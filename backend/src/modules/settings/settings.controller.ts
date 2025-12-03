@@ -1,0 +1,45 @@
+import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/auth.guard';
+import { SettingsService } from './settings.service';
+
+@Controller('settings')
+@UseGuards(JwtAuthGuard)
+export class SettingsController {
+  constructor(private settingsService: SettingsService) {}
+
+  @Get('team')
+  async getTeamSettings() {
+    // TODO: Get teamId from request context
+    return this.settingsService.getTeamSettings('teamId');
+  }
+
+  @Patch('team')
+  async updateTeamSettings(@Body() settings: any) {
+    // TODO: Get teamId from request context
+    return this.settingsService.updateTeamSettings('teamId', settings);
+  }
+
+  @Get('whatsapp')
+  async getWhatsAppConfig() {
+    // TODO: Get teamId from request context
+    return this.settingsService.getWhatsAppConfig('teamId');
+  }
+
+  @Patch('whatsapp')
+  async updateWhatsAppConfig(@Body() config: any) {
+    // TODO: Get teamId from request context
+    return this.settingsService.updateWhatsAppConfig('teamId', config);
+  }
+
+  @Get('automation')
+  async getAutomationSettings() {
+    // TODO: Get teamId from request context
+    return this.settingsService.getAutomationSettings('teamId');
+  }
+
+  @Patch('automation')
+  async updateAutomationSettings(@Body() settings: any) {
+    // TODO: Get teamId from request context
+    return this.settingsService.updateAutomationSettings('teamId', settings);
+  }
+}
