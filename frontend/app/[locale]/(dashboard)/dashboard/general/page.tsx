@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { User } from "@/lib/db/schema";
 import { Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { Suspense, useActionState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import useSWR from "swr";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
@@ -71,6 +71,16 @@ function AccountFormWithData({
   t: ReturnType<typeof useTranslations>;
 }) {
   const { data: user } = useSWR<User>("/api/user", fetcher);
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  if (!isMounted) {
+    return <AccountForm state={state} t={t} />;
+  }
+
   return (
     <AccountForm
       state={state}
@@ -98,9 +108,7 @@ export default function GeneralPage() {
         </CardHeader>
         <CardContent>
           <form className="space-y-4" action={formAction}>
-            <Suspense fallback={<AccountForm state={state} t={t} />}>
-              <AccountFormWithData state={state} t={t} />
-            </Suspense>
+            <AccountFormWithData state={state} t={t} />
             {state.error && (
               <p className="text-red-500 text-sm">{state.error}</p>
             )}
