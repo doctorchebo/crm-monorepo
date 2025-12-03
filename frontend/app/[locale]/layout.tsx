@@ -51,8 +51,8 @@ export default async function RootLayout({ children, params }: Props) {
         <ThemeScript />
       </head>
       <body className="min-h-[100dvh] bg-white dark:bg-gray-950 text-black dark:text-white">
-        <ThemeProvider>
-          <NextIntlClientProvider locale={locale}>
+        <NextIntlClientProvider locale={locale}>
+          <ThemeProvider>
             <SWRConfig
               value={{
                 fallback: {
@@ -65,8 +65,8 @@ export default async function RootLayout({ children, params }: Props) {
             >
               {children}
             </SWRConfig>
-          </NextIntlClientProvider>
-        </ThemeProvider>
+          </ThemeProvider>
+        </NextIntlClientProvider>
       </body>
     </html>
   );
