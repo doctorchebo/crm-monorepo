@@ -6,7 +6,6 @@ import { MessageSquare, Plus } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
-
 // Mock data for chats
 const mockChats = [
   {
@@ -134,7 +133,7 @@ export default function ChatsPage() {
                 </div>
                 <Button size="sm" variant="outline" className="gap-2">
                   <Plus className="h-4 w-4" />
-                  Add Note
+                  {t("addNote")}
                 </Button>
               </div>
 
