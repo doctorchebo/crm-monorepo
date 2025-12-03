@@ -50,27 +50,27 @@ function formatAction(
 ): string {
   switch (action) {
     case ActivityType.SIGN_UP:
-      return t("activity.signUp");
+      return t("signUp");
     case ActivityType.SIGN_IN:
-      return t("activity.signIn");
+      return t("signIn");
     case ActivityType.SIGN_OUT:
-      return t("activity.signOut");
+      return t("signOut");
     case ActivityType.UPDATE_PASSWORD:
-      return t("activity.updatePassword");
+      return t("updatePassword");
     case ActivityType.DELETE_ACCOUNT:
-      return t("activity.deleteAccount");
+      return t("deleteAccount");
     case ActivityType.UPDATE_ACCOUNT:
-      return t("activity.updateAccount");
+      return t("updateAccount");
     case ActivityType.CREATE_TEAM:
-      return t("activity.createTeam");
+      return t("createTeam");
     case ActivityType.REMOVE_TEAM_MEMBER:
-      return t("activity.removeTeamMember");
+      return t("removeTeamMember");
     case ActivityType.INVITE_TEAM_MEMBER:
-      return t("activity.inviteTeamMember");
+      return t("inviteTeamMember");
     case ActivityType.ACCEPT_INVITATION:
-      return t("activity.acceptInvitation");
+      return t("acceptInvitation");
     default:
-      return t("activity.unknownAction");
+      return t("unknownAction");
   }
 }
 
