@@ -1,9 +1,11 @@
 import { defaultLocale, locales } from "@/i18n";
 import { getTeamForUser, getUser } from "@/lib/db/queries";
+import { ThemeProvider } from "@/lib/theme/theme-provider";
+import { ThemeScript } from "@/lib/theme/theme-script";
 import { routing } from "@/src/i18n/routing";
 import type { Metadata, Viewport } from "next";
 import { hasLocale, NextIntlClientProvider } from "next-intl";
-import { getMessages, setRequestLocale } from "next-intl/server";
+import { setRequestLocale } from "next-intl/server";
 import { Manrope } from "next/font/google";
 import { notFound } from "next/navigation";
 import { SWRConfig } from "swr";
@@ -42,23 +44,29 @@ export default async function RootLayout({ children, params }: Props) {
   return (
     <html
       lang={locale || defaultLocale}
-      className={`bg-white dark:bg-gray-950 text-black dark:text-white ${manrope.className}`}
+      suppressHydrationWarning
+      className={manrope.className}
     >
-      <body className="min-h-[100dvh] bg-gray-50">
-        <NextIntlClientProvider locale={locale}>
-          <SWRConfig
-            value={{
-              fallback: {
-                // We do NOT await here
-                // Only components that read this data will suspend
-                "/api/user": getUser(),
-                "/api/team": getTeamForUser(),
-              },
-            }}
-          >
-            {children}
-          </SWRConfig>
-        </NextIntlClientProvider>
+      <head>
+        <ThemeScript />
+      </head>
+      <body className="min-h-[100dvh] bg-white dark:bg-gray-950 text-black dark:text-white">
+        <ThemeProvider>
+          <NextIntlClientProvider locale={locale}>
+            <SWRConfig
+              value={{
+                fallback: {
+                  // We do NOT await here
+                  // Only components that read this data will suspend
+                  "/api/user": getUser(),
+                  "/api/team": getTeamForUser(),
+                },
+              }}
+            >
+              {children}
+            </SWRConfig>
+          </NextIntlClientProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

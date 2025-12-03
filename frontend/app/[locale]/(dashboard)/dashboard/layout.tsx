@@ -20,11 +20,13 @@ import {
   Shield,
   Users,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 function DashboardSidebar() {
   const pathname = usePathname();
+  const t = useTranslations("dashboard");
 
   const navItems = [
     { href: "/dashboard", icon: Home, label: "Home" },
@@ -40,7 +42,7 @@ function DashboardSidebar() {
     <Sidebar>
       <SidebarHeader className="p-4">
         <div className="flex items-center">
-          <span className="font-semibold text-lg">Navigation</span>
+          <span className="font-semibold text-lg">{t("navigation")}</span>
         </div>
       </SidebarHeader>
       <Separator />
