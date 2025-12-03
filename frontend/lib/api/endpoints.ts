@@ -1,0 +1,100 @@
+/**
+ * API Endpoints for backend communication
+ */
+import { apiClient } from "./client";
+
+export const backendApi = {
+  // Auth endpoints
+  auth: {
+    register: (data: { email: string; name: string; password: string }) =>
+      apiClient.post("/auth/register", data),
+    login: (data: { email: string; password: string }) =>
+      apiClient.post("/auth/login", data),
+  },
+
+  // User endpoints
+  user: {
+    getProfile: () => apiClient.get("/users/profile"),
+    updateProfile: (data: any) => apiClient.patch("/users/profile", data),
+  },
+
+  // Team endpoints
+  team: {
+    get: () => apiClient.get("/teams"),
+    create: (data: { name: string; description?: string }) =>
+      apiClient.post("/teams", data),
+    inviteMember: (teamId: string, data: { email: string; role: string }) =>
+      apiClient.post(`/teams/${teamId}/invite`, data),
+    removeMember: (teamId: string, memberId: string) =>
+      apiClient.delete(`/teams/${teamId}/members/${memberId}`),
+    getMembers: (teamId: string) => apiClient.get(`/teams/${teamId}/members`),
+  },
+
+  // Billing endpoints
+  billing: {
+    getSubscription: () => apiClient.get("/billing/subscription"),
+    createCheckout: (priceId: string) =>
+      apiClient.post("/billing/checkout", { priceId }),
+    createPortalSession: (returnUrl: string) =>
+      apiClient.post("/billing/portal", { returnUrl }),
+    getInvoices: () => apiClient.get("/billing/invoices"),
+    getCheckoutSession: (sessionId: string) =>
+      apiClient.get(`/billing/checkout/${sessionId}`),
+  },
+
+  // Chats endpoints
+  chats: {
+    list: (skip?: number, take?: number) =>
+      apiClient.get(`/chats?skip=${skip || 0}&take=${take || 20}`),
+    get: (id: string) => apiClient.get(`/chats/${id}`),
+    create: (data: any) => apiClient.post("/chats", data),
+    update: (id: string, data: any) => apiClient.patch(`/chats/${id}`, data),
+    close: (id: string) => apiClient.post(`/chats/${id}/close`, {}),
+    getMessages: (id: string, skip?: number, take?: number) =>
+      apiClient.get(
+        `/chats/${id}/messages?skip=${skip || 0}&take=${take || 50}`
+      ),
+  },
+
+  // Kanban endpoints
+  kanban: {
+    getStages: () => apiClient.get("/kanban/stages"),
+    createStage: (data: any) => apiClient.post("/kanban/stages", data),
+    updateStage: (id: string, data: any) =>
+      apiClient.patch(`/kanban/stages/${id}`, data),
+    deleteStage: (id: string) => apiClient.delete(`/kanban/stages/${id}`),
+    moveCard: (data: any) => apiClient.post("/kanban/cards/move", data),
+    getCards: (stageId: string) =>
+      apiClient.get(`/kanban/stages/${stageId}/cards`),
+  },
+
+  // Automation endpoints
+  automation: {
+    list: () => apiClient.get("/automation/rules"),
+    get: (id: string) => apiClient.get(`/automation/rules/${id}`),
+    create: (data: any) => apiClient.post("/automation/rules", data),
+    update: (id: string, data: any) =>
+      apiClient.patch(`/automation/rules/${id}`, data),
+    delete: (id: string) => apiClient.delete(`/automation/rules/${id}`),
+    evaluateTriggers: (data: any) =>
+      apiClient.post("/automation/evaluate", data),
+  },
+
+  // Settings endpoints
+  settings: {
+    getTeam: () => apiClient.get("/settings/team"),
+    updateTeam: (data: any) => apiClient.patch("/settings/team", data),
+    getWhatsApp: () => apiClient.get("/settings/whatsapp"),
+    updateWhatsApp: (data: any) => apiClient.patch("/settings/whatsapp", data),
+    getAutomation: () => apiClient.get("/settings/automation"),
+    updateAutomation: (data: any) =>
+      apiClient.patch("/settings/automation", data),
+  },
+
+  // WhatsApp endpoints
+  whatsapp: {
+    sendMessage: (data: any) => apiClient.post("/whatsapp/send", data),
+    getStatus: (messageSid: string) =>
+      apiClient.post("/whatsapp/status/:messageSid", { messageSid }),
+  },
+};

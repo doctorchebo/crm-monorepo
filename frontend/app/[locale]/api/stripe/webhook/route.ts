@@ -1,34 +1,43 @@
-import Stripe from 'stripe';
-import { handleSubscriptionChange, stripe } from '@/lib/payments/stripe';
-import { NextRequest, NextResponse } from 'next/server';
-
-const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
+import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(request: NextRequest) {
-  const payload = await request.text();
-  const signature = request.headers.get('stripe-signature') as string;
-
-  let event: Stripe.Event;
-
   try {
-    event = stripe.webhooks.constructEvent(payload, signature, webhookSecret);
-  } catch (err) {
-    console.error('Webhook signature verification failed.', err);
+    // Get raw body for Stripe signature verification
+    const payload = await request.text();
+    const signature = request.headers.get("stripe-signature");
+
+    if (!signature) {
+      return NextResponse.json(
+        { error: "Missing stripe-signature header" },
+        { status: 400 }
+      );
+    }
+
+    // Forward webhook to backend for processing with signature verification
+    const backendUrl =
+      process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001";
+    const response = await fetch(`${backendUrl}/webhook/stripe`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "stripe-signature": signature,
+      },
+      body: payload,
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      console.error("Backend webhook processing error:", result);
+      return NextResponse.json(result, { status: response.status });
+    }
+
+    return NextResponse.json({ received: true });
+  } catch (error) {
+    console.error("Error processing Stripe webhook:", error);
     return NextResponse.json(
-      { error: 'Webhook signature verification failed.' },
-      { status: 400 }
+      { error: "Webhook processing failed" },
+      { status: 500 }
     );
   }
-
-  switch (event.type) {
-    case 'customer.subscription.updated':
-    case 'customer.subscription.deleted':
-      const subscription = event.data.object as Stripe.Subscription;
-      await handleSubscriptionChange(subscription);
-      break;
-    default:
-      console.log(`Unhandled event type ${event.type}`);
-  }
-
-  return NextResponse.json({ received: true });
 }
