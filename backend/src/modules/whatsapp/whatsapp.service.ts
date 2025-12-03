@@ -1,26 +1,298 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import Twilio from 'twilio';
 import { OutboundMessageDto } from './dto/outbound-message.dto';
 
+/**
+ * WhatsApp Service
+ * Handles all Twilio WhatsApp messaging operations
+ * - Sending messages via WhatsApp Business
+ * - Receiving and storing messages
+ * - Message status tracking
+ * - Webhook handling for inbound messages and delivery status
+ */
 @Injectable()
 export class WhatsAppService {
+  private readonly logger = new Logger(WhatsAppService.name);
+  private twilioClient: ReturnType<typeof Twilio>;
+  private readonly twilioPhoneNumber = 'whatsapp:+14155238886'; // Your Twilio WhatsApp Business number
+
+  constructor() {
+    // Initialize Twilio client
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+
+    if (!accountSid || !authToken) {
+      this.logger.error('Missing Twilio credentials in environment variables');
+      throw new Error('Missing TWILIO_ACCOUNT_SID or TWILIO_AUTH_TOKEN');
+    }
+
+    this.twilioClient = Twilio(accountSid, authToken);
+    this.logger.log('Twilio client initialized');
+  }
+
+  /**
+   * Send a WhatsApp message
+   * @param messageDto - Message data (to, body, mediaUrl)
+   * @returns Message SID from Twilio
+   */
   async sendMessage(messageDto: OutboundMessageDto) {
-    // TODO: Implement Twilio WhatsApp send message
-    // This would integrate with Twilio SDK to send messages
-    return null;
+    try {
+      const toPhoneNumber = `whatsapp:${messageDto.to}`;
+
+    //   const messageData: any = {
+    //     body: messageDto.body,
+    //     from: this.twilioPhoneNumber,
+    //     to: toPhoneNumber,
+    //   };
+
+      const messageData: any = {
+        from: this.twilioPhoneNumber,
+        contentSid: 'HXb5b62575e6e4ff6129ad7c8efe1f983e',
+        contentVariables: '{"1":"12/1","2":"3pm"}',
+        to: toPhoneNumber,
+      };
+      
+      // Add media URL if provided
+      if (messageDto.mediaUrl) {
+        messageData.mediaUrl = messageDto.mediaUrl;
+      }
+
+      // Send message via Twilio
+      const message = await this.twilioClient.messages.create(messageData);
+
+      this.logger.log(
+        `Message sent successfully. SID: ${message.sid}, To: ${messageDto.to}`,
+      );
+
+      // Store message metadata in database
+      await this.storeOutboundMessage({
+        messageSid: message.sid,
+        to: messageDto.to,
+        body: messageDto.body,
+        mediaUrl: messageDto.mediaUrl,
+      });
+
+      return {
+        success: true,
+        messageSid: message.sid,
+        to: messageDto.to,
+        status: message.status,
+      };
+    } catch (error) {
+      this.logger.error(`Error sending message: ${error.message}`, error);
+      throw new Error(`Failed to send WhatsApp message: ${error.message}`);
+    }
   }
 
+  /**
+   * Retrieve message status from Twilio
+   * @param messageSid - Twilio message SID
+   * @returns Message status
+   */
   async getMessageStatus(messageSid: string) {
-    // TODO: Get message status from Twilio
-    return null;
+    try {
+      const message = await this.twilioClient.messages(messageSid).fetch();
+      return {
+        messageSid,
+        status: message.status,
+        errorCode: message.errorCode,
+        errorMessage: message.errorMessage,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error retrieving message status: ${error.message}`,
+        error,
+      );
+      throw new Error(`Failed to retrieve message status: ${error.message}`);
+    }
   }
 
-  async handleInboundMessage(data: any) {
-    // TODO: Process inbound message, link to chat, trigger automation
-    return null;
+  /**
+   * Handle inbound WhatsApp message webhook
+   * @param webhookData - Webhook data from Twilio
+   */
+  async handleInboundMessage(webhookData: any) {
+    try {
+      const {
+        MessageSid,
+        From,
+        To,
+        Body,
+        NumMedia,
+        MediaUrl0,
+        MediaContentType0,
+      } = webhookData;
+
+      this.logger.log(
+        `Inbound message received. SID: ${MessageSid}, From: ${From}`,
+      );
+
+      // Extract phone numbers without 'whatsapp:' prefix for storage
+      const senderPhone = From.replace('whatsapp:', '');
+      const recipientPhone = To.replace('whatsapp:', '');
+
+      // Determine message type
+      const messageType = NumMedia && Number(NumMedia) > 0 ? 'media' : 'text';
+      const mediaUrl = MediaContentType0
+        ? `${MediaUrl0}?ContentType=${MediaContentType0}`
+        : null;
+
+      // Store inbound message
+      const messageData = {
+        messageSid: MessageSid,
+        sender: senderPhone,
+        recipient: recipientPhone,
+        body: Body,
+        type: messageType,
+        mediaUrl,
+        timestamp: new Date(),
+      };
+
+      await this.storeInboundMessage(messageData);
+
+      this.logger.log(
+        `Inbound message stored. From: ${senderPhone}, Type: ${messageType}`,
+      );
+
+      // TODO: Link message to chat
+      // TODO: Trigger automation rules
+      // TODO: Notify frontend via WebSocket
+
+      return { success: true, messageSid: MessageSid };
+    } catch (error) {
+      this.logger.error(
+        `Error handling inbound message: ${error.message}`,
+        error,
+      );
+      // Don't throw, just log - Twilio will retry if we don't respond 200
+      return { success: false, error: error.message };
+    }
   }
 
-  async handleMessageStatus(messageSid: string | undefined, status: string | undefined) {
-    // TODO: Update message status in databases
-    return null;
+  /**
+   * Handle message delivery status webhook
+   * @param messageSid - Twilio message SID
+   * @param messageStatus - Status from Twilio ('sent', 'delivered', 'failed', etc)
+   */
+  async handleMessageStatus(
+    messageSid: string | undefined,
+    messageStatus: string | undefined,
+  ) {
+    try {
+      if (!messageSid || !messageStatus) {
+        this.logger.warn(
+          `Incomplete status webhook. SID: ${messageSid}, Status: ${messageStatus}`,
+        );
+        return { success: false };
+      }
+
+      this.logger.log(
+        `Message status update. SID: ${messageSid}, Status: ${messageStatus}`,
+      );
+
+      // TODO: Update message status in database
+      // TODO: Update chat UI with delivery status
+
+      return { success: true, messageSid, status: messageStatus };
+    } catch (error) {
+      this.logger.error(
+        `Error handling message status: ${error.message}`,
+        error,
+      );
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Store outbound message metadata in database
+   * In production, this would use a database connection
+   */
+  private async storeOutboundMessage(messageData: any) {
+    try {
+      // TODO: Store in database using db.insert(messages).values({...})
+      this.logger.debug('Storing outbound message', messageData);
+      // For now, just log it
+      return messageData;
+    } catch (error) {
+      this.logger.error(`Error storing outbound message: ${error.message}`);
+      // Don't throw - message already sent to Twilio
+    }
+  }
+
+  /**
+   * Store inbound message metadata in database
+   * In production, this would use a database connection
+   */
+  private async storeInboundMessage(messageData: any) {
+    try {
+      // TODO: Store in database using db.insert(messages).values({...})
+      this.logger.debug('Storing inbound message', messageData);
+      // For now, just log it
+      return messageData;
+    } catch (error) {
+      this.logger.error(`Error storing inbound message: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Save a note to a message
+   * Multiple users can add notes to the same message
+   */
+  async saveNote(messageId: string, userId: number, note: string) {
+    try {
+      // TODO: Store note in database
+      // INSERT INTO notes (message_id, user_id, note, created_at) VALUES (...)
+      this.logger.log(`Note saved for message ${messageId} by user ${userId}`);
+      return {
+        success: true,
+        messageId,
+        userId,
+        note,
+      };
+    } catch (error) {
+      this.logger.error(`Error saving note: ${error.message}`, error);
+      throw new Error(`Failed to save note: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get all notes for a message
+   */
+  async getMessageNotes(messageId: string) {
+    try {
+      // TODO: Retrieve notes from database
+      // SELECT * FROM notes WHERE message_id = ...
+      this.logger.debug(`Retrieving notes for message ${messageId}`);
+      return {
+        messageId,
+        notes: [],
+      };
+    } catch (error) {
+      this.logger.error(`Error retrieving message notes: ${error.message}`);
+      throw new Error(`Failed to retrieve notes: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get all messages for a user/team
+   */
+  async getMessages(filters?: {
+    sender?: string;
+    startDate?: Date;
+    endDate?: Date;
+    limit?: number;
+  }) {
+    try {
+      // TODO: Retrieve messages from database with filters
+      this.logger.debug('Retrieving messages with filters', filters);
+      return {
+        messages: [],
+        total: 0,
+      };
+    } catch (error) {
+      this.logger.error(`Error retrieving messages: ${error.message}`);
+      throw new Error(`Failed to retrieve messages: ${error.message}`);
+    }
   }
 }

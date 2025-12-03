@@ -18,7 +18,7 @@ class EnvironmentVariables {
   NODE_ENV: Environment = Environment.DEVELOPMENT;
 
   @IsNumber()
-  PORT: number = 3000;
+  PORT: number = 3001;
 
   @IsString()
   @IsNotEmpty()
@@ -50,7 +50,7 @@ class EnvironmentVariables {
   STRIPE_WEBHOOK_SECRET: string;
 
   @IsString()
-  FRONTEND_URL: string = 'http://localhost:3001';
+  FRONTEND_URL: string = 'http://localhost:3000';
 }
 
 export async function validateEnvironment(

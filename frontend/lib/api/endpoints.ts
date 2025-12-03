@@ -93,8 +93,14 @@ export const backendApi = {
 
   // WhatsApp endpoints
   whatsapp: {
-    sendMessage: (data: any) => apiClient.post("/whatsapp/send", data),
+    sendMessage: (data: { to: string; body: string; mediaUrl?: string }) =>
+      apiClient.post("/whatsapp/send", data),
     getStatus: (messageSid: string) =>
-      apiClient.post("/whatsapp/status/:messageSid", { messageSid }),
+      apiClient.get(`/whatsapp/status/${messageSid}`),
+    getMessages: () => apiClient.get("/whatsapp/messages"),
+    saveNote: (data: { messageId: string; note: string }) =>
+      apiClient.post("/whatsapp/notes", data),
+    getMessageNotes: (messageId: string) =>
+      apiClient.get(`/whatsapp/notes/${messageId}`),
   },
 };
