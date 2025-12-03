@@ -1,0 +1,152 @@
+{
+  "project_name": "whatsapp-crm-backend",
+  "description": "Nest.js backend for WhatsApp CRM, automation, LLM replies, kanban pipeline, and multi-channel messaging.",
+  "base_path": "/src",
+  "structure": {
+    "app_module": "src/app.module.ts",
+
+    "config": {
+      "path": "src/config/",
+      "files": [
+        "env.config.ts",
+        "twilio.config.ts",
+        "database.config.ts",
+        "openai.config.ts"
+      ]
+    },
+
+    "modules": {
+      "auth": {
+        "path": "src/modules/auth/",
+        "files": [
+          "auth.module.ts",
+          "auth.controller.ts",
+          "auth.service.ts",
+          "auth.guard.ts",
+          "strategies/jwt.strategy.ts",
+          "dto/login.dto.ts",
+          "dto/register.dto.ts"
+        ]
+      },
+
+      "user": {
+        "path": "src/modules/user/",
+        "files": [
+          "user.module.ts",
+          "user.controller.ts",
+          "user.service.ts",
+          "dto/update-user.dto.ts"
+        ]
+      },
+
+      "team": {
+        "path": "src/modules/team/",
+        "files": [
+          "team.module.ts",
+          "team.controller.ts",
+          "team.service.ts",
+          "dto/create-team.dto.ts",
+          "dto/invite-member.dto.ts"
+        ]
+      },
+
+      "whatsapp": {
+        "path": "src/modules/whatsapp/",
+        "description": "Handles Twilio WhatsApp inbound/outbound messages + message status + webhooks.",
+        "files": [
+          "whatsapp.module.ts",
+          "whatsapp.controller.ts",
+          "whatsapp.service.ts",
+          "whatsapp.webhook.controller.ts",
+          "dto/outbound-message.dto.ts",
+          "dto/webhook.dto.ts"
+        ]
+      },
+
+      "messaging": {
+        "path": "src/modules/messaging/",
+        "description": "Unified messaging layer. Later will include Instagram/Messenger.",
+        "files": ["messaging.module.ts", "messaging.service.ts"]
+      },
+
+      "chats": {
+        "path": "src/modules/chats/",
+        "description": "Chat sessions, thread history, storing messages, linking to leads.",
+        "files": [
+          "chats.module.ts",
+          "chats.controller.ts",
+          "chats.service.ts",
+          "dto/create-chat.dto.ts",
+          "dto/update-chat.dto.ts"
+        ]
+      },
+
+      "automation": {
+        "path": "src/modules/automation/",
+        "description": "LLM auto-replies, rule engine, triggers, scheduling.",
+        "files": [
+          "automation.module.ts",
+          "automation.controller.ts",
+          "automation.service.ts",
+          "dto/create-rule.dto.ts",
+          "dto/update-rule.dto.ts"
+        ]
+      },
+
+      "kanban": {
+        "path": "src/modules/kanban/",
+        "files": [
+          "kanban.module.ts",
+          "kanban.controller.ts",
+          "kanban.service.ts",
+          "dto/create-stage.dto.ts",
+          "dto/update-stage.dto.ts",
+          "dto/move-card.dto.ts"
+        ]
+      },
+
+      "settings": {
+        "path": "src/modules/settings/",
+        "files": [
+          "settings.module.ts",
+          "settings.controller.ts",
+          "settings.service.ts"
+        ]
+      },
+
+      "billing": {
+        "path": "src/modules/billing/",
+        "description": "Stripe integration for subscriptions",
+        "files": [
+          "billing.module.ts",
+          "billing.controller.ts",
+          "billing.service.ts",
+          "stripe.webhook.controller.ts"
+        ]
+      }
+    },
+
+    "database": {
+      "orm": "Drizzle ORM",
+      "path": "src/database/",
+      "files": ["drizzle.module.ts", "schema.ts", "migrations/", "seed.ts"]
+    },
+
+    "shared": {
+      "path": "src/shared/",
+      "folders": [
+        "exceptions/",
+        "pipes/",
+        "interceptors/",
+        "guards/",
+        "utils/",
+        "types/"
+      ]
+    },
+
+    "main_files": {
+      "main": "src/main.ts",
+      "app_module": "src/app.module.ts"
+    }
+  }
+}

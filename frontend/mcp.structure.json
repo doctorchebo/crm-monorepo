@@ -1,0 +1,373 @@
+{
+  "project_name": "WhatsApp Automation & CRM",
+  "base_path": "/[locale]",
+  "description": "Multilingual SaaS platform for WhatsApp automation with LLM emotion analysis, built with Next.js 15, next-intl for i18n, and Stripe payments",
+  "locales": ["en", "es"],
+  "layouts": {
+    "root_layout": {
+      "path": "app/[locale]/layout.tsx",
+      "description": "Root layout with NextIntlClientProvider and static params generation",
+      "type": "root"
+    },
+    "marketing_layout": {
+      "path": "app/[locale]/(dashboard)/layout.tsx",
+      "header": ["Logo", "LanguageSwitcher", "DarkModeToggle"],
+      "components": ["Header with navigation links"],
+      "type": "public"
+    },
+    "dashboard_layout": {
+      "path": "app/[locale]/(dashboard)/dashboard/layout.tsx",
+      "header": ["Header"],
+      "sidebar": ["DashboardSidebar", "SidebarToggleButton"],
+      "type": "private",
+      "protected": true,
+      "description": "Private dashboard layout with sidebar navigation"
+    },
+    "auth_layout": {
+      "path": "app/[locale]/(login)/",
+      "description": "Authentication layout for login/signup pages",
+      "type": "auth"
+    }
+  },
+  "pages": [
+    {
+      "name": "LandingPage (HomePage)",
+      "path": "/",
+      "file": "app/[locale]/(dashboard)/page.tsx",
+      "layout": "marketing_layout",
+      "translations": "home, header",
+      "components": [
+        {
+          "type": "section",
+          "name": "HeroSection",
+          "description": "Main call-to-action with title, subtitle, description, and deploy button."
+        },
+        {
+          "type": "section",
+          "name": "FeaturesSection",
+          "description": "Three features highlighting LLM emotion analysis, automation, and data security."
+        },
+        {
+          "type": "component",
+          "name": "Terminal",
+          "description": "Interactive terminal visualization component."
+        }
+      ]
+    },
+    {
+      "name": "PricingPage",
+      "path": "/pricing",
+      "file": "app/[locale]/(dashboard)/pricing/page.tsx",
+      "layout": "marketing_layout",
+      "translations": "pricing, header",
+      "components": [
+        {
+          "type": "component",
+          "name": "PricingPlans",
+          "description": "Stripe-integrated pricing cards with plan features and checkout button."
+        },
+        {
+          "type": "form",
+          "name": "SubmitButton",
+          "file": "pricing/submit-button.tsx",
+          "description": "Server action form button for checkout."
+        }
+      ]
+    },
+    {
+      "name": "LoginPage",
+      "path": "/login",
+      "file": "app/[locale]/(login)/sign-in/page.tsx",
+      "layout": "auth_layout",
+      "translations": "auth",
+      "components": [
+        {
+          "type": "component",
+          "name": "Login",
+          "file": "app/[locale]/(login)/login.tsx",
+          "description": "Reusable login/signup form component"
+        },
+        {
+          "type": "form",
+          "name": "SignInForm",
+          "description": "Email/password sign in with optional redirect/priceId/inviteId params"
+        }
+      ]
+    },
+    {
+      "name": "SignUpPage",
+      "path": "/sign-up",
+      "file": "app/[locale]/(login)/sign-up/page.tsx",
+      "layout": "auth_layout",
+      "translations": "auth",
+      "components": [
+        {
+          "type": "component",
+          "name": "Login",
+          "mode": "signup",
+          "description": "Sign up form via reusable Login component"
+        }
+      ]
+    },
+    {
+      "name": "DashboardHome",
+      "path": "/dashboard",
+      "file": "app/[locale]/(dashboard)/dashboard/page.tsx",
+      "layout": "dashboard_layout",
+      "translations": "dashboard",
+      "components": [
+        {
+          "type": "component",
+          "name": "DashboardOverview",
+          "description": "Main dashboard landing page - currently placeholder."
+        }
+      ]
+    },
+    {
+      "name": "ChatsPage",
+      "path": "/dashboard/chats",
+      "file": "app/[locale]/(dashboard)/dashboard/chats/page.tsx",
+      "layout": "dashboard_layout",
+      "translations": "chats",
+      "components": [
+        {
+          "type": "component",
+          "name": "ChatListPanel",
+          "description": "Left column: List of leads/chats with search."
+        },
+        {
+          "type": "component",
+          "name": "ChatDetailPanel",
+          "description": "Right column: Individual chat view with messages."
+        },
+        {
+          "type": "component",
+          "name": "MessageItem",
+          "description": "Message display with emotion analysis tags."
+        },
+        {
+          "type": "form",
+          "name": "ChatCommentForm",
+          "description": "Add internal comments to chats."
+        }
+      ]
+    },
+    {
+      "name": "KanbanPage",
+      "path": "/dashboard/kanban",
+      "file": "app/[locale]/(dashboard)/dashboard/kanban/page.tsx",
+      "layout": "dashboard_layout",
+      "translations": "kanban",
+      "components": [
+        {
+          "type": "component",
+          "name": "KanbanBoard",
+          "description": "Drag-and-drop Kanban board for sales pipeline."
+        },
+        {
+          "type": "component",
+          "name": "KanbanColumn",
+          "description": "Column representing a sales stage (Lead, Qualified, Demo, Closed)."
+        },
+        {
+          "type": "component",
+          "name": "KanbanCard",
+          "description": "Draggable card representing a chat/lead."
+        }
+      ]
+    },
+    {
+      "name": "GeneralSettingsPage",
+      "path": "/dashboard/general",
+      "file": "app/[locale]/(dashboard)/dashboard/general/page.tsx",
+      "layout": "dashboard_layout",
+      "translations": "general",
+      "components": [
+        {
+          "type": "form",
+          "name": "GeneralSettingsForm",
+          "description": "User profile settings (name, email)."
+        }
+      ]
+    },
+    {
+      "name": "SecuritySettingsPage",
+      "path": "/dashboard/security",
+      "file": "app/[locale]/(dashboard)/dashboard/security/page.tsx",
+      "layout": "dashboard_layout",
+      "translations": "security",
+      "components": [
+        {
+          "type": "form",
+          "name": "SecurityForm",
+          "description": "Password and security settings."
+        }
+      ]
+    },
+    {
+      "name": "TeamSettingsPage",
+      "path": "/dashboard/team",
+      "file": "app/[locale]/(dashboard)/dashboard/team/page.tsx",
+      "layout": "dashboard_layout",
+      "translations": "team",
+      "components": [
+        {
+          "type": "component",
+          "name": "ManageSubscription",
+          "description": "Stripe subscription management (plan, billing)."
+        },
+        {
+          "type": "component",
+          "name": "TeamMembers",
+          "description": "List and manage team members."
+        },
+        {
+          "type": "component",
+          "name": "InviteTeamMember",
+          "description": "Form to invite new team members with role assignment."
+        }
+      ]
+    },
+    {
+      "name": "SettingsPage",
+      "path": "/dashboard/settings",
+      "file": "app/[locale]/(dashboard)/dashboard/settings/page.tsx",
+      "layout": "dashboard_layout",
+      "translations": "settings",
+      "components": [
+        {
+          "type": "form",
+          "name": "WhatsAppIntegration",
+          "description": "Twilio/WhatsApp setup and configuration."
+        },
+        {
+          "type": "form",
+          "name": "AutomationSettings",
+          "description": "Configure automation rules and triggers."
+        }
+      ]
+    },
+    {
+      "name": "ActivityPage",
+      "path": "/dashboard/activity",
+      "file": "app/[locale]/(dashboard)/dashboard/activity/page.tsx",
+      "layout": "dashboard_layout",
+      "translations": "activity",
+      "components": [
+        {
+          "type": "component",
+          "name": "ActivityLog",
+          "description": "Server component displaying activity history with localized action descriptions."
+        }
+      ]
+    }
+  ],
+  "api_routes": [
+    {
+      "path": "/api/user",
+      "file": "app/[locale]/api/user/route.ts",
+      "description": "User profile endpoint"
+    },
+    {
+      "path": "/api/team",
+      "file": "app/[locale]/api/team/route.ts",
+      "description": "Team management endpoint"
+    },
+    {
+      "path": "/api/stripe/checkout",
+      "file": "app/[locale]/api/stripe/checkout/route.ts",
+      "description": "Stripe checkout session creation"
+    },
+    {
+      "path": "/api/stripe/webhook",
+      "file": "app/[locale]/api/stripe/webhook/route.ts",
+      "description": "Stripe webhook for payment events"
+    }
+  ],
+  "middleware": {
+    "root": {
+      "path": "middleware.ts",
+      "description": "next-intl middleware for locale routing"
+    },
+    "src": {
+      "path": "src/middleware.ts",
+      "description": "Alternative middleware location"
+    },
+    "auth": {
+      "path": "lib/auth/middleware.ts",
+      "description": "Authentication middleware"
+    }
+  },
+  "i18n": {
+    "config_file": "i18n.ts",
+    "locales": ["en", "es"],
+    "default_locale": "en",
+    "message_files": [
+      { "locale": "en", "path": "messages/en.json" },
+      { "locale": "es", "path": "messages/es.json" }
+    ],
+    "namespaces": [
+      "header",
+      "dashboard",
+      "chats",
+      "kanban",
+      "team",
+      "general",
+      "activity",
+      "security",
+      "auth",
+      "home",
+      "pricing",
+      "settings"
+    ]
+  },
+  "components": {
+    "ui": {
+      "path": "components/ui/",
+      "description": "shadcn/ui component library",
+      "components": [
+        "avatar.tsx",
+        "badge.tsx",
+        "button.tsx",
+        "card.tsx",
+        "dropdown-menu.tsx",
+        "input.tsx",
+        "label.tsx",
+        "navigation-menu.tsx",
+        "radio-group.tsx",
+        "separator.tsx",
+        "sheet.tsx",
+        "sidebar.tsx",
+        "skeleton.tsx",
+        "switch.tsx",
+        "tooltip.tsx"
+      ]
+    },
+    "global": [
+      {
+        "name": "LanguageSwitcher",
+        "path": "components/language-switcher.tsx",
+        "description": "Language selector component with cookie persistence"
+      }
+    ]
+  },
+  "database": {
+    "framework": "Drizzle ORM",
+    "config": "drizzle.config.ts",
+    "schema": "lib/db/schema.ts",
+    "queries": "lib/db/queries.ts",
+    "migrations": "lib/db/migrations/",
+    "setup": "lib/db/setup.ts",
+    "seed": "lib/db/seed.ts"
+  },
+  "payments": {
+    "provider": "Stripe",
+    "config_files": ["lib/payments/stripe.ts", "lib/payments/actions.ts"]
+  },
+  "build_config": {
+    "next_config": "next.config.ts",
+    "tsconfig": "tsconfig.json",
+    "postcss": "postcss.config.mjs",
+    "components": "components.json"
+  }
+}
