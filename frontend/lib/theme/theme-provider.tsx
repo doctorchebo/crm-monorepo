@@ -19,6 +19,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   // Sync with the theme that was already applied by ThemeScript
   useEffect(() => {
+    // Check if the theme is already properly mounted in the DOM
+    const htmlElement = document.documentElement;
+    const isDarkClass = htmlElement.classList.contains("dark");
+
     const storedTheme = localStorage.getItem("theme") as Theme | null;
     const initialTheme = storedTheme || "system";
     setThemeState(initialTheme);
@@ -31,6 +35,15 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         : "light";
     } else {
       finalTheme = initialTheme;
+    }
+
+    // Only update DOM if it doesn't match the stored preference
+    if ((finalTheme === "dark") !== isDarkClass) {
+      if (finalTheme === "dark") {
+        htmlElement.classList.add("dark");
+      } else {
+        htmlElement.classList.remove("dark");
+      }
     }
 
     setIsDark(finalTheme === "dark");
