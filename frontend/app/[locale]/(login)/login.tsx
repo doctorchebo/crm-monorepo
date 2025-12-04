@@ -4,21 +4,55 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ActionState } from "@/lib/auth/middleware";
+import { setCookie } from "@/lib/cookies";
 import { CircleIcon, Loader2 } from "lucide-react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { useActionState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useActionState, useEffect } from "react";
 import { signIn, signUp } from "./actions";
 
 export function Login({ mode = "signin" }: { mode?: "signin" | "signup" }) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const redirect = searchParams.get("redirect");
   const priceId = searchParams.get("priceId");
   const inviteId = searchParams.get("inviteId");
   const [state, formAction, pending] = useActionState<ActionState, FormData>(
-    mode === "signin" ? signIn : signUp,
+    async (previousState, formData) => {
+      const result = await (mode === "signin" ? signIn : signUp)(
+        previousState,
+        formData
+      );
+
+      // If we have a JWT token in the result, store it in cookies
+      if (result && typeof result === "object" && "jwtToken" in result) {
+        const { jwtToken } = result as { jwtToken: string | null };
+        if (jwtToken) {
+          setCookie("jwt_token", jwtToken, 3600);
+          console.debug("JWT token stored in cookies");
+        }
+      }
+
+      return result;
+    },
     { error: "" }
   );
+
+  // Handle redirect after successful login
+  useEffect(() => {
+    if (
+      state &&
+      typeof state === "object" &&
+      "jwtToken" in state &&
+      !state.error
+    ) {
+      // Give a moment for cookies to be set before redirecting
+      const timer = setTimeout(() => {
+        router.push("/dashboard");
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [state, router]);
 
   return (
     <div className="min-h-[100dvh] flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8 bg-gray-50">

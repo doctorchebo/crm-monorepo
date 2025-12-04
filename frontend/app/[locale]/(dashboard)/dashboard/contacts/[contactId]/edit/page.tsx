@@ -2,6 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CountryCodeSelect } from "@/components/ui/country-code-select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -213,32 +214,35 @@ export default function EditContactPage() {
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="countryCode">{t("countryCode")}</Label>
-              <Input
-                id="countryCode"
-                name="countryCode"
-                placeholder={t("enterCountryCode")}
-                value={formData.countryCode}
-                onChange={handleChange}
-                disabled={isLoading}
-                required
-              />
-              <p className="text-xs text-muted-foreground">
-                Format: +1, +34, +591, etc.
-              </p>
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="phoneNumber">{t("phoneNumber")}</Label>
-              <Input
-                id="phoneNumber"
-                name="phoneNumber"
-                placeholder={t("enterPhoneNumber")}
-                value={formData.phoneNumber}
-                onChange={handleChange}
-                disabled={isLoading}
-                required
-              />
+              <Label>
+                {t("countryCode")} & {t("phoneNumber")}
+              </Label>
+              <div className="grid grid-cols-3 gap-2">
+                <div className="col-span-1">
+                  <CountryCodeSelect
+                    value={formData.countryCode}
+                    onChange={(code) => {
+                      setFormData((prev) => ({
+                        ...prev,
+                        countryCode: code,
+                      }));
+                      if (error) setError(null);
+                    }}
+                    disabled={isLoading}
+                  />
+                </div>
+                <div className="col-span-2">
+                  <Input
+                    id="phoneNumber"
+                    name="phoneNumber"
+                    placeholder={t("enterPhoneNumber")}
+                    value={formData.phoneNumber}
+                    onChange={handleChange}
+                    disabled={isLoading}
+                    required
+                  />
+                </div>
+              </div>
               <p className="text-xs text-muted-foreground">
                 6-15 digits without country code
               </p>

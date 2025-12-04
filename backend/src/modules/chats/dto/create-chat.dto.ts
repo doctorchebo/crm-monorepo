@@ -3,11 +3,15 @@ import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
 export class CreateChatDto {
   @IsString()
   @IsNotEmpty()
-  phoneNumber: string;
+  businessPhone: string;
+
+  @IsString()
+  @IsNotEmpty()
+  participantPhone: string;
 
   @IsString()
   @IsOptional()
-  name?: string;
+  participantName?: string;
 
   @IsString()
   @IsOptional()

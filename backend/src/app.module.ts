@@ -14,6 +14,7 @@ import { SettingsModule } from './modules/settings/settings.module';
 import { TeamModule } from './modules/team/team.module';
 import { UserModule } from './modules/user/user.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
+import { SendersModule } from './modules/senders/senders.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
     UserModule,
     TeamModule,
     ContactsModule,
+    SendersModule,
     WhatsAppModule,
     MessagingModule,
     ChatsModule,

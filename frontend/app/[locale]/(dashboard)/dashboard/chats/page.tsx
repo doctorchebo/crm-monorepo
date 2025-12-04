@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { backendApi } from "@/lib/api/endpoints";
 import { MessageSquare, Plus, Send } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 // Twilio WhatsApp Sandbox Templates
@@ -48,6 +49,7 @@ interface Message {
 
 export default function ChatsPage() {
   const t = useTranslations("chats");
+  const searchParams = useSearchParams();
   const [automationEnabled, setAutomationEnabled] = useState(false);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [chats, setChats] = useState<Chat[]>([]);
@@ -66,7 +68,14 @@ export default function ChatsPage() {
         const data = await backendApi.whatsapp.getChats(0, 20);
         if (Array.isArray(data) && data.length > 0) {
           setChats(data);
-          setSelectedChatId(data[0].chatId);
+
+          // Check if selectedChatId is in the query params
+          const querySelectedChatId = searchParams.get("selectedChatId");
+          if (querySelectedChatId) {
+            setSelectedChatId(querySelectedChatId);
+          } else {
+            setSelectedChatId(data[0].chatId);
+          }
         } else {
           setChats([]);
           setSelectedChatId(null);

@@ -1,4 +1,10 @@
-import { IsOptional, IsString, Matches } from 'class-validator';
+import {
+  IsArray,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Matches,
+} from 'class-validator';
 
 export class CreateContactDto {
   @IsString()
@@ -19,6 +25,10 @@ export class CreateContactDto {
     message: 'Phone number must be 6-15 digits',
   })
   phoneNumber: string;
+
+  @IsArray()
+  @IsNumber({}, { each: true })
+  senderIds: number[]; // IDs of the WhatsApp Business phones this contact is linked to
 
   @IsOptional()
   @IsString()

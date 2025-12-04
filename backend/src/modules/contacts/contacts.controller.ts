@@ -32,16 +32,20 @@ export class ContactsController {
   }
 
   /**
-   * Get all contacts
-   * GET /contacts
+   * Get all contacts for current user's registered senders
+   * GET /contacts?phoneNumberId=1
    */
   @Get()
   async findAll(
     @Query('skip') skip: number = 0,
     @Query('take') take: number = 50,
+    @Query('phoneNumberId') phoneNumberId?: string,
   ) {
-    this.logger.log('Get all contacts');
-    return this.contactsService.findAll(skip, take);
+    this.logger.log('Get all contacts for user');
+    // TODO: Get userId from auth context
+    const userId = 1; // Hardcoded for now
+    const phoneNumId = phoneNumberId ? parseInt(phoneNumberId, 10) : undefined;
+    return this.contactsService.findAll(userId, skip, take, phoneNumId);
   }
 
   /**

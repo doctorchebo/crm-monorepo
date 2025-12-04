@@ -18,6 +18,7 @@ import { useRouter } from "next/navigation";
 import { Suspense } from "react";
 import useSWR from "swr";
 import { signOut } from "../(login)/actions";
+import { logoutClient } from "../(login)/logout";
 
 const fetcher = async (url: string) => {
   const res = await fetch(url);
@@ -45,6 +46,8 @@ function UserMenu() {
   async function handleSignOut() {
     try {
       await signOut();
+      // Clean up JWT token from client-side cookies
+      logoutClient();
       // Clear the user data immediately
       await mutateUser(undefined, false);
     } catch (error) {

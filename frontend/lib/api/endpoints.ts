@@ -9,11 +9,14 @@ export interface CreateContactDto {
   lastName?: string;
   countryCode: string;
   phoneNumber: string;
+  senderIds: number[];
 }
 
 export interface UpdateContactDto extends Partial<CreateContactDto> {}
 
 export const backendApi = {
+  baseUrl: process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001",
+
   // Auth endpoints
   auth: {
     register: (data: { email: string; name: string; password: string }) =>
@@ -64,6 +67,12 @@ export const backendApi = {
       apiClient.get(
         `/chats/${id}/messages?skip=${skip || 0}&take=${take || 50}`
       ),
+    startWithContact: (data: {
+      businessPhone: string;
+      participantPhone: string;
+      participantName?: string;
+      senderId?: number;
+    }) => apiClient.post("/chats/contact/start", data),
   },
 
   // Kanban endpoints
@@ -124,8 +133,12 @@ export const backendApi = {
 
   // Contacts endpoints
   contacts: {
-    list: (skip?: number, take?: number) =>
-      apiClient.get(`/contacts?skip=${skip || 0}&take=${take || 50}`),
+    list: (skip?: number, take?: number, phoneNumberId?: number) =>
+      apiClient.get(
+        `/contacts?skip=${skip || 0}&take=${take || 50}${
+          phoneNumberId ? `&phoneNumberId=${phoneNumberId}` : ""
+        }`
+      ),
     get: (contactId: string) => apiClient.get(`/contacts/${contactId}`),
     create: (data: any) => apiClient.post("/contacts", data),
     update: (contactId: string, data: any) =>
@@ -133,5 +146,21 @@ export const backendApi = {
     delete: (contactId: string) => apiClient.delete(`/contacts/${contactId}`),
     getByPhone: (phoneNumber: string) =>
       apiClient.get(`/contacts/phone/${phoneNumber}`),
+  },
+
+  // Senders endpoints
+  senders: {
+    list: () => apiClient.get("/senders"),
+    get: (senderId: number) => apiClient.get(`/senders/${senderId}`),
+    create: (data: any) => apiClient.post("/senders", data),
+    update: (senderId: number, data: any) =>
+      apiClient.patch(`/senders/${senderId}`, data),
+    delete: (senderId: number) => apiClient.delete(`/senders/${senderId}`),
+    getContacts: (senderId: number) =>
+      apiClient.get(`/senders/${senderId}/contacts`),
+    linkContact: (senderId: number, contactId: string, data?: any) =>
+      apiClient.post(`/senders/${senderId}/contacts/${contactId}`, data || {}),
+    unlinkContact: (senderId: number, contactId: string) =>
+      apiClient.delete(`/senders/${senderId}/contacts/${contactId}`),
   },
 };

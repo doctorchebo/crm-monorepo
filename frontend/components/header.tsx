@@ -1,6 +1,7 @@
 "use client";
 
 import { signOut } from "@/app/[locale]/(login)/actions";
+import { logoutClient } from "@/app/[locale]/(login)/logout";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -45,6 +46,8 @@ function UserMenu() {
   async function handleSignOut() {
     try {
       await signOut();
+      // Clean up JWT token from client-side cookies
+      logoutClient();
       // Clear the user data immediately
       await mutateUser(undefined, false);
     } catch (error) {

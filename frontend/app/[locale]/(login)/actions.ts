@@ -44,6 +44,33 @@ async function logActivity(
   await db.insert(activityLogs).values(newActivity);
 }
 
+async function authenticateWithBackend(
+  email: string,
+  password: string
+): Promise<string | null> {
+  try {
+    const backendUrl =
+      process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+    const response = await fetch(`${backendUrl}/auth/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ email, password }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Backend auth failed: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    return data?.access_token || null;
+  } catch (err) {
+    console.error("Backend authentication failed:", err);
+    return null;
+  }
+}
+
 const signInSchema = z.object({
   email: z.string().email().min(3).max(255),
   password: z.string().min(8).max(100),
@@ -86,6 +113,9 @@ export const signIn = validatedAction(signInSchema, async (data, formData) => {
     };
   }
 
+  // Get JWT token from backend
+  const jwtToken = await authenticateWithBackend(email, password);
+
   await Promise.all([
     setSession(foundUser),
     logActivity(foundTeam?.id, foundUser.id, ActivityType.SIGN_IN),
@@ -97,7 +127,8 @@ export const signIn = validatedAction(signInSchema, async (data, formData) => {
     return createCheckoutSession({ team: foundTeam, priceId });
   }
 
-  redirect("/dashboard");
+  // Return JWT token to client so it can be stored in cookies
+  return { jwtToken };
 });
 
 const signUpSchema = z.object({
@@ -206,6 +237,9 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
     role: userRole,
   };
 
+  // Get JWT token from backend
+  const jwtToken = await authenticateWithBackend(email, password);
+
   await Promise.all([
     db.insert(teamMembers).values(newTeamMember),
     logActivity(teamId, createdUser.id, ActivityType.SIGN_UP),
@@ -218,7 +252,8 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
     return createCheckoutSession({ team: createdTeam, priceId });
   }
 
-  redirect("/dashboard");
+  // Return JWT token to client so it can be stored in cookies
+  return { jwtToken };
 });
 
 export async function signOut() {
@@ -229,6 +264,7 @@ export async function signOut() {
       await logActivity(userWithTeam?.teamId, user.id, ActivityType.SIGN_OUT);
     }
     (await cookies()).delete("session");
+    // Note: jwt_token is deleted client-side in the logout flow
   } catch (error) {
     console.error("Error during sign out:", error);
   }

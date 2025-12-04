@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useNotification } from "@/hooks/use-notification";
 import { backendApi } from "@/lib/api/endpoints";
 import { MoreVertical, Plus } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -72,6 +73,7 @@ export default function ContactsPage() {
   const locale = params.locale as string;
   const t = useTranslations("contacts");
   const tChats = useTranslations("chats");
+  const { addNotification } = useNotification();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -115,11 +117,43 @@ export default function ContactsPage() {
 
   const handleStartChat = async (contact: Contact) => {
     try {
-      // Navigate to chats page - the chat will be created when the first message is sent
-      // from the contact or when a message is sent to the contact
-      router.push(`/${locale}/dashboard/chats`);
+      // Fetch available senders for the user
+      const allSenders = (await backendApi.senders.list()) as any[];
+
+      if (!allSenders || allSenders.length === 0) {
+        addNotification(
+          "No WhatsApp senders configured. Please set up a sender first.",
+          "error"
+        );
+        return;
+      }
+
+      // TODO: In future, add logic to fetch senders linked to this specific contact
+      // For now, use the first available sender as default
+      // This should be replaced with: const contactSenders = await backendApi.contacts.getSenders(contact.contactId)
+
+      const selectedSender = allSenders[0];
+      const businessPhone = selectedSender.phoneNumber;
+      const participantPhone = contact.phoneNumber;
+      const senderId = selectedSender.id;
+
+      const createdChat = await backendApi.chats.startWithContact({
+        businessPhone,
+        participantPhone,
+        participantName: `${contact.firstName} ${
+          contact.lastName || ""
+        }`.trim(),
+        senderId,
+      });
+
+      // Navigate to chats page with the created chat ID
+      const chatId = (createdChat as any)?.chatId || "";
+      router.push(`/${locale}/dashboard/chats?selectedChatId=${chatId}`);
     } catch (err) {
       console.error("Failed to start chat:", err);
+      addNotification("Failed to start chat", "error");
+      // Fallback: just go to chats page
+      router.push(`/${locale}/dashboard/chats`);
     }
   };
 
@@ -134,11 +168,18 @@ export default function ContactsPage() {
     setIsDeleting(true);
     try {
       await backendApi.contacts.delete(contactToDelete.contactId);
+      addNotification(
+        `${contactToDelete.firstName} ${
+          contactToDelete.lastName || ""
+        } deleted successfully`,
+        "success"
+      );
       mutate();
       setDeleteDialogOpen(false);
       setContactToDelete(null);
     } catch (err) {
       console.error("Failed to delete contact:", err);
+      addNotification("Failed to delete contact", "error");
     } finally {
       setIsDeleting(false);
     }

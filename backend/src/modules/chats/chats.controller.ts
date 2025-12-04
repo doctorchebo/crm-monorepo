@@ -6,6 +6,7 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/auth.guard';
@@ -19,18 +20,47 @@ export class ChatsController {
   constructor(private chatsService: ChatsService) {}
 
   @Post()
-  async create(@Body() createChatDto: CreateChatDto) {
+  async create(@Req() req: any, @Body() createChatDto: CreateChatDto) {
+    const userId = req.user.userId;
     // TODO: Get teamId from request context
-    return this.chatsService.create('teamId', createChatDto);
+    return this.chatsService.create(userId, 'teamId', createChatDto);
+  }
+
+  /**
+   * Start a new chat or get existing chat with a contact
+   * POST /chats/contact/start
+   * Requires: businessPhone, participantPhone, participantName (optional)
+   */
+  @Post('contact/start')
+  async startChatWithContact(
+    @Req() req: any,
+    @Body()
+    body: {
+      businessPhone: string;
+      participantPhone: string;
+      participantName?: string;
+      senderId?: number;
+    },
+  ) {
+    const userId = req.user.userId;
+    return this.chatsService.createOrGetChatWithContact(
+      userId,
+      body.businessPhone,
+      body.participantPhone,
+      body.participantName,
+      body.senderId,
+    );
   }
 
   @Get()
   async findByTeam(
+    @Req() req: any,
     @Query('skip') skip: number = 0,
     @Query('take') take: number = 20,
   ) {
+    const userId = req.user.userId;
     // TODO: Get teamId from request context
-    return this.chatsService.findByTeam('teamId', skip, take);
+    return this.chatsService.findByTeam(userId, 'teamId', skip, take);
   }
 
   @Get(':id')

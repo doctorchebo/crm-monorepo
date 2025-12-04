@@ -9,7 +9,11 @@ export enum ChatStatus {
 export class UpdateChatDto {
   @IsString()
   @IsOptional()
-  name?: string;
+  participantName?: string;
+
+  @IsString()
+  @IsOptional()
+  lastMessage?: string;
 
   @IsEnum(ChatStatus)
   @IsOptional()

@@ -3,6 +3,8 @@
  * Handles JWT token attachment, error handling, and request/response transformation
  */
 
+import { getCookie } from "@/lib/cookies";
+
 interface ApiRequestOptions extends RequestInit {
   headers?: Record<string, string>;
 }
@@ -16,11 +18,14 @@ class ApiClient {
   }
 
   private async getToken(): Promise<string | null> {
-    // Get JWT token from localStorage or cookies
-    // This would be set after login
-    if (typeof window !== "undefined") {
-      return localStorage.getItem("jwt_token");
+    // Get JWT token from browser cookies
+    // This token is issued by the backend and should be used for API authentication
+    const token = getCookie("jwt_token");
+    if (token) {
+      console.debug("JWT token found in cookies");
+      return token;
     }
+    console.debug("JWT token not found in cookies");
     return null;
   }
 
@@ -38,6 +43,9 @@ class ApiClient {
 
     if (token) {
       headers["Authorization"] = `Bearer ${token}`;
+      console.debug(`Sending request to ${endpoint} with JWT token`);
+    } else {
+      console.warn(`No JWT token available for request to ${endpoint}`);
     }
 
     const response = await fetch(url, {
