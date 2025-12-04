@@ -26,12 +26,18 @@ export class ChatsService {
 
   /**
    * Generate a unique chat ID from business phone and participant phone
+   * Uses sorted order to ensure the same ID regardless of direction (inbound vs outbound)
+   * Removes '+' signs to avoid URL encoding issues in query parameters
    */
   private generateChatId(
     businessPhone: string,
     participantPhone: string,
   ): string {
-    return `chat_${businessPhone.replace('+', '')}_${participantPhone.replace('+', '')}`;
+    // Remove '+' signs to avoid URL encoding issues
+    const cleanBusinessPhone = businessPhone.replace(/\+/g, '');
+    const cleanParticipantPhone = participantPhone.replace(/\+/g, '');
+    const sorted = [cleanBusinessPhone, cleanParticipantPhone].sort();
+    return `chat_${sorted.join('_')}`;
   }
 
   /**
@@ -114,6 +120,31 @@ export class ChatsService {
 
       if (chat) {
         this.logger.log(`Chat already exists: ${chatId}`);
+
+        // If chat exists but has no participantName, update it with the contact name
+        if (!chat.participantName && (participantName || !participantName)) {
+          let nameToUpdate: string | null | undefined = participantName;
+          if (!nameToUpdate) {
+            nameToUpdate = await this.getContactNameByPhone(participantPhone);
+          }
+
+          if (nameToUpdate) {
+            const [updatedChat] = await db
+              .update(chats)
+              .set({
+                participantName: nameToUpdate,
+                updatedAt: new Date(),
+              })
+              .where(eq(chats.chatId, chatId))
+              .returning();
+
+            this.logger.log(
+              `Chat updated with participantName: ${chatId} -> ${nameToUpdate}`,
+            );
+            return updatedChat;
+          }
+        }
+
         return chat;
       }
 

@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { backendApi } from "@/lib/api/endpoints";
 import { MessageSquare, Plus, Send } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 // Twilio WhatsApp Sandbox Templates with contentSid and contentVariables
@@ -66,7 +66,7 @@ interface Message {
 
 export default function ChatsPage() {
   const t = useTranslations("chats");
-  const searchParams = useSearchParams();
+  const router = useRouter();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [automationEnabled, setAutomationEnabled] = useState(false);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
@@ -97,14 +97,31 @@ export default function ChatsPage() {
         setLoading(true);
         setError(null);
         const data = await backendApi.whatsapp.getChats(0, 20);
+
         if (Array.isArray(data) && data.length > 0) {
           setChats(data);
 
-          // Check if selectedChatId is in the query params
-          const querySelectedChatId = searchParams.get("selectedChatId");
+          // Get the query param from the URL directly to preserve special characters like +
+          // searchParams.get() decodes the value, turning + into spaces
+          // We need to parse the raw query string instead
+          const urlParams = new URLSearchParams(window.location.search);
+          const querySelectedChatId = urlParams.get("selectedChatId");
+
+          console.log("Query selectedChatId:", querySelectedChatId);
+          console.log(
+            "Available chats:",
+            data.map((c) => c.chatId)
+          );
+
           if (querySelectedChatId) {
+            console.log(
+              "Setting selectedChatId from query param:",
+              querySelectedChatId
+            );
+            // Set the selected chat from query param directly
             setSelectedChatId(querySelectedChatId);
           } else {
+            // If no query param, select the first chat
             setSelectedChatId(data[0].chatId);
           }
         } else {
@@ -123,8 +140,6 @@ export default function ChatsPage() {
 
     fetchChats();
   }, []);
-
-  // Fetch messages when selected chat changes
   useEffect(() => {
     if (!selectedChatId) return;
 

@@ -36,9 +36,13 @@ export class WhatsAppService {
 
   /**
    * Generate a unique chat ID from sender and recipient
+   * Removes '+' signs to avoid URL encoding issues in query parameters
    */
   private generateChatId(sender: string, recipient: string): string {
-    const sorted = [sender, recipient].sort();
+    // Remove '+' signs to avoid URL encoding issues
+    const cleanSender = sender.replace(/\+/g, '');
+    const cleanRecipient = recipient.replace(/\+/g, '');
+    const sorted = [cleanSender, cleanRecipient].sort();
     return `chat_${sorted.join('_')}`;
   }
 
