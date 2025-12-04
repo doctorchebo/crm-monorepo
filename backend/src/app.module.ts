@@ -7,6 +7,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { AutomationModule } from './modules/automation/automation.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { ChatsModule } from './modules/chats/chats.module';
+import { ContactsModule } from './modules/contacts/contacts.module';
 import { KanbanModule } from './modules/kanban/kanban.module';
 import { MessagingModule } from './modules/messaging/messaging.module';
 import { SettingsModule } from './modules/settings/settings.module';
@@ -23,6 +24,7 @@ import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
     AuthModule,
     UserModule,
     TeamModule,
+    ContactsModule,
     WhatsAppModule,
     MessagingModule,
     ChatsModule,

@@ -5,10 +5,9 @@ import {
   Logger,
   Param,
   Post,
+  Query,
   Req,
-  UseGuards,
 } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/auth.guard';
 import { SaveNoteDto } from './dto/notes.dto';
 import { OutboundMessageDto } from './dto/outbound-message.dto';
 import { WhatsAppService } from './whatsapp.service';
@@ -24,7 +23,6 @@ export class WhatsAppController {
    * POST /whatsapp/send
    */
   @Post('send')
-  @UseGuards(JwtAuthGuard)
   async sendMessage(@Body() messageDto: OutboundMessageDto, @Req() req: any) {
     this.logger.log(
       `Send message request from user ${req.user?.id}: To ${messageDto.to}`,
@@ -37,7 +35,6 @@ export class WhatsAppController {
    * GET /whatsapp/status/:messageSid
    */
   @Get('status/:messageSid')
-  @UseGuards(JwtAuthGuard)
   async getMessageStatus(@Param('messageSid') messageSid: string) {
     this.logger.log(`Get message status: ${messageSid}`);
     return this.whatsAppService.getMessageStatus(messageSid);
@@ -48,10 +45,36 @@ export class WhatsAppController {
    * GET /whatsapp/messages
    */
   @Get('messages')
-  @UseGuards(JwtAuthGuard)
   async getMessages(@Req() req: any) {
     this.logger.log(`Get messages request from user ${req.user?.id}`);
     return this.whatsAppService.getMessages();
+  }
+
+  /**
+   * Get all chats (conversations)
+   * GET /whatsapp/chats
+   */
+  @Get('chats')
+  async getChats(
+    @Query('skip') skip: number = 0,
+    @Query('take') take: number = 20,
+  ) {
+    this.logger.log(`Get chats request`);
+    return this.whatsAppService.getChats(skip, take);
+  }
+
+  /**
+   * Get messages for a specific chat
+   * GET /whatsapp/chats/:chatId/messages
+   */
+  @Get('chats/:chatId/messages')
+  async getChatMessages(
+    @Param('chatId') chatId: string,
+    @Query('skip') skip: number = 0,
+    @Query('take') take: number = 50,
+  ) {
+    this.logger.log(`Get messages for chat: ${chatId}`);
+    return this.whatsAppService.getChatMessages(chatId, skip, take);
   }
 
   /**
@@ -59,7 +82,6 @@ export class WhatsAppController {
    * POST /whatsapp/notes
    */
   @Post('notes')
-  @UseGuards(JwtAuthGuard)
   async saveNote(@Body() noteDto: SaveNoteDto, @Req() req: any) {
     const userId = req.user?.id;
     this.logger.log(
@@ -77,7 +99,6 @@ export class WhatsAppController {
    * GET /whatsapp/notes/:messageId
    */
   @Get('notes/:messageId')
-  @UseGuards(JwtAuthGuard)
   async getMessageNotes(@Param('messageId') messageId: string) {
     this.logger.log(`Get notes for message ${messageId}`);
     return this.whatsAppService.getMessageNotes(messageId);

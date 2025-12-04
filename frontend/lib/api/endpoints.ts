@@ -3,6 +3,16 @@
  */
 import { apiClient } from "./client";
 
+// DTOs
+export interface CreateContactDto {
+  firstName: string;
+  lastName?: string;
+  countryCode: string;
+  phoneNumber: string;
+}
+
+export interface UpdateContactDto extends Partial<CreateContactDto> {}
+
 export const backendApi = {
   // Auth endpoints
   auth: {
@@ -98,9 +108,30 @@ export const backendApi = {
     getStatus: (messageSid: string) =>
       apiClient.get(`/whatsapp/status/${messageSid}`),
     getMessages: () => apiClient.get("/whatsapp/messages"),
+    getChats: (skip?: number, take?: number) =>
+      apiClient.get(`/whatsapp/chats?skip=${skip || 0}&take=${take || 20}`),
+    getChatMessages: (chatId: string, skip?: number, take?: number) =>
+      apiClient.get(
+        `/whatsapp/chats/${chatId}/messages?skip=${skip || 0}&take=${
+          take || 50
+        }`
+      ),
     saveNote: (data: { messageId: string; note: string }) =>
       apiClient.post("/whatsapp/notes", data),
     getMessageNotes: (messageId: string) =>
       apiClient.get(`/whatsapp/notes/${messageId}`),
+  },
+
+  // Contacts endpoints
+  contacts: {
+    list: (skip?: number, take?: number) =>
+      apiClient.get(`/contacts?skip=${skip || 0}&take=${take || 50}`),
+    get: (contactId: string) => apiClient.get(`/contacts/${contactId}`),
+    create: (data: any) => apiClient.post("/contacts", data),
+    update: (contactId: string, data: any) =>
+      apiClient.patch(`/contacts/${contactId}`, data),
+    delete: (contactId: string) => apiClient.delete(`/contacts/${contactId}`),
+    getByPhone: (phoneNumber: string) =>
+      apiClient.get(`/contacts/phone/${phoneNumber}`),
   },
 };

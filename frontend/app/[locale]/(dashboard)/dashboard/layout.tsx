@@ -19,6 +19,7 @@ import {
   Settings,
   Shield,
   Users,
+  Users2,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
@@ -31,6 +32,7 @@ function DashboardSidebar() {
   const navItems = [
     { href: "/dashboard", icon: Home, label: "Home" },
     { href: "/dashboard/chats", icon: MessageSquare, label: "Chats" },
+    { href: "/dashboard/contacts", icon: Users2, label: "Contacts" },
     { href: "/dashboard/kanban", icon: Users, label: "Kanban" },
     { href: "/dashboard/team", icon: Settings, label: "Team" },
     { href: "/dashboard/general", icon: Settings, label: "General" },

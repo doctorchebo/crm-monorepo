@@ -1,4 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { desc, eq } from 'drizzle-orm';
+import { db } from 'src/database/db.connection';
+import { Chat, chats, Message, messages } from 'src/database/schema';
 import Twilio from 'twilio';
 import { OutboundMessageDto } from './dto/outbound-message.dto';
 
@@ -15,6 +18,7 @@ export class WhatsAppService {
   private readonly logger = new Logger(WhatsAppService.name);
   private twilioClient: ReturnType<typeof Twilio>;
   private readonly twilioPhoneNumber = 'whatsapp:+14155238886'; // Your Twilio WhatsApp Business number
+  private readonly businessPhoneDisplay = '+14155238886'; // For database storage
 
   constructor() {
     // Initialize Twilio client
@@ -31,6 +35,14 @@ export class WhatsAppService {
   }
 
   /**
+   * Generate a unique chat ID from sender and recipient
+   */
+  private generateChatId(sender: string, recipient: string): string {
+    const sorted = [sender, recipient].sort();
+    return `chat_${sorted.join('_')}`;
+  }
+
+  /**
    * Send a WhatsApp message
    * @param messageDto - Message data (to, body, mediaUrl)
    * @returns Message SID from Twilio
@@ -39,11 +51,11 @@ export class WhatsAppService {
     try {
       const toPhoneNumber = `whatsapp:${messageDto.to}`;
 
-    //   const messageData: any = {
-    //     body: messageDto.body,
-    //     from: this.twilioPhoneNumber,
-    //     to: toPhoneNumber,
-    //   };
+      //   const messageData: any = {
+      //     body: messageDto.body,
+      //     from: this.twilioPhoneNumber,
+      //     to: toPhoneNumber,
+      //   };
 
       const messageData: any = {
         from: this.twilioPhoneNumber,
@@ -51,7 +63,7 @@ export class WhatsAppService {
         contentVariables: '{"1":"12/1","2":"3pm"}',
         to: toPhoneNumber,
       };
-      
+
       // Add media URL if provided
       if (messageDto.mediaUrl) {
         messageData.mediaUrl = messageDto.mediaUrl;
@@ -64,9 +76,23 @@ export class WhatsAppService {
         `Message sent successfully. SID: ${message.sid}, To: ${messageDto.to}`,
       );
 
+      // Generate chat ID
+      const chatId = this.generateChatId(
+        this.businessPhoneDisplay,
+        messageDto.to,
+      );
+
+      // Ensure chat exists
+      await this.getOrCreateChat(
+        chatId,
+        this.businessPhoneDisplay,
+        messageDto.to,
+      );
+
       // Store message metadata in database
       await this.storeOutboundMessage({
         messageSid: message.sid,
+        chatId,
         to: messageDto.to,
         body: messageDto.body,
         mediaUrl: messageDto.mediaUrl,
@@ -82,9 +108,7 @@ export class WhatsAppService {
       this.logger.error(`Error sending message: ${error.message}`, error);
       throw new Error(`Failed to send WhatsApp message: ${error.message}`);
     }
-  }
-
-  /**
+  } /**
    * Retrieve message status from Twilio
    * @param messageSid - Twilio message SID
    * @returns Message status
@@ -131,6 +155,12 @@ export class WhatsAppService {
       const senderPhone = From.replace('whatsapp:', '');
       const recipientPhone = To.replace('whatsapp:', '');
 
+      // Generate chat ID
+      const chatId = this.generateChatId(recipientPhone, senderPhone);
+
+      // Ensure chat exists
+      await this.getOrCreateChat(chatId, recipientPhone, senderPhone);
+
       // Determine message type
       const messageType = NumMedia && Number(NumMedia) > 0 ? 'media' : 'text';
       const mediaUrl = MediaContentType0
@@ -140,6 +170,7 @@ export class WhatsAppService {
       // Store inbound message
       const messageData = {
         messageSid: MessageSid,
+        chatId,
         sender: senderPhone,
         recipient: recipientPhone,
         body: Body,
@@ -154,7 +185,9 @@ export class WhatsAppService {
         `Inbound message stored. From: ${senderPhone}, Type: ${messageType}`,
       );
 
-      // TODO: Link message to chat
+      // Update chat with last message
+      await this.updateChatLastMessage(chatId, Body);
+
       // TODO: Trigger automation rules
       // TODO: Notify frontend via WebSocket
 
@@ -209,9 +242,19 @@ export class WhatsAppService {
    */
   private async storeOutboundMessage(messageData: any) {
     try {
-      // TODO: Store in database using db.insert(messages).values({...})
-      this.logger.debug('Storing outbound message', messageData);
-      // For now, just log it
+      await db.insert(messages).values({
+        messageId: messageData.messageSid,
+        chatId: messageData.chatId,
+        source: 'whatsapp',
+        sender: this.businessPhoneDisplay,
+        type: 'text',
+        text: messageData.body,
+        mediaUrl: messageData.mediaUrl,
+        direction: 'outbound',
+        status: 'sent',
+        timestamp: new Date(),
+      });
+      this.logger.debug('Outbound message stored', messageData.messageSid);
       return messageData;
     } catch (error) {
       this.logger.error(`Error storing outbound message: ${error.message}`);
@@ -225,13 +268,77 @@ export class WhatsAppService {
    */
   private async storeInboundMessage(messageData: any) {
     try {
-      // TODO: Store in database using db.insert(messages).values({...})
-      this.logger.debug('Storing inbound message', messageData);
-      // For now, just log it
+      await db.insert(messages).values({
+        messageId: messageData.messageSid,
+        chatId: messageData.chatId,
+        source: 'whatsapp',
+        sender: messageData.sender,
+        type: messageData.type,
+        text: messageData.body,
+        mediaUrl: messageData.mediaUrl,
+        direction: 'inbound',
+        status: 'delivered',
+        timestamp: messageData.timestamp,
+      });
+      this.logger.debug('Inbound message stored', messageData.messageSid);
       return messageData;
     } catch (error) {
       this.logger.error(`Error storing inbound message: ${error.message}`);
       throw error;
+    }
+  }
+
+  /**
+   * Get or create a chat for two participants
+   */
+  private async getOrCreateChat(
+    chatId: string,
+    businessPhone: string,
+    participantPhone: string,
+  ): Promise<Chat> {
+    try {
+      let chat = await db.query.chats.findFirst({
+        where: eq(chats.chatId, chatId),
+      });
+
+      if (!chat) {
+        const [newChat] = await db
+          .insert(chats)
+          .values({
+            chatId,
+            businessPhone,
+            participantPhone,
+            participantName: participantPhone, // Initially set to phone number
+            isActive: true,
+          })
+          .returning();
+        this.logger.log(`Chat created: ${chatId}`);
+        return newChat;
+      }
+
+      return chat;
+    } catch (error) {
+      this.logger.error(`Error getting or creating chat: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Update chat with latest message info
+   */
+  private async updateChatLastMessage(chatId: string, lastMessage: string) {
+    try {
+      await db
+        .update(chats)
+        .set({
+          lastMessage,
+          lastMessageTime: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(chats.chatId, chatId));
+    } catch (error) {
+      this.logger.error(`Error updating chat last message: ${error.message}`);
+      // Don't throw - not critical
     }
   }
 
@@ -275,7 +382,7 @@ export class WhatsAppService {
   }
 
   /**
-   * Get all messages for a user/team
+   * Get all messages for a user/team with optional filters
    */
   async getMessages(filters?: {
     sender?: string;
@@ -293,6 +400,46 @@ export class WhatsAppService {
     } catch (error) {
       this.logger.error(`Error retrieving messages: ${error.message}`);
       throw new Error(`Failed to retrieve messages: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get all chats (conversations)
+   */
+  async getChats(skip: number = 0, take: number = 20): Promise<Chat[]> {
+    try {
+      const chatsData = await db.query.chats.findMany({
+        where: eq(chats.isActive, true),
+        orderBy: desc(chats.lastMessageTime),
+        limit: take,
+        offset: skip,
+      });
+      return chatsData;
+    } catch (error) {
+      this.logger.error(`Error retrieving chats: ${error.message}`);
+      throw new Error(`Failed to retrieve chats: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get messages for a specific chat
+   */
+  async getChatMessages(
+    chatId: string,
+    skip: number = 0,
+    take: number = 50,
+  ): Promise<Message[]> {
+    try {
+      const chatMessages = await db.query.messages.findMany({
+        where: eq(messages.chatId, chatId),
+        orderBy: desc(messages.timestamp),
+        limit: take,
+        offset: skip,
+      });
+      return chatMessages;
+    } catch (error) {
+      this.logger.error(`Error retrieving chat messages: ${error.message}`);
+      throw new Error(`Failed to retrieve chat messages: ${error.message}`);
     }
   }
 }

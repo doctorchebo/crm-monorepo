@@ -5,12 +5,14 @@ declare const module: any;
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // Enable CORS for frontend communication
+  // Enable CORS with explicit configuration
   app.enableCors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3001',
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
+    optionsSuccessStatus: 200,
+    preflightContinue: false,
   });
 
   // Configure URL-encoded form data parser for Twilio webhooks
@@ -33,7 +35,7 @@ async function bootstrap() {
   await app.listen(process.env.PORT ?? 3001);
   console.log(`✅ Backend running on port ${process.env.PORT ?? 3001}`);
   console.log(
-    `✅ CORS enabled for: ${process.env.FRONTEND_URL || 'http://localhost:3001'}`,
+    `✅ CORS enabled for: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`,
   );
 
   if (module.hot) {
