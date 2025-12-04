@@ -1,5 +1,6 @@
 "use client";
 
+import { signOut } from "@/app/[locale]/(login)/actions";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -17,7 +18,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Suspense } from "react";
 import useSWR from "swr";
-import { signOut } from "../(login)/actions";
 
 const fetcher = async (url: string) => {
   const res = await fetch(url);
@@ -31,7 +31,6 @@ const fetcher = async (url: string) => {
 };
 
 function UserMenu() {
-  const t = useTranslations("header");
   const { data: user, mutate: mutateUser } = useSWR<User | null>(
     "/api/user",
     fetcher,
@@ -40,6 +39,7 @@ function UserMenu() {
       revalidateOnReconnect: true,
     }
   );
+  const t = useTranslations("header");
   const router = useRouter();
 
   async function handleSignOut() {
@@ -91,14 +91,14 @@ function UserMenu() {
         <DropdownMenuItem className="cursor-pointer">
           <Link href="/dashboard" className="flex w-full items-center">
             <Home className="mr-2 h-4 w-4" />
-            <span>{t("dashboard")}</span>
+            <span>Dashboard</span>
           </Link>
         </DropdownMenuItem>
         <form action={handleSignOut} className="w-full">
           <button type="submit" className="flex w-full">
             <DropdownMenuItem className="w-full flex-1 cursor-pointer">
               <LogOut className="mr-2 h-4 w-4" />
-              <span>{t("signOut")}</span>
+              <span>Sign out</span>
             </DropdownMenuItem>
           </button>
         </form>
@@ -107,7 +107,7 @@ function UserMenu() {
   );
 }
 
-function Header() {
+export function Header() {
   return (
     <header className="border-b border-gray-200 dark:border-gray-800">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
@@ -126,14 +126,5 @@ function Header() {
         </div>
       </div>
     </header>
-  );
-}
-
-export default function Layout({ children }: { children: React.ReactNode }) {
-  return (
-    <section className="flex flex-col min-h-screen">
-      <Header />
-      {children}
-    </section>
   );
 }
