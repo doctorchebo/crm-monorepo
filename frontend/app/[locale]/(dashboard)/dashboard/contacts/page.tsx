@@ -193,7 +193,7 @@ export default function ContactsPage() {
           <p className="text-muted-foreground mt-2">{t("description")}</p>
         </div>
         <Button
-          onClick={() => router.push(`/${locale}/dashboard/contacts/new`)}
+          onClick={() => router.push(`/${locale}/dashboard/contacts/form`)}
         >
           <Plus className="mr-2 h-4 w-4" />
           {t("newContact")}

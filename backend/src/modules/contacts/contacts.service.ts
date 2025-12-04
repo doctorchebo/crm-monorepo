@@ -1,5 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, count, desc, eq, inArray } from 'drizzle-orm';
 import { db } from '../../database/db.connection';
 import {
   Contact,
@@ -115,6 +115,8 @@ export class ContactsService {
     senderIds: number[],
   ): Promise<void> {
     try {
+      const linkedSenderIds: number[] = [];
+
       for (let index = 0; index < senderIds.length; index++) {
         const senderId = senderIds[index];
         const isPrimary = index === 0; // First sender is primary
@@ -131,6 +133,7 @@ export class ContactsService {
           this.logger.log(
             `Link already exists between contact ${contactId} and sender ${senderId}`,
           );
+          linkedSenderIds.push(senderId); // Still track it for count update
           continue;
         }
 
@@ -141,12 +144,52 @@ export class ContactsService {
           isPrimary,
         });
 
+        linkedSenderIds.push(senderId);
+
         this.logger.log(
           `Linked contact ${contactId} to sender ${senderId} (isPrimary: ${isPrimary})`,
         );
       }
+
+      // Update contact count for all linked senders
+      for (const senderId of linkedSenderIds) {
+        await this.updateSenderContactCount(senderId);
+      }
     } catch (error) {
       this.logger.error(`Error linking contact to senders: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Update contact count for a sender (internal helper)
+   */
+  private async updateSenderContactCount(senderId: number): Promise<void> {
+    try {
+      const result = await db
+        .select({
+          count: count(),
+        })
+        .from(contactSenders)
+        .where(eq(contactSenders.senderId, senderId));
+
+      const contactCount = result[0]?.count || 0;
+
+      await db
+        .update(senders)
+        .set({
+          contactCount: contactCount,
+          updatedAt: new Date(),
+        })
+        .where(eq(senders.id, senderId));
+
+      this.logger.log(
+        `Updated contact count for sender ${senderId}: ${contactCount}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error updating contact count for sender ${senderId}: ${error.message}`,
+      );
       throw error;
     }
   }
@@ -215,9 +258,17 @@ export class ContactsService {
   }
 
   /**
-   * Get a single contact
+   * Get a single contact with its linked senders
    */
-  async findOne(contactId: string): Promise<Contact> {
+  async findOne(contactId: string): Promise<
+    Contact & {
+      senders?: Array<{
+        id: number;
+        phoneNumber: string;
+        displayName: string | null;
+      }>;
+    }
+  > {
     try {
       const contact = await db.query.contacts.findFirst({
         where: eq(contacts.contactId, contactId),
@@ -227,7 +278,35 @@ export class ContactsService {
         throw new NotFoundException(`Contact ${contactId} not found`);
       }
 
-      return contact;
+      // Fetch linked senders
+      const links = await db.query.contactSenders.findMany({
+        where: eq(contactSenders.contactId, contactId),
+      });
+
+      const senderIds = links.map((link) => link.senderId);
+
+      let linkedSenders: Array<{
+        id: number;
+        phoneNumber: string;
+        displayName: string | null;
+      }> = [];
+
+      if (senderIds.length > 0) {
+        const sendersData = await db.query.senders.findMany({
+          where: inArray(senders.id, senderIds),
+        });
+
+        linkedSenders = sendersData.map((s) => ({
+          id: s.id,
+          phoneNumber: s.phoneNumber,
+          displayName: s.displayName,
+        }));
+      }
+
+      return {
+        ...contact,
+        senders: linkedSenders,
+      };
     } catch (error) {
       this.logger.error(`Error fetching contact: ${error.message}`);
       throw error;
@@ -235,15 +314,23 @@ export class ContactsService {
   }
 
   /**
-   * Update a contact
+   * Update a contact and optionally update its sender associations
    */
   async update(
     contactId: string,
     updateContactDto: UpdateContactDto,
-  ): Promise<Contact> {
+  ): Promise<
+    Contact & {
+      senders?: Array<{
+        id: number;
+        phoneNumber: string;
+        displayName: string | null;
+      }>;
+    }
+  > {
     try {
-      // Verify contact exists
-      await this.findOne(contactId);
+      // Verify contact exists and get current senders
+      const existingContact = await this.findOne(contactId);
 
       const updateData: any = {
         updatedAt: new Date(),
@@ -267,6 +354,33 @@ export class ContactsService {
         updateData.phoneNumber = updateContactDto.phoneNumber;
       }
 
+      // Update sender associations if provided
+      let finalSenderIds = existingContact.senders?.map((s) => s.id) || [];
+
+      if (updateContactDto.senderIds) {
+        // Validate that at least one sender is provided
+        if (updateContactDto.senderIds.length === 0) {
+          throw new Error(
+            'At least one sender must be selected for the contact',
+          );
+        }
+
+        // Remove all existing sender links
+        await db
+          .delete(contactSenders)
+          .where(eq(contactSenders.contactId, contactId as any));
+
+        // Link to new senders
+        await this.linkContactToMultipleSenders(
+          contactId,
+          updateContactDto.senderIds,
+        );
+        finalSenderIds = updateContactDto.senderIds;
+
+        // Update the primary sender (first in the array) in the contact record
+        updateData.phoneNumberId = updateContactDto.senderIds[0] || null;
+      }
+
       const [updated] = await db
         .update(contacts)
         .set(updateData)
@@ -274,7 +388,20 @@ export class ContactsService {
         .returning();
 
       this.logger.log(`Contact updated: ${contactId}`);
-      return updated;
+
+      // Return with current senders
+      const linkedSendersData = await db.query.senders.findMany({
+        where: inArray(senders.id, finalSenderIds),
+      });
+
+      return {
+        ...updated,
+        senders: linkedSendersData.map((s) => ({
+          id: s.id,
+          phoneNumber: s.phoneNumber,
+          displayName: s.displayName,
+        })),
+      };
     } catch (error) {
       this.logger.error(`Error updating contact: ${error.message}`);
       throw error;

@@ -4,7 +4,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, count, eq } from 'drizzle-orm';
 import { db } from '../../database/db.connection';
 import { contactSenders, Sender, senders } from '../../database/schema';
 import { CreateSenderDto } from './dto/create-sender.dto';
@@ -294,19 +294,19 @@ export class SendersService {
    * Update contact count for a sender (internal helper)
    */
   private async updateContactCount(senderId: number): Promise<void> {
-    const [result] = await db
+    const result = await db
       .select({
-        count: db.count(),
+        count: count(),
       })
       .from(contactSenders)
       .where(eq(contactSenders.senderId, senderId));
 
-    const count = result?.count || 0;
+    const contactCount = result[0]?.count || 0;
 
     await db
       .update(senders)
       .set({
-        contactCount: count,
+        contactCount: contactCount,
         updatedAt: new Date(),
       })
       .where(eq(senders.id, senderId));
