@@ -6,24 +6,41 @@ import { backendApi } from "@/lib/api/endpoints";
 import { MessageSquare, Plus, Send } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-// Twilio WhatsApp Sandbox Templates
-const WHATSAPP_TEMPLATES = [
+// Twilio WhatsApp Sandbox Templates with contentSid and contentVariables
+interface WhatsAppTemplate {
+  id: string;
+  label: string;
+  templateContent: string;
+  contentSid: string;
+  contentVariables: Record<string, string>;
+}
+
+const WHATSAPP_TEMPLATES: WhatsAppTemplate[] = [
   {
     id: "template1",
-    label: "Hello Template",
-    content: "Hello! This is a test message from our WhatsApp Business.",
+    label: "Appointment Reminder",
+    templateContent:
+      "Your appointment is coming up on {{1}} at {{2}}. If you need to change it, please reply back and let us know.",
+    contentSid: "HXb5b62575e6e4ff6129ad7c8efe1f983e",
+    contentVariables: { "1": "12/1", "2": "3pm" },
   },
   {
     id: "template2",
-    label: "Appointment Reminder",
-    content: "This is your appointment reminder for 12/1 at 3pm.",
+    label: "Order Notification",
+    templateContent:
+      "Thank you for your order. Your delivery is scheduled for {{1}} at {{2}}. If you need to change it, please reply back and let us know.",
+    contentSid: "HX350d429d32e64a552466cafecbe95f3c",
+    contentVariables: { "1": "12/1", "2": "3pm" },
   },
   {
     id: "template3",
-    label: "Follow-up",
-    content: "Just checking in! Let me know if you have any questions.",
+    label: "Verification Code",
+    templateContent:
+      "{{1}} is your verification code. For your security, do not share this code.",
+    contentSid: "HX229f5a04fd0510ce1b071852155d3e75",
+    contentVariables: { "1": "409173" },
   },
 ];
 
@@ -50,6 +67,7 @@ interface Message {
 export default function ChatsPage() {
   const t = useTranslations("chats");
   const searchParams = useSearchParams();
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const [automationEnabled, setAutomationEnabled] = useState(false);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [chats, setChats] = useState<Chat[]>([]);
@@ -58,6 +76,19 @@ export default function ChatsPage() {
   const [templateInput, setTemplateInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      // For initial load, scroll immediately without animation
+      // For subsequent updates, use smooth animation
+      messagesEndRef.current.scrollIntoView({
+        behavior: isInitialLoad ? "auto" : "smooth",
+      });
+      setIsInitialLoad(false);
+    }
+  }, [messages]);
 
   // Fetch chats on mount
   useEffect(() => {
@@ -97,6 +128,8 @@ export default function ChatsPage() {
   useEffect(() => {
     if (!selectedChatId) return;
 
+    setIsInitialLoad(true);
+
     const fetchMessages = async () => {
       try {
         setError(null);
@@ -126,20 +159,55 @@ export default function ChatsPage() {
   }, [selectedChatId]);
 
   const handleSendMessage = async () => {
-    if (!messageInput.trim() || !selectedChatId) return;
+    if ((!messageInput.trim() && !templateInput.trim()) || !selectedChatId)
+      return;
 
     try {
       setError(null);
       const selectedChat = chats.find((c) => c.chatId === selectedChatId);
       if (!selectedChat) return;
 
-      // Send message via API
-      await backendApi.whatsapp.sendMessage({
+      // Check if this is a recipient-initiated conversation (has inbound messages)
+      const hasInboundMessages = messages.some(
+        (m) => m.direction === "inbound"
+      );
+
+      let messagePayload: any = {
         to: selectedChat.participantPhone,
-        body: messageInput,
-      });
+      };
+
+      // If replying to a recipient-initiated conversation, use free-form body
+      if (hasInboundMessages) {
+        messagePayload.body = messageInput || templateInput;
+      } else {
+        // For initiated conversations, check if a template was explicitly selected
+        if (templateInput.trim()) {
+          // User selected a template
+          const selectedTemplate = WHATSAPP_TEMPLATES.find(
+            (t) => t.templateContent === templateInput
+          );
+
+          if (selectedTemplate) {
+            // Send template-based message
+            messagePayload.contentSid = selectedTemplate.contentSid;
+            messagePayload.contentVariables = JSON.stringify(
+              selectedTemplate.contentVariables
+            );
+          } else {
+            // Template content doesn't match - shouldn't happen
+            messagePayload.body = templateInput;
+          }
+        } else {
+          // No template selected, send as free-form body
+          messagePayload.body = messageInput;
+        }
+      }
+
+      // Send message via API
+      await backendApi.whatsapp.sendMessage(messagePayload);
 
       setMessageInput("");
+      setTemplateInput("");
       // Refresh messages
       const data = await backendApi.whatsapp.getChatMessages(
         selectedChatId,
@@ -159,8 +227,15 @@ export default function ChatsPage() {
     }
   };
 
-  const handleApplyTemplate = (templateContent: string) => {
-    setTemplateInput(templateContent);
+  const handleApplyTemplate = (template: WhatsAppTemplate) => {
+    setTemplateInput(template.templateContent);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
+    }
   };
 
   const selectedChat = chats.find((c) => c.chatId === selectedChatId) || null;
@@ -275,42 +350,45 @@ export default function ChatsPage() {
                     <p className="text-muted-foreground">No messages yet</p>
                   </div>
                 ) : (
-                  messages.map((message) => {
-                    const isOutbound = message.direction === "outbound";
-                    const timestamp = new Date(message.timestamp);
-                    const timeString = timestamp.toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    });
+                  <>
+                    {messages.map((message) => {
+                      const isOutbound = message.direction === "outbound";
+                      const timestamp = new Date(message.timestamp);
+                      const timeString = timestamp.toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      });
 
-                    return (
-                      <div
-                        key={message.messageId || message.id}
-                        className={`flex ${
-                          isOutbound ? "justify-end" : "justify-start"
-                        }`}
-                      >
+                      return (
                         <div
-                          className={`max-w-xs px-4 py-2 rounded-lg ${
-                            isOutbound
-                              ? "bg-primary text-primary-foreground"
-                              : "bg-muted"
+                          key={message.messageId || message.id}
+                          className={`flex ${
+                            isOutbound ? "justify-end" : "justify-start"
                           }`}
                         >
-                          <p className="text-sm">{message.text}</p>
-                          <p
-                            className={`text-xs mt-1 ${
+                          <div
+                            className={`max-w-xs px-4 py-2 rounded-lg ${
                               isOutbound
-                                ? "text-primary-foreground/70"
-                                : "text-muted-foreground"
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-muted"
                             }`}
                           >
-                            {timeString}
-                          </p>
+                            <p className="text-sm">{message.text}</p>
+                            <p
+                              className={`text-xs mt-1 ${
+                                isOutbound
+                                  ? "text-primary-foreground/70"
+                                  : "text-muted-foreground"
+                              }`}
+                            >
+                              {timeString}
+                            </p>
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })
+                      );
+                    })}
+                    <div ref={messagesEndRef} />
+                  </>
                 )}
               </div>
 
@@ -325,7 +403,7 @@ export default function ChatsPage() {
                       key={template.id}
                       variant="outline"
                       size="sm"
-                      onClick={() => handleApplyTemplate(template.content)}
+                      onClick={() => handleApplyTemplate(template)}
                       className="text-left justify-start h-auto py-2"
                     >
                       <span className="text-xs">{template.label}</span>
@@ -347,6 +425,7 @@ export default function ChatsPage() {
                       }
                       setMessageInput(e.target.value);
                     }}
+                    onKeyDown={handleKeyDown}
                   />
                   <Button
                     onClick={handleSendMessage}

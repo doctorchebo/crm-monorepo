@@ -44,25 +44,28 @@ export class WhatsAppService {
 
   /**
    * Send a WhatsApp message
-   * @param messageDto - Message data (to, body, mediaUrl)
+   * @param messageDto - Message data (to, body, mediaUrl, contentSid, contentVariables)
    * @returns Message SID from Twilio
    */
   async sendMessage(messageDto: OutboundMessageDto) {
     try {
       const toPhoneNumber = `whatsapp:${messageDto.to}`;
 
-      //   const messageData: any = {
-      //     body: messageDto.body,
-      //     from: this.twilioPhoneNumber,
-      //     to: toPhoneNumber,
-      //   };
-
       const messageData: any = {
         from: this.twilioPhoneNumber,
-        contentSid: 'HXb5b62575e6e4ff6129ad7c8efe1f983e',
-        contentVariables: '{"1":"12/1","2":"3pm"}',
         to: toPhoneNumber,
       };
+
+      // If contentSid is provided, use template-based message
+      if (messageDto.contentSid) {
+        messageData.contentSid = messageDto.contentSid;
+        messageData.contentVariables = messageDto.contentVariables;
+      } else if (messageDto.body) {
+        // Otherwise use free-form body message
+        messageData.body = messageDto.body;
+      } else {
+        throw new Error('Either body or contentSid must be provided');
+      }
 
       // Add media URL if provided
       if (messageDto.mediaUrl) {
