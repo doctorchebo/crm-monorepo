@@ -95,11 +95,26 @@ export default function ContactFormPage() {
         const data = (await backendApi.contacts.get(contactId)) as Contact;
         setContact(data);
         const linkedSenderIds = data.senders?.map((s) => s.id) || [];
+
+        // Extract country code and phone number from the full phone number
+        // phoneNumber is stored as full E.164 format (e.g., +59167131914)
+        // countryCode is stored separately (e.g., +591)
+        let phoneNumberOnly = data.phoneNumber;
+        let countryCode = data.countryCode;
+
+        // If phoneNumber starts with country code, extract the number part
+        if (
+          data.phoneNumber.startsWith(data.countryCode) &&
+          data.phoneNumber.length > data.countryCode.length
+        ) {
+          phoneNumberOnly = data.phoneNumber.substring(data.countryCode.length);
+        }
+
         setFormData({
           firstName: data.firstName,
           lastName: data.lastName || "",
-          countryCode: data.countryCode,
-          phoneNumber: data.phoneNumber,
+          countryCode: countryCode,
+          phoneNumber: phoneNumberOnly,
           senderIds: linkedSenderIds,
         });
       } catch (err: any) {
@@ -172,13 +187,16 @@ export default function ContactFormPage() {
     setError(null);
 
     try {
+      // Combine country code and phone number into full E.164 format
+      const fullPhoneNumber = `${formData.countryCode.trim()}${formData.phoneNumber.trim()}`;
+
       if (isEdit && contactId) {
         // Update contact
         const updatePayload: any = {
           firstName: formData.firstName.trim(),
           lastName: formData.lastName.trim(),
           countryCode: formData.countryCode.trim(),
-          phoneNumber: formData.phoneNumber.trim(),
+          phoneNumber: fullPhoneNumber,
           senderIds: formData.senderIds,
         };
 
@@ -190,7 +208,7 @@ export default function ContactFormPage() {
           firstName: formData.firstName.trim(),
           lastName: formData.lastName.trim(),
           countryCode: formData.countryCode.trim(),
-          phoneNumber: formData.phoneNumber.trim(),
+          phoneNumber: fullPhoneNumber,
           senderIds: formData.senderIds,
         };
 

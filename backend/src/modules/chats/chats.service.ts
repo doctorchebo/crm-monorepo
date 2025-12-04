@@ -6,7 +6,13 @@ import {
 } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 import { db } from '../../database/db.connection';
-import { Chat, chats, messages, senders } from '../../database/schema';
+import {
+  Chat,
+  chats,
+  contacts,
+  messages,
+  senders,
+} from '../../database/schema';
 import { CreateChatDto } from './dto/create-chat.dto';
 import { UpdateChatDto } from './dto/update-chat.dto';
 
@@ -47,6 +53,36 @@ export class ChatsService {
   }
 
   /**
+   * Find contact by phone number and return their name if found
+   */
+  private async getContactNameByPhone(
+    participantPhone: string,
+  ): Promise<string | null> {
+    try {
+      const contact = await db.query.contacts.findFirst({
+        where: and(
+          eq(contacts.phoneNumber, participantPhone),
+          eq(contacts.isActive, true),
+        ),
+      });
+
+      if (contact) {
+        const name = contact.lastName
+          ? `${contact.firstName} ${contact.lastName}`
+          : contact.firstName;
+        return name;
+      }
+
+      return null;
+    } catch (error) {
+      this.logger.warn(
+        `Error looking up contact for phone ${participantPhone}: ${error.message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
    * Create or get existing chat with a contact
    * This is used when starting a conversation with a contact
    *
@@ -81,6 +117,13 @@ export class ChatsService {
         return chat;
       }
 
+      // If no participantName provided, try to look it up from contacts
+      let finalParticipantName: string | null | undefined = participantName;
+      if (!finalParticipantName) {
+        finalParticipantName =
+          await this.getContactNameByPhone(participantPhone);
+      }
+
       // Create new chat
       const [newChat] = await db
         .insert(chats)
@@ -89,7 +132,7 @@ export class ChatsService {
           userId,
           businessPhone,
           participantPhone,
-          participantName: participantName || null,
+          participantName: finalParticipantName || null,
           isActive: true,
         })
         .returning();
@@ -169,7 +212,26 @@ export class ChatsService {
         limit: take,
         offset: skip,
       });
-      return result;
+
+      // For chats without participantName, try to look up from contacts
+      const enrichedChats = await Promise.all(
+        result.map(async (chat) => {
+          if (!chat.participantName) {
+            const contactName = await this.getContactNameByPhone(
+              chat.participantPhone,
+            );
+            if (contactName) {
+              return {
+                ...chat,
+                participantName: contactName,
+              };
+            }
+          }
+          return chat;
+        }),
+      );
+
+      return enrichedChats;
     } catch (error) {
       this.logger.error(`Error fetching team chats: ${error.message}`);
       throw error;

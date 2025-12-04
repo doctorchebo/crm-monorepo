@@ -32,12 +32,10 @@ export class ContactsService {
         throw new Error('At least one sender must be selected for the contact');
       }
 
-      // Check if contact already exists (active or inactive) by phone number AND country code
+      // Check if contact already exists (active or inactive) by phone number
+      // phoneNumber now includes the country code, so it's a unique identifier
       const existingContact = await db.query.contacts.findFirst({
-        where: and(
-          eq(contacts.phoneNumber, createContactDto.phoneNumber),
-          eq(contacts.countryCode, createContactDto.countryCode),
-        ),
+        where: eq(contacts.phoneNumber, createContactDto.phoneNumber),
       });
 
       if (existingContact) {

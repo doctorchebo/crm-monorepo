@@ -21,10 +21,10 @@ export class CreateContactDto {
   countryCode: string;
 
   @IsString()
-  @Matches(/^\d{6,15}$/, {
-    message: 'Phone number must be 6-15 digits',
+  @Matches(/^\+\d{6,15}$/, {
+    message: 'Phone number must be in E.164 format (e.g., +14155552671)',
   })
-  phoneNumber: string;
+  phoneNumber: string; // Full phone number including country code (e.g., +59167131914)
 
   @IsArray()
   @IsNumber({}, { each: true })
