@@ -1,6 +1,7 @@
 "use client";
 
 import { LanguageSwitcher } from "@/components/language-switcher";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,7 +17,6 @@ import { useRouter } from "next/navigation";
 import { Suspense } from "react";
 import useSWR, { mutate } from "swr";
 import { signOut } from "../(login)/actions";
-import { ThemeToggle } from "@/components/theme-toggle";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
