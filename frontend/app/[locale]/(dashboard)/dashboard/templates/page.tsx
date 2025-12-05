@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useAuthProtection } from "@/hooks/use-auth";
 import { useNotification } from "@/hooks/use-notification";
 import { backendApi } from "@/lib/api/endpoints";
 import { MoreVertical, Plus, Trash2 } from "lucide-react";
@@ -60,6 +61,9 @@ export default function TemplatesPage() {
   const t = useTranslations("templates");
   const tCommon = useTranslations("common");
   const { addNotification } = useNotification();
+
+  // Protect this route - redirect to login if token is missing or expired
+  useAuthProtection();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);

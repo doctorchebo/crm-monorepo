@@ -2,6 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useAuthProtection } from "@/hooks/use-auth";
 import { backendApi } from "@/lib/api/endpoints";
 import { Loader, MessageSquare, Plus, Send } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -48,6 +49,10 @@ export default function ChatsPage() {
   const t = useTranslations("chats");
   const router = useRouter();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Protect this route - redirect to login if token is missing or expired
+  useAuthProtection();
+
   const [automationEnabled, setAutomationEnabled] = useState(false);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [chats, setChats] = useState<Chat[]>([]);

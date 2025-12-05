@@ -3,7 +3,7 @@
  * Handles JWT token attachment, error handling, and request/response transformation
  */
 
-import { getCookie } from "@/lib/cookies";
+import { deleteCookie, getCookie } from "@/lib/cookies";
 
 interface ApiRequestOptions extends RequestInit {
   headers?: Record<string, string>;
@@ -17,6 +17,16 @@ class ApiClient {
       baseUrl || process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
   }
 
+  private getRouter() {
+    // Import router dynamically to avoid issues in non-React contexts
+    // This will only be used in client components
+    try {
+      return require("next/navigation").useRouter();
+    } catch {
+      return null;
+    }
+  }
+
   private async getToken(): Promise<string | null> {
     // Get JWT token from browser cookies
     // This token is issued by the backend and should be used for API authentication
@@ -27,6 +37,17 @@ class ApiClient {
     }
     console.debug("JWT token not found in cookies");
     return null;
+  }
+
+  private handleAuthError() {
+    // Delete expired/invalid token from cookies
+    deleteCookie("jwt_token");
+
+    // Attempt to redirect to login page
+    if (typeof window !== "undefined") {
+      // Client-side: redirect using window.location
+      window.location.href = "/sign-in";
+    }
   }
 
   private async request<T>(
@@ -52,6 +73,15 @@ class ApiClient {
       ...options,
       headers,
     });
+
+    // Handle 401 Unauthorized - token is invalid or expired
+    if (response.status === 401) {
+      console.warn(
+        "Received 401 Unauthorized response - token expired or invalid"
+      );
+      this.handleAuthError();
+      throw new Error("Unauthorized: Please log in again");
+    }
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));

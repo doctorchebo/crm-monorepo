@@ -1,5 +1,6 @@
 import { defaultLocale, locales } from "@/i18n";
 import { signToken, verifyToken } from "@/lib/auth/session";
+import { isTokenExpired } from "@/lib/auth/token";
 import createMiddleware from "next-intl/middleware";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
@@ -46,10 +47,18 @@ export async function middleware(request: NextRequest) {
   // Extract locale from pathname for further processing
   const pathnameWithoutLocale = pathname.replace(/^\/(en|es)/, "") || "/";
   const isProtectedRoute = pathnameWithoutLocale.startsWith(protectedRoutes);
+
+  // Check for JWT token (the actual auth token from backend)
+  const jwtToken = request.cookies.get("jwt_token")?.value;
   const sessionCookie = request.cookies.get("session");
 
-  if (isProtectedRoute && !sessionCookie) {
-    return NextResponse.redirect(new URL("/sign-in", request.url));
+  // Redirect to login if accessing protected route without JWT token or if token is expired
+  if (isProtectedRoute && (!jwtToken || isTokenExpired(jwtToken))) {
+    // Clear the expired token
+    const response = NextResponse.redirect(new URL("/sign-in", request.url));
+    response.cookies.delete("jwt_token");
+    response.cookies.delete("session");
+    return response;
   }
 
   let res = NextResponse.next();

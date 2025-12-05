@@ -19,6 +19,7 @@ import { useTranslations } from "next-intl";
 import { Suspense, useActionState } from "react";
 import useSWR from "swr";
 import { inviteTeamMember, removeTeamMember } from "../../(login)/actions";
+import { useAuthProtection } from "@/hooks/use-auth";
 
 type ActionState = {
   error?: string;
@@ -273,6 +274,10 @@ function InviteTeamMember() {
 
 export default function SettingsPage() {
   const t = useTranslations("team");
+
+  // Protect this route - redirect to login if token is missing or expired
+  useAuthProtection();
+
   return (
     <section className="flex-1 p-4 lg:p-8">
       <h1 className="text-lg lg:text-2xl font-medium mb-6">{t("title")}</h1>
