@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ActionState } from "@/lib/auth/middleware";
-import { setCookie } from "@/lib/cookies";
 import { CircleIcon, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -19,21 +18,10 @@ export function Login({ mode = "signin" }: { mode?: "signin" | "signup" }) {
   const inviteId = searchParams.get("inviteId");
   const [state, formAction, pending] = useActionState<ActionState, FormData>(
     async (previousState, formData) => {
-      const result = await (mode === "signin" ? signIn : signUp)(
+      return await (mode === "signin" ? signIn : signUp)(
         previousState,
         formData
       );
-
-      // If we have a JWT token in the result, store it in cookies
-      if (result && typeof result === "object" && "jwtToken" in result) {
-        const { jwtToken } = result as { jwtToken: string | null };
-        if (jwtToken) {
-          setCookie("jwt_token", jwtToken, 3600);
-          console.debug("JWT token stored in cookies");
-        }
-      }
-
-      return result;
     },
     { error: "" }
   );
@@ -46,11 +34,9 @@ export function Login({ mode = "signin" }: { mode?: "signin" | "signup" }) {
       "jwtToken" in state &&
       !state.error
     ) {
-      // Give a moment for cookies to be set before redirecting
-      const timer = setTimeout(() => {
-        router.push("/dashboard");
-      }, 100);
-      return () => clearTimeout(timer);
+      // JWT token is already set server-side as HTTP-only cookie
+      // Redirect immediately to dashboard
+      router.push("/dashboard");
     }
   }, [state, router]);
 

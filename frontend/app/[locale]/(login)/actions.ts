@@ -116,6 +116,17 @@ export const signIn = validatedAction(signInSchema, async (data, formData) => {
   // Get JWT token from backend
   const jwtToken = await authenticateWithBackend(email, password);
 
+  // Set JWT token as cookie server-side so it's available on next request
+  if (jwtToken) {
+    const cookieJar = await cookies();
+    const expiresInOneDay = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    cookieJar.set("jwt_token", jwtToken, {
+      secure: true,
+      sameSite: "lax",
+      expires: expiresInOneDay,
+    });
+  }
+
   await Promise.all([
     setSession(foundUser),
     logActivity(foundTeam?.id, foundUser.id, ActivityType.SIGN_IN),
@@ -127,7 +138,7 @@ export const signIn = validatedAction(signInSchema, async (data, formData) => {
     return createCheckoutSession({ team: foundTeam, priceId });
   }
 
-  // Return JWT token to client so it can be stored in cookies
+  // Return JWT token to client to indicate successful login
   return { jwtToken };
 });
 

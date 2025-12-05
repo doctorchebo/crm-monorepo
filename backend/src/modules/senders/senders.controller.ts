@@ -7,7 +7,10 @@ import {
   Param,
   Patch,
   Post,
+  Req,
+  UseGuards,
 } from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/auth.guard';
 import { CreateSenderDto } from './dto/create-sender.dto';
 import { UpdateSenderDto } from './dto/update-sender.dto';
 import { SendersService } from './senders.service';
@@ -17,6 +20,7 @@ import { SendersService } from './senders.service';
  * REST API endpoints for WhatsApp business number management
  */
 @Controller('senders')
+@UseGuards(JwtAuthGuard)
 export class SendersController {
   private readonly logger = new Logger(SendersController.name);
 
@@ -27,10 +31,9 @@ export class SendersController {
    * POST /senders
    */
   @Post()
-  async create(@Body() createSenderDto: CreateSenderDto) {
+  async create(@Body() createSenderDto: CreateSenderDto, @Req() req: any) {
+    const userId = req.user?.userId;
     this.logger.log(`Create sender: ${createSenderDto.phoneNumber}`);
-    // TODO: Get userId from auth context
-    const userId = 1; // Hardcoded for now
     return this.sendersService.create(userId, createSenderDto);
   }
 
@@ -39,10 +42,9 @@ export class SendersController {
    * GET /senders
    */
   @Get()
-  async findAll() {
-    this.logger.log(`Get all senders`);
-    // TODO: Get userId from auth context
-    const userId = 1; // Hardcoded for now
+  async findAll(@Req() req: any) {
+    const userId = req.user?.userId;
+    this.logger.log(`Get all senders for user ${userId}`);
     return this.sendersService.findAll(userId);
   }
 

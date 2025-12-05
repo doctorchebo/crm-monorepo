@@ -8,12 +8,16 @@ import {
   Patch,
   Post,
   Query,
+  Req,
+  UseGuards,
 } from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/auth.guard';
 import { ContactsService } from './contacts.service';
 import { CreateContactDto } from './dto/create-contact.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
 
 @Controller('contacts')
+@UseGuards(JwtAuthGuard)
 export class ContactsController {
   private readonly logger = new Logger(ContactsController.name);
 
@@ -24,11 +28,12 @@ export class ContactsController {
    * POST /contacts
    */
   @Post()
-  async create(@Body() createContactDto: CreateContactDto) {
+  async create(@Body() createContactDto: CreateContactDto, @Req() req: any) {
+    const userId = req.user?.userId;
     this.logger.log(
       `Create contact: ${createContactDto.firstName} ${createContactDto.lastName}`,
     );
-    return this.contactsService.create(createContactDto);
+    return this.contactsService.create(userId, createContactDto);
   }
 
   /**
@@ -37,15 +42,25 @@ export class ContactsController {
    */
   @Get()
   async findAll(
+    @Req() req: any,
     @Query('skip') skip: number = 0,
     @Query('take') take: number = 50,
     @Query('phoneNumberId') phoneNumberId?: string,
   ) {
-    this.logger.log('Get all contacts for user');
-    // TODO: Get userId from auth context
-    const userId = 1; // Hardcoded for now
+    const userId = req.user?.userId;
+    this.logger.log(`Get all contacts for user ${userId}`);
     const phoneNumId = phoneNumberId ? parseInt(phoneNumberId, 10) : undefined;
     return this.contactsService.findAll(userId, skip, take, phoneNumId);
+  }
+
+  /**
+   * Get contact by phone number
+   * GET /contacts/phone/:phoneNumber
+   */
+  @Get('phone/:phoneNumber')
+  async findByPhone(@Param('phoneNumber') phoneNumber: string) {
+    this.logger.log(`Get contact by phone: ${phoneNumber}`);
+    return this.contactsService.findByPhoneNumber(phoneNumber);
   }
 
   /**
@@ -53,7 +68,8 @@ export class ContactsController {
    * GET /contacts/:contactId
    */
   @Get(':contactId')
-  async findOne(@Param('contactId') contactId: string) {
+  async findOne(@Param('contactId') contactId: string, @Req() req: any) {
+    const userId = req.user?.userId;
     this.logger.log(`Get contact: ${contactId}`);
     return this.contactsService.findOne(contactId);
   }
@@ -80,15 +96,5 @@ export class ContactsController {
     this.logger.log(`Delete contact: ${contactId}`);
     await this.contactsService.delete(contactId);
     return { success: true };
-  }
-
-  /**
-   * Get contact by phone number
-   * GET /contacts/phone/:phoneNumber
-   */
-  @Get('phone/:phoneNumber')
-  async findByPhone(@Param('phoneNumber') phoneNumber: string) {
-    this.logger.log(`Get contact by phone: ${phoneNumber}`);
-    return this.contactsService.findByPhoneNumber(phoneNumber);
   }
 }

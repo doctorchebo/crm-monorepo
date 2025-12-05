@@ -59,12 +59,23 @@ export function decodeToken(token: string): Record<string, any> | null {
 export function isTokenExpired(token: string): boolean {
   const decoded = decodeToken(token);
   if (!decoded || !decoded.exp) {
+    console.error("Token has no exp claim or failed to decode", { decoded });
     return true; // Treat invalid tokens as expired
   }
 
   // exp is in seconds, Date.now() is in milliseconds
   const currentTime = Math.floor(Date.now() / 1000);
-  return decoded.exp < currentTime;
+  const isExpired = decoded.exp < currentTime;
+
+  if (isExpired) {
+    console.warn("Token is expired", {
+      currentTime,
+      expiresAt: decoded.exp,
+      diff: currentTime - decoded.exp,
+    });
+  }
+
+  return isExpired;
 }
 
 /**

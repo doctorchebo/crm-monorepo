@@ -7,12 +7,15 @@ import {
   Post,
   Query,
   Req,
+  UseGuards,
 } from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/auth.guard';
 import { SaveNoteDto } from './dto/notes.dto';
 import { OutboundMessageDto } from './dto/outbound-message.dto';
 import { WhatsAppService } from './whatsapp.service';
 
 @Controller('whatsapp')
+@UseGuards(JwtAuthGuard)
 export class WhatsAppController {
   private readonly logger = new Logger(WhatsAppController.name);
 
@@ -25,7 +28,7 @@ export class WhatsAppController {
   @Post('send')
   async sendMessage(@Body() messageDto: OutboundMessageDto, @Req() req: any) {
     this.logger.log(
-      `Send message request from user ${req.user?.id}: To ${messageDto.to}`,
+      `Send message request from user ${req.user?.userId}: To ${messageDto.to}`,
     );
     return this.whatsAppService.sendMessage(messageDto);
   }
@@ -46,7 +49,7 @@ export class WhatsAppController {
    */
   @Get('messages')
   async getMessages(@Req() req: any) {
-    this.logger.log(`Get messages request from user ${req.user?.id}`);
+    this.logger.log(`Get messages request from user ${req.user?.userId}`);
     return this.whatsAppService.getMessages();
   }
 
@@ -58,9 +61,11 @@ export class WhatsAppController {
   async getChats(
     @Query('skip') skip: number = 0,
     @Query('take') take: number = 20,
+    @Req() req: any,
   ) {
-    this.logger.log(`Get chats request`);
-    return this.whatsAppService.getChats(skip, take);
+    const userId = req.user?.userId;
+    this.logger.log(`Get chats request from user ${userId}`);
+    return this.whatsAppService.getChats(skip, take, userId);
   }
 
   /**

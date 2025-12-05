@@ -1,7 +1,7 @@
 import { db } from '@database/db.connection';
 import { Chat, chats, Message, messages } from '@database/schema';
 import { Injectable, Logger } from '@nestjs/common';
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import Twilio from 'twilio';
 import { OutboundMessageDto } from './dto/outbound-message.dto';
 
@@ -413,10 +413,32 @@ export class WhatsAppService {
   /**
    * Get all chats (conversations)
    */
-  async getChats(skip: number = 0, take: number = 20): Promise<Chat[]> {
+  async getChats(
+    skip: number = 0,
+    take: number = 20,
+    userId: number,
+  ): Promise<Chat[]> {
     try {
+      // Get user's senders first
+      const userSenders = await db.query.senders.findMany({
+        where: eq(require('@database/schema').senders.userId, userId),
+        columns: {
+          phoneNumber: true,
+        },
+      });
+
+      const phoneNumbers = userSenders.map((s) => s.phoneNumber);
+
+      if (phoneNumbers.length === 0) {
+        return [];
+      }
+
+      // Get chats only for this user's senders
       const chatsData = await db.query.chats.findMany({
-        where: eq(chats.isActive, true),
+        where: and(
+          eq(chats.isActive, true),
+          inArray(chats.businessPhone, phoneNumbers),
+        ),
         orderBy: desc(chats.lastMessageTime),
         limit: take,
         offset: skip,

@@ -17,7 +17,10 @@ export class ContactsService {
    * Create a new contact linked to one or more senders
    * When a contact is created, it must be linked to at least one sender (WhatsApp Business number)
    */
-  async create(createContactDto: CreateContactDto): Promise<Contact> {
+  async create(
+    userId: number,
+    createContactDto: CreateContactDto,
+  ): Promise<Contact> {
     try {
       // Validate that at least one sender is provided
       if (
@@ -25,6 +28,21 @@ export class ContactsService {
         createContactDto.senderIds.length === 0
       ) {
         throw new Error('At least one sender must be selected for the contact');
+      }
+
+      // Verify all senders belong to the user
+      const senderCount = await db
+        .select({ count: count() })
+        .from(senders)
+        .where(
+          and(
+            eq(senders.userId, userId),
+            inArray(senders.id, createContactDto.senderIds),
+          ),
+        );
+
+      if (senderCount[0].count !== createContactDto.senderIds.length) {
+        throw new Error('One or more senders do not belong to this user');
       }
 
       // Check if contact already exists (active or inactive) by phone number
