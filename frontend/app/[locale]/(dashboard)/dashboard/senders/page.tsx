@@ -49,14 +49,13 @@ export default function SendersPage() {
     data: senders = [],
     isLoading,
     mutate,
-  } = useSWR("/senders", async (url) => {
-    const response = await fetch(backendApi.baseUrl + url);
-    if (!response.ok) throw new Error("Failed to fetch senders");
-    return response.json();
+  } = useSWR<Sender[]>("/senders", async () => {
+    const result = await backendApi.senders.list();
+    return result as Sender[];
   });
 
   const filteredSenders = useMemo(() => {
-    return senders.filter(
+    return (senders as Sender[]).filter(
       (sender: Sender) =>
         sender.phoneNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
         sender.displayName?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -73,9 +72,7 @@ export default function SendersPage() {
 
     setIsDeleting(true);
     try {
-      await fetch(`${backendApi.baseUrl}/senders/${senderToDelete.id}`, {
-        method: "DELETE",
-      });
+      await backendApi.senders.delete(Number(senderToDelete.id));
       addNotification(
         `${senderToDelete.displayName || senderToDelete.phoneNumber} ${t(
           "deletedSuccessfully"
