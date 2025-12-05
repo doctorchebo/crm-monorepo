@@ -44,7 +44,11 @@
     "typeMessage": "Escribe un mensaje...",
     "send": "Enviar",
     "automationBanner": "Las respuestas automáticas están habilitadas. Los mensajes que coincidan con las reglas de automatización se responderán automáticamente.",
-    "noChats": "Sin chats aún. Crea un contacto e inicia una conversación."
+    "noChats": "Sin chats aún. Crea un contacto e inicia una conversación.",
+    "availableTemplates": "Plantillas Disponibles:",
+    "searchTemplates": "Buscar plantillas...",
+    "typeMessageOrUseTemplates": "Escribe un mensaje o usa las plantillas anteriores...",
+    "noTemplatesAvailable": "Sin plantillas disponibles. Crea una en la sección Plantillas."
   },
   "contacts": {
     "title": "Contactos",

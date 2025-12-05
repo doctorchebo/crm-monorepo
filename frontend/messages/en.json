@@ -44,7 +44,11 @@
     "typeMessage": "Type a message...",
     "send": "Send",
     "automationBanner": "Automatic replies are enabled. Messages matching automation rules will be responded to automatically.",
-    "noChats": "No chats yet. Create a contact and start a conversation."
+    "noChats": "No chats yet. Create a contact and start a conversation.",
+    "availableTemplates": "Available Templates:",
+    "searchTemplates": "Search templates...",
+    "typeMessageOrUseTemplates": "Type a message or use templates above...",
+    "noTemplatesAvailable": "No templates available. Create one in the Templates section."
   },
   "contacts": {
     "title": "Contacts",

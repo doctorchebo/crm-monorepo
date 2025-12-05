@@ -404,43 +404,71 @@ export default function ChatsPage() {
 
               {/* Template Buttons */}
               <div className="border-t p-4 bg-muted/30">
-                <div className="mb-3 space-y-2">
-                  <p className="text-xs font-medium text-muted-foreground">
-                    Available Templates:
-                  </p>
-                  <Input
-                    placeholder="Search templates..."
-                    className="h-8 text-xs"
-                    value={templateSearch}
-                    onChange={(e) => setTemplateSearch(e.target.value)}
-                  />
-                </div>
                 {templatesLoading ? (
-                  <div className="flex items-center justify-center py-2">
-                    <Loader className="h-4 w-4 animate-spin" />
-                  </div>
+                  <>
+                    <div className="mb-3 space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        {t("availableTemplates")}
+                      </p>
+                      <Input
+                        placeholder={t("searchTemplates")}
+                        className="h-8 text-xs"
+                        value={templateSearch}
+                        onChange={(e) => setTemplateSearch(e.target.value)}
+                      />
+                    </div>
+                    <div className="flex items-center justify-center py-2">
+                      <Loader className="h-4 w-4 animate-spin" />
+                    </div>
+                  </>
                 ) : Array.isArray(filteredTemplates) &&
                   filteredTemplates.length > 0 ? (
-                  <div className="grid grid-cols-1 gap-2 mb-4">
-                    {filteredTemplates.map((template) => (
-                      <Button
-                        key={template.id}
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleApplyTemplate(template)}
-                        className="text-left justify-start h-auto py-2"
-                      >
-                        <span className="text-xs">{template.name}</span>
-                      </Button>
-                    ))}
-                  </div>
+                  <>
+                    <div className="mb-3 space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        {t("availableTemplates")}
+                      </p>
+                      <Input
+                        placeholder={t("searchTemplates")}
+                        className="h-8 text-xs"
+                        value={templateSearch}
+                        onChange={(e) => setTemplateSearch(e.target.value)}
+                      />
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 mb-4">
+                      {filteredTemplates.map((template) => (
+                        <Button
+                          key={template.id}
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleApplyTemplate(template)}
+                          className="text-left justify-start h-auto py-2"
+                        >
+                          <span className="text-xs">{template.name}</span>
+                        </Button>
+                      ))}
+                    </div>
+                  </>
                 ) : templateSearch ? (
-                  <p className="text-xs text-muted-foreground py-2">
-                    No templates match your search.
-                  </p>
+                  <>
+                    <div className="mb-3 space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        {t("availableTemplates")}
+                      </p>
+                      <Input
+                        placeholder={t("searchTemplates")}
+                        className="h-8 text-xs"
+                        value={templateSearch}
+                        onChange={(e) => setTemplateSearch(e.target.value)}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground py-2">
+                      No templates match your search.
+                    </p>
+                  </>
                 ) : (
                   <p className="text-xs text-muted-foreground py-2">
-                    No templates available. Create one in the Templates section.
+                    {t("noTemplatesAvailable")}
                   </p>
                 )}
               </div>
@@ -449,7 +477,7 @@ export default function ChatsPage() {
               <div className="border-t p-4">
                 <div className="flex gap-2">
                   <Input
-                    placeholder="Type a message or use templates above..."
+                    placeholder={t("typeMessageOrUseTemplates")}
                     className="flex-1"
                     value={templateInput || messageInput}
                     onChange={(e) => {
