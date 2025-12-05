@@ -45,7 +45,7 @@ function DashboardSidebar() {
   ];
 
   return (
-    <Sidebar>
+    <Sidebar collapsible="icon">
       <SidebarHeader className="p-4">
         <div className="flex items-center">
           <span className="font-semibold text-lg">{t("navigation")}</span>
@@ -60,6 +60,7 @@ function DashboardSidebar() {
                 asChild
                 isActive={pathname === item.href}
                 className="cursor-pointer"
+                tooltip={item.label}
               >
                 <Link href={item.href}>
                   <item.icon className="h-4 w-4" />
@@ -84,7 +85,7 @@ export default function DashboardLayout({
       <DashboardSidebar />
       <SidebarInset>
         <div className="flex flex-col min-h-screen">
-          <div className="flex items-center gap-2 border-b px-4 py-3">
+          <div className="flex items-center gap-2 border-b px-4 py-3 md:hidden">
             <SidebarTrigger />
           </div>
           <main className="flex-1 overflow-y-auto">{children}</main>
