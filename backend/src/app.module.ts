@@ -16,6 +16,7 @@ import { TeamModule } from './modules/team/team.module';
 import { TemplatesModule } from './modules/templates/templates.module';
 import { UserModule } from './modules/user/user.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
+import { NotesModule } from '@modules/notes/notes.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
     TemplatesModule,
     WhatsAppModule,
     MessagingModule,
+    NotesModule,
     ChatsModule,
     AutomationModule,
     KanbanModule,

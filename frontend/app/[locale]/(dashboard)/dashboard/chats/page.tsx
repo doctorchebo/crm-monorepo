@@ -2,9 +2,10 @@
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NotesPanel } from "@/components/ui/notes-panel";
 import { useAuthProtection } from "@/hooks/use-auth";
 import { backendApi } from "@/lib/api/endpoints";
-import { Loader, MessageSquare, Plus, Send } from "lucide-react";
+import { Loader, MessageSquare, Send } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -49,6 +50,8 @@ export default function ChatsPage() {
   const t = useTranslations("chats");
   const router = useRouter();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const separatorRef = useRef<HTMLDivElement>(null);
 
   // Protect this route - redirect to login if token is missing or expired
   useAuthProtection();
@@ -63,6 +66,10 @@ export default function ChatsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [notes, setNotes] = useState<any>(null);
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+  const [notesPanelWidth, setNotesPanelWidth] = useState(320); // Default width in pixels
 
   // Fetch templates from API
   const { data: templates = [], isLoading: templatesLoading } = useSWR(
@@ -81,6 +88,20 @@ export default function ChatsPage() {
   const filteredTemplates = (templates as Template[]).filter((template) =>
     template.name.toLowerCase().includes(templateSearch.toLowerCase())
   );
+
+  // Fetch current user on mount
+  useEffect(() => {
+    const fetchCurrentUser = async () => {
+      try {
+        const user = await backendApi.user.getProfile();
+        setCurrentUserId(user.id);
+      } catch (error) {
+        console.error("Failed to fetch current user:", error);
+      }
+    };
+
+    fetchCurrentUser();
+  }, []);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -144,6 +165,30 @@ export default function ChatsPage() {
 
     fetchChats();
   }, []);
+
+  // Fetch notes when chat changes
+  useEffect(() => {
+    if (!selectedChatId) {
+      setNotes(null);
+      return;
+    }
+
+    const fetchNotes = async () => {
+      try {
+        setNotesLoading(true);
+        const notesData = await backendApi.notes.getChatNotes(selectedChatId);
+        setNotes(notesData);
+      } catch (error) {
+        console.error("Error fetching notes:", error);
+        setNotes(null);
+      } finally {
+        setNotesLoading(false);
+      }
+    };
+
+    fetchNotes();
+  }, [selectedChatId]);
+
   useEffect(() => {
     if (!selectedChatId) return;
 
@@ -226,6 +271,39 @@ export default function ChatsPage() {
     }
   };
 
+  const handleAddNote = async (noteText: string, messageId?: string) => {
+    if (!selectedChatId) return;
+
+    try {
+      await backendApi.notes.create({
+        chatId: selectedChatId,
+        messageId,
+        note: noteText,
+      });
+
+      // Refresh notes
+      const notesData = await backendApi.notes.getChatNotes(selectedChatId);
+      setNotes(notesData);
+    } catch (error) {
+      console.error("Failed to add note:", error);
+    }
+  };
+
+  const handleDeleteNote = async (noteId: number) => {
+    if (!selectedChatId) return;
+
+    try {
+      await backendApi.notes.delete(noteId);
+
+      // Refresh notes after deletion
+      const notesData = await backendApi.notes.getChatNotes(selectedChatId);
+      setNotes(notesData);
+    } catch (error) {
+      console.error("Failed to delete note:", error);
+      alert("Failed to delete note. Please try again.");
+    }
+  };
+
   const handleApplyTemplate = (template: Template) => {
     if (template.locales && template.locales.length > 0) {
       // Use the first locale's body or render with example vars
@@ -251,6 +329,31 @@ export default function ChatsPage() {
       e.preventDefault();
       handleSendMessage();
     }
+  };
+
+  // Handle separator drag to resize notes panel
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = notesPanelWidth;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      // Minimum width 250px, maximum 60% of container
+      const maxWidth = containerRef.current
+        ? containerRef.current.clientWidth * 0.6
+        : 800;
+      const newWidth = Math.max(250, Math.min(startWidth - deltaX, maxWidth));
+      setNotesPanelWidth(newWidth);
+    };
+
+    const handleMouseUp = () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
   };
 
   const selectedChat = chats.find((c) => c.chatId === selectedChatId) || null;
@@ -337,12 +440,12 @@ export default function ChatsPage() {
           </div>
         </div>
 
-        {/* Right Panel: Chat Detail */}
-        <div className="hidden lg:flex flex-1 flex-col bg-background">
+        {/* Right Panel: Chat Detail + Notes */}
+        <div className="hidden lg:flex flex-1 flex-col bg-background overflow-hidden">
           {selectedChat ? (
             <>
               {/* Chat Header */}
-              <div className="border-b px-6 py-4 flex items-center justify-between">
+              <div className="border-b px-6 py-4 flex items-center justify-between flex-shrink-0">
                 <div>
                   <h2 className="text-lg font-semibold">
                     {selectedChat.participantName ||
@@ -352,155 +455,181 @@ export default function ChatsPage() {
                     {selectedChat.participantPhone}
                   </p>
                 </div>
-                <Button size="sm" variant="outline" className="gap-2">
-                  <Plus className="h-4 w-4" />
-                  {t("addNote")}
-                </Button>
               </div>
 
-              {/* Messages Area */}
-              <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                {messages.length === 0 ? (
-                  <div className="flex items-center justify-center h-full">
-                    <p className="text-muted-foreground">No messages yet</p>
-                  </div>
-                ) : (
-                  <>
-                    {messages.map((message) => {
-                      const isOutbound = message.direction === "outbound";
-                      const timestamp = new Date(message.timestamp);
-                      const timeString = timestamp.toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      });
+              {/* Messages + Notes Container */}
+              <div className="flex flex-1 overflow-hidden" ref={containerRef}>
+                {/* Messages Area */}
+                <div className="flex-1 flex flex-col overflow-hidden">
+                  <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                    {messages.length === 0 ? (
+                      <div className="flex items-center justify-center h-full">
+                        <p className="text-muted-foreground">No messages yet</p>
+                      </div>
+                    ) : (
+                      <>
+                        {messages.map((message) => {
+                          const isOutbound = message.direction === "outbound";
+                          const timestamp = new Date(message.timestamp);
+                          const timeString = timestamp.toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          });
 
-                      return (
-                        <div
-                          key={message.messageId || message.id}
-                          className={`flex ${
-                            isOutbound ? "justify-end" : "justify-start"
-                          }`}
-                        >
-                          <div
-                            className={`max-w-xs px-4 py-2 rounded-lg ${
-                              isOutbound
-                                ? "bg-primary text-primary-foreground"
-                                : "bg-muted"
-                            }`}
-                          >
-                            <p className="text-sm">{message.text}</p>
-                            <p
-                              className={`text-xs mt-1 ${
-                                isOutbound
-                                  ? "text-primary-foreground/70"
-                                  : "text-muted-foreground"
+                          return (
+                            <div
+                              key={message.messageId || message.id}
+                              className={`flex ${
+                                isOutbound ? "justify-end" : "justify-start"
                               }`}
                             >
-                              {timeString}
-                            </p>
-                          </div>
+                              <div
+                                className={`max-w-xs px-4 py-2 rounded-lg ${
+                                  isOutbound
+                                    ? "bg-primary text-primary-foreground"
+                                    : "bg-muted"
+                                }`}
+                              >
+                                <p className="text-sm">{message.text}</p>
+                                <p
+                                  className={`text-xs mt-1 ${
+                                    isOutbound
+                                      ? "text-primary-foreground/70"
+                                      : "text-muted-foreground"
+                                  }`}
+                                >
+                                  {timeString}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                        <div ref={messagesEndRef} />
+                      </>
+                    )}
+                  </div>
+
+                  {/* Template Buttons */}
+                  <div className="border-t p-4 bg-muted/30">
+                    {templatesLoading ? (
+                      <>
+                        <div className="mb-3 space-y-2">
+                          <p className="text-xs font-medium text-muted-foreground">
+                            {t("availableTemplates")}
+                          </p>
+                          <Input
+                            placeholder={t("searchTemplates")}
+                            className="h-8 text-xs"
+                            value={templateSearch}
+                            onChange={(e) => setTemplateSearch(e.target.value)}
+                          />
                         </div>
-                      );
-                    })}
-                    <div ref={messagesEndRef} />
-                  </>
-                )}
-              </div>
+                        <div className="flex items-center justify-center py-2">
+                          <Loader className="h-4 w-4 animate-spin" />
+                        </div>
+                      </>
+                    ) : Array.isArray(filteredTemplates) &&
+                      filteredTemplates.length > 0 ? (
+                      <>
+                        <div className="mb-3 space-y-2">
+                          <p className="text-xs font-medium text-muted-foreground">
+                            {t("availableTemplates")}
+                          </p>
+                          <Input
+                            placeholder={t("searchTemplates")}
+                            className="h-8 text-xs"
+                            value={templateSearch}
+                            onChange={(e) => setTemplateSearch(e.target.value)}
+                          />
+                        </div>
+                        <div className="grid grid-cols-1 gap-2 mb-4">
+                          {filteredTemplates.map((template) => (
+                            <Button
+                              key={template.id}
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleApplyTemplate(template)}
+                              className="text-left justify-start h-auto py-2"
+                            >
+                              <span className="text-xs">{template.name}</span>
+                            </Button>
+                          ))}
+                        </div>
+                      </>
+                    ) : templateSearch ? (
+                      <>
+                        <div className="mb-3 space-y-2">
+                          <p className="text-xs font-medium text-muted-foreground">
+                            {t("availableTemplates")}
+                          </p>
+                          <Input
+                            placeholder={t("searchTemplates")}
+                            className="h-8 text-xs"
+                            value={templateSearch}
+                            onChange={(e) => setTemplateSearch(e.target.value)}
+                          />
+                        </div>
+                        <p className="text-xs text-muted-foreground py-2">
+                          No templates match your search.
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-xs text-muted-foreground py-2">
+                        {t("noTemplatesAvailable")}
+                      </p>
+                    )}
+                  </div>
 
-              {/* Template Buttons */}
-              <div className="border-t p-4 bg-muted/30">
-                {templatesLoading ? (
-                  <>
-                    <div className="mb-3 space-y-2">
-                      <p className="text-xs font-medium text-muted-foreground">
-                        {t("availableTemplates")}
-                      </p>
+                  {/* Input Area */}
+                  <div className="border-t p-4">
+                    <div className="flex gap-2">
                       <Input
-                        placeholder={t("searchTemplates")}
-                        className="h-8 text-xs"
-                        value={templateSearch}
-                        onChange={(e) => setTemplateSearch(e.target.value)}
+                        placeholder={t("typeMessageOrUseTemplates")}
+                        className="flex-1"
+                        value={templateInput || messageInput}
+                        onChange={(e) => {
+                          if (templateInput) {
+                            setTemplateInput("");
+                          }
+                          setMessageInput(e.target.value);
+                        }}
+                        onKeyDown={handleKeyDown}
                       />
+                      <Button
+                        onClick={handleSendMessage}
+                        disabled={!messageInput.trim() && !templateInput.trim()}
+                        className="gap-2"
+                      >
+                        <Send className="h-4 w-4" />
+                        Send
+                      </Button>
                     </div>
-                    <div className="flex items-center justify-center py-2">
-                      <Loader className="h-4 w-4 animate-spin" />
-                    </div>
-                  </>
-                ) : Array.isArray(filteredTemplates) &&
-                  filteredTemplates.length > 0 ? (
-                  <>
-                    <div className="mb-3 space-y-2">
-                      <p className="text-xs font-medium text-muted-foreground">
-                        {t("availableTemplates")}
-                      </p>
-                      <Input
-                        placeholder={t("searchTemplates")}
-                        className="h-8 text-xs"
-                        value={templateSearch}
-                        onChange={(e) => setTemplateSearch(e.target.value)}
-                      />
-                    </div>
-                    <div className="grid grid-cols-1 gap-2 mb-4">
-                      {filteredTemplates.map((template) => (
-                        <Button
-                          key={template.id}
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleApplyTemplate(template)}
-                          className="text-left justify-start h-auto py-2"
-                        >
-                          <span className="text-xs">{template.name}</span>
-                        </Button>
-                      ))}
-                    </div>
-                  </>
-                ) : templateSearch ? (
-                  <>
-                    <div className="mb-3 space-y-2">
-                      <p className="text-xs font-medium text-muted-foreground">
-                        {t("availableTemplates")}
-                      </p>
-                      <Input
-                        placeholder={t("searchTemplates")}
-                        className="h-8 text-xs"
-                        value={templateSearch}
-                        onChange={(e) => setTemplateSearch(e.target.value)}
-                      />
-                    </div>
-                    <p className="text-xs text-muted-foreground py-2">
-                      No templates match your search.
-                    </p>
-                  </>
-                ) : (
-                  <p className="text-xs text-muted-foreground py-2">
-                    {t("noTemplatesAvailable")}
-                  </p>
-                )}
-              </div>
+                  </div>
+                </div>
 
-              {/* Input Area */}
-              <div className="border-t p-4">
-                <div className="flex gap-2">
-                  <Input
-                    placeholder={t("typeMessageOrUseTemplates")}
-                    className="flex-1"
-                    value={templateInput || messageInput}
-                    onChange={(e) => {
-                      if (templateInput) {
-                        setTemplateInput("");
-                      }
-                      setMessageInput(e.target.value);
-                    }}
-                    onKeyDown={handleKeyDown}
-                  />
-                  <Button
-                    onClick={handleSendMessage}
-                    disabled={!messageInput.trim() && !templateInput.trim()}
-                    className="gap-2"
-                  >
-                    <Send className="h-4 w-4" />
-                    Send
-                  </Button>
+                {/* Resizable Separator */}
+                <div
+                  ref={separatorRef}
+                  onMouseDown={handleMouseDown}
+                  className="w-1 bg-border hover:bg-primary/50 cursor-col-resize transition-colors"
+                  title="Drag to resize"
+                />
+
+                {/* Notes Panel (Right Sidebar) - Dynamic Width */}
+                <div
+                  className="hidden xl:flex flex-col overflow-hidden"
+                  style={{ width: `${notesPanelWidth}px` }}
+                >
+                  {selectedChatId && currentUserId && (
+                    <NotesPanel
+                      chatId={selectedChatId}
+                      currentUserId={currentUserId}
+                      notes={notes}
+                      loading={notesLoading}
+                      onAddNote={handleAddNote}
+                      onDeleteNote={handleDeleteNote}
+                    />
+                  )}
                 </div>
               </div>
             </>

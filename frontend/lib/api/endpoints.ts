@@ -14,6 +14,14 @@ export interface CreateContactDto {
 
 export interface UpdateContactDto extends Partial<CreateContactDto> {}
 
+export interface UserProfileDto {
+  id: number;
+  email: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export const backendApi = {
   baseUrl: process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001",
 
@@ -27,7 +35,7 @@ export const backendApi = {
 
   // User endpoints
   user: {
-    getProfile: () => apiClient.get("/users/profile"),
+    getProfile: (): Promise<UserProfileDto> => apiClient.get("/users/profile"),
     updateProfile: (data: any) => apiClient.patch("/users/profile", data),
   },
 
@@ -191,5 +199,15 @@ export const backendApi = {
       apiClient.post(`/templates/${templateId}/test`, data),
     getVersions: (templateId: string) =>
       apiClient.get(`/templates/${templateId}/versions`),
+  },
+
+  // Notes endpoints
+  notes: {
+    create: (data: { messageId?: string; chatId?: string; note: string }) =>
+      apiClient.post("/notes", data),
+    getChatNotes: (chatId: string) => apiClient.get(`/notes/chat/${chatId}`),
+    getMessageNotes: (messageId: string) =>
+      apiClient.get(`/notes/message/${messageId}`),
+    delete: (noteId: number) => apiClient.delete(`/notes/${noteId}`),
   },
 };

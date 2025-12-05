@@ -85,14 +85,23 @@ export const messages = pgTable(
 export type Message = typeof messages.$inferSelect;
 export type NewMessage = typeof messages.$inferInsert;
 
-// Notes table - multiple users can add notes to each message
-export const notes = pgTable('notes', {
-  id: serial('id').primaryKey(),
-  messageId: varchar('message_id').notNull(), // Foreign key to messages.message_id
-  userId: integer('user_id').notNull(), // User who created the note
-  note: text('note').notNull(),
-  createdAt: timestamp('created_at').defaultNow(),
-});
+// Notes table - multiple users can add notes to each message or chat
+// Note: Either messageId OR chatId should be set, but not both (enforced at application level)
+export const notes = pgTable(
+  'notes',
+  {
+    id: serial('id').primaryKey(),
+    messageId: varchar('message_id'), // Foreign key to messages.message_id (optional)
+    chatId: varchar('chat_id'), // Foreign key to chats.chat_id (optional)
+    userId: integer('user_id').notNull(), // User who created the note
+    note: text('note').notNull(),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (table) => ({
+    messageIdIndex: index().on(table.messageId),
+    chatIdIndex: index().on(table.chatId),
+  }),
+);
 
 export type Note = typeof notes.$inferSelect;
 export type NewNote = typeof notes.$inferInsert;
@@ -378,3 +387,29 @@ export const templatePlatformsRelations = relations(
     }),
   }),
 );
+
+// Notes relations
+export const notesRelations = relations(notes, ({ one }) => ({
+  message: one(messages, {
+    fields: [notes.messageId],
+    references: [messages.messageId],
+  }),
+  chat: one(chats, {
+    fields: [notes.chatId],
+    references: [chats.chatId],
+  }),
+  user: one(users, {
+    fields: [notes.userId],
+    references: [users.id],
+  }),
+}));
+
+// Add relations to chats table for notes
+export const chatsRelations = relations(chats, ({ many }) => ({
+  notes: many(notes),
+}));
+
+// Add relations to messages table for notes
+export const messagesRelations = relations(messages, ({ many }) => ({
+  notes: many(notes),
+}));
