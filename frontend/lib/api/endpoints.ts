@@ -163,4 +163,33 @@ export const backendApi = {
     unlinkContact: (senderId: number, contactId: string) =>
       apiClient.delete(`/senders/${senderId}/contacts/${contactId}`),
   },
+
+  // Templates endpoints
+  templates: {
+    list: (visible?: boolean) =>
+      apiClient.get(`/templates${visible ? "?visible=true" : ""}`),
+    get: (templateId: string) => apiClient.get(`/templates/${templateId}`),
+    create: (data: any) => apiClient.post("/templates", data),
+    update: (templateId: string, data: any) =>
+      apiClient.patch(`/templates/${templateId}`, data),
+    delete: (templateId: string) =>
+      apiClient.delete(`/templates/${templateId}`),
+    addLocale: (templateId: string, data: any) =>
+      apiClient.post(`/templates/${templateId}/locales`, data),
+    preview: (templateId: string, data: any) =>
+      apiClient.post(`/templates/${templateId}/preview`, data),
+    validate: (templateId: string, data: any) =>
+      apiClient.post(`/templates/${templateId}/validate`, data),
+    submit: (templateId: string, data: any, provider?: string) =>
+      apiClient.post(
+        `/templates/${templateId}/submit${
+          provider ? `?provider=${provider}` : ""
+        }`,
+        data
+      ),
+    test: (templateId: string, data: any) =>
+      apiClient.post(`/templates/${templateId}/test`, data),
+    getVersions: (templateId: string) =>
+      apiClient.get(`/templates/${templateId}/versions`),
+  },
 };

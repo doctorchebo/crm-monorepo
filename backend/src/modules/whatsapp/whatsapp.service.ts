@@ -1,7 +1,7 @@
+import { db } from '@database/db.connection';
+import { Chat, chats, Message, messages } from '@database/schema';
 import { Injectable, Logger } from '@nestjs/common';
 import { desc, eq } from 'drizzle-orm';
-import { db } from 'src/database/db.connection';
-import { Chat, chats, Message, messages } from 'src/database/schema';
 import Twilio from 'twilio';
 import { OutboundMessageDto } from './dto/outbound-message.dto';
 

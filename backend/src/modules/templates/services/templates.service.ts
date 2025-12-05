@@ -1,0 +1,295 @@
+import { db } from '@database/db.connection';
+import {
+  templateLocales,
+  templatePlatforms,
+  templates,
+  templateVariables,
+} from '@database/schema';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { and, eq } from 'drizzle-orm';
+import {
+  CreateTemplateDto,
+  CreateTemplateLocaleDto,
+  UpdateTemplateDto,
+} from '../dto';
+import { TemplateParserService } from './template-parser.service';
+import { TemplateRenderService } from './template-render.service';
+import { TemplateValidatorService } from './template-validator.service';
+
+/**
+ * Templates service
+ * Handles CRUD operations and business logic for template management
+ */
+@Injectable()
+export class TemplatesService {
+  constructor(
+    private parserService: TemplateParserService,
+    private validatorService: TemplateValidatorService,
+    private renderService: TemplateRenderService,
+  ) {}
+
+  /**
+   * Create a new template
+   */
+  async createTemplate(userId: number, dto: CreateTemplateDto) {
+    const templateId = crypto.randomUUID();
+
+    const result = await db.insert(templates).values({
+      id: templateId,
+      ownerId: userId,
+      name: dto.name,
+      description: dto.description,
+      isVisible: true,
+      isActive: true,
+    });
+
+    // Add platform support
+    const platformsToAdd = dto.platforms || ['whatsapp'];
+    for (const platform of platformsToAdd) {
+      await db.insert(templatePlatforms).values({
+        id: crypto.randomUUID(),
+        templateId,
+        platformName: platform,
+        isEnabled: true,
+      });
+    }
+
+    return this.getTemplate(templateId);
+  }
+
+  /**
+   * Get template by ID with locales
+   */
+  async getTemplate(templateId: string) {
+    const template = await db.query.templates.findFirst({
+      where: eq(templates.id, templateId),
+      with: {
+        locales: true,
+        platforms: true,
+      },
+    });
+
+    if (!template) {
+      throw new NotFoundException(`Template with ID ${templateId} not found`);
+    }
+
+    return template;
+  }
+
+  /**
+   * List all templates for a user
+   */
+  async listTemplates(userId: number, onlyVisible = false) {
+    const where = onlyVisible
+      ? and(
+          eq(templates.ownerId, userId),
+          eq(templates.isVisible, true),
+          eq(templates.isActive, true),
+        )
+      : and(eq(templates.ownerId, userId), eq(templates.isActive, true));
+
+    return await db.query.templates.findMany({
+      where,
+      with: {
+        locales: true,
+        platforms: true,
+      },
+      orderBy: (templates, { desc }) => [desc(templates.createdAt)],
+    });
+  }
+
+  /**
+   * Update template metadata
+   */
+  async updateTemplate(templateId: string, dto: UpdateTemplateDto) {
+    const template = await this.getTemplate(templateId);
+
+    await db
+      .update(templates)
+      .set({
+        ...dto,
+        updatedAt: new Date(),
+      })
+      .where(eq(templates.id, templateId));
+
+    return this.getTemplate(templateId);
+  }
+
+  /**
+   * Delete template (soft delete via isActive flag)
+   */
+  async deleteTemplate(templateId: string) {
+    await this.getTemplate(templateId); // Verify exists
+
+    await db
+      .update(templates)
+      .set({
+        isActive: false,
+        updatedAt: new Date(),
+      })
+      .where(eq(templates.id, templateId));
+
+    return { success: true };
+  }
+
+  /**
+   * Add locale content to template
+   */
+  async addLocale(templateId: string, dto: CreateTemplateLocaleDto) {
+    await this.getTemplate(templateId); // Verify template exists
+
+    // Validate template content
+    const validationErrors = this.validatorService.validate(
+      dto.body,
+      dto.header,
+      dto.footer,
+    );
+
+    if (this.validatorService.hasCriticalErrors(validationErrors)) {
+      throw new BadRequestException({
+        message: 'Template validation failed',
+        errors: validationErrors,
+      });
+    }
+
+    const localeId = crypto.randomUUID();
+
+    // Check if locale already exists
+    const existing = await db.query.templateLocales.findFirst({
+      where: and(
+        eq(templateLocales.templateId, templateId),
+        eq(templateLocales.locale, dto.locale),
+      ),
+    });
+
+    if (existing) {
+      // Update existing locale
+      await db
+        .update(templateLocales)
+        .set({
+          type: dto.type || 'text',
+          header: dto.header,
+          body: dto.body,
+          footer: dto.footer,
+          exampleVars: dto.exampleVars || {},
+          updatedAt: new Date(),
+        })
+        .where(eq(templateLocales.id, existing.id));
+
+      return this.getLocale(existing.id);
+    }
+
+    // Create new locale
+    await db.insert(templateLocales).values({
+      id: localeId,
+      templateId,
+      locale: dto.locale,
+      type: dto.type || 'text',
+      header: dto.header,
+      body: dto.body,
+      footer: dto.footer,
+      exampleVars: dto.exampleVars || {},
+    });
+
+    // Extract and create variables
+    const variables = this.parserService.extractVariables(dto.body);
+    for (const varName of variables) {
+      await db.insert(templateVariables).values({
+        id: crypto.randomUUID(),
+        localeId,
+        varName,
+        varType: 'string',
+        isRequired: true,
+      });
+    }
+
+    return this.getLocale(localeId);
+  }
+
+  /**
+   * Get locale by ID
+   */
+  async getLocale(localeId: string) {
+    const locale = await db.query.templateLocales.findFirst({
+      where: eq(templateLocales.id, localeId),
+      with: {
+        variables: true,
+      },
+    });
+
+    if (!locale) {
+      throw new NotFoundException(`Locale with ID ${localeId} not found`);
+    }
+
+    return locale;
+  }
+
+  /**
+   * Render template preview
+   */
+  async renderPreview(
+    templateId: string,
+    locale: string,
+    variables?: Record<string, any>,
+  ) {
+    const template = await this.getTemplate(templateId);
+
+    const localeData = template.locales?.find((l) => l.locale === locale);
+    if (!localeData) {
+      throw new NotFoundException(`Locale ${locale} not found for template`);
+    }
+
+    const vars = variables || localeData.exampleVars || {};
+
+    const rendered = this.renderService.render(
+      {
+        header: localeData.header,
+        body: localeData.body,
+        footer: localeData.footer,
+      },
+      vars,
+    );
+
+    return {
+      rendered,
+      formatted: this.renderService.getFormattedPreview(rendered),
+    };
+  }
+
+  /**
+   * Get template variables for a locale
+   */
+  async getLocaleVariables(localeId: string) {
+    const locale = await this.getLocale(localeId);
+    return locale.variables || [];
+  }
+
+  /**
+   * Validate template before submission
+   */
+  async validateTemplate(templateId: string, locale: string) {
+    const template = await this.getTemplate(templateId);
+    const localeData = template.locales?.find((l) => l.locale === locale);
+
+    if (!localeData) {
+      throw new NotFoundException(`Locale ${locale} not found`);
+    }
+
+    const errors = this.validatorService.validate(
+      localeData.body,
+      localeData.header,
+      localeData.footer,
+    );
+
+    return {
+      isValid: !this.validatorService.hasCriticalErrors(errors),
+      errors,
+      criticalErrors: this.validatorService.getErrorsOnly(errors),
+      warnings: this.validatorService.getWarningsOnly(errors),
+    };
+  }
+}

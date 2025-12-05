@@ -14,12 +14,14 @@ import {
 } from "@/components/ui/sidebar";
 import {
   Activity,
+  FileText,
   Home,
+  LayoutGrid,
   MessageSquare,
+  Send,
   Settings,
   Shield,
   Users,
-  Users2,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
@@ -30,15 +32,16 @@ function DashboardSidebar() {
   const t = useTranslations("dashboard");
 
   const navItems = [
-    { href: "/dashboard", icon: Home, label: "Home" },
-    { href: "/dashboard/chats", icon: MessageSquare, label: "Chats" },
-    { href: "/dashboard/contacts", icon: Users2, label: "Contacts" },
-    { href: "/dashboard/senders", icon: Users, label: "Senders" },
-    { href: "/dashboard/kanban", icon: Users, label: "Kanban" },
-    { href: "/dashboard/team", icon: Users, label: "Team" },
-    { href: "/dashboard/general", icon: Settings, label: "General" },
-    { href: "/dashboard/activity", icon: Activity, label: "Activity" },
-    { href: "/dashboard/security", icon: Shield, label: "Security" },
+    { href: "/dashboard", icon: Home, label: t("home") },
+    { href: "/dashboard/chats", icon: MessageSquare, label: t("chats") },
+    { href: "/dashboard/contacts", icon: Users, label: t("contacts") },
+    { href: "/dashboard/templates", icon: FileText, label: t("templates") },
+    { href: "/dashboard/senders", icon: Send, label: t("senders") },
+    { href: "/dashboard/kanban", icon: LayoutGrid, label: t("kanban") },
+    { href: "/dashboard/team", icon: Users, label: t("team") },
+    { href: "/dashboard/general", icon: Settings, label: t("general") },
+    { href: "/dashboard/activity", icon: Activity, label: t("activity") },
+    { href: "/dashboard/security", icon: Shield, label: t("security") },
   ];
 
   return (

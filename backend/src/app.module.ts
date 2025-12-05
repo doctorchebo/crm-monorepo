@@ -10,11 +10,12 @@ import { ChatsModule } from './modules/chats/chats.module';
 import { ContactsModule } from './modules/contacts/contacts.module';
 import { KanbanModule } from './modules/kanban/kanban.module';
 import { MessagingModule } from './modules/messaging/messaging.module';
+import { SendersModule } from './modules/senders/senders.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { TeamModule } from './modules/team/team.module';
+import { TemplatesModule } from './modules/templates/templates.module';
 import { UserModule } from './modules/user/user.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
-import { SendersModule } from './modules/senders/senders.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { SendersModule } from './modules/senders/senders.module';
     TeamModule,
     ContactsModule,
     SendersModule,
+    TemplatesModule,
     WhatsAppModule,
     MessagingModule,
     ChatsModule,

@@ -1,3 +1,5 @@
+import { db } from '@database/db.connection';
+import { contactSenders, Sender, senders } from '@database/schema';
 import {
   ConflictException,
   Injectable,
@@ -5,8 +7,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { and, count, eq } from 'drizzle-orm';
-import { db } from '../../database/db.connection';
-import { contactSenders, Sender, senders } from '../../database/schema';
 import { CreateSenderDto } from './dto/create-sender.dto';
 import { UpdateSenderDto } from './dto/update-sender.dto';
 

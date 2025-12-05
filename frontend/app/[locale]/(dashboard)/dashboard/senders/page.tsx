@@ -37,6 +37,7 @@ export default function SendersPage() {
   const params = useParams();
   const locale = params.locale as string;
   const t = useTranslations("senders");
+  const tCommon = useTranslations("common");
   const { addNotification } = useNotification();
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -76,9 +77,9 @@ export default function SendersPage() {
         method: "DELETE",
       });
       addNotification(
-        `${
-          senderToDelete.displayName || senderToDelete.phoneNumber
-        } deleted successfully`,
+        `${senderToDelete.displayName || senderToDelete.phoneNumber} ${t(
+          "deletedSuccessfully"
+        )}`,
         "success"
       );
       mutate();
@@ -86,7 +87,7 @@ export default function SendersPage() {
       setSenderToDelete(null);
     } catch (err) {
       console.error("Failed to delete sender:", err);
-      addNotification("Failed to delete sender", "error");
+      addNotification(t("failedToDelete"), "error");
     } finally {
       setIsDeleting(false);
     }
@@ -96,24 +97,22 @@ export default function SendersPage() {
     <div className="flex-1 space-y-4 p-4 md:p-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Sender Numbers</h1>
-          <p className="text-muted-foreground mt-2">
-            Manage your WhatsApp business phone numbers
-          </p>
+          <h1 className="text-3xl font-bold tracking-tight">{t("title")}</h1>
+          <p className="text-muted-foreground mt-2">{t("subtitle")}</p>
         </div>
         <Button
           onClick={() => router.push(`/${locale}/dashboard/senders/new`)}
           className="gap-2"
         >
           <Plus className="h-4 w-4" />
-          Add Sender
+          {t("addSender")}
         </Button>
       </div>
 
       {/* Search Bar */}
       <Card className="p-4">
         <Input
-          placeholder="Search by phone or name..."
+          placeholder={t("searchPlaceholder")}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="w-full"
@@ -131,13 +130,13 @@ export default function SendersPage() {
         ) : filteredSenders.length === 0 ? (
           <div className="flex flex-col items-center justify-center p-8 text-center">
             <AlertCircle className="h-8 w-8 text-muted-foreground mb-2" />
-            <p className="text-muted-foreground">No sender numbers yet</p>
+            <p className="text-muted-foreground">{t("noSenders")}</p>
             <Button
               variant="outline"
               onClick={() => router.push(`/${locale}/dashboard/senders/new`)}
               className="mt-4"
             >
-              Add your first sender
+              {t("addFirst")}
             </Button>
           </div>
         ) : (
@@ -146,20 +145,22 @@ export default function SendersPage() {
               <thead className="border-b bg-muted/50">
                 <tr>
                   <th className="px-6 py-3 text-left font-semibold">
-                    Phone Number
+                    {t("phoneNumber")}
                   </th>
                   <th className="px-6 py-3 text-left font-semibold">
-                    Display Name
+                    {t("displayName")}
                   </th>
                   <th className="px-6 py-3 text-left font-semibold">
-                    Contacts
+                    {t("contacts")}
                   </th>
-                  <th className="px-6 py-3 text-left font-semibold">Status</th>
                   <th className="px-6 py-3 text-left font-semibold">
-                    Verified
+                    {t("status")}
+                  </th>
+                  <th className="px-6 py-3 text-left font-semibold">
+                    {t("verified")}
                   </th>
                   <th className="px-6 py-3 text-right font-semibold">
-                    Actions
+                    {t("actions")}
                   </th>
                 </tr>
               </thead>
@@ -177,7 +178,7 @@ export default function SendersPage() {
                         <span>{sender.displayName}</span>
                       ) : (
                         <span className="text-muted-foreground italic">
-                          Unnamed
+                          {t("unnamed")}
                         </span>
                       )}
                     </td>
@@ -199,19 +200,19 @@ export default function SendersPage() {
                             sender.isActive ? "bg-green-600" : "bg-red-600"
                           }`}
                         />
-                        {sender.isActive ? "Active" : "Inactive"}
+                        {sender.isActive ? t("active") : t("inactive")}
                       </span>
                     </td>
                     <td className="px-6 py-4">
                       {sender.isVerified ? (
                         <span className="inline-flex items-center gap-1 text-sm text-green-600 dark:text-green-400">
                           <Check className="h-4 w-4" />
-                          Verified
+                          {t("verified")}
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-sm text-yellow-600 dark:text-yellow-400">
                           <AlertCircle className="h-4 w-4" />
-                          Pending
+                          {t("pending")}
                         </span>
                       )}
                     </td>
@@ -230,13 +231,13 @@ export default function SendersPage() {
                               )
                             }
                           >
-                            Edit
+                            {tCommon("edit")}
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() => handleDeleteClick(sender)}
                             className="text-red-600 dark:text-red-400"
                           >
-                            Delete
+                            {tCommon("delete")}
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -252,7 +253,7 @@ export default function SendersPage() {
       {/* Delete Confirmation Dialog */}
       <DeleteConfirmationDialog
         isOpen={deleteDialogOpen}
-        title="Delete Sender"
+        title={t("deleteTitle")}
         description={`Are you sure you want to delete ${
           senderToDelete?.displayName || senderToDelete?.phoneNumber
         }? Associated contacts will remain but lose this sender association.`}

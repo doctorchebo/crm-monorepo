@@ -1,12 +1,7 @@
+import { db } from '@database/db.connection';
+import { Contact, contacts, contactSenders, senders } from '@database/schema';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { and, count, desc, eq, inArray } from 'drizzle-orm';
-import { db } from '../../database/db.connection';
-import {
-  Contact,
-  contacts,
-  contactSenders,
-  senders,
-} from '../../database/schema';
 import { CreateContactDto } from './dto/create-contact.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
 

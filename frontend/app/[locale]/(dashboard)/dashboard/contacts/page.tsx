@@ -72,6 +72,7 @@ export default function ContactsPage() {
   const params = useParams();
   const locale = params.locale as string;
   const t = useTranslations("contacts");
+  const tCommon = useTranslations("common");
   const tChats = useTranslations("chats");
   const { addNotification } = useNotification();
 
@@ -294,7 +295,7 @@ export default function ContactsPage() {
                     <DropdownMenuItem
                       onClick={() => handleEdit(contact.contactId)}
                     >
-                      {t("edit")}
+                      {tCommon("edit")}
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => handleStartChat(contact)}>
                       {t("startChat")}
@@ -303,7 +304,7 @@ export default function ContactsPage() {
                       onClick={() => handleDeleteClick(contact)}
                       className="text-red-600 dark:text-red-400 focus:bg-red-50 dark:focus:bg-red-900/20"
                     >
-                      {t("delete")}
+                      {tCommon("delete")}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>

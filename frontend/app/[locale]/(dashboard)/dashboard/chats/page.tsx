@@ -3,46 +3,26 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { backendApi } from "@/lib/api/endpoints";
-import { MessageSquare, Plus, Send } from "lucide-react";
+import { Loader, MessageSquare, Plus, Send } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import useSWR from "swr";
 
-// Twilio WhatsApp Sandbox Templates with contentSid and contentVariables
-interface WhatsAppTemplate {
+interface Template {
   id: string;
-  label: string;
-  templateContent: string;
-  contentSid: string;
-  contentVariables: Record<string, string>;
+  name: string;
+  description?: string;
+  isVisible: boolean;
+  locales?: Array<{
+    id: string;
+    locale: string;
+    body: string;
+    header?: string;
+    footer?: string;
+    exampleVars?: Record<string, any>;
+  }>;
 }
-
-const WHATSAPP_TEMPLATES: WhatsAppTemplate[] = [
-  {
-    id: "template1",
-    label: "Appointment Reminder",
-    templateContent:
-      "Your appointment is coming up on {{1}} at {{2}}. If you need to change it, please reply back and let us know.",
-    contentSid: "HXb5b62575e6e4ff6129ad7c8efe1f983e",
-    contentVariables: { "1": "12/1", "2": "3pm" },
-  },
-  {
-    id: "template2",
-    label: "Order Notification",
-    templateContent:
-      "Thank you for your order. Your delivery is scheduled for {{1}} at {{2}}. If you need to change it, please reply back and let us know.",
-    contentSid: "HX350d429d32e64a552466cafecbe95f3c",
-    contentVariables: { "1": "12/1", "2": "3pm" },
-  },
-  {
-    id: "template3",
-    label: "Verification Code",
-    templateContent:
-      "{{1}} is your verification code. For your security, do not share this code.",
-    contentSid: "HX229f5a04fd0510ce1b071852155d3e75",
-    contentVariables: { "1": "409173" },
-  },
-];
 
 interface Chat {
   id?: number;
@@ -74,9 +54,28 @@ export default function ChatsPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [messageInput, setMessageInput] = useState("");
   const [templateInput, setTemplateInput] = useState("");
+  const [templateSearch, setTemplateSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
+
+  // Fetch templates from API
+  const { data: templates = [], isLoading: templatesLoading } = useSWR(
+    "visible-templates",
+    async () => {
+      try {
+        return await backendApi.templates.list(true); // Only visible templates
+      } catch (error) {
+        console.error("Failed to fetch templates:", error);
+        return [];
+      }
+    }
+  );
+
+  // Filter templates based on search
+  const filteredTemplates = (templates as Template[]).filter((template) =>
+    template.name.toLowerCase().includes(templateSearch.toLowerCase())
+  );
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -191,31 +190,11 @@ export default function ChatsPage() {
         to: selectedChat.participantPhone,
       };
 
-      // If replying to a recipient-initiated conversation, use free-form body
-      if (hasInboundMessages) {
-        messagePayload.body = messageInput || templateInput;
+      // Use template content if available, otherwise use free-form message
+      if (templateInput.trim()) {
+        messagePayload.body = templateInput;
       } else {
-        // For initiated conversations, check if a template was explicitly selected
-        if (templateInput.trim()) {
-          // User selected a template
-          const selectedTemplate = WHATSAPP_TEMPLATES.find(
-            (t) => t.templateContent === templateInput
-          );
-
-          if (selectedTemplate) {
-            // Send template-based message
-            messagePayload.contentSid = selectedTemplate.contentSid;
-            messagePayload.contentVariables = JSON.stringify(
-              selectedTemplate.contentVariables
-            );
-          } else {
-            // Template content doesn't match - shouldn't happen
-            messagePayload.body = templateInput;
-          }
-        } else {
-          // No template selected, send as free-form body
-          messagePayload.body = messageInput;
-        }
+        messagePayload.body = messageInput;
       }
 
       // Send message via API
@@ -242,8 +221,24 @@ export default function ChatsPage() {
     }
   };
 
-  const handleApplyTemplate = (template: WhatsAppTemplate) => {
-    setTemplateInput(template.templateContent);
+  const handleApplyTemplate = (template: Template) => {
+    if (template.locales && template.locales.length > 0) {
+      // Use the first locale's body or render with example vars
+      const locale = template.locales[0];
+      let body = locale.body;
+
+      // Replace example variables if available
+      if (locale.exampleVars) {
+        Object.entries(locale.exampleVars).forEach(([key, value]) => {
+          body = body.replace(
+            new RegExp(`\\{\\{${key}\\}\\}`, "g"),
+            String(value || "")
+          );
+        });
+      }
+
+      setTemplateInput(body);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -409,22 +404,45 @@ export default function ChatsPage() {
 
               {/* Template Buttons */}
               <div className="border-t p-4 bg-muted/30">
-                <p className="text-xs font-medium mb-2 text-muted-foreground">
-                  Sandbox Templates (Required for initial messages):
-                </p>
-                <div className="grid grid-cols-1 gap-2 mb-4">
-                  {WHATSAPP_TEMPLATES.map((template) => (
-                    <Button
-                      key={template.id}
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleApplyTemplate(template)}
-                      className="text-left justify-start h-auto py-2"
-                    >
-                      <span className="text-xs">{template.label}</span>
-                    </Button>
-                  ))}
+                <div className="mb-3 space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    Available Templates:
+                  </p>
+                  <Input
+                    placeholder="Search templates..."
+                    className="h-8 text-xs"
+                    value={templateSearch}
+                    onChange={(e) => setTemplateSearch(e.target.value)}
+                  />
                 </div>
+                {templatesLoading ? (
+                  <div className="flex items-center justify-center py-2">
+                    <Loader className="h-4 w-4 animate-spin" />
+                  </div>
+                ) : Array.isArray(filteredTemplates) &&
+                  filteredTemplates.length > 0 ? (
+                  <div className="grid grid-cols-1 gap-2 mb-4">
+                    {filteredTemplates.map((template) => (
+                      <Button
+                        key={template.id}
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleApplyTemplate(template)}
+                        className="text-left justify-start h-auto py-2"
+                      >
+                        <span className="text-xs">{template.name}</span>
+                      </Button>
+                    ))}
+                  </div>
+                ) : templateSearch ? (
+                  <p className="text-xs text-muted-foreground py-2">
+                    No templates match your search.
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground py-2">
+                    No templates available. Create one in the Templates section.
+                  </p>
+                )}
               </div>
 
               {/* Input Area */}

@@ -1,3 +1,5 @@
+import { db } from '@database/db.connection';
+import { Chat, chats, contacts, messages, senders } from '@database/schema';
 import {
   BadRequestException,
   Injectable,
@@ -5,14 +7,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
-import { db } from '../../database/db.connection';
-import {
-  Chat,
-  chats,
-  contacts,
-  messages,
-  senders,
-} from '../../database/schema';
 import { CreateChatDto } from './dto/create-chat.dto';
 import { UpdateChatDto } from './dto/update-chat.dto';
 
