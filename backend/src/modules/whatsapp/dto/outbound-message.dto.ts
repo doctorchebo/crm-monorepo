@@ -1,8 +1,16 @@
-import { IsOptional, IsPhoneNumber, IsString } from 'class-validator';
+import { IsNumber, IsOptional, IsPhoneNumber, IsString } from 'class-validator';
 
 export class OutboundMessageDto {
   @IsPhoneNumber()
   to: string;
+
+  @IsNumber()
+  @IsOptional()
+  senderId?: number; // Which sender this message is from
+
+  @IsString()
+  @IsOptional()
+  businessPhone?: string; // Alternative: specify by phone number instead of ID
 
   @IsString()
   @IsOptional()

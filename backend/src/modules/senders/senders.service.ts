@@ -7,6 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { and, count, eq } from 'drizzle-orm';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { CreateSenderDto } from './dto/create-sender.dto';
 import { UpdateSenderDto } from './dto/update-sender.dto';
 
@@ -18,8 +19,11 @@ import { UpdateSenderDto } from './dto/update-sender.dto';
 export class SendersService {
   private readonly logger = new Logger(SendersService.name);
 
+  constructor(private readonly whatsAppService: WhatsAppService) {}
+
   /**
    * Create a new sender (WhatsApp business number)
+   * Fetches phoneNumberId from Meta Cloud API if not provided
    */
   async create(
     userId: number,
@@ -40,6 +44,23 @@ export class SendersService {
         );
       }
 
+      // Get phoneNumberId from Meta Cloud API
+      let phoneNumberId: string | null = null;
+      try {
+        phoneNumberId = await this.whatsAppService.getPhoneNumberIdFromMeta(
+          createSenderDto.phoneNumber,
+        );
+        this.logger.log(
+          `Successfully retrieved phoneNumberId for ${createSenderDto.phoneNumber}: ${phoneNumberId}`,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Could not retrieve phoneNumberId from Meta API: ${error.message}. Sender will be created without it.`,
+        );
+        // Don't throw - allow creation without phoneNumberId
+        // User can configure it manually later if needed
+      }
+
       const [sender] = await db
         .insert(senders)
         .values({
@@ -50,6 +71,7 @@ export class SendersService {
           twilioMessagingServiceSid:
             createSenderDto.twilioMessagingServiceSid || null,
           twilioAccountSid: createSenderDto.twilioAccountSid || null,
+          phoneNumberId: phoneNumberId || null,
           isActive: true,
           isVerified: false,
           contactCount: 0,
@@ -286,6 +308,40 @@ export class SendersService {
       return result;
     } catch (error) {
       this.logger.error(`Error fetching sender contacts: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Verify sender phone number and retrieve phoneNumberId from Meta
+   * Updates the sender record with the phoneNumberId
+   */
+  async verifySender(userId: number, senderId: number): Promise<Sender> {
+    try {
+      // Verify sender belongs to user
+      const sender = await this.findOne(userId, senderId);
+
+      // Get phoneNumberId from Meta
+      const phoneNumberId = await this.whatsAppService.getPhoneNumberIdFromMeta(
+        sender.phoneNumber,
+      );
+
+      // Update sender with phoneNumberId
+      const [updated] = await db
+        .update(senders)
+        .set({
+          phoneNumberId,
+          updatedAt: new Date(),
+        })
+        .where(eq(senders.id, senderId))
+        .returning();
+
+      this.logger.log(
+        `Sender verified and updated with phoneNumberId: ${phoneNumberId}`,
+      );
+      return updated;
+    } catch (error) {
+      this.logger.error(`Error verifying sender: ${error.message}`);
       throw error;
     }
   }

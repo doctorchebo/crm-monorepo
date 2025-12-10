@@ -1,9 +1,12 @@
 "use client";
 
+import { ChatsSenderSection } from "@/components/chats-sender-section";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NotesPanel } from "@/components/ui/notes-panel";
+import { WhatsAppStatusIcon } from "@/components/whatsapp-status-icon";
 import { useAuthProtection } from "@/hooks/use-auth";
+import { useMultipleMessageStatusTracking } from "@/hooks/use-message-status-tracking";
 import { backendApi } from "@/lib/api/endpoints";
 import { Loader, MessageSquare, Send } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -34,6 +37,8 @@ interface Chat {
   lastMessage?: string;
   lastMessageTime?: string;
   isActive: boolean;
+  senderId: number;
+  businessPhone?: string;
 }
 
 interface Message {
@@ -44,6 +49,10 @@ interface Message {
   direction: "inbound" | "outbound";
   timestamp: string;
   type: string;
+  status: "pending" | "sent" | "delivered" | "read" | "failed";
+  sentAt?: string;
+  deliveredAt?: string;
+  readAt?: string;
 }
 
 export default function ChatsPage() {
@@ -59,6 +68,7 @@ export default function ChatsPage() {
   const [automationEnabled, setAutomationEnabled] = useState(false);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [chats, setChats] = useState<Chat[]>([]);
+  const [senders, setSenders] = useState<any[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [messageInput, setMessageInput] = useState("");
   const [templateInput, setTemplateInput] = useState("");
@@ -121,34 +131,82 @@ export default function ChatsPage() {
       try {
         setLoading(true);
         setError(null);
-        const data = await backendApi.whatsapp.getChats(0, 20);
+
+        // Get the query param from the URL directly to preserve special characters like +
+        // searchParams.get() decodes the value, turning + into spaces
+        // We need to parse the raw query string instead
+        const urlParams = new URLSearchParams(window.location.search);
+        const querySelectedChatId = urlParams.get("selectedChatId");
+
+        console.log("Query selectedChatId:", querySelectedChatId);
+
+        // Fetch senders
+        const sendersData = await backendApi.senders.list();
+        if (Array.isArray(sendersData)) {
+          setSenders(sendersData);
+        }
+
+        // Fetch chats
+        const data = await backendApi.whatsapp.getChats(0, 50);
 
         if (Array.isArray(data) && data.length > 0) {
           setChats(data);
 
-          // Get the query param from the URL directly to preserve special characters like +
-          // searchParams.get() decodes the value, turning + into spaces
-          // We need to parse the raw query string instead
-          const urlParams = new URLSearchParams(window.location.search);
-          const querySelectedChatId = urlParams.get("selectedChatId");
-
-          console.log("Query selectedChatId:", querySelectedChatId);
           console.log(
             "Available chats:",
             data.map((c) => c.chatId)
           );
 
+          let chatToSelect: string | null = null;
+
           if (querySelectedChatId) {
-            console.log(
-              "Setting selectedChatId from query param:",
-              querySelectedChatId
+            // Check if the query selected chat exists in the fetched list
+            const chatExists = data.some(
+              (c) => c.chatId === querySelectedChatId
             );
-            // Set the selected chat from query param directly
-            setSelectedChatId(querySelectedChatId);
+            if (chatExists) {
+              console.log(
+                "Setting selectedChatId from query param:",
+                querySelectedChatId
+              );
+              chatToSelect = querySelectedChatId;
+            } else {
+              console.warn(
+                "Chat from query param not found in chat list:",
+                querySelectedChatId
+              );
+              // The newly created chat might not be immediately indexed
+              // Try to fetch it with a retry after a short delay
+              console.log("Attempting to fetch chat with retry...");
+              setTimeout(async () => {
+                try {
+                  const retryData = await backendApi.whatsapp.getChats(0, 50);
+                  if (Array.isArray(retryData) && retryData.length > 0) {
+                    setChats(retryData);
+                    const foundChat = retryData.find(
+                      (c) => c.chatId === querySelectedChatId
+                    );
+                    if (foundChat) {
+                      console.log("Chat found on retry:", querySelectedChatId);
+                      setSelectedChatId(querySelectedChatId);
+                    } else {
+                      console.warn("Chat still not found after retry");
+                      setSelectedChatId(retryData[0].chatId);
+                    }
+                  }
+                } catch (retryErr) {
+                  console.error("Retry fetch failed:", retryErr);
+                }
+              }, 300);
+              // Use first chat as immediate fallback
+              chatToSelect = data[0].chatId;
+            }
           } else {
             // If no query param, select the first chat
-            setSelectedChatId(data[0].chatId);
+            chatToSelect = data[0].chatId;
           }
+
+          setSelectedChatId(chatToSelect);
         } else {
           setChats([]);
           setSelectedChatId(null);
@@ -209,6 +267,15 @@ export default function ChatsPage() {
               new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
           );
           setMessages(sorted);
+
+          // Start polling for status updates on outbound messages
+          const outboundMessageIds = sorted
+            .filter((msg) => msg.direction === "outbound")
+            .map((msg) => msg.messageId);
+
+          if (outboundMessageIds.length > 0) {
+            startStatusTracking(outboundMessageIds);
+          }
         }
       } catch (err) {
         console.error("Error fetching messages:", err);
@@ -221,6 +288,36 @@ export default function ChatsPage() {
     const interval = setInterval(fetchMessages, 5000);
     return () => clearInterval(interval);
   }, [selectedChatId]);
+
+  // Status tracking for outbound messages
+  const [trackedMessageIds, setTrackedMessageIds] = useState<string[]>([]);
+  const { statusMap, isPolling } = useMultipleMessageStatusTracking(
+    trackedMessageIds,
+    { pollInterval: 3000, autoStart: true }
+  );
+
+  // Update tracked message IDs and re-fetch messages when status changes
+  const startStatusTracking = (messageIds: string[]) => {
+    setTrackedMessageIds(messageIds);
+  };
+
+  // Update messages with new status information from polling
+  useEffect(() => {
+    if (statusMap.size === 0) return;
+
+    setMessages((prevMessages) =>
+      prevMessages.map((msg) => {
+        const newStatus = statusMap.get(msg.messageId);
+        if (newStatus && newStatus !== msg.status) {
+          return {
+            ...msg,
+            status: newStatus,
+          };
+        }
+        return msg;
+      })
+    );
+  }, [statusMap]);
 
   const handleSendMessage = async () => {
     if ((!messageInput.trim() && !templateInput.trim()) || !selectedChatId)
@@ -238,6 +335,7 @@ export default function ChatsPage() {
 
       let messagePayload: any = {
         to: selectedChat.participantPhone,
+        senderId: selectedChat.senderId,
       };
 
       // Use template content if available, otherwise use free-form message
@@ -361,10 +459,10 @@ export default function ChatsPage() {
   return (
     <div className="flex flex-col h-screen gap-0">
       {/* Header with Controls */}
-      <div className="border-b px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div className="border-b px-6 py-2 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">{t("title")}</h1>
-          <p className="text-sm text-muted-foreground">{t("description")}</p>
+          <h1 className="text-xl font-semibold">{t("title")}</h1>
+          <p className="text-xs text-muted-foreground">{t("description")}</p>
         </div>
         <div className="flex items-center gap-3">
           <Button
@@ -402,50 +500,32 @@ export default function ChatsPage() {
                 <p className="text-muted-foreground">{t("noChats")}</p>
               </div>
             ) : (
-              chats.map((chat) => (
-                <button
-                  key={chat.chatId || chat.id}
-                  onClick={() =>
-                    setSelectedChatId(chat.chatId || String(chat.id))
-                  }
-                  className={`w-full text-left px-4 py-3 border-b transition-colors hover:bg-accent ${
-                    selectedChatId === (chat.chatId || String(chat.id))
-                      ? "bg-accent"
-                      : ""
-                  }`}
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                      <MessageSquare className="h-5 w-5 text-primary" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">
-                        {chat.participantName ||
-                          chat.participantPhone ||
-                          "Unknown"}
-                      </p>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {chat.lastMessage || "No messages yet"}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {chat.lastMessageTime
-                          ? new Date(chat.lastMessageTime).toLocaleTimeString()
-                          : ""}
-                      </p>
-                    </div>
-                  </div>
-                </button>
-              ))
+              // Group chats by sender
+              senders.map((sender) => {
+                const senderChats = chats.filter(
+                  (c) => c.senderId === sender.id
+                );
+                return (
+                  <ChatsSenderSection
+                    key={sender.id}
+                    senderPhoneNumber={sender.phoneNumber}
+                    senderDisplayName={sender.displayName}
+                    chats={senderChats}
+                    selectedChatId={selectedChatId}
+                    onSelectChat={(chatId) => setSelectedChatId(chatId)}
+                  />
+                );
+              })
             )}
           </div>
         </div>
 
         {/* Right Panel: Chat Detail + Notes */}
-        <div className="hidden lg:flex flex-1 flex-col bg-background overflow-hidden">
+        <div className="hidden lg:flex flex-1 flex-col bg-background overflow-hidden min-h-0">
           {selectedChat ? (
             <>
               {/* Chat Header */}
-              <div className="border-b px-6 py-4 flex items-center justify-between flex-shrink-0">
+              <div className="border-b px-6 py-2 flex items-center justify-between flex-shrink-0">
                 <div>
                   <h2 className="text-lg font-semibold">
                     {selectedChat.participantName ||
@@ -461,7 +541,10 @@ export default function ChatsPage() {
               <div className="flex flex-1 overflow-hidden" ref={containerRef}>
                 {/* Messages Area */}
                 <div className="flex-1 flex flex-col overflow-hidden">
-                  <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                  <div
+                    className="overflow-y-auto p-3 space-y-2"
+                    style={{ maxHeight: "calc(100% - 220px)" }}
+                  >
                     {messages.length === 0 ? (
                       <div className="flex items-center justify-center h-full">
                         <p className="text-muted-foreground">No messages yet</p>
@@ -484,22 +567,30 @@ export default function ChatsPage() {
                               }`}
                             >
                               <div
-                                className={`max-w-xs px-4 py-2 rounded-lg ${
+                                className={`max-w-xs px-3 py-1 rounded-lg text-xs ${
                                   isOutbound
                                     ? "bg-primary text-primary-foreground"
                                     : "bg-muted"
                                 }`}
                               >
-                                <p className="text-sm">{message.text}</p>
-                                <p
-                                  className={`text-xs mt-1 ${
+                                <p className="text-xs">{message.text}</p>
+                                <div
+                                  className={`text-xs mt-0.5 flex items-center justify-between gap-1 ${
                                     isOutbound
                                       ? "text-primary-foreground/70"
                                       : "text-muted-foreground"
                                   }`}
                                 >
-                                  {timeString}
-                                </p>
+                                  <span>{timeString}</span>
+                                  {isOutbound && (
+                                    <WhatsAppStatusIcon
+                                      status={message.status || "pending"}
+                                      deliveredAt={message.deliveredAt}
+                                      readAt={message.readAt}
+                                      className="ml-1"
+                                    />
+                                  )}
+                                </div>
                               </div>
                             </div>
                           );
@@ -510,16 +601,19 @@ export default function ChatsPage() {
                   </div>
 
                   {/* Template Buttons */}
-                  <div className="border-t p-4 bg-muted/30">
+                  <div
+                    className="border-t p-3 bg-muted/30 flex flex-col overflow-hidden"
+                    style={{ maxHeight: "160px" }}
+                  >
                     {templatesLoading ? (
                       <>
-                        <div className="mb-3 space-y-2">
+                        <div className="mb-2 space-y-1 flex-shrink-0">
                           <p className="text-xs font-medium text-muted-foreground">
                             {t("availableTemplates")}
                           </p>
                           <Input
                             placeholder={t("searchTemplates")}
-                            className="h-8 text-xs"
+                            className="h-7 text-xs"
                             value={templateSearch}
                             onChange={(e) => setTemplateSearch(e.target.value)}
                           />
@@ -531,57 +625,70 @@ export default function ChatsPage() {
                     ) : Array.isArray(filteredTemplates) &&
                       filteredTemplates.length > 0 ? (
                       <>
-                        <div className="mb-3 space-y-2">
+                        <div className="mb-2 space-y-1 flex-shrink-0">
                           <p className="text-xs font-medium text-muted-foreground">
                             {t("availableTemplates")}
                           </p>
                           <Input
                             placeholder={t("searchTemplates")}
-                            className="h-8 text-xs"
+                            className="h-7 text-xs"
                             value={templateSearch}
                             onChange={(e) => setTemplateSearch(e.target.value)}
                           />
                         </div>
-                        <div className="grid grid-cols-1 gap-2 mb-4">
+                        <div className="grid grid-cols-2 gap-1 overflow-y-auto">
                           {filteredTemplates.map((template) => (
                             <Button
                               key={template.id}
                               variant="outline"
                               size="sm"
                               onClick={() => handleApplyTemplate(template)}
-                              className="text-left justify-start h-auto py-2"
+                              className="text-left justify-start h-auto py-1 px-2 text-xs"
                             >
-                              <span className="text-xs">{template.name}</span>
+                              <span className="truncate">{template.name}</span>
                             </Button>
                           ))}
                         </div>
                       </>
                     ) : templateSearch ? (
                       <>
-                        <div className="mb-3 space-y-2">
+                        <div className="mb-2 space-y-1 flex-shrink-0">
                           <p className="text-xs font-medium text-muted-foreground">
                             {t("availableTemplates")}
                           </p>
                           <Input
                             placeholder={t("searchTemplates")}
-                            className="h-8 text-xs"
+                            className="h-7 text-xs"
                             value={templateSearch}
                             onChange={(e) => setTemplateSearch(e.target.value)}
                           />
                         </div>
-                        <p className="text-xs text-muted-foreground py-2">
+                        <p className="text-xs text-muted-foreground py-1">
                           No templates match your search.
                         </p>
                       </>
                     ) : (
-                      <p className="text-xs text-muted-foreground py-2">
-                        {t("noTemplatesAvailable")}
-                      </p>
+                      <>
+                        <div className="mb-2 space-y-1 flex-shrink-0">
+                          <p className="text-xs font-medium text-muted-foreground">
+                            {t("availableTemplates")}
+                          </p>
+                          <Input
+                            placeholder={t("searchTemplates")}
+                            className="h-7 text-xs"
+                            value={templateSearch}
+                            onChange={(e) => setTemplateSearch(e.target.value)}
+                          />
+                        </div>
+                        <p className="text-xs text-muted-foreground py-1">
+                          {t("noTemplatesAvailable")}
+                        </p>
+                      </>
                     )}
                   </div>
 
                   {/* Input Area */}
-                  <div className="border-t p-4">
+                  <div className="border-t p-3 flex-shrink-0">
                     <div className="flex gap-2">
                       <Input
                         placeholder={t("typeMessageOrUseTemplates")}

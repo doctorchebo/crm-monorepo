@@ -27,10 +27,29 @@ export class WhatsAppController {
    */
   @Post('send')
   async sendMessage(@Body() messageDto: OutboundMessageDto, @Req() req: any) {
+    const userId = req.user?.userId;
     this.logger.log(
-      `Send message request from user ${req.user?.userId}: To ${messageDto.to}`,
+      `Send message request from user ${userId}: To ${messageDto.to}`,
     );
-    return this.whatsAppService.sendMessage(messageDto);
+    return this.whatsAppService.sendMessage(messageDto, userId);
+  }
+
+  /**
+   * Send a WhatsApp media message (image, video, audio, document)
+   * POST /whatsapp/send-media
+   */
+  @Post('send-media')
+  async sendMedia(@Body() mediaDto: any, @Req() req: any) {
+    const userId = req.user?.userId;
+    this.logger.log(
+      `Send media request from user ${userId}: To ${mediaDto.to}, Type: ${mediaDto.mediaType}`,
+    );
+    return this.whatsAppService.sendMedia(
+      mediaDto.to,
+      mediaDto.mediaType,
+      mediaDto.mediaUrl,
+      mediaDto.caption,
+    );
   }
 
   /**
@@ -59,9 +78,9 @@ export class WhatsAppController {
    */
   @Get('chats')
   async getChats(
+    @Req() req: any,
     @Query('skip') skip: number = 0,
     @Query('take') take: number = 20,
-    @Req() req: any,
   ) {
     const userId = req.user?.userId;
     this.logger.log(`Get chats request from user ${userId}`);
@@ -88,7 +107,7 @@ export class WhatsAppController {
    */
   @Post('notes')
   async saveNote(@Body() noteDto: SaveNoteDto, @Req() req: any) {
-    const userId = req.user?.id;
+    const userId = req.user?.userId;
     this.logger.log(
       `Save note for message ${noteDto.messageId} from user ${userId}`,
     );

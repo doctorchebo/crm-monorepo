@@ -15,19 +15,45 @@ async function bootstrap() {
     preflightContinue: false,
   });
 
-  // Configure URL-encoded form data parser for Twilio webhooks
-  // Twilio sends webhook data as application/x-www-form-urlencoded, not JSON
+  // Global logging middleware to debug all requests
+  app.use((req, res, next) => {
+    if (req.url.includes('webhook') || req.url.includes('whatsapp')) {
+      console.log(
+        `\n📨 [${new Date().toISOString()}] ${req.method} ${req.url}`,
+      );
+      console.log('IP:', req.ip);
+      console.log('Headers:', {
+        'content-type': req.headers['content-type'],
+        'content-length': req.headers['content-length'],
+        'x-hub-signature-256': req.headers['x-hub-signature-256'],
+      });
+    }
+    next();
+  });
+
+  // Middleware to capture raw body for webhook signature verification
+  // Meta Cloud API sends JSON webhooks and signs the raw body
   app.use('/webhook/whatsapp', (req, res, next) => {
+    console.log('🔌 Raw body middleware triggered');
     let data = '';
     req.on('data', (chunk) => {
+      console.log('📥 Receiving chunk:', chunk.length, 'bytes');
       data += chunk.toString();
     });
     req.on('end', () => {
-      // Parse form data manually for webhook authentication
+      console.log('✅ Body received completely:', data.length, 'bytes');
+      // Store raw body for signature verification
       req.rawBody = data;
-      // Convert form data to JSON for body parser
-      const params = new URLSearchParams(data);
-      req.body = Object.fromEntries(params);
+      try {
+        // Parse JSON body
+        req.body = JSON.parse(data);
+        console.log('✅ JSON parsed successfully');
+      } catch (e) {
+        console.log('⚠️ JSON parse failed, trying URLSearchParams');
+        // If not JSON, try form data parsing (for potential backward compatibility)
+        const params = new URLSearchParams(data);
+        req.body = Object.fromEntries(params);
+      }
       next();
     });
   });

@@ -6,7 +6,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { CreateChatDto } from './dto/create-chat.dto';
 import { UpdateChatDto } from './dto/update-chat.dto';
 
@@ -101,19 +101,40 @@ export class ChatsService {
   ): Promise<Chat> {
     try {
       // If senderId is provided, validate it belongs to the user
-      if (senderId) {
-        await this.validateSenderBelongsToUser(userId, senderId);
+      let finalSenderId = senderId;
+      if (finalSenderId) {
+        await this.validateSenderBelongsToUser(userId, finalSenderId);
+      } else {
+        // If no senderId provided, get the first sender for the user
+        const userSenders = await db.query.senders.findFirst({
+          where: eq(senders.userId, userId),
+        });
+
+        if (!userSenders) {
+          throw new Error('No senders configured for this user');
+        }
+        finalSenderId = userSenders.id;
+        this.logger.log(
+          `No senderId provided, using default sender: ${finalSenderId}`,
+        );
+      }
+
+      // Type guard: ensure finalSenderId is defined
+      if (!finalSenderId) {
+        throw new Error('Unable to determine sender ID for chat');
       }
 
       const chatId = this.generateChatId(businessPhone, participantPhone);
 
-      // Check if chat already exists
+      // Check if chat already exists for this sender
       let chat = await db.query.chats.findFirst({
-        where: eq(chats.chatId, chatId),
+        where: and(eq(chats.chatId, chatId), eq(chats.senderId, finalSenderId)),
       });
 
       if (chat) {
-        this.logger.log(`Chat already exists: ${chatId}`);
+        this.logger.log(
+          `Chat already exists: ${chatId} for sender ${finalSenderId}`,
+        );
 
         // If chat exists but has no participantName, update it with the contact name
         if (!chat.participantName && (participantName || !participantName)) {
@@ -129,7 +150,12 @@ export class ChatsService {
                 participantName: nameToUpdate,
                 updatedAt: new Date(),
               })
-              .where(eq(chats.chatId, chatId))
+              .where(
+                and(
+                  eq(chats.chatId, chatId),
+                  eq(chats.senderId, finalSenderId),
+                ),
+              )
               .returning();
 
             this.logger.log(
@@ -155,6 +181,7 @@ export class ChatsService {
         .values({
           chatId,
           userId,
+          senderId: finalSenderId,
           businessPhone,
           participantPhone,
           participantName: finalParticipantName || null,
@@ -162,7 +189,7 @@ export class ChatsService {
         })
         .returning();
 
-      this.logger.log(`Chat created: ${chatId}`);
+      this.logger.log(`Chat created: ${chatId} for sender ${finalSenderId}`);
       return newChat;
     } catch (error) {
       this.logger.error(
@@ -182,11 +209,33 @@ export class ChatsService {
         createChatDto.participantPhone,
       );
 
+      // If senderId provided, validate it belongs to user
+      let finalSenderId = createChatDto.senderId;
+      if (finalSenderId) {
+        await this.validateSenderBelongsToUser(userId, finalSenderId);
+      } else {
+        // If no senderId, get the first sender for the user
+        const userSenders = await db.query.senders.findFirst({
+          where: eq(senders.userId, userId),
+        });
+
+        if (!userSenders) {
+          throw new Error('No senders configured for this user');
+        }
+        finalSenderId = userSenders.id;
+      }
+
+      // Type guard: ensure finalSenderId is defined
+      if (!finalSenderId) {
+        throw new Error('Unable to determine sender ID for chat');
+      }
+
       const [chat] = await db
         .insert(chats)
         .values({
           chatId,
           userId,
+          senderId: finalSenderId,
           businessPhone: createChatDto.businessPhone,
           participantPhone: createChatDto.participantPhone,
           participantName: createChatDto.participantName || null,
@@ -194,7 +243,7 @@ export class ChatsService {
         })
         .returning();
 
-      this.logger.log(`Chat created: ${chatId}`);
+      this.logger.log(`Chat created: ${chatId} for sender ${finalSenderId}`);
       return chat;
     } catch (error) {
       this.logger.error(`Error creating chat: ${error.message}`);
@@ -234,6 +283,10 @@ export class ChatsService {
     try {
       const result = await db.query.chats.findMany({
         where: and(eq(chats.userId, userId), eq(chats.isActive, true)),
+        orderBy: [
+          desc(sql`${chats.lastMessageTime} IS NULL`),
+          desc(chats.lastMessageTime),
+        ],
         limit: take,
         offset: skip,
       });

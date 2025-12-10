@@ -44,6 +44,7 @@ export const chats = pgTable(
     id: serial('id').primaryKey(),
     chatId: varchar('chat_id').notNull().unique(),
     userId: integer('user_id'), // Foreign key to users (through senders relationship)
+    senderId: integer('sender_id').notNull(), // Foreign key to senders - which sender number initiated this chat
     participantPhone: varchar('participant_phone').notNull(), // Phone number of participant (recipient)
     businessPhone: varchar('business_phone').notNull(), // Twilio WhatsApp Business number
     participantName: varchar('participant_name'), // Name of the participant (from Twilio or custom)
@@ -74,8 +75,13 @@ export const messages = pgTable(
     text: text('text'),
     mediaUrl: text('media_url'),
     direction: varchar('direction').notNull(), // 'inbound' or 'outbound'
-    status: varchar('status').default('sent'), // 'sent', 'delivered', 'read', 'failed'
-    timestamp: timestamp('timestamp').notNull(),
+    status: varchar('status').default('pending'), // 'pending', 'sent', 'delivered', 'read', 'failed'
+    sentAt: timestamp('sent_at'), // Timestamp when message was successfully sent to WhatsApp
+    deliveredAt: timestamp('delivered_at'), // Timestamp when message was delivered to recipient device
+    readAt: timestamp('read_at'), // Timestamp when message was read by recipient
+    failedReason: text('failed_reason'), // Error reason if status is 'failed'
+    timestamp: timestamp('timestamp').notNull(), // Original message timestamp
+    updatedAt: timestamp('updated_at').defaultNow(), // Track last status update
   },
   (table) => ({
     messageIdUnique: unique().on(table.messageId),
@@ -147,6 +153,7 @@ export const senders = pgTable(
     twilioPhoneNumberSid: varchar('twilio_phone_number_sid'), // Twilio's internal ID for this number
     twilioMessagingServiceSid: varchar('twilio_messaging_service_sid'),
     twilioAccountSid: varchar('twilio_account_sid'), // Twilio account for verification
+    phoneNumberId: varchar('phone_number_id'), // Meta Cloud API phone number ID
     isActive: boolean('is_active').default(true), // Active status
     isVerified: boolean('is_verified').default(false), // Twilio verification status
     contactCount: integer('contact_count').default(0), // Denormalized count for performance

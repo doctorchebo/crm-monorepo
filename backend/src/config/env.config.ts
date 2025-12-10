@@ -32,13 +32,30 @@ class EnvironmentVariables {
   JWT_EXPIRATION: number = 3600;
 
   @IsString()
-  TWILIO_ACCOUNT_SID: string;
+  @IsNotEmpty()
+  META_WABA_ID: string;
 
   @IsString()
-  TWILIO_AUTH_TOKEN: string;
+  @IsNotEmpty()
+  META_PHONE_NUMBER_ID: string;
 
   @IsString()
-  TWILIO_PHONE_NUMBER: string;
+  @IsNotEmpty()
+  META_BUSINESS_PHONE_NUMBER: string;
+
+  @IsString()
+  @IsNotEmpty()
+  META_ACCESS_TOKEN: string;
+
+  @IsString()
+  @IsNotEmpty()
+  META_VERIFY_TOKEN: string;
+
+  @IsString()
+  META_APP_ID?: string;
+
+  @IsString()
+  META_APP_SECRET?: string;
 
   @IsString()
   OPENAI_API_KEY: string;

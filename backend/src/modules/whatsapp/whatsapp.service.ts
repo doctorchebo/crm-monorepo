@@ -1,133 +1,668 @@
 import { db } from '@database/db.connection';
-import { Chat, chats, Message, messages } from '@database/schema';
+import { Chat, chats, Message, messages, senders } from '@database/schema';
 import { Injectable, Logger } from '@nestjs/common';
-import { and, desc, eq, inArray } from 'drizzle-orm';
-import Twilio from 'twilio';
+import { ConfigService } from '@nestjs/config';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { OutboundMessageDto } from './dto/outbound-message.dto';
+import {
+  CloudAPIInboundMessage,
+  CloudAPISendMessageResponse,
+  CloudAPIWebhookPayload,
+  MediaMetadata,
+  NormalizedCloudAPIMessage,
+} from './types/cloud-api.types';
+import {
+  buildCloudAPIUrl,
+  cleanPhoneNumber,
+  extractWebhookUpdates,
+  generateChatId,
+  getCloudAPIHeaders,
+  mapCloudAPIMessageType,
+  mapCloudAPIStatus,
+  parseWebhookPayload,
+  validateCloudAPIMessage,
+  verifyWebhookSignature,
+} from './utils/cloud-api.utils';
 
 /**
- * WhatsApp Service
- * Handles all Twilio WhatsApp messaging operations
- * - Sending messages via WhatsApp Business
- * - Receiving and storing messages
- * - Message status tracking
- * - Webhook handling for inbound messages and delivery status
+ * WhatsApp Cloud API Service
+ * Replaces Twilio integration with direct WhatsApp Business Cloud API
+ *
+ * Features:
+ * - Send text and media messages via Cloud API
+ * - Receive and store inbound messages and media
+ * - Track message delivery status
+ * - Handle webhook verification
+ * - Support for future chat history sync
  */
 @Injectable()
 export class WhatsAppService {
   private readonly logger = new Logger(WhatsAppService.name);
-  private twilioClient: ReturnType<typeof Twilio>;
-  private readonly twilioPhoneNumber = 'whatsapp:+14155238886'; // Your Twilio WhatsApp Business number
-  private readonly businessPhoneDisplay = '+14155238886'; // For database storage
 
-  constructor() {
-    // Initialize Twilio client
-    const accountSid = process.env.TWILIO_ACCOUNT_SID;
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
+  private readonly metaPhoneNumberId: string;
+  private readonly metaBusinessPhoneNumber: string;
+  private readonly metaAccessToken: string;
+  private readonly metaVerifyToken: string;
+  private readonly metaAppSecret: string | undefined;
+  private readonly wabaId: string | undefined;
 
-    if (!accountSid || !authToken) {
-      this.logger.error('Missing Twilio credentials in environment variables');
-      throw new Error('Missing TWILIO_ACCOUNT_SID or TWILIO_AUTH_TOKEN');
+  constructor(private configService: ConfigService) {
+    this.metaPhoneNumberId = this.configService.getOrThrow<string>(
+      'META_PHONE_NUMBER_ID',
+    );
+    this.metaBusinessPhoneNumber = this.configService.getOrThrow<string>(
+      'META_BUSINESS_PHONE_NUMBER',
+    );
+    this.metaAccessToken =
+      this.configService.getOrThrow<string>('META_ACCESS_TOKEN');
+    this.metaVerifyToken =
+      this.configService.getOrThrow<string>('META_VERIFY_TOKEN');
+    this.metaAppSecret = this.configService.get<string>('META_APP_SECRET');
+    this.wabaId = this.configService.get<string>('META_WABA_ID');
+
+    if (
+      !this.metaPhoneNumberId ||
+      !this.metaBusinessPhoneNumber ||
+      !this.metaAccessToken ||
+      !this.metaVerifyToken
+    ) {
+      this.logger.error('Missing required Meta Cloud API credentials');
+      throw new Error(
+        'Missing META_PHONE_NUMBER_ID, META_BUSINESS_PHONE_NUMBER, META_ACCESS_TOKEN, or META_VERIFY_TOKEN',
+      );
     }
 
-    this.twilioClient = Twilio(accountSid, authToken);
-    this.logger.log('Twilio client initialized');
+    this.logger.log('Cloud API Service initialized');
   }
 
   /**
-   * Generate a unique chat ID from sender and recipient
-   * Removes '+' signs to avoid URL encoding issues in query parameters
+   * Verify webhook challenge from Meta
+   * Meta sends GET request with hub.mode, hub.verify_token, hub.challenge
+   * We must echo back the challenge to confirm webhook URL
+   *
+   * @param hubMode - Should be 'subscribe'
+   * @param hubVerifyToken - Token provided by us (should match META_VERIFY_TOKEN)
+   * @param hubChallenge - Challenge string to echo back
+   * @returns challenge if verification succeeds, null otherwise
    */
-  private generateChatId(sender: string, recipient: string): string {
-    // Remove '+' signs to avoid URL encoding issues
-    const cleanSender = sender.replace(/\+/g, '');
-    const cleanRecipient = recipient.replace(/\+/g, '');
-    const sorted = [cleanSender, cleanRecipient].sort();
-    return `chat_${sorted.join('_')}`;
+  verifyWebhookChallenge(
+    hubMode: string,
+    hubVerifyToken: string,
+    hubChallenge: string,
+  ): string | null {
+    console.log('=== WEBHOOK CHALLENGE VERIFICATION ===');
+    console.log('Received hubMode:', hubMode);
+    console.log('Received hubVerifyToken:', hubVerifyToken);
+    console.log('Expected metaVerifyToken:', this.metaVerifyToken);
+    console.log('Token match:', hubVerifyToken === this.metaVerifyToken);
+    console.log('Mode match:', hubMode === 'subscribe');
+
+    if (hubMode === 'subscribe' && hubVerifyToken === this.metaVerifyToken) {
+      console.log('✅ Webhook challenge verified successfully');
+      this.logger.log('Webhook challenge verified successfully');
+      return hubChallenge;
+    }
+
+    console.log('❌ Webhook challenge verification failed');
+    this.logger.warn('Webhook challenge verification failed');
+    return null;
   }
 
   /**
-   * Send a WhatsApp message
-   * @param messageDto - Message data (to, body, mediaUrl, contentSid, contentVariables)
-   * @returns Message SID from Twilio
+   * Handle webhook callback from Meta
+   * Verifies signature and processes message/status updates
+   *
+   * @param payload - Raw request body
+   * @param signature - X-Hub-Signature-256 header
+   * @returns Processed webhook data
    */
-  async sendMessage(messageDto: OutboundMessageDto) {
+  async handleWebhookCallback(
+    payload: string,
+    signature: string,
+  ): Promise<{ success: boolean; message?: string }> {
     try {
-      const toPhoneNumber = `whatsapp:${messageDto.to}`;
+      // Verify webhook signature if app secret is available
+      if (this.metaAppSecret) {
+        // Debug signature verification
+        console.log('=== WEBHOOK SIGNATURE DEBUG ===');
+        console.log('Payload length:', payload.length);
+        console.log('Payload preview:', payload.substring(0, 100));
+        console.log('Signature from header:', signature);
+        console.log('App secret available:', !!this.metaAppSecret);
 
-      const messageData: any = {
-        from: this.twilioPhoneNumber,
-        to: toPhoneNumber,
-      };
+        const isValid = verifyWebhookSignature(
+          payload,
+          signature,
+          this.metaAppSecret,
+        );
 
-      // If contentSid is provided, use template-based message
-      if (messageDto.contentSid) {
-        messageData.contentSid = messageDto.contentSid;
-        messageData.contentVariables = messageDto.contentVariables;
-      } else if (messageDto.body) {
-        // Otherwise use free-form body message
-        messageData.body = messageDto.body;
+        console.log('Signature valid:', isValid);
+
+        if (!isValid) {
+          this.logger.warn('Invalid webhook signature');
+          return { success: false, message: 'Invalid signature' };
+        }
       } else {
-        throw new Error('Either body or contentSid must be provided');
+        console.log(
+          '⚠️  META_APP_SECRET not configured - skipping signature verification',
+        );
+        this.logger.warn(
+          '⚠️  META_APP_SECRET not configured - skipping signature verification for webhook',
+        );
       }
 
-      // Add media URL if provided
-      if (messageDto.mediaUrl) {
-        messageData.mediaUrl = messageDto.mediaUrl;
+      // Parse webhook payload
+      const webhookPayload = JSON.parse(payload);
+      const parsed = parseWebhookPayload(webhookPayload);
+
+      if (!parsed.valid) {
+        this.logger.warn('Invalid webhook payload', parsed.errors);
+        return { success: false, message: 'Invalid payload' };
       }
 
-      // Send message via Twilio
-      const message = await this.twilioClient.messages.create(messageData);
+      // Extract updates from webhook
+      const {
+        messages: inboundMessages,
+        statuses,
+        contacts: webhookContacts,
+      } = extractWebhookUpdates(webhookPayload);
+
+      // Extract phone_number_id from webhook metadata
+      // The webhook structure is: entry[0].changes[0].value.metadata.phone_number_id
+      let phoneNumberId: string | undefined;
+      if (
+        webhookPayload.entry &&
+        webhookPayload.entry.length > 0 &&
+        webhookPayload.entry[0].changes &&
+        webhookPayload.entry[0].changes.length > 0
+      ) {
+        phoneNumberId =
+          webhookPayload.entry[0].changes[0].value.metadata?.phone_number_id;
+      }
+
+      console.log('Extracted phone_number_id from webhook:', phoneNumberId);
+
+      // Find the sender (phoneNumberId should map to a sender in the database)
+      let senderId: number | undefined;
+
+      // First, try to match by phoneNumberId
+      if (phoneNumberId) {
+        this.logger.log(
+          `Looking up sender for phone_number_id: ${phoneNumberId}`,
+        );
+        const sender = await db.query.senders.findFirst({
+          where: eq(senders.phoneNumberId, phoneNumberId),
+        });
+        if (sender) {
+          senderId = sender.id;
+          this.logger.log(
+            `Found sender by phoneNumberId: ${sender.id} for phone_number_id: ${phoneNumberId}`,
+          );
+        } else {
+          this.logger.warn(
+            `No sender found with phoneNumberId: ${phoneNumberId}. Checking if we can match by phone number from webhook...`,
+          );
+        }
+      } else {
+        this.logger.warn('No phone_number_id in webhook metadata');
+      }
+
+      // If phoneNumberId lookup failed, try to extract phone number from webhook and match
+      if (!senderId) {
+        this.logger.log(
+          'Attempting fallback: matching by phone number from webhook',
+        );
+        // Try to extract the recipient phone number from the webhook
+        // This is in: webhookPayload.entry[0].changes[0].value.metadata.phone_number
+        let recipientPhone: string | undefined;
+        if (
+          webhookPayload.entry &&
+          webhookPayload.entry.length > 0 &&
+          webhookPayload.entry[0].changes &&
+          webhookPayload.entry[0].changes.length > 0
+        ) {
+          recipientPhone =
+            webhookPayload.entry[0].changes[0].value.metadata?.phone_number;
+        }
+
+        console.log('Extracted phone_number from webhook:', recipientPhone);
+
+        if (recipientPhone) {
+          this.logger.log(
+            `Looking up sender by phone number: ${recipientPhone}`,
+          );
+          const sender = await db.query.senders.findFirst({
+            where: eq(senders.phoneNumber, recipientPhone),
+          });
+          if (sender) {
+            senderId = sender.id;
+            this.logger.log(
+              `Found sender by phone number: ${sender.id} (${recipientPhone})`,
+            );
+            // Update the sender with the phoneNumberId from this webhook
+            if (phoneNumberId) {
+              await db
+                .update(senders)
+                .set({ phoneNumberId })
+                .where(eq(senders.id, sender.id));
+              this.logger.log(
+                `Updated sender ${sender.id} with phoneNumberId: ${phoneNumberId}`,
+              );
+            }
+          } else {
+            this.logger.warn(
+              `No sender found with phone number: ${recipientPhone}`,
+            );
+          }
+        } else {
+          this.logger.warn('Could not extract phone_number from webhook');
+        }
+      }
+
+      // Debug: Log what we extracted
+      console.log('=== WEBHOOK EXTRACTION DEBUG ===');
+      console.log('Inbound messages count:', inboundMessages.length);
+      console.log(
+        'Inbound messages:',
+        JSON.stringify(inboundMessages, null, 2),
+      );
+      console.log('Statuses count:', statuses.length);
+      console.log('Contacts count:', webhookContacts.length);
+      console.log('Phone number ID:', phoneNumberId);
+      console.log('Resolved sender ID:', senderId);
+
+      // Process inbound messages
+      for (const message of inboundMessages) {
+        try {
+          console.log(`Processing inbound message: ${message.id}`);
+          await this.handleInboundMessage(message, webhookPayload, senderId);
+          console.log(`Successfully processed message: ${message.id}`);
+        } catch (error) {
+          this.logger.error(
+            `Error processing inbound message ${message.id}:`,
+            error,
+          );
+          console.error(`Error details:`, error);
+        }
+      }
+
+      // Process status updates
+      for (const status of statuses) {
+        try {
+          await this.handleMessageStatus(
+            status.id,
+            status.status,
+            status.timestamp,
+          );
+        } catch (error) {
+          this.logger.error(
+            `Error processing status for message ${status.id}:`,
+            error,
+          );
+        }
+      }
+
+      // Process contact updates (future: contact syncing)
+      if (webhookContacts.length > 0) {
+        this.logger.debug(`Received ${webhookContacts.length} contact updates`);
+        // TODO: Sync contact information when enabled
+      }
+
+      return { success: true };
+    } catch (error) {
+      this.logger.error('Error handling webhook callback:', error);
+      return { success: false, message: error.message };
+    }
+  }
+
+  /**
+   * Send a text message via Cloud API
+   * Stores message metadata locally
+   *
+   * @param messageDto - Recipient phone, message body, and sender ID
+   * @returns Response with message ID and status
+   */
+  async sendMessage(
+    messageDto: OutboundMessageDto,
+    userId?: number,
+  ): Promise<any> {
+    try {
+      const recipientPhone = cleanPhoneNumber(messageDto.to);
+
+      // Validate body is provided
+      if (!messageDto.body) {
+        throw new Error('Message body is required');
+      }
+
+      // Determine which sender this message is from
+      let senderId: number | undefined = messageDto.senderId;
+      let senderPhoneNumber: string | undefined = messageDto.businessPhone;
+
+      // If senderId provided, look up sender details
+      if (senderId) {
+        const sender = await db.query.senders.findFirst({
+          where: eq(senders.id, senderId),
+        });
+        if (!sender) {
+          throw new Error(`Sender with ID ${senderId} not found`);
+        }
+        senderPhoneNumber = sender.phoneNumber;
+      }
+      // If businessPhone provided, look up sender by phone number
+      else if (senderPhoneNumber) {
+        const sender = await db.query.senders.findFirst({
+          where: eq(senders.phoneNumber, senderPhoneNumber),
+        });
+        if (!sender) {
+          throw new Error(
+            `Sender with phone number ${senderPhoneNumber} not found`,
+          );
+        }
+        senderId = sender.id;
+      }
+      // If neither provided, use the first sender (user's default)
+      else {
+        const sender = await db.query.senders.findFirst();
+        if (!sender) {
+          throw new Error(
+            'No senders configured. Please add a WhatsApp sender first.',
+          );
+        }
+        senderId = sender.id;
+        senderPhoneNumber = sender.phoneNumber;
+      }
+
+      // Type guard: ensure senderPhoneNumber is defined
+      if (!senderPhoneNumber) {
+        throw new Error('Unable to determine sender phone number');
+      }
+
+      // Type guard: ensure senderId is defined
+      if (!senderId) {
+        throw new Error('Unable to determine sender ID');
+      }
+
+      // Look up sender's phoneNumberId
+      const senderRecord = await db.query.senders.findFirst({
+        where: eq(senders.id, senderId),
+      });
+
+      if (!senderRecord) {
+        throw new Error(`Sender with ID ${senderId} not found`);
+      }
+
+      if (!senderRecord.phoneNumberId) {
+        throw new Error(
+          `Sender ${senderId} (${senderPhoneNumber}) does not have a phoneNumberId set. ` +
+            `Please verify the sender in the UI and try again.`,
+        );
+      }
 
       this.logger.log(
-        `Message sent successfully. SID: ${message.sid}, To: ${messageDto.to}`,
+        `Sending message from sender ${senderId} (${senderPhoneNumber}) with phoneNumberId ${senderRecord.phoneNumberId} to ${recipientPhone}`,
       );
 
-      // Generate chat ID
-      const chatId = this.generateChatId(
-        this.businessPhoneDisplay,
-        messageDto.to,
+      // Build message payload for Cloud API
+      const message = {
+        messaging_product: 'whatsapp' as const,
+        to: recipientPhone,
+        type: 'text' as const,
+        text: {
+          preview_url: true,
+          body: messageDto.body,
+        },
+      };
+
+      // Validate message
+      const validation = validateCloudAPIMessage(message);
+      if (!validation.valid) {
+        throw new Error(`Invalid message: ${validation.errors.join(', ')}`);
+      }
+
+      // Send via Cloud API using the sender's phoneNumberId
+      const response = await this.sendCloudAPIMessage(
+        message,
+        senderRecord.phoneNumberId,
       );
 
-      // Ensure chat exists
+      if (!response.messages || response.messages.length === 0) {
+        throw new Error('No message ID returned from Cloud API');
+      }
+
+      const waMessageId = response.messages[0].id;
+
+      this.logger.log(
+        `Message sent successfully. ID: ${waMessageId}, To: ${recipientPhone}`,
+      );
+
+      // Generate chat ID using the sender's phone number
+      const chatId = generateChatId(senderPhoneNumber, recipientPhone);
+
+      // Ensure chat exists with the correct sender
       await this.getOrCreateChat(
         chatId,
-        this.businessPhoneDisplay,
-        messageDto.to,
+        senderPhoneNumber,
+        recipientPhone,
+        senderId,
       );
 
-      // Store message metadata in database
+      // Store message metadata
       await this.storeOutboundMessage({
-        messageSid: message.sid,
+        waMessageId,
         chatId,
-        to: messageDto.to,
+        from: senderPhoneNumber,
+        to: recipientPhone,
         body: messageDto.body,
-        mediaUrl: messageDto.mediaUrl,
+        userId,
+        senderId,
       });
 
       return {
         success: true,
-        messageSid: message.sid,
-        to: messageDto.to,
-        status: message.status,
+        messageId: waMessageId,
+        to: recipientPhone,
+        status: 'sent',
       };
     } catch (error) {
       this.logger.error(`Error sending message: ${error.message}`, error);
       throw new Error(`Failed to send WhatsApp message: ${error.message}`);
     }
-  } /**
-   * Retrieve message status from Twilio
-   * @param messageSid - Twilio message SID
-   * @returns Message status
+  }
+
+  /**
+   * Send media message via Cloud API
+   * Supports image, video, audio, document
+   *
+   * @param recipientPhone - Recipient phone number
+   * @param mediaType - Type of media (image, video, audio, document)
+   * @param mediaUrl - URL of media file
+   * @param caption - Optional caption for media
+   * @param senderId - Optional sender ID to determine which phoneNumberId to use
+   * @returns Response with message ID
    */
-  async getMessageStatus(messageSid: string) {
+  async sendMedia(
+    recipientPhone: string,
+    mediaType: 'image' | 'video' | 'audio' | 'document',
+    mediaUrl: string,
+    caption?: string,
+    senderId?: number,
+  ): Promise<any> {
     try {
-      const message = await this.twilioClient.messages(messageSid).fetch();
+      const cleanedPhone = cleanPhoneNumber(recipientPhone);
+
+      const mediaPayload: any = {
+        link: mediaUrl,
+      };
+
+      // Add caption if provided and supported
+      if (caption && ['image', 'video', 'document'].includes(mediaType)) {
+        mediaPayload.caption = caption;
+      }
+
+      const message = {
+        messaging_product: 'whatsapp' as const,
+        to: cleanedPhone,
+        type: mediaType,
+        [mediaType]: mediaPayload,
+      };
+
+      // Validate message
+      const validation = validateCloudAPIMessage(message);
+      if (!validation.valid) {
+        throw new Error(`Invalid message: ${validation.errors.join(', ')}`);
+      }
+
+      // Look up phoneNumberId if senderId provided
+      let phoneNumberIdToUse: string | undefined;
+      if (senderId) {
+        const sender = await db.query.senders.findFirst({
+          where: eq(senders.id, senderId),
+        });
+        if (sender && sender.phoneNumberId) {
+          phoneNumberIdToUse = sender.phoneNumberId;
+        }
+      }
+
+      // Send via Cloud API
+      const response = await this.sendCloudAPIMessage(
+        message,
+        phoneNumberIdToUse,
+      );
+
+      if (!response.messages || response.messages.length === 0) {
+        throw new Error('No message ID returned from Cloud API');
+      }
+
+      const waMessageId = response.messages[0].id;
+      this.logger.log(
+        `Media message sent successfully. ID: ${waMessageId}, Type: ${mediaType}`,
+      );
+
       return {
-        messageSid,
-        status: message.status,
-        errorCode: message.errorCode,
-        errorMessage: message.errorMessage,
+        success: true,
+        messageId: waMessageId,
+        to: cleanedPhone,
+        type: mediaType,
+        status: 'sent',
+      };
+    } catch (error) {
+      this.logger.error(`Error sending media: ${error.message}`, error);
+      throw new Error(`Failed to send media: ${error.message}`);
+    }
+  }
+
+  /**
+   * Internal method: Send message via Cloud API HTTP endpoint
+   * @private
+   */
+  private async sendCloudAPIMessage(
+    message: any,
+    phoneNumberId?: string,
+  ): Promise<CloudAPISendMessageResponse> {
+    // Use provided phoneNumberId, or fall back to default (for backward compatibility)
+    const actualPhoneNumberId = phoneNumberId || this.metaPhoneNumberId;
+    const url = buildCloudAPIUrl(actualPhoneNumberId, 'messages');
+    const headers = getCloudAPIHeaders(this.metaAccessToken);
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(message),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(
+          `Cloud API error: ${response.status} ${JSON.stringify(errorData)}`,
+        );
+      }
+
+      return await response.json();
+    } catch (error) {
+      this.logger.error('Cloud API request failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Retrieve detailed message status with full delivery tracking
+   *
+   * Returns the complete status lifecycle for a message:
+   * - Current status (pending, sent, delivered, read, failed)
+   * - Timestamp for each status transition
+   * - Full status history for debugging
+   *
+   * Note: Status updates come via Meta Cloud API webhooks.
+   * This method returns the current state from our local database.
+   *
+   * @param messageId - Cloud API message ID (wamid)
+   * @returns Comprehensive message status information with history
+   */
+  async getMessageStatus(messageId: string) {
+    try {
+      const message = await db.query.messages.findFirst({
+        where: eq(messages.messageId, messageId),
+      });
+
+      if (!message) {
+        throw new Error(`Message not found: ${messageId}`);
+      }
+
+      // Build status history based on timestamp progression
+      const statusHistory: Array<{
+        status: string;
+        timestamp: string;
+        failureReason?: string;
+      }> = [];
+
+      // Pending status (implicit, message created)
+      statusHistory.push({
+        status: 'pending',
+        timestamp: message.timestamp.toISOString(),
+      });
+
+      // Track each status transition
+      if (message.sentAt) {
+        statusHistory.push({
+          status: 'sent',
+          timestamp: message.sentAt.toISOString(),
+        });
+      }
+
+      if (message.deliveredAt) {
+        statusHistory.push({
+          status: 'delivered',
+          timestamp: message.deliveredAt.toISOString(),
+        });
+      }
+
+      if (message.readAt) {
+        statusHistory.push({
+          status: 'read',
+          timestamp: message.readAt.toISOString(),
+        });
+      }
+
+      if (message.status === 'failed' && message.failedReason) {
+        statusHistory.push({
+          status: 'failed',
+          timestamp:
+            message.updatedAt?.toISOString() || new Date().toISOString(),
+          failureReason: message.failedReason,
+        });
+      }
+
+      return {
+        messageId,
+        direction: message.direction,
+        currentStatus: message.status,
+        sentAt: message.sentAt?.toISOString() || null,
+        deliveredAt: message.deliveredAt?.toISOString() || null,
+        readAt: message.readAt?.toISOString() || null,
+        failedReason: message.failedReason || null,
+        statusHistory: statusHistory,
+        updatedAt: message.updatedAt?.toISOString() || new Date().toISOString(),
       };
     } catch (error) {
       this.logger.error(
@@ -140,155 +675,356 @@ export class WhatsAppService {
 
   /**
    * Handle inbound WhatsApp message webhook
-   * @param webhookData - Webhook data from Twilio
+   * Processes message from Cloud API webhook
+   * @param message - Inbound message from webhook
+   * @param webhookPayload - Full webhook payload for metadata
+   * @private
    */
-  async handleInboundMessage(webhookData: any) {
+  private async handleInboundMessage(
+    message: CloudAPIInboundMessage,
+    webhookPayload: CloudAPIWebhookPayload,
+    senderId?: number,
+  ): Promise<void> {
     try {
-      const {
-        MessageSid,
-        From,
-        To,
-        Body,
-        NumMedia,
-        MediaUrl0,
-        MediaContentType0,
-      } = webhookData;
+      console.log('=== HANDLE INBOUND MESSAGE ===');
+      console.log('Raw message:', JSON.stringify(message, null, 2));
 
-      this.logger.log(
-        `Inbound message received. SID: ${MessageSid}, From: ${From}`,
-      );
+      const senderPhone = cleanPhoneNumber(message.from);
 
-      // Extract phone numbers without 'whatsapp:' prefix for storage
-      const senderPhone = From.replace('whatsapp:', '');
-      const recipientPhone = To.replace('whatsapp:', '');
+      console.log('Sender phone:', senderPhone);
+      console.log('Message ID:', message.id);
+      console.log('Sender ID from webhook:', senderId);
+      const messageId = message.id;
+
+      // Get sender details to get the business phone
+      let sender: any = null;
+      if (senderId) {
+        sender = await db.query.senders.findFirst({
+          where: eq(senders.id, senderId),
+        });
+      }
+
+      if (!sender) {
+        this.logger.error(
+          `No sender found for ID ${senderId}. Cannot process message.`,
+        );
+        throw new Error(
+          `Sender not found for message. SenderId: ${senderId}, MessageId: ${messageId}`,
+        );
+      }
+
+      const businessPhone = sender.phoneNumber;
+
+      console.log('Business phone:', businessPhone);
 
       // Generate chat ID
-      const chatId = this.generateChatId(recipientPhone, senderPhone);
+      const chatId = generateChatId(businessPhone, senderPhone);
+      console.log('Generated chat ID:', chatId);
 
       // Ensure chat exists
-      await this.getOrCreateChat(chatId, recipientPhone, senderPhone);
+      const chat = await this.getOrCreateChat(
+        chatId,
+        businessPhone,
+        senderPhone,
+        senderId,
+      );
+      console.log('Chat created/retrieved:', {
+        chatId: chat.chatId,
+        id: chat.id,
+        senderId: chat.senderId,
+      });
 
-      // Determine message type
-      const messageType = NumMedia && Number(NumMedia) > 0 ? 'media' : 'text';
-      const mediaUrl = MediaContentType0
-        ? `${MediaUrl0}?ContentType=${MediaContentType0}`
-        : null;
+      // Determine message type and extract content
+      const messageType = mapCloudAPIMessageType(message.type);
+      let textContent = '';
+      let mediaMetadata: MediaMetadata | undefined;
+
+      switch (message.type) {
+        case 'text':
+          textContent = message.text?.body || '';
+          break;
+        case 'image':
+          mediaMetadata = {
+            type: 'image',
+            mimeType: message.image?.mime_type || 'image/jpeg',
+            sha256: message.image?.sha256 || '',
+            mediaId: message.image?.id || '',
+            caption: message.image?.caption,
+          };
+          textContent = message.image?.caption || '[Image]';
+          break;
+        case 'video':
+          mediaMetadata = {
+            type: 'video',
+            mimeType: message.video?.mime_type || 'video/mp4',
+            sha256: message.video?.sha256 || '',
+            mediaId: message.video?.id || '',
+            caption: message.video?.caption,
+          };
+          textContent = message.video?.caption || '[Video]';
+          break;
+        case 'audio':
+          mediaMetadata = {
+            type: 'audio',
+            mimeType: message.audio?.mime_type || 'audio/mpeg',
+            sha256: message.audio?.sha256 || '',
+            mediaId: message.audio?.id || '',
+          };
+          textContent = '[Audio]';
+          break;
+        case 'document':
+          mediaMetadata = {
+            type: 'document',
+            mimeType: message.document?.mime_type || 'application/octet-stream',
+            sha256: message.document?.sha256 || '',
+            mediaId: message.document?.id || '',
+            filename: message.document?.filename,
+          };
+          textContent = `[Document: ${message.document?.filename || 'unknown'}]`;
+          break;
+        case 'button':
+          textContent = message.button?.text || '[Button]';
+          break;
+        case 'interactive':
+          textContent = '[Interactive message]';
+          break;
+        default:
+          textContent = '[Unsupported message type]';
+      }
 
       // Store inbound message
-      const messageData = {
-        messageSid: MessageSid,
+      await this.storeInboundMessage({
+        waMessageId: messageId,
         chatId,
+        source: 'whatsapp',
         sender: senderPhone,
-        recipient: recipientPhone,
-        body: Body,
         type: messageType,
-        mediaUrl,
-        timestamp: new Date(),
-      };
+        text: textContent,
+        mediaMetadata,
+        direction: 'inbound',
+        status: 'delivered',
+        timestamp: new Date(parseInt(message.timestamp) * 1000),
+        waPhoneNumberId: businessPhone,
+      });
 
-      await this.storeInboundMessage(messageData);
+      console.log('Message stored successfully:', {
+        messageId,
+        chatId,
+      });
+
+      // Update chat with last message preview
+      await this.updateChatLastMessage(chatId, textContent);
+      console.log('Chat updated with last message');
 
       this.logger.log(
-        `Inbound message stored. From: ${senderPhone}, Type: ${messageType}`,
+        `Inbound message stored. From: ${senderPhone}, Type: ${messageType}, ID: ${messageId}`,
       );
-
-      // Update chat with last message
-      await this.updateChatLastMessage(chatId, Body);
 
       // TODO: Trigger automation rules
       // TODO: Notify frontend via WebSocket
-
-      return { success: true, messageSid: MessageSid };
     } catch (error) {
-      this.logger.error(
-        `Error handling inbound message: ${error.message}`,
-        error,
-      );
-      // Don't throw, just log - Twilio will retry if we don't respond 200
-      return { success: false, error: error.message };
+      this.logger.error('Error handling inbound message:', error);
+      throw error;
     }
   }
 
   /**
-   * Handle message delivery status webhook
-   * @param messageSid - Twilio message SID
-   * @param messageStatus - Status from Twilio ('sent', 'delivered', 'failed', etc)
+   * Handle message delivery status webhook from Meta Cloud API
+   *
+   * Implements the full message lifecycle:
+   * - pending: Initial state when message is queued
+   * - sent: Message successfully sent to WhatsApp servers (✓)
+   * - delivered: Message reached recipient device (✓✓)
+   * - read: Message read by recipient (✓✓ in blue)
+   * - failed: Delivery failed with error
+   *
+   * @param messageId - Cloud API message ID (wamid)
+   * @param status - Status from Cloud API webhook
+   * @param timestamp - Unix timestamp from webhook (optional, defaults to now)
+   * @private
    */
-  async handleMessageStatus(
-    messageSid: string | undefined,
-    messageStatus: string | undefined,
-  ) {
+  private async handleMessageStatus(
+    messageId: string,
+    status: string,
+    timestamp?: string,
+  ): Promise<void> {
     try {
-      if (!messageSid || !messageStatus) {
+      if (!messageId || !status) {
         this.logger.warn(
-          `Incomplete status webhook. SID: ${messageSid}, Status: ${messageStatus}`,
+          `Incomplete status webhook. MessageId: ${messageId}, Status: ${status}`,
         );
-        return { success: false };
+        return;
       }
 
-      this.logger.log(
-        `Message status update. SID: ${messageSid}, Status: ${messageStatus}`,
-      );
+      const normalizedStatus = mapCloudAPIStatus(status);
+      const statusTimestamp = timestamp
+        ? new Date(parseInt(timestamp) * 1000)
+        : new Date();
 
-      // TODO: Update message status in database
-      // TODO: Update chat UI with delivery status
+      // Find message to update
+      const msg = await db.query.messages.findFirst({
+        where: eq(messages.messageId, messageId),
+      });
 
-      return { success: true, messageSid, status: messageStatus };
+      if (msg) {
+        // Build update data based on status
+        const updateData: Record<string, any> = {
+          status: normalizedStatus,
+          updatedAt: new Date(),
+        };
+
+        // Set timestamp fields based on status progression
+        // This creates the double-tick visualization:
+        switch (normalizedStatus) {
+          case 'sent':
+            updateData.sentAt = statusTimestamp;
+            break;
+          case 'delivered':
+            // Once delivered, keep the original sentAt if it exists
+            if (!msg.sentAt) {
+              updateData.sentAt = statusTimestamp;
+            }
+            updateData.deliveredAt = statusTimestamp;
+            break;
+          case 'read':
+            // Preserve previous timestamps
+            if (!msg.sentAt) {
+              updateData.sentAt = statusTimestamp;
+            }
+            if (!msg.deliveredAt) {
+              updateData.deliveredAt = statusTimestamp;
+            }
+            updateData.readAt = statusTimestamp;
+            break;
+          case 'failed':
+            // Keep timestamps but mark as failed
+            // failedReason will be set from error data if provided
+            break;
+        }
+
+        await db
+          .update(messages)
+          .set(updateData)
+          .where(eq(messages.messageId, messageId));
+
+        this.logger.log(
+          `Message status updated. ID: ${messageId}, Status: ${normalizedStatus}, Timestamp: ${statusTimestamp.toISOString()}`,
+        );
+
+        // Log status progression for debugging
+        console.log(`📊 Message Status Update:
+          ID: ${messageId}
+          Status: ${msg.status} → ${normalizedStatus}
+          Sent: ${msg.sentAt || 'pending'} → ${updateData.sentAt || msg.sentAt || 'pending'}
+          Delivered: ${msg.deliveredAt || 'pending'} → ${updateData.deliveredAt || msg.deliveredAt || 'pending'}
+          Read: ${msg.readAt || 'pending'} → ${updateData.readAt || msg.readAt || 'pending'}
+        `);
+      } else {
+        this.logger.debug(
+          `Message not found for status update: ${messageId}. Status: ${status}`,
+        );
+        console.warn(
+          `⚠️ Status update received for non-existent message: ${messageId}`,
+        );
+      }
     } catch (error) {
-      this.logger.error(
-        `Error handling message status: ${error.message}`,
-        error,
-      );
-      return { success: false, error: error.message };
+      this.logger.error('Error handling message status:', error);
+      // Don't throw - status updates are non-critical
     }
   }
 
   /**
    * Store outbound message metadata in database
-   * In production, this would use a database connection
+   * @private
    */
-  private async storeOutboundMessage(messageData: any) {
+  /**
+   * Store outbound message metadata in database
+   * Initial status is 'pending' until Cloud API confirms 'sent'
+   * @private
+   */
+  private async storeOutboundMessage(messageData: {
+    waMessageId: string;
+    chatId: string;
+    from: string;
+    to: string;
+    body: string;
+    userId?: number;
+    senderId?: number;
+  }): Promise<void> {
     try {
+      const now = new Date();
       await db.insert(messages).values({
-        messageId: messageData.messageSid,
+        messageId: messageData.waMessageId,
         chatId: messageData.chatId,
         source: 'whatsapp',
-        sender: this.businessPhoneDisplay,
+        sender: messageData.from, // Store the actual sender's phone number
         type: 'text',
         text: messageData.body,
-        mediaUrl: messageData.mediaUrl,
         direction: 'outbound',
-        status: 'sent',
-        timestamp: new Date(),
+        status: 'pending', // Start as pending, will update to 'sent' when Cloud API confirms
+        timestamp: now,
+        updatedAt: now,
       });
-      this.logger.debug('Outbound message stored', messageData.messageSid);
-      return messageData;
+
+      this.logger.debug('Outbound message stored', messageData.waMessageId);
+      console.log(
+        `💾 Outbound message stored with pending status: ${messageData.waMessageId}`,
+      );
     } catch (error) {
       this.logger.error(`Error storing outbound message: ${error.message}`);
-      // Don't throw - message already sent to Twilio
+      // Don't throw - message already sent
     }
   }
 
   /**
    * Store inbound message metadata in database
-   * In production, this would use a database connection
+   * @private
    */
-  private async storeInboundMessage(messageData: any) {
+  private async storeInboundMessage(
+    messageData: NormalizedCloudAPIMessage,
+  ): Promise<void> {
     try {
+      // Check if message already exists
+      const existingMessage = await db.query.messages.findFirst({
+        where: eq(messages.messageId, messageData.waMessageId),
+      });
+
+      if (existingMessage) {
+        console.log(
+          `Message already exists: ${messageData.waMessageId} - skipping duplicate`,
+        );
+        this.logger.debug(
+          'Message already exists, skipping duplicate:',
+          messageData.waMessageId,
+        );
+        return;
+      }
+
       await db.insert(messages).values({
-        messageId: messageData.messageSid,
+        messageId: messageData.waMessageId,
         chatId: messageData.chatId,
         source: 'whatsapp',
         sender: messageData.sender,
         type: messageData.type,
-        text: messageData.body,
-        mediaUrl: messageData.mediaUrl,
+        text: messageData.text,
+        mediaUrl: messageData.mediaMetadata
+          ? `cloud-api://${messageData.mediaMetadata.mediaId}`
+          : undefined,
         direction: 'inbound',
         status: 'delivered',
         timestamp: messageData.timestamp,
       });
-      this.logger.debug('Inbound message stored', messageData.messageSid);
-      return messageData;
+
+      // Store media metadata if present
+      // TODO: Create media_metadata table in schema
+      if (messageData.mediaMetadata) {
+        this.logger.debug(
+          'Media metadata stored for message:',
+          messageData.waMessageId,
+        );
+      }
+
+      this.logger.debug('Inbound message stored', messageData.waMessageId);
     } catch (error) {
       this.logger.error(`Error storing inbound message: ${error.message}`);
       throw error;
@@ -297,15 +1033,25 @@ export class WhatsAppService {
 
   /**
    * Get or create a chat for two participants
+   * @private
    */
   private async getOrCreateChat(
     chatId: string,
     businessPhone: string,
     participantPhone: string,
+    senderId?: number,
   ): Promise<Chat> {
     try {
+      // Validate that senderId is provided - we MUST know which sender this chat belongs to
+      if (!senderId) {
+        throw new Error(
+          `Cannot create/retrieve chat without senderId. This indicates a webhook routing error.`,
+        );
+      }
+
+      // Look up chat for that specific sender
       let chat = await db.query.chats.findFirst({
-        where: eq(chats.chatId, chatId),
+        where: and(eq(chats.chatId, chatId), eq(chats.senderId, senderId)),
       });
 
       if (!chat) {
@@ -315,11 +1061,18 @@ export class WhatsAppService {
             chatId,
             businessPhone,
             participantPhone,
-            participantName: participantPhone, // Initially set to phone number
+            participantName: participantPhone,
+            senderId,
+            userId: (
+              await db.query.senders.findFirst({
+                where: eq(senders.id, senderId),
+              })
+            )?.userId,
             isActive: true,
           })
           .returning();
-        this.logger.log(`Chat created: ${chatId}`);
+
+        this.logger.log(`Chat created: ${chatId} for sender ${senderId}`);
         return newChat;
       }
 
@@ -332,8 +1085,12 @@ export class WhatsAppService {
 
   /**
    * Update chat with latest message info
+   * @private
    */
-  private async updateChatLastMessage(chatId: string, lastMessage: string) {
+  private async updateChatLastMessage(
+    chatId: string,
+    lastMessage: string,
+  ): Promise<void> {
     try {
       await db
         .update(chats)
@@ -353,10 +1110,13 @@ export class WhatsAppService {
    * Save a note to a message
    * Multiple users can add notes to the same message
    */
-  async saveNote(messageId: string, userId: number, note: string) {
+  async saveNote(
+    messageId: string,
+    userId: number,
+    note: string,
+  ): Promise<any> {
     try {
-      // TODO: Store note in database
-      // INSERT INTO notes (message_id, user_id, note, created_at) VALUES (...)
+      // TODO: Store note in database via notes service
       this.logger.log(`Note saved for message ${messageId} by user ${userId}`);
       return {
         success: true,
@@ -373,10 +1133,8 @@ export class WhatsAppService {
   /**
    * Get all notes for a message
    */
-  async getMessageNotes(messageId: string) {
+  async getMessageNotes(messageId: string): Promise<any> {
     try {
-      // TODO: Retrieve notes from database
-      // SELECT * FROM notes WHERE message_id = ...
       this.logger.debug(`Retrieving notes for message ${messageId}`);
       return {
         messageId,
@@ -396,9 +1154,8 @@ export class WhatsAppService {
     startDate?: Date;
     endDate?: Date;
     limit?: number;
-  }) {
+  }): Promise<any> {
     try {
-      // TODO: Retrieve messages from database with filters
       this.logger.debug('Retrieving messages with filters', filters);
       return {
         messages: [],
@@ -411,7 +1168,7 @@ export class WhatsAppService {
   }
 
   /**
-   * Get all chats (conversations)
+   * Get all chats (conversations) for a user
    */
   async getChats(
     skip: number = 0,
@@ -421,7 +1178,7 @@ export class WhatsAppService {
     try {
       // Get user's senders first
       const userSenders = await db.query.senders.findMany({
-        where: eq(require('@database/schema').senders.userId, userId),
+        where: eq(senders.userId, userId),
         columns: {
           phoneNumber: true,
         },
@@ -433,16 +1190,22 @@ export class WhatsAppService {
         return [];
       }
 
-      // Get chats only for this user's senders
+      // Get chats for this user's senders with proper ordering
+      // Sort by: 1) IS NULL DESC (puts NULL first), then 2) lastMessageTime DESC
       const chatsData = await db.query.chats.findMany({
         where: and(
           eq(chats.isActive, true),
           inArray(chats.businessPhone, phoneNumbers),
         ),
-        orderBy: desc(chats.lastMessageTime),
+        orderBy: [
+          // Sort by whether lastMessageTime IS NULL (NULL first), then by the time descending
+          desc(sql`${chats.lastMessageTime} IS NULL`),
+          desc(chats.lastMessageTime),
+        ],
         limit: take,
         offset: skip,
       });
+
       return chatsData;
     } catch (error) {
       this.logger.error(`Error retrieving chats: ${error.message}`);
@@ -465,10 +1228,68 @@ export class WhatsAppService {
         limit: take,
         offset: skip,
       });
+
       return chatMessages;
     } catch (error) {
       this.logger.error(`Error retrieving chat messages: ${error.message}`);
       throw new Error(`Failed to retrieve chat messages: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get phone number ID from Meta Cloud API
+   * Queries the WABA's phone numbers to find the ID for a given phone number
+   * This is needed when setting up a new sender number
+   *
+   * @param phoneNumber - WhatsApp Business phone number (e.g., +14155552671)
+   * @returns Phone number ID from Meta Cloud API
+   */
+  async getPhoneNumberIdFromMeta(phoneNumber: string): Promise<string> {
+    try {
+      if (!this.wabaId) {
+        throw new Error('META_WABA_ID not configured');
+      }
+
+      const url = `https://graph.facebook.com/v20.0/${this.wabaId}/phone_numbers`;
+
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: getCloudAPIHeaders(this.metaAccessToken),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        this.logger.error('Meta API error:', errorData);
+        throw new Error(
+          `Failed to fetch phone numbers from Meta: ${response.status} ${JSON.stringify(errorData)}`,
+        );
+      }
+
+      const data = (await response.json()) as any;
+      const phoneNumbers = data.data || [];
+
+      // Clean phone number for comparison
+      const cleanedPhone = cleanPhoneNumber(phoneNumber);
+
+      // Find matching phone number
+      const matchingPhone = phoneNumbers.find((pn: any) => {
+        const cleanedMeta = cleanPhoneNumber(pn.phone_number || '');
+        return cleanedMeta === cleanedPhone;
+      });
+
+      if (!matchingPhone) {
+        throw new Error(
+          `Phone number ${phoneNumber} not found in Meta WABA. Available numbers: ${phoneNumbers.map((p: any) => p.phone_number).join(', ')}`,
+        );
+      }
+
+      this.logger.log(
+        `Found phone number ID for ${phoneNumber}: ${matchingPhone.id}`,
+      );
+      return matchingPhone.id;
+    } catch (error) {
+      this.logger.error(`Error getting phone number ID from Meta:`, error);
+      throw error;
     }
   }
 }

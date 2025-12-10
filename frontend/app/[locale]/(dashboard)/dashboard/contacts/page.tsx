@@ -1,6 +1,7 @@
 "use client";
 
 import { DeleteConfirmationDialog } from "@/components/dialogs/delete-confirmation-dialog";
+import { SelectSenderModal } from "@/components/dialogs/select-sender-modal";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -25,7 +26,7 @@ interface Contact {
   id: string;
   contactId: string;
   firstName: string;
-  lastName: string | null;
+  lastName?: string;
   countryCode: string;
   phoneNumber: string;
   avatar: string | null;
@@ -35,6 +36,12 @@ interface Contact {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+interface Sender {
+  id: number;
+  phoneNumber: string;
+  displayName?: string;
 }
 
 function formatDateTime(dateString: string | null): string {
@@ -62,7 +69,10 @@ function formatDateTime(dateString: string | null): string {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-function getInitials(firstName: string, lastName: string | null): string {
+function getInitials(
+  firstName: string,
+  lastName: string | undefined | null
+): string {
   const first = firstName.charAt(0).toUpperCase();
   const last = lastName ? lastName.charAt(0).toUpperCase() : "";
   return (first + last).slice(0, 2);
@@ -82,6 +92,9 @@ export default function ContactsPage() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [senderModalOpen, setSenderModalOpen] = useState(false);
+  const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
+  const [availableSenders, setAvailableSenders] = useState<Sender[]>([]);
   const [contactToDelete, setContactToDelete] = useState<Contact | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -123,31 +136,42 @@ export default function ContactsPage() {
   const handleStartChat = async (contact: Contact) => {
     try {
       // Fetch available senders for the user
-      const allSenders = (await backendApi.senders.list()) as any[];
+      const senders = (await backendApi.senders.list()) as Sender[];
 
-      if (!allSenders || allSenders.length === 0) {
+      if (!senders || senders.length === 0) {
         addNotification(
-          "No WhatsApp senders configured. Please set up a sender first.",
+          "No WhatsApp senders configured. Please add a sender first.",
           "error"
         );
         return;
       }
 
-      // TODO: In future, add logic to fetch senders linked to this specific contact
-      // For now, use the first available sender as default
-      // This should be replaced with: const contactSenders = await backendApi.contacts.getSenders(contact.contactId)
+      // Store contact and senders in state, then show modal
+      setSelectedContact(contact);
+      setAvailableSenders(senders);
+      setSenderModalOpen(true);
+    } catch (err) {
+      console.error("Failed to fetch senders:", err);
+      addNotification("Failed to start chat", "error");
+    }
+  };
 
-      const selectedSender = allSenders[0];
-      const businessPhone = selectedSender.phoneNumber;
-      const participantPhone = contact.phoneNumber;
-      const senderId = selectedSender.id;
+  const handleSenderSelected = async (
+    senderId: number,
+    senderPhoneNumber: string
+  ) => {
+    if (!selectedContact) return;
+
+    try {
+      const participantPhone = selectedContact.phoneNumber;
+      const participantName = `${selectedContact.firstName} ${
+        selectedContact.lastName || ""
+      }`.trim();
 
       const createdChat = await backendApi.chats.startWithContact({
-        businessPhone,
+        businessPhone: senderPhoneNumber,
         participantPhone,
-        participantName: `${contact.firstName} ${
-          contact.lastName || ""
-        }`.trim(),
+        participantName,
         senderId,
       });
 
@@ -159,6 +183,10 @@ export default function ContactsPage() {
       addNotification("Failed to start chat", "error");
       // Fallback: just go to chats page
       router.push(`/${locale}/dashboard/chats`);
+    } finally {
+      setSenderModalOpen(false);
+      setSelectedContact(null);
+      setAvailableSenders([]);
     }
   };
 
@@ -329,6 +357,20 @@ export default function ContactsPage() {
         }}
         isLoading={isDeleting}
       />
+
+      {selectedContact && (
+        <SelectSenderModal
+          isOpen={senderModalOpen}
+          onClose={() => {
+            setSenderModalOpen(false);
+            setSelectedContact(null);
+            setAvailableSenders([]);
+          }}
+          onSelect={handleSenderSelected}
+          senders={availableSenders}
+          contact={selectedContact}
+        />
+      )}
     </div>
   );
 }

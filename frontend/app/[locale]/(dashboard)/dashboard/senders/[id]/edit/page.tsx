@@ -8,12 +8,13 @@ import { useNotification } from "@/hooks/use-notification";
 import { backendApi } from "@/lib/api/endpoints";
 import { ArrowLeft } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { use, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 interface Sender {
   id: number;
   phoneNumber: string;
   displayName?: string;
+  phoneNumberId?: string; // Meta Cloud API ID
   twilioPhoneNumberSid?: string;
   twilioMessagingServiceSid?: string;
   twilioAccountSid?: string;
@@ -22,15 +23,16 @@ interface Sender {
 export default function SenderFormPage({
   params,
 }: {
-  params: Promise<{ locale: string; id?: string }>;
+  params: { locale: string; id?: string };
 }) {
   const router = useRouter();
-  const { locale, id: senderId } = use(params);
+  const { locale, id: senderId } = params;
   const isEdit = !!senderId;
 
   const { addNotification } = useNotification();
   const [isLoading, setIsLoading] = useState(false);
   const [isFetching, setIsFetching] = useState(isEdit);
+  const [isVerifying, setIsVerifying] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const [formData, setFormData] = useState<Partial<Sender>>({
@@ -46,12 +48,8 @@ export default function SenderFormPage({
     if (isEdit) {
       const fetchSender = async () => {
         try {
-          const response = await fetch(
-            `${backendApi.baseUrl}/senders/${senderId}`
-          );
-          if (!response.ok) throw new Error("Failed to fetch sender");
-          const sender = await response.json();
-          setFormData(sender);
+          const sender = await backendApi.senders.get(parseInt(senderId, 10));
+          setFormData(sender as Partial<Sender>);
         } catch (err) {
           console.error("Failed to fetch sender:", err);
           addNotification("Failed to load sender details", "error");
@@ -95,6 +93,32 @@ export default function SenderFormPage({
     return Object.keys(newErrors).length === 0;
   };
 
+  const handleVerifyPhoneNumber = async () => {
+    if (!isEdit || !senderId) {
+      addNotification("Can only verify existing senders", "error");
+      return;
+    }
+
+    setIsVerifying(true);
+    try {
+      const result = await backendApi.senders.verify(parseInt(senderId, 10));
+      setFormData((prev) => ({
+        ...prev,
+        phoneNumberId: result.phoneNumberId,
+      }));
+      addNotification("Phone Number ID verified successfully", "success");
+    } catch (err: any) {
+      console.error("Verification error:", err);
+      addNotification(
+        err.message ||
+          "Failed to verify phone number. Check that it exists in your Meta WABA.",
+        "error"
+      );
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -113,25 +137,11 @@ export default function SenderFormPage({
         twilioAccountSid: formData.twilioAccountSid || null,
       };
 
-      const method = isEdit ? "PATCH" : "POST";
-      const url = isEdit
-        ? `${backendApi.baseUrl}/senders/${senderId}`
-        : `${backendApi.baseUrl}/senders`;
-
-      const response = await fetch(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(
-          error.message || `Failed to ${isEdit ? "update" : "create"} sender`
-        );
+      if (isEdit) {
+        await backendApi.senders.update(parseInt(senderId, 10), payload);
+      } else {
+        await backendApi.senders.create(payload);
       }
-
-      const result = await response.json();
 
       addNotification(
         `Sender ${isEdit ? "updated" : "created"} successfully`,
@@ -219,6 +229,45 @@ export default function SenderFormPage({
             <p className="text-xs text-muted-foreground">
               A friendly name to help you identify this number
             </p>
+          </div>
+
+          {/* Meta Cloud API Status */}
+          <div className="space-y-2 p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-900">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="text-sm font-semibold">
+                  Meta Cloud API Status
+                </Label>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {formData.phoneNumberId
+                    ? `Phone Number ID: ${formData.phoneNumberId}`
+                    : "Not yet verified. Click 'Verify' to retrieve from Meta."}
+                </p>
+              </div>
+              {isEdit && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleVerifyPhoneNumber}
+                  disabled={isVerifying || !formData.phoneNumber}
+                  className="shrink-0"
+                >
+                  {isVerifying ? "Verifying..." : "Verify"}
+                </Button>
+              )}
+            </div>
+            {!formData.phoneNumberId && (
+              <p className="text-xs text-amber-700 dark:text-amber-200 mt-2">
+                ⚠️ The Phone Number ID is required for receiving messages. It
+                will be automatically retrieved when you create this sender.
+              </p>
+            )}
+            {formData.phoneNumberId && (
+              <p className="text-xs text-green-700 dark:text-green-200 mt-2">
+                ✓ Phone Number ID verified and ready to receive messages.
+              </p>
+            )}
           </div>
 
           {/* Twilio Fields (Optional) */}

@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
 
 export class CreateChatDto {
   @IsString()
@@ -16,4 +16,8 @@ export class CreateChatDto {
   @IsString()
   @IsOptional()
   customerId?: string;
+
+  @IsNumber()
+  @IsOptional()
+  senderId?: number;
 }

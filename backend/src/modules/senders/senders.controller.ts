@@ -144,4 +144,15 @@ export class SendersController {
     );
     return { success: true };
   }
+
+  /**
+   * Verify sender phone number and retrieve phoneNumberId from Meta
+   * PATCH /senders/:id/verify
+   */
+  @Patch(':id/verify')
+  async verifySender(@Param('id') senderId: string, @Req() req: any) {
+    this.logger.log(`Verify sender: ${senderId}`);
+    const userId = req.user?.userId;
+    return this.sendersService.verifySender(userId, parseInt(senderId, 10));
+  }
 }

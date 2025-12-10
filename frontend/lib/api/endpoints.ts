@@ -120,10 +120,16 @@ export const backendApi = {
 
   // WhatsApp endpoints
   whatsapp: {
-    sendMessage: (data: { to: string; body: string; mediaUrl?: string }) =>
+    sendMessage: (data: { to: string; body: string; senderId?: number }) =>
       apiClient.post("/whatsapp/send", data),
-    getStatus: (messageSid: string) =>
-      apiClient.get(`/whatsapp/status/${messageSid}`),
+    sendMedia: (data: {
+      to: string;
+      mediaType: "image" | "video" | "audio" | "document";
+      mediaUrl: string;
+      caption?: string;
+    }) => apiClient.post("/whatsapp/send-media", data),
+    getStatus: (messageId: string) =>
+      apiClient.get(`/whatsapp/status/${messageId}`),
     getMessages: () => apiClient.get("/whatsapp/messages"),
     getChats: (skip?: number, take?: number) =>
       apiClient.get(`/whatsapp/chats?skip=${skip || 0}&take=${take || 20}`),
@@ -164,6 +170,8 @@ export const backendApi = {
     update: (senderId: number, data: any) =>
       apiClient.patch(`/senders/${senderId}`, data),
     delete: (senderId: number) => apiClient.delete(`/senders/${senderId}`),
+    verify: (senderId: number) =>
+      apiClient.patch(`/senders/${senderId}/verify`, {}),
     getContacts: (senderId: number) =>
       apiClient.get(`/senders/${senderId}/contacts`),
     linkContact: (senderId: number, contactId: string, data?: any) =>
