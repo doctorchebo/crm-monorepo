@@ -59,6 +59,7 @@ export default function ChatsPage() {
   const t = useTranslations("chats");
   const router = useRouter();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const separatorRef = useRef<HTMLDivElement>(null);
 
@@ -80,6 +81,7 @@ export default function ChatsPage() {
   const [notesLoading, setNotesLoading] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [notesPanelWidth, setNotesPanelWidth] = useState(320); // Default width in pixels
+  const [shouldAutoScroll, setShouldAutoScroll] = useState(true); // Control auto-scroll
 
   // Fetch templates from API
   const { data: templates = [], isLoading: templatesLoading } = useSWR(
@@ -113,17 +115,52 @@ export default function ChatsPage() {
     fetchCurrentUser();
   }, []);
 
-  // Auto-scroll to bottom when messages change
+  const [messageCount, setMessageCount] = useState(0);
+
+  // Auto-scroll to bottom when messages change, but only if we should auto-scroll
   useEffect(() => {
-    if (messagesEndRef.current) {
-      // For initial load, scroll immediately without animation
-      // For subsequent updates, use smooth animation
-      messagesEndRef.current.scrollIntoView({
-        behavior: isInitialLoad ? "auto" : "smooth",
+    if (messagesEndRef.current && shouldAutoScroll) {
+      // Use requestAnimationFrame to ensure DOM has been painted
+      requestAnimationFrame(() => {
+        if (messagesEndRef.current) {
+          messagesEndRef.current.scrollIntoView({
+            behavior: isInitialLoad ? "auto" : "smooth",
+          });
+        }
       });
       setIsInitialLoad(false);
     }
-  }, [messages]);
+  }, [messageCount, shouldAutoScroll, isInitialLoad]);
+
+  // Track scroll position to disable auto-scroll when user scrolls up
+  useEffect(() => {
+    const messagesContainer = messagesContainerRef.current;
+    if (!messagesContainer) return;
+
+    let scrollTimeout: NodeJS.Timeout;
+
+    const handleScroll = () => {
+      // Calculate if user is at the bottom
+      const { scrollTop, scrollHeight, clientHeight } = messagesContainer;
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 50; // 50px threshold
+
+      // Only disable auto-scroll if user manually scrolled up
+      if (!isAtBottom) {
+        setShouldAutoScroll(false);
+      }
+    };
+
+    const debouncedHandleScroll = () => {
+      clearTimeout(scrollTimeout);
+      scrollTimeout = setTimeout(handleScroll, 100);
+    };
+
+    messagesContainer.addEventListener("scroll", debouncedHandleScroll);
+    return () => {
+      messagesContainer.removeEventListener("scroll", debouncedHandleScroll);
+      clearTimeout(scrollTimeout);
+    };
+  }, []);
 
   // Fetch chats on mount
   useEffect(() => {
@@ -251,6 +288,7 @@ export default function ChatsPage() {
     if (!selectedChatId) return;
 
     setIsInitialLoad(true);
+    setShouldAutoScroll(true); // Enable auto-scroll when changing chats
 
     const fetchMessages = async () => {
       try {
@@ -266,6 +304,13 @@ export default function ChatsPage() {
             (a, b) =>
               new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
           );
+
+          // Check if message count changed (new messages arrived)
+          const newCount = sorted.length;
+          if (newCount !== messages.length) {
+            setMessageCount(newCount);
+          }
+
           setMessages(sorted);
 
           // Start polling for status updates on outbound messages
@@ -317,6 +362,8 @@ export default function ChatsPage() {
         return msg;
       })
     );
+    // Don't trigger auto-scroll when just updating message statuses
+    // Keep shouldAutoScroll unchanged
   }, [statusMap]);
 
   const handleSendMessage = async () => {
@@ -362,6 +409,9 @@ export default function ChatsPage() {
             new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
         );
         setMessages(sorted);
+        setMessageCount(sorted.length);
+        // Re-enable auto-scroll when a message is sent so it scrolls to the new message
+        setShouldAutoScroll(true);
       }
     } catch (err) {
       console.error("Error sending message:", err);
@@ -540,11 +590,12 @@ export default function ChatsPage() {
               {/* Messages + Notes Container */}
               <div className="flex flex-1 overflow-hidden" ref={containerRef}>
                 {/* Messages Area */}
-                <div className="flex-1 flex flex-col overflow-hidden">
+                <div className="flex-1 flex flex-col overflow-hidden min-h-0">
                   <div
+                    ref={messagesContainerRef}
                     className="overflow-y-auto p-3 space-y-2 flex-1"
                     style={{
-                      maxHeight: "calc(100% - 220px)",
+                      scrollBehavior: "smooth",
                     }}
                   >
                     {messages.length === 0 ? (
@@ -604,7 +655,7 @@ export default function ChatsPage() {
 
                   {/* Template Buttons */}
                   <div
-                    className="border-t p-3 bg-muted/30 flex flex-col overflow-hidden"
+                    className="border-t p-3 bg-muted/30 flex flex-col overflow-hidden flex-shrink-0"
                     style={{ maxHeight: "160px" }}
                   >
                     {templatesLoading ? (
@@ -710,7 +761,7 @@ export default function ChatsPage() {
                         className="gap-2"
                       >
                         <Send className="h-4 w-4" />
-                        Send
+                        {t("send")}
                       </Button>
                     </div>
                   </div>

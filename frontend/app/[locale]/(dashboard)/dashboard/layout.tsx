@@ -84,11 +84,11 @@ export default function DashboardLayout({
     <SidebarProvider>
       <DashboardSidebar />
       <SidebarInset>
-        <div className="flex flex-col min-h-screen">
-          <div className="flex items-center gap-2 border-b px-4 py-3 md:hidden">
+        <div className="flex flex-col h-screen">
+          <div className="flex items-center gap-2 border-b px-4 py-3 md:hidden flex-shrink-0">
             <SidebarTrigger />
           </div>
-          <main className="flex-1 overflow-y-auto">{children}</main>
+          <main className="flex-1 overflow-hidden">{children}</main>
         </div>
       </SidebarInset>
     </SidebarProvider>

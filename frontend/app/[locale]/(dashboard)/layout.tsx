@@ -134,9 +134,9 @@ function Header() {
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <section className="flex flex-col min-h-screen">
+    <section className="flex flex-col h-screen">
       <Header />
-      {children}
+      <div className="flex-1 overflow-hidden">{children}</div>
     </section>
   );
 }
