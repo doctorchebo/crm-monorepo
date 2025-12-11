@@ -2,6 +2,7 @@ import { db } from '@database/db.connection';
 import { Chat, chats, Message, messages, senders } from '@database/schema';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { MetaCloudAPIConfigService } from '@shared/services/meta-cloud-api.config';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { OutboundMessageDto } from './dto/outbound-message.dto';
 import {
@@ -46,7 +47,10 @@ export class WhatsAppService {
   private readonly metaAppSecret: string | undefined;
   private readonly wabaId: string | undefined;
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    private metaCloudAPIConfig: MetaCloudAPIConfigService,
+  ) {
     this.metaPhoneNumberId = this.configService.getOrThrow<string>(
       'META_PHONE_NUMBER_ID',
     );
@@ -329,9 +333,13 @@ export class WhatsAppService {
     try {
       const recipientPhone = cleanPhoneNumber(messageDto.to);
 
-      // Validate body is provided
-      if (!messageDto.body) {
-        throw new Error('Message body is required');
+      // Validate that either body or attachments are provided
+      const hasBody = messageDto.body && messageDto.body.trim().length > 0;
+      const hasAttachments =
+        messageDto.attachments && messageDto.attachments.length > 0;
+
+      if (!hasBody && !hasAttachments) {
+        throw new Error('Message body or attachments are required');
       }
 
       // Determine which sender this message is from
@@ -403,13 +411,15 @@ export class WhatsAppService {
       );
 
       // Build message payload for Cloud API
+      // If there's no body but there are attachments, we'll just create the database record
+      // The attachments will be sent separately via media uploads
       const message = {
         messaging_product: 'whatsapp' as const,
         to: recipientPhone,
         type: 'text' as const,
         text: {
           preview_url: true,
-          body: messageDto.body,
+          body: messageDto.body || '📎', // Use a placeholder emoji if no body
         },
       };
 
@@ -453,6 +463,7 @@ export class WhatsAppService {
         from: senderPhoneNumber,
         to: recipientPhone,
         body: messageDto.body,
+        attachments: messageDto.attachments,
         userId,
         senderId,
       });
@@ -947,7 +958,8 @@ export class WhatsAppService {
     chatId: string;
     from: string;
     to: string;
-    body: string;
+    body?: string;
+    attachments?: Array<any>;
     userId?: number;
     senderId?: number;
   }): Promise<void> {
@@ -958,8 +970,12 @@ export class WhatsAppService {
         chatId: messageData.chatId,
         source: 'whatsapp',
         sender: messageData.from, // Store the actual sender's phone number
-        type: 'text',
+        type:
+          messageData.attachments && messageData.attachments.length > 0
+            ? 'media'
+            : 'text',
         text: messageData.body,
+        attachments: messageData.attachments || [],
         direction: 'outbound',
         status: 'pending', // Start as pending, will update to 'sent' when Cloud API confirms
         timestamp: now,
@@ -1000,6 +1016,25 @@ export class WhatsAppService {
         return;
       }
 
+      // Convert media metadata to attachment object if present
+      const attachments = messageData.mediaMetadata
+        ? [
+            {
+              id: messageData.mediaMetadata.mediaId,
+              type: messageData.type, // The type field contains 'image', 'video', etc.
+              fileName:
+                messageData.mediaMetadata.fileName ||
+                `${messageData.type}_${messageData.mediaMetadata.mediaId}`,
+              mimeType: messageData.mediaMetadata.mimeType || '',
+              size: messageData.mediaMetadata.size || 0,
+              s3Key: '', // Inbound media from Meta, not stored in S3
+              status: 'success',
+              uploadedAt: new Date().toISOString(),
+              mediaUrl: `cloud-api://${messageData.mediaMetadata.mediaId}`, // Store Cloud API reference
+            },
+          ]
+        : [];
+
       await db.insert(messages).values({
         messageId: messageData.waMessageId,
         chatId: messageData.chatId,
@@ -1007,22 +1042,11 @@ export class WhatsAppService {
         sender: messageData.sender,
         type: messageData.type,
         text: messageData.text,
-        mediaUrl: messageData.mediaMetadata
-          ? `cloud-api://${messageData.mediaMetadata.mediaId}`
-          : undefined,
+        attachments: attachments.length > 0 ? (attachments as any) : [],
         direction: 'inbound',
         status: 'delivered',
         timestamp: messageData.timestamp,
       });
-
-      // Store media metadata if present
-      // TODO: Create media_metadata table in schema
-      if (messageData.mediaMetadata) {
-        this.logger.debug(
-          'Media metadata stored for message:',
-          messageData.waMessageId,
-        );
-      }
 
       this.logger.debug('Inbound message stored', messageData.waMessageId);
     } catch (error) {
@@ -1250,11 +1274,15 @@ export class WhatsAppService {
         throw new Error('META_WABA_ID not configured');
       }
 
-      const url = `https://graph.facebook.com/v20.0/${this.wabaId}/phone_numbers`;
+      const url = this.metaCloudAPIConfig
+        .getEndpoints()
+        .getPhoneNumbers(this.wabaId);
+
+      this.logger.debug(`Fetching phone numbers from: ${url}`);
 
       const response = await fetch(url, {
         method: 'GET',
-        headers: getCloudAPIHeaders(this.metaAccessToken),
+        headers: this.metaCloudAPIConfig.getDefaultHeaders(),
       });
 
       if (!response.ok) {

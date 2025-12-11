@@ -104,7 +104,7 @@ export default function SenderFormPage({
       const result = await backendApi.senders.verify(parseInt(senderId, 10));
       setFormData((prev) => ({
         ...prev,
-        phoneNumberId: result.phoneNumberId,
+        phoneNumberId: (result as any).phoneNumberId,
       }));
       addNotification("Phone Number ID verified successfully", "success");
     } catch (err: any) {

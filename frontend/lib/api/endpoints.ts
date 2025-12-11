@@ -127,9 +127,14 @@ export const backendApi = {
       mediaType: "image" | "video" | "audio" | "document";
       mediaUrl: string;
       caption?: string;
+      senderId?: number;
     }) => apiClient.post("/whatsapp/send-media", data),
     getStatus: (messageId: string) =>
       apiClient.get(`/whatsapp/status/${messageId}`),
+    getDownloadUrl: (messageId: string, attachmentId: string) =>
+      apiClient.get(
+        `/whatsapp/media/${messageId}/${attachmentId}/download-url`
+      ),
     getMessages: () => apiClient.get("/whatsapp/messages"),
     getChats: (skip?: number, take?: number) =>
       apiClient.get(`/whatsapp/chats?skip=${skip || 0}&take=${take || 20}`),

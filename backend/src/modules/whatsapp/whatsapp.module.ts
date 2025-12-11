@@ -1,5 +1,9 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { MetaCloudAPIConfigService } from '@shared/services/meta-cloud-api.config';
+import { S3Service } from '@shared/services/s3.service';
+import { MediaController } from './controllers/media.controller';
+import { MediaService } from './services/media.service';
 import { WhatsAppController } from './whatsapp.controller';
 import { WhatsAppService } from './whatsapp.service';
 import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
@@ -14,6 +18,7 @@ import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
  * - Track message delivery status (sent, delivered, read, failed)
  * - Store message metadata and media information
  * - Support for multiple phone numbers per user (via senders table)
+ * - Media upload/download with S3 integration
  * - Foundation for future chat history synchronization
  *
  * Environment Variables Required:
@@ -22,11 +27,25 @@ import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
  * - META_ACCESS_TOKEN: Bearer token for Cloud API
  * - META_VERIFY_TOKEN: Token for webhook verification
  * - META_APP_SECRET: (Optional) For signature verification
+ * - AWS_REGION: AWS region for S3
+ * - AWS_ACCESS_KEY_ID: AWS access key
+ * - AWS_SECRET_ACCESS_KEY: AWS secret key
+ * - AWS_S3_BUCKET_NAME: S3 bucket name for media storage
  */
 @Module({
   imports: [ConfigModule],
-  controllers: [WhatsAppController, WhatsAppWebhookController],
-  providers: [WhatsAppService],
-  exports: [WhatsAppService],
+  controllers: [WhatsAppController, WhatsAppWebhookController, MediaController],
+  providers: [
+    WhatsAppService,
+    MediaService,
+    S3Service,
+    MetaCloudAPIConfigService,
+  ],
+  exports: [
+    WhatsAppService,
+    MediaService,
+    S3Service,
+    MetaCloudAPIConfigService,
+  ],
 })
 export class WhatsAppModule {}

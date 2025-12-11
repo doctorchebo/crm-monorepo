@@ -204,11 +204,27 @@ export function useMultipleMessageStatusTracking(
   const [error, setError] = useState<string | null>(null);
 
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const completedMessagesRef = useRef<Set<string>>(new Set());
 
   const fetchAllStatuses = useCallback(async () => {
     try {
+      // Only fetch messages that haven't reached the stop status
+      const messagesToFetch = messageIds.filter(
+        (id) => !completedMessagesRef.current.has(id)
+      );
+
+      if (messagesToFetch.length === 0) {
+        // All messages have reached stop status, stop polling
+        if (pollingIntervalRef.current) {
+          clearInterval(pollingIntervalRef.current);
+          pollingIntervalRef.current = null;
+          setIsPolling(false);
+        }
+        return;
+      }
+
       const statuses = await Promise.all(
-        messageIds.map((id) =>
+        messagesToFetch.map((id) =>
           backendApi.whatsapp.getStatus(id).catch(() => null)
         )
       );
@@ -216,12 +232,23 @@ export function useMultipleMessageStatusTracking(
       const newMap = new Map<
         string,
         "pending" | "sent" | "delivered" | "read" | "failed"
-      >();
+      >(statusMap);
 
-      messageIds.forEach((id, index) => {
+      const stopPollOnStatus = options.stopPollOnStatus || "read";
+
+      messagesToFetch.forEach((id, index) => {
         if (statuses[index]) {
           const data = statuses[index] as MessageStatusData;
           newMap.set(id, data.currentStatus);
+
+          // Mark as completed if it reached stop status
+          if (
+            data.currentStatus === stopPollOnStatus ||
+            data.currentStatus === "read" ||
+            data.currentStatus === "failed"
+          ) {
+            completedMessagesRef.current.add(id);
+          }
         }
       });
 
@@ -231,7 +258,7 @@ export function useMultipleMessageStatusTracking(
       console.error("Error fetching multiple message statuses:", err);
       setError(err instanceof Error ? err.message : "Failed to fetch statuses");
     }
-  }, [messageIds]);
+  }, [messageIds, options.stopPollOnStatus]);
 
   const startPolling = useCallback(() => {
     if (pollingIntervalRef.current) return;
@@ -241,7 +268,7 @@ export function useMultipleMessageStatusTracking(
 
     pollingIntervalRef.current = setInterval(
       fetchAllStatuses,
-      options.pollInterval || 5000
+      options.pollInterval || 15000 // Default to 15 seconds
     );
   }, [fetchAllStatuses, options.pollInterval]);
 
@@ -262,7 +289,7 @@ export function useMultipleMessageStatusTracking(
     return () => {
       stopPolling();
     };
-  }, [startPolling, stopPolling, options.autoStart, messageIds.length]);
+  }, [options.autoStart, messageIds.length]); // Only depend on LENGTH, not the array itself
 
   return {
     statusMap,

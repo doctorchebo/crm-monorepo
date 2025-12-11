@@ -52,7 +52,7 @@ export function getCloudAPIHeaders(
 export function buildCloudAPIUrl(
   phoneNumberId: string,
   endpoint: string,
-  apiVersion: string = 'v22.0',
+  apiVersion: string = 'v20.0',
 ): string {
   const baseUrl = 'https://graph.facebook.com';
   return `${baseUrl}/${apiVersion}/${phoneNumberId}/${endpoint}`;
@@ -132,37 +132,6 @@ export function mapCloudAPIStatus(
     failed: 'failed',
   };
   return statusMap[status] || 'sent';
-}
-
-/**
- * Build media download URL using Cloud API
- * Media must be downloaded via authenticated endpoint
- *
- * @param mediaId - Media object ID from inbound message
- * @param accessToken - Bearer token for authorization
- * @returns Download URL with metadata
- */
-export async function getMediaDownloadUrl(
-  mediaId: string,
-  accessToken: string,
-): Promise<string | null> {
-  try {
-    const headers = getCloudAPIHeaders(accessToken);
-    const response = await fetch(
-      `https://graph.facebook.com/v20.0/${mediaId}`,
-      { method: 'GET', headers },
-    );
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const data = (await response.json()) as { url?: string };
-    return data.url || null;
-  } catch (error) {
-    console.error('Error getting media download URL:', error);
-    return null;
-  }
 }
 
 /**

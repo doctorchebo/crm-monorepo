@@ -71,9 +71,10 @@ export const messages = pgTable(
     chatId: varchar('chat_id').notNull(), // Foreign key to chats.chat_id
     source: varchar('source').notNull(), // 'whatsapp', 'messenger', etc
     sender: varchar('sender').notNull(), // WhatsApp phone number
-    type: varchar('type').notNull(), // 'text', 'image', 'video', etc
+    type: varchar('type').notNull(), // 'text', 'image', 'video', 'audio', 'document', etc
     text: text('text'),
-    mediaUrl: text('media_url'),
+    mediaUrl: text('media_url'), // Legacy: single media URL, deprecated in favor of attachments
+    attachments: jsonb('attachments').default('[]'), // Array of attachment metadata objects
     direction: varchar('direction').notNull(), // 'inbound' or 'outbound'
     status: varchar('status').default('pending'), // 'pending', 'sent', 'delivered', 'read', 'failed'
     sentAt: timestamp('sent_at'), // Timestamp when message was successfully sent to WhatsApp

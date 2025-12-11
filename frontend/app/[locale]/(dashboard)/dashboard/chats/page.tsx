@@ -1,13 +1,23 @@
 "use client";
 
 import { ChatsSenderSection } from "@/components/chats-sender-section";
+import { AttachmentGallery } from "@/components/media/attachment-display";
+import {
+  FilePicker,
+  PendingUploadsDisplay,
+} from "@/components/media/file-picker";
+import { MediaDownloadMenu } from "@/components/media/media-download-menu";
+import { MediaPreviewModal } from "@/components/media/media-preview-modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NotesPanel } from "@/components/ui/notes-panel";
 import { WhatsAppStatusIcon } from "@/components/whatsapp-status-icon";
 import { useAuthProtection } from "@/hooks/use-auth";
+import { useMediaUpload } from "@/hooks/use-media-upload";
 import { useMultipleMessageStatusTracking } from "@/hooks/use-message-status-tracking";
 import { backendApi } from "@/lib/api/endpoints";
+import { mediaApi } from "@/lib/media/api";
+import { Attachment, PendingUpload } from "@/lib/media/types";
 import { Loader, MessageSquare, Send } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
@@ -50,6 +60,7 @@ interface Message {
   timestamp: string;
   type: string;
   status: "pending" | "sent" | "delivered" | "read" | "failed";
+  attachments?: Attachment[];
   sentAt?: string;
   deliveredAt?: string;
   readAt?: string;
@@ -65,6 +76,15 @@ export default function ChatsPage() {
 
   // Protect this route - redirect to login if token is missing or expired
   useAuthProtection();
+
+  // Initialize media upload hook
+  const hookResult = useMediaUpload();
+  const pendingUploads = hookResult.pendingUploads as Map<
+    string,
+    PendingUpload
+  >;
+  const { isUploading, queueFiles, uploadAll, removeUpload, clearUploads } =
+    hookResult;
 
   const [automationEnabled, setAutomationEnabled] = useState(false);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
@@ -82,6 +102,26 @@ export default function ChatsPage() {
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [notesPanelWidth, setNotesPanelWidth] = useState(320); // Default width in pixels
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true); // Control auto-scroll
+
+  // Media preview modal state
+  const [previewModalOpen, setPreviewModalOpen] = useState(false);
+  const [previewAttachments, setPreviewAttachments] = useState<Attachment[]>(
+    []
+  );
+  const [previewMessageId, setPreviewMessageId] = useState<string>("");
+  const [previewInitialIndex, setPreviewInitialIndex] = useState(0);
+
+  // Download menu state
+  const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
+  const [downloadMenuPosition, setDownloadMenuPosition] = useState({
+    x: 0,
+    y: 0,
+  });
+  const [currentMessageAttachments, setCurrentMessageAttachments] = useState<
+    Attachment[]
+  >([]);
+  const [currentMessageId, setCurrentMessageId] = useState<string>("");
+  const [downloadLoading, setDownloadLoading] = useState(false);
 
   // Fetch templates from API
   const { data: templates = [], isLoading: templatesLoading } = useSWR(
@@ -144,10 +184,8 @@ export default function ChatsPage() {
       const { scrollTop, scrollHeight, clientHeight } = messagesContainer;
       const isAtBottom = scrollHeight - scrollTop - clientHeight < 50; // 50px threshold
 
-      // Only disable auto-scroll if user manually scrolled up
-      if (!isAtBottom) {
-        setShouldAutoScroll(false);
-      }
+      // Set shouldAutoScroll based on whether user is at the bottom
+      setShouldAutoScroll(isAtBottom);
     };
 
     const debouncedHandleScroll = () => {
@@ -161,6 +199,37 @@ export default function ChatsPage() {
       clearTimeout(scrollTimeout);
     };
   }, []);
+
+  // Auto-scroll when content size changes (e.g., images loading)
+  useEffect(() => {
+    const messagesContainer = messagesContainerRef.current;
+    if (!messagesContainer) return;
+
+    // Use ResizeObserver to detect when images load and container size changes
+    const resizeObserver = new ResizeObserver(() => {
+      // Check if we should be at the bottom
+      // If shouldAutoScroll is true, always scroll to bottom
+      // If shouldAutoScroll is false but user is very close to bottom (within 100px), still scroll
+      if (shouldAutoScroll) {
+        // User wants to stay at bottom
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      } else {
+        // Check if user is close to bottom (within 100px)
+        const { scrollTop, scrollHeight, clientHeight } = messagesContainer;
+        const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+        if (distanceFromBottom < 100) {
+          // User is close to bottom, scroll to bottom
+          messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+      }
+    });
+
+    resizeObserver.observe(messagesContainer);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [shouldAutoScroll]);
 
   // Fetch chats on mount
   useEffect(() => {
@@ -329,8 +398,9 @@ export default function ChatsPage() {
     };
 
     fetchMessages();
-    // Refresh messages every 5 seconds
-    const interval = setInterval(fetchMessages, 5000);
+    // Refresh messages every 10 seconds (instead of 5) to reduce server load
+    // Message status updates are now handled by status polling, not message list refresh
+    const interval = setInterval(fetchMessages, 10000);
     return () => clearInterval(interval);
   }, [selectedChatId]);
 
@@ -338,12 +408,25 @@ export default function ChatsPage() {
   const [trackedMessageIds, setTrackedMessageIds] = useState<string[]>([]);
   const { statusMap, isPolling } = useMultipleMessageStatusTracking(
     trackedMessageIds,
-    { pollInterval: 3000, autoStart: true }
+    {
+      pollInterval: 15000, // Poll every 15 seconds instead of 3 seconds
+      stopPollOnStatus: "delivered", // Stop polling once message is delivered
+      autoStart: true,
+    }
   );
 
-  // Update tracked message IDs and re-fetch messages when status changes
+  // Update tracked message IDs - only set once per message to avoid restarting polling
   const startStatusTracking = (messageIds: string[]) => {
-    setTrackedMessageIds(messageIds);
+    setTrackedMessageIds((prevIds) => {
+      // Only update if the set of message IDs has actually changed
+      const prevSet = new Set(prevIds);
+      const newSet = new Set(messageIds);
+      const hasChanged =
+        prevSet.size !== newSet.size ||
+        [...newSet].some((id) => !prevSet.has(id));
+
+      return hasChanged ? messageIds : prevIds;
+    });
   };
 
   // Update messages with new status information from polling
@@ -367,7 +450,12 @@ export default function ChatsPage() {
   }, [statusMap]);
 
   const handleSendMessage = async () => {
-    if ((!messageInput.trim() && !templateInput.trim()) || !selectedChatId)
+    if (
+      (!messageInput.trim() &&
+        !templateInput.trim() &&
+        pendingUploads.size === 0) ||
+      !selectedChatId
+    )
       return;
 
     try {
@@ -388,15 +476,117 @@ export default function ChatsPage() {
       // Use template content if available, otherwise use free-form message
       if (templateInput.trim()) {
         messagePayload.body = templateInput;
-      } else {
+      } else if (messageInput.trim()) {
         messagePayload.body = messageInput;
       }
 
-      // Send message via API
-      await backendApi.whatsapp.sendMessage(messagePayload);
+      // For image-only messages, include placeholder attachments so validation passes
+      if (pendingUploads.size > 0) {
+        messagePayload.attachments = Array.from(pendingUploads.values()).map(
+          (upload) => ({
+            id: upload.id,
+            type: upload.file.type.split("/")[0] || "file",
+            fileName: upload.file.name,
+            mimeType: upload.file.type || "application/octet-stream",
+            size: upload.file.size,
+            s3Key: "", // Will be filled after upload
+            status: "pending",
+            uploadedAt: new Date().toISOString(),
+          })
+        );
+      }
+
+      // Determine if we have text or only media
+      const hasText =
+        messagePayload.body && messagePayload.body.trim().length > 0;
+      const hasMedia = pendingUploads.size > 0;
+
+      // Send message first to get the messageId (only if there's text or no media)
+      let sentMessage: any;
+
+      if (hasText || !hasMedia) {
+        // Send text message (or placeholder for media-only messages to record in DB)
+        try {
+          sentMessage = await backendApi.whatsapp.sendMessage(messagePayload);
+        } catch (sendError) {
+          console.error("Error sending message:", sendError);
+          throw sendError;
+        }
+      }
+
+      // Upload attachments after message is sent, using the real messageId
+      if (hasMedia && sentMessage?.messageId) {
+        try {
+          console.log(
+            `[Chats] Starting attachment upload for messageId: ${
+              (sentMessage as any).messageId
+            }`
+          );
+          const attachments = await uploadAll(
+            (sentMessage as any).messageId,
+            selectedChat.senderId,
+            selectedChatId
+          );
+          console.log(`[Chats] Attachments uploaded:`, attachments);
+
+          // Send the media to the recipient for each attachment
+          for (const attachment of attachments) {
+            try {
+              console.log(
+                `[Chats] Getting download URL for attachment: ${attachment.fileName}`
+              );
+              // Get download URL for the file in S3
+              const downloadUrl = (await backendApi.whatsapp.getDownloadUrl(
+                (sentMessage as any).messageId,
+                attachment.id
+              )) as any;
+
+              console.log(`[Chats] Download URL received:`, downloadUrl);
+
+              // Send media message to recipient
+              if (downloadUrl && downloadUrl.url) {
+                console.log(
+                  `[Chats] Sending media message to WhatsApp for: ${attachment.fileName}`
+                );
+                await backendApi.whatsapp.sendMedia({
+                  to: selectedChat.participantPhone,
+                  mediaType: attachment.type,
+                  mediaUrl: downloadUrl.url,
+                  caption: messagePayload.body || undefined, // Include text as caption if present
+                  senderId: selectedChat.senderId,
+                });
+                console.log(
+                  `[Chats] Media message sent successfully: ${attachment.fileName}`
+                );
+              } else {
+                console.error(
+                  `[Chats] No download URL received for: ${attachment.fileName}`
+                );
+              }
+            } catch (mediaError) {
+              console.error(
+                `Failed to send media attachment ${attachment.fileName}:`,
+                mediaError
+              );
+              setError(
+                `Attachment uploaded but failed to send: ${attachment.fileName}`
+              );
+            }
+          }
+        } catch (uploadError) {
+          console.error("Batch upload error:", uploadError);
+          // Don't throw - message was already sent, just warn about attachment upload failure
+          setError(
+            `Message sent but attachments failed to upload: ${
+              (uploadError as Error).message
+            }`
+          );
+        }
+      }
 
       setMessageInput("");
       setTemplateInput("");
+      clearUploads();
       // Refresh messages
       const data = await backendApi.whatsapp.getChatMessages(
         selectedChatId,
@@ -503,6 +693,145 @@ export default function ChatsPage() {
     document.addEventListener("mousemove", handleMouseMove);
     document.addEventListener("mouseup", handleMouseUp);
   };
+
+  // Media preview modal handlers
+  const handleImageClick = (
+    messageId: string,
+    attachments: Attachment[],
+    index: number
+  ) => {
+    const images = attachments.filter((a) => a.type === "image");
+    setPreviewAttachments(images);
+    setPreviewMessageId(messageId);
+    setPreviewInitialIndex(index);
+    setPreviewModalOpen(true);
+  };
+
+  // Download menu handlers
+  const handleShowDownloadMenu = (
+    messageId: string,
+    attachments: Attachment[],
+    position: { x: number; y: number }
+  ) => {
+    setCurrentMessageId(messageId);
+    setCurrentMessageAttachments(attachments.filter((a) => a.type === "image"));
+    setDownloadMenuPosition(position);
+    setDownloadMenuOpen(true);
+  };
+
+  const handleDownloadSingle = async () => {
+    if (!currentMessageAttachments.length) return;
+
+    try {
+      setDownloadLoading(true);
+      const attachment = currentMessageAttachments[0];
+      const urlResponse = await mediaApi.getDownloadUrl(
+        currentMessageId,
+        attachment.id
+      );
+      let url = urlResponse.url;
+
+      let response;
+      if (url.startsWith("cloud-api://")) {
+        const mediaId = url.replace("cloud-api://", "");
+        response = await mediaApi.fetchCloudAPIMedia(mediaId);
+      } else {
+        response = await fetch(url);
+      }
+      const blob = await response.blob();
+      const dlUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = dlUrl;
+      a.download = attachment.fileName || "image";
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(dlUrl);
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error("Failed to download image:", err);
+      setError("Failed to download image");
+    } finally {
+      setDownloadLoading(false);
+    }
+  };
+
+  const handleDownloadPack = async () => {
+    if (!currentMessageAttachments.length) return;
+
+    try {
+      setDownloadLoading(true);
+
+      // Dynamic import for JSZip
+      const JSZip = (await import("jszip")).default;
+      const zip = new JSZip();
+
+      // Download all images and add to zip
+      for (const attachment of currentMessageAttachments) {
+        const urlResponse = await mediaApi.getDownloadUrl(
+          currentMessageId,
+          attachment.id
+        );
+        let url = urlResponse.url;
+
+        let response;
+        if (url.startsWith("cloud-api://")) {
+          const mediaId = url.replace("cloud-api://", "");
+          response = await mediaApi.fetchCloudAPIMedia(mediaId);
+        } else {
+          response = await fetch(url);
+        }
+        const blob = await response.blob();
+        zip.file(attachment.fileName || `image_${attachment.id}`, blob);
+      }
+
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const dlUrl = window.URL.createObjectURL(zipBlob);
+      const a = document.createElement("a");
+      a.href = dlUrl;
+      a.download = `images_${Date.now()}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(dlUrl);
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error("Failed to download images pack:", err);
+      setError("Failed to download images pack");
+    } finally {
+      setDownloadLoading(false);
+    }
+  };
+
+  // Close download menu on click outside or Escape key
+  useEffect(() => {
+    if (!downloadMenuOpen) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      // Check if click is outside the download menu
+      const target = event.target as HTMLElement;
+      if (
+        !target.closest("[data-download-menu]") &&
+        !target.closest('button[title="Download options"]')
+      ) {
+        setDownloadMenuOpen(false);
+      }
+    };
+
+    const handleEscapeKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setDownloadMenuOpen(false);
+      }
+    };
+
+    // Add event listeners
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEscapeKey);
+
+    // Cleanup
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEscapeKey);
+    };
+  }, [downloadMenuOpen]);
 
   const selectedChat = chats.find((c) => c.chatId === selectedChatId) || null;
 
@@ -620,13 +949,56 @@ export default function ChatsPage() {
                               }`}
                             >
                               <div
-                                className={`max-w-xs px-3 py-1 rounded-lg text-xs ${
+                                className={`px-3 py-1 rounded-lg text-xs ${
+                                  // For image-only messages, use standard image width
+                                  message.attachments?.length === 1 &&
+                                  message.attachments[0].type === "image" &&
+                                  !message.text
+                                    ? "max-w-md"
+                                    : "max-w-xs"
+                                } ${
                                   isOutbound
                                     ? "bg-primary text-primary-foreground"
                                     : "bg-muted"
                                 }`}
                               >
-                                <p className="text-xs">{message.text}</p>
+                                {message.text && (
+                                  <p className="text-xs">{message.text}</p>
+                                )}
+
+                                {/* Display attachments if present */}
+                                {message.attachments &&
+                                  message.attachments.length > 0 && (
+                                    <div className="mt-2">
+                                      <AttachmentGallery
+                                        attachments={message.attachments}
+                                        messageId={
+                                          message.messageId ||
+                                          message.id?.toString() ||
+                                          ""
+                                        }
+                                        onImageClick={(index) =>
+                                          handleImageClick(
+                                            message.messageId ||
+                                              message.id?.toString() ||
+                                              "",
+                                            message.attachments || [],
+                                            index
+                                          )
+                                        }
+                                        onShowDownloadMenu={(position) =>
+                                          handleShowDownloadMenu(
+                                            message.messageId ||
+                                              message.id?.toString() ||
+                                              "",
+                                            message.attachments || [],
+                                            position
+                                          )
+                                        }
+                                      />
+                                    </div>
+                                  )}
+
                                 <div
                                   className={`text-xs mt-0.5 flex items-center justify-between gap-1 ${
                                     isOutbound
@@ -742,6 +1114,23 @@ export default function ChatsPage() {
 
                   {/* Input Area */}
                   <div className="border-t p-3 flex-shrink-0">
+                    {/* File Picker */}
+                    <FilePicker
+                      onFilesSelected={queueFiles}
+                      disabled={isUploading}
+                    />
+
+                    {/* Pending Uploads Display */}
+                    {pendingUploads.size > 0 && (
+                      <div className="mb-4">
+                        <PendingUploadsDisplay
+                          uploads={Array.from(pendingUploads.values())}
+                          onRemove={removeUpload}
+                          disabled={isUploading}
+                        />
+                      </div>
+                    )}
+
                     <div className="flex gap-2">
                       <Input
                         placeholder={t("typeMessageOrUseTemplates")}
@@ -754,10 +1143,16 @@ export default function ChatsPage() {
                           setMessageInput(e.target.value);
                         }}
                         onKeyDown={handleKeyDown}
+                        disabled={isUploading}
                       />
                       <Button
                         onClick={handleSendMessage}
-                        disabled={!messageInput.trim() && !templateInput.trim()}
+                        disabled={
+                          (!messageInput.trim() &&
+                            !templateInput.trim() &&
+                            pendingUploads.size === 0) ||
+                          isUploading
+                        }
                         className="gap-2"
                       >
                         <Send className="h-4 w-4" />
@@ -815,6 +1210,26 @@ export default function ChatsPage() {
           </p>
         </div>
       )}
+
+      {/* Media Preview Modal */}
+      <MediaPreviewModal
+        isOpen={previewModalOpen}
+        attachments={previewAttachments}
+        messageId={previewMessageId}
+        initialIndex={previewInitialIndex}
+        onClose={() => setPreviewModalOpen(false)}
+      />
+
+      {/* Download Menu */}
+      <MediaDownloadMenu
+        isOpen={downloadMenuOpen}
+        position={downloadMenuPosition}
+        isSingleImage={currentMessageAttachments.length === 1}
+        isLoading={downloadLoading}
+        onDownloadSingle={handleDownloadSingle}
+        onDownloadPack={handleDownloadPack}
+        onClose={() => setDownloadMenuOpen(false)}
+      />
     </div>
   );
 }

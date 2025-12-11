@@ -1,4 +1,10 @@
-import { IsNumber, IsOptional, IsPhoneNumber, IsString } from 'class-validator';
+import {
+  IsArray,
+  IsNumber,
+  IsOptional,
+  IsPhoneNumber,
+  IsString,
+} from 'class-validator';
 
 export class OutboundMessageDto {
   @IsPhoneNumber()
@@ -27,4 +33,20 @@ export class OutboundMessageDto {
   @IsString()
   @IsOptional()
   mediaUrl?: string;
+
+  @IsArray()
+  @IsOptional()
+  attachments?: Array<{
+    id: string;
+    type: string;
+    fileName: string;
+    mimeType: string;
+    size: number;
+    s3Key: string;
+    thumbnailKey?: string;
+    duration?: number;
+    uploadedAt: string;
+    status: string;
+    errorMessage?: string;
+  }>;
 }

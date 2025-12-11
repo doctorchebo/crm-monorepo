@@ -5,6 +5,19 @@ declare const module: any;
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // Set request size limits for file uploads
+  app.use((req, res, next) => {
+    if (req.method === 'POST' && req.url.includes('/whatsapp/media/upload')) {
+      req.headers['content-length'] = Math.min(
+        50 * 1024 * 1024,
+        req.headers['content-length']
+          ? parseInt(req.headers['content-length'])
+          : 0,
+      ).toString();
+    }
+    next();
+  });
+
   // Enable CORS with explicit configuration
   app.enableCors({
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
@@ -17,7 +30,13 @@ async function bootstrap() {
 
   // Global logging middleware to debug all requests
   app.use((req, res, next) => {
-    if (req.url.includes('webhook') || req.url.includes('whatsapp')) {
+    // Skip logging for frequent status checks (they're too noisy)
+    const isStatusCheck = req.url.includes('/whatsapp/status/');
+
+    if (
+      !isStatusCheck &&
+      (req.url.includes('webhook') || req.url.includes('whatsapp'))
+    ) {
       console.log(
         `\n📨 [${new Date().toISOString()}] ${req.method} ${req.url}`,
       );

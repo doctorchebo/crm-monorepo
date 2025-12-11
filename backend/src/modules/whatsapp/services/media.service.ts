@@ -1,0 +1,658 @@
+/**
+ * Media Service
+ * Handles media message operations and file management
+ */
+
+import { db } from '@database/db.connection';
+import { messages } from '@database/schema';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { MetaCloudAPIConfigService } from '@shared/services/meta-cloud-api.config';
+import { S3Service } from '@shared/services/s3.service';
+import { eq } from 'drizzle-orm';
+import { v4 as uuidv4 } from 'uuid';
+import {
+  DownloadUrlResponseDto,
+  PresignedUrlResponseDto,
+  RequestPresignedUrlDto,
+  UploadCompletedDto,
+} from '../dto/media.dto';
+import {
+  AttachmentMetadata,
+  getMediaTypeFromMimeType,
+  validateFileUpload,
+} from '../types/media.types';
+
+@Injectable()
+export class MediaService {
+  private readonly logger = new Logger(MediaService.name);
+
+  constructor(
+    private s3Service: S3Service,
+    private configService: ConfigService,
+    private metaCloudAPIConfig: MetaCloudAPIConfigService,
+  ) {}
+
+  /**
+   * Fetch media from Meta Cloud API
+   *
+   * According to Meta's WhatsApp Business Platform documentation:
+   * https://developers.facebook.com/documentation/business-messaging/whatsapp/business-phone-numbers/media
+   *
+   * Process:
+   * 1. Call GET /{media-id}?phone_number_id=<PHONE_NUMBER_ID> to retrieve media metadata including the download URL
+   * 2. Download the actual media file using the provided URL with access token
+   *
+   * Note: Media URLs expire after 5 minutes, so we must fetch a fresh URL each time
+   *
+   * @param mediaId - The media ID returned by WhatsApp in the inbound message
+   * @returns Buffer containing the media file
+   */
+  async fetchCloudAPIMedia(mediaId: string): Promise<Buffer> {
+    try {
+      // Step 1: Get media metadata from Meta Cloud API
+      // The token will be sent via Authorization header
+      const metadataUrl = this.metaCloudAPIConfig.buildEndpoint(mediaId);
+
+      this.logger.debug(`Fetching media metadata from: ${metadataUrl}`);
+      this.logger.log(
+        `[Media Fetch] Step 1: Getting metadata for mediaId: ${mediaId}`,
+      );
+
+      const metadataResponse = await fetch(metadataUrl, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${this.metaCloudAPIConfig.getAccessToken()}`,
+        },
+      });
+
+      this.logger.log(
+        `[Media Fetch] Step 1 Response Status: ${metadataResponse.status} ${metadataResponse.statusText}`,
+      );
+
+      if (!metadataResponse.ok) {
+        const errorText = await metadataResponse.text();
+        this.logger.error(
+          `[Media Fetch] Meta API error (${metadataResponse.status}): ${errorText}`,
+        );
+
+        // Try to parse as JSON for error details
+        try {
+          const errorJson = JSON.parse(errorText);
+          this.logger.error(
+            `[Media Fetch] Facebook error response: ${JSON.stringify(errorJson, null, 2)}`,
+          );
+        } catch {
+          this.logger.error(`[Media Fetch] Raw error response: ${errorText}`);
+        }
+
+        throw new Error(
+          `Failed to get media metadata from Meta API: ${metadataResponse.status} ${metadataResponse.statusText} - ${errorText}`,
+        );
+      }
+
+      const mediaMetadata = (await metadataResponse.json()) as any;
+      this.logger.log(
+        `[Media Fetch] Step 1 Success. Metadata: ${JSON.stringify(mediaMetadata, null, 2)}`,
+      );
+
+      if (!mediaMetadata.url) {
+        this.logger.error(
+          `[Media Fetch] No download URL in Meta response. Full response: ${JSON.stringify(mediaMetadata, null, 2)}`,
+        );
+        throw new Error(
+          'Meta API did not return a media download URL. Response: ' +
+            JSON.stringify(mediaMetadata),
+        );
+      }
+
+      // Step 2: Download the actual media file using the URL from metadata
+      this.logger.log(
+        `[Media Fetch] Step 2: Downloading from URL: ${mediaMetadata.url}`,
+      );
+
+      const downloadResponse = await fetch(mediaMetadata.url, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${this.metaCloudAPIConfig.getAccessToken()}`,
+        },
+      });
+
+      this.logger.log(
+        `[Media Fetch] Step 2 Response Status: ${downloadResponse.status} ${downloadResponse.statusText}`,
+      );
+
+      if (!downloadResponse.ok) {
+        const downloadErrorText = await downloadResponse.text();
+        this.logger.error(
+          `[Media Fetch] Failed to download media file (${downloadResponse.status}): ${downloadErrorText}`,
+        );
+        throw new Error(
+          `Failed to download media file: ${downloadResponse.status} ${downloadResponse.statusText}`,
+        );
+      }
+
+      const buffer = await downloadResponse.arrayBuffer();
+      this.logger.log(
+        `[Media Fetch] Step 2 Success. Downloaded ${buffer.byteLength} bytes for mediaId: ${mediaId}`,
+      );
+
+      return Buffer.from(buffer);
+    } catch (error) {
+      this.logger.error(
+        `Error fetching Cloud API media ${mediaId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Generate presigned URL for file upload
+   * Validates file and returns S3 presigned URL for direct client upload
+   */
+  async requestPresignedUrl(
+    dto: RequestPresignedUrlDto,
+    senderId: number,
+    contactId: string,
+  ): Promise<PresignedUrlResponseDto> {
+    try {
+      // Validate file upload
+      const validation = validateFileUpload(
+        dto.fileName,
+        dto.mimeType,
+        dto.fileSize,
+      );
+
+      if (!validation.valid) {
+        this.logger.warn(
+          `File validation failed: ${validation.errors.join(', ')}`,
+        );
+        throw new BadRequestException({
+          message: 'File validation failed',
+          errors: validation.errors,
+        });
+      }
+
+      // Generate unique message ID if not provided
+      const messageId = dto.messageId || `msg-${uuidv4()}`;
+
+      // Generate presigned URL
+      const presignedData = await this.s3Service.generatePresignedUploadUrl(
+        senderId,
+        contactId,
+        messageId,
+        dto.fileName,
+        dto.mimeType,
+      );
+
+      this.logger.log(
+        `Presigned URL generated for upload: ${dto.fileName} (${(dto.fileSize / 1024 / 1024).toFixed(2)}MB)`,
+      );
+
+      return {
+        uploadId: presignedData.uploadId,
+        url: presignedData.url,
+        expiresIn: presignedData.expiresIn,
+        s3Key: presignedData.s3Key,
+        maxFileSize: dto.fileSize,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error generating presigned URL: ${error.message}`,
+        error,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Register completed upload and store attachment metadata
+   */
+  async registerUploadCompletion(
+    dto: UploadCompletedDto,
+    messageId: string,
+  ): Promise<AttachmentMetadata> {
+    try {
+      // Validate S3 key format
+      if (!dto.s3Key) {
+        throw new BadRequestException('S3 key is required');
+      }
+
+      // Get file metadata from S3 to verify upload
+      const fileMetadata = await this.s3Service.getFileMetadata(dto.s3Key);
+
+      if (!fileMetadata) {
+        this.logger.warn(`File not found in S3: ${dto.s3Key}`);
+        throw new BadRequestException('File not found in S3');
+      }
+
+      // Verify file size matches
+      if (fileMetadata.size !== dto.fileSize) {
+        this.logger.warn(
+          `File size mismatch for ${dto.s3Key}: expected ${dto.fileSize}, got ${fileMetadata.size}`,
+        );
+        throw new BadRequestException('File size mismatch');
+      }
+
+      // Determine media type
+      const mediaType = getMediaTypeFromMimeType(dto.mimeType);
+      if (!mediaType) {
+        throw new BadRequestException(
+          `Unsupported media type: ${dto.mimeType}`,
+        );
+      }
+
+      // Create attachment metadata
+      const attachment: AttachmentMetadata = {
+        id: dto.uploadId,
+        type: mediaType,
+        fileName: dto.fileName,
+        mimeType: dto.mimeType,
+        size: dto.fileSize,
+        s3Key: dto.s3Key,
+        duration: dto.duration,
+        uploadedAt: new Date().toISOString(),
+        status: 'success',
+      };
+
+      // Update message with the completed attachment
+      const message = await db.query.messages.findFirst({
+        where: eq(messages.messageId, messageId),
+      });
+
+      if (message) {
+        const existingAttachments = (message.attachments ||
+          []) as AttachmentMetadata[];
+
+        // Find and update the placeholder attachment with the same uploadId
+        const updatedAttachments = existingAttachments.map((att) =>
+          att.id === dto.uploadId ? attachment : att,
+        );
+
+        // If no attachment with this uploadId was found, add it
+        if (!updatedAttachments.some((att) => att.id === dto.uploadId)) {
+          updatedAttachments.push(attachment);
+        }
+
+        // Update the message with the new attachments array
+        await db
+          .update(messages)
+          .set({ attachments: updatedAttachments as any })
+          .where(eq(messages.messageId, messageId));
+
+        this.logger.log(
+          `Updated message ${messageId} with attachment: ${dto.fileName}`,
+        );
+      }
+
+      this.logger.log(
+        `Upload completed and registered: ${dto.fileName} (${attachment.id})`,
+      );
+
+      return attachment;
+    } catch (error) {
+      this.logger.error(`Error registering upload: ${error.message}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get presigned download URL for attachment
+   */
+  async getDownloadUrl(
+    messageId: string,
+    attachmentId: string,
+    expiresIn: number = 3600,
+  ): Promise<DownloadUrlResponseDto> {
+    try {
+      // Retrieve message and verify it exists
+      const message = await db.query.messages.findFirst({
+        where: eq(messages.messageId, messageId),
+      });
+
+      if (!message) {
+        throw new BadRequestException('Message not found');
+      }
+
+      // Get attachments from JSONB
+      const attachmentsList = (message.attachments ||
+        []) as AttachmentMetadata[];
+      const attachment = attachmentsList.find((a) => a.id === attachmentId);
+
+      if (!attachment) {
+        throw new BadRequestException('Attachment not found');
+      }
+
+      // Check if this is a Cloud API media (inbound from Meta)
+      if (attachment.mediaUrl?.startsWith('cloud-api://')) {
+        // For inbound Cloud API media, return the Cloud API reference
+        // The client will need to fetch this through our backend endpoint
+        // that has access to the Meta access token
+        const mediaId = attachment.mediaUrl.replace('cloud-api://', '');
+
+        return {
+          url: `cloud-api://${mediaId}`,
+          expiresIn: 86400, // Cloud API URLs are long-lived
+          fileName: attachment.fileName,
+          fileSize: attachment.size,
+          mimeType: attachment.mimeType,
+        };
+      }
+
+      // Generate download URL for S3-stored media
+      const downloadData = await this.s3Service.generatePresignedDownloadUrl(
+        attachment.s3Key,
+        { expiresIn },
+      );
+
+      this.logger.log(
+        `Download URL generated for: ${attachment.fileName} (expires in ${expiresIn}s)`,
+      );
+
+      return {
+        url: downloadData.url,
+        expiresIn: downloadData.expiresIn,
+        fileName: attachment.fileName,
+        fileSize: attachment.size,
+        mimeType: attachment.mimeType,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error generating download URL: ${error.message}`,
+        error,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Get thumbnail download URL (if available)
+   */
+  async getThumbnailUrl(
+    messageId: string,
+    attachmentId: string,
+    expiresIn: number = 3600,
+  ): Promise<string | null> {
+    try {
+      // Retrieve message
+      const message = await db.query.messages.findFirst({
+        where: eq(messages.messageId, messageId),
+      });
+
+      if (!message) {
+        return null;
+      }
+
+      // Get attachment
+      const attachmentsList = (message.attachments ||
+        []) as AttachmentMetadata[];
+      const attachment = attachmentsList.find((a) => a.id === attachmentId);
+
+      if (!attachment || !attachment.thumbnailKey) {
+        return null;
+      }
+
+      // Generate download URL for thumbnail
+      const downloadData = await this.s3Service.generatePresignedDownloadUrl(
+        attachment.thumbnailKey,
+        { expiresIn },
+      );
+
+      return downloadData.url;
+    } catch (error) {
+      this.logger.error(`Error generating thumbnail URL: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Add attachment to message
+   */
+  async addAttachmentToMessage(
+    messageId: string,
+    attachment: AttachmentMetadata,
+  ): Promise<void> {
+    try {
+      // Retrieve message
+      const message = await db.query.messages.findFirst({
+        where: eq(messages.messageId, messageId),
+      });
+
+      if (!message) {
+        throw new BadRequestException('Message not found');
+      }
+
+      // Get existing attachments
+      const attachments = (message.attachments || []) as AttachmentMetadata[];
+
+      // Add new attachment
+      attachments.push(attachment);
+
+      // Update message with new attachments
+      await db
+        .update(messages)
+        .set({
+          attachments: attachments as any,
+          updatedAt: new Date(),
+        })
+        .where(eq(messages.messageId, messageId));
+
+      this.logger.log(
+        `Attachment added to message ${messageId}: ${attachment.fileName}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error adding attachment to message: ${error.message}`,
+        error,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Remove attachment from message
+   */
+  async removeAttachmentFromMessage(
+    messageId: string,
+    attachmentId: string,
+  ): Promise<void> {
+    try {
+      // Retrieve message
+      const message = await db.query.messages.findFirst({
+        where: eq(messages.messageId, messageId),
+      });
+
+      if (!message) {
+        throw new BadRequestException('Message not found');
+      }
+
+      // Get attachments
+      const attachments = (message.attachments || []) as AttachmentMetadata[];
+      const attachment = attachments.find((a) => a.id === attachmentId);
+
+      if (!attachment) {
+        throw new BadRequestException('Attachment not found');
+      }
+
+      // Delete from S3
+      try {
+        await this.s3Service.deleteFile(attachment.s3Key);
+        if (attachment.thumbnailKey) {
+          await this.s3Service.deleteFile(attachment.thumbnailKey);
+        }
+      } catch (s3Error) {
+        this.logger.warn(
+          `Failed to delete S3 files for attachment: ${s3Error.message}`,
+        );
+        // Continue even if S3 deletion fails
+      }
+
+      // Remove from attachments array
+      const updatedAttachments = attachments.filter(
+        (a) => a.id !== attachmentId,
+      );
+
+      // Update message
+      await db
+        .update(messages)
+        .set({
+          attachments: updatedAttachments as any,
+          updatedAt: new Date(),
+        })
+        .where(eq(messages.messageId, messageId));
+
+      this.logger.log(
+        `Attachment removed from message ${messageId}: ${attachment.fileName}`,
+      );
+    } catch (error) {
+      this.logger.error(`Error removing attachment: ${error.message}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all attachments for a message
+   */
+  async getMessageAttachments(
+    messageId: string,
+  ): Promise<AttachmentMetadata[]> {
+    try {
+      const message = await db.query.messages.findFirst({
+        where: eq(messages.messageId, messageId),
+      });
+
+      if (!message) {
+        throw new BadRequestException('Message not found');
+      }
+
+      return (message.attachments || []) as AttachmentMetadata[];
+    } catch (error) {
+      this.logger.error(`Error retrieving attachments: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete all attachments for a message
+   */
+  async deleteMessageAttachments(messageId: string): Promise<void> {
+    try {
+      const attachments = await this.getMessageAttachments(messageId);
+
+      // Delete all S3 files
+      for (const attachment of attachments) {
+        try {
+          await this.s3Service.deleteFile(attachment.s3Key);
+          if (attachment.thumbnailKey) {
+            await this.s3Service.deleteFile(attachment.thumbnailKey);
+          }
+        } catch (s3Error) {
+          this.logger.warn(
+            `Failed to delete S3 file: ${attachment.s3Key}`,
+            s3Error,
+          );
+        }
+      }
+
+      // Clear attachments from message
+      await db
+        .update(messages)
+        .set({
+          attachments: [],
+          updatedAt: new Date(),
+        })
+        .where(eq(messages.messageId, messageId));
+
+      this.logger.log(`All attachments deleted for message: ${messageId}`);
+    } catch (error) {
+      this.logger.error(
+        `Error deleting message attachments: ${error.message}`,
+        error,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Upload file directly to S3 (backend-side upload)
+   * This avoids CORS issues by proxying the upload through the backend
+   */
+  async uploadFileToS3(
+    file: any,
+    senderId: number,
+    contactId: string,
+    messageId?: string,
+    userId?: number,
+  ): Promise<AttachmentMetadata> {
+    try {
+      const uploadId = file.originalname.split('.')[0] + '-' + Date.now();
+      const finalMessageId = messageId || `msg-${uuidv4()}`;
+
+      // Generate S3 key
+      const s3Key = `${senderId}/${contactId}/${finalMessageId}/${file.originalname}`;
+
+      // Upload file to S3
+      await this.s3Service.uploadFile(s3Key, file.buffer, file.mimetype);
+
+      this.logger.log(`File uploaded to S3: ${file.originalname} → ${s3Key}`);
+
+      // Determine media type
+      const mediaType = getMediaTypeFromMimeType(file.mimetype);
+      if (!mediaType) {
+        throw new BadRequestException(
+          `Unsupported media type: ${file.mimetype}`,
+        );
+      }
+
+      // Create attachment metadata
+      const attachment: AttachmentMetadata = {
+        id: uploadId,
+        type: mediaType,
+        fileName: file.originalname,
+        mimeType: file.mimetype,
+        size: file.size,
+        s3Key,
+        uploadedAt: new Date().toISOString(),
+        status: 'success',
+      };
+
+      // If messageId was provided, update the message with this attachment
+      if (messageId) {
+        const message = await db.query.messages.findFirst({
+          where: eq(messages.messageId, messageId),
+        });
+
+        if (message) {
+          const existingAttachments = (message.attachments ||
+            []) as AttachmentMetadata[];
+
+          // Remove placeholder attachment with matching filename (s3Key is empty)
+          const filteredAttachments = existingAttachments.filter(
+            (a) =>
+              !(
+                a.fileName === file.originalname &&
+                (!a.s3Key || a.s3Key === '')
+              ),
+          );
+
+          // Add the real attachment
+          const updatedAttachments = [...filteredAttachments, attachment];
+
+          await db
+            .update(messages)
+            .set({ attachments: updatedAttachments as any })
+            .where(eq(messages.messageId, messageId));
+
+          this.logger.log(
+            `Updated message ${messageId} with attachment: ${file.originalname}`,
+          );
+        }
+      }
+
+      return attachment;
+    } catch (error) {
+      this.logger.error(`Error uploading file to S3: ${error.message}`, error);
+      throw error;
+    }
+  }
+}

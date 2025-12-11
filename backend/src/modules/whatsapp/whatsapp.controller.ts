@@ -49,6 +49,7 @@ export class WhatsAppController {
       mediaDto.mediaType,
       mediaDto.mediaUrl,
       mediaDto.caption,
+      mediaDto.senderId,
     );
   }
 
@@ -58,7 +59,7 @@ export class WhatsAppController {
    */
   @Get('status/:messageSid')
   async getMessageStatus(@Param('messageSid') messageSid: string) {
-    this.logger.log(`Get message status: ${messageSid}`);
+    //this.logger.log(`Get message status: ${messageSid}`);
     return this.whatsAppService.getMessageStatus(messageSid);
   }
 
