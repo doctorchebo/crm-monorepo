@@ -25,6 +25,7 @@ import {
   validateCloudAPIMessage,
   verifyWebhookSignature,
 } from './utils/cloud-api.utils';
+import { whatsAppGatewayInstance } from './whatsapp.gateway';
 
 /**
  * WhatsApp Cloud API Service
@@ -833,8 +834,24 @@ export class WhatsAppService {
         `Inbound message stored. From: ${senderPhone}, Type: ${messageType}, ID: ${messageId}`,
       );
 
+      // 🔥 EMIT MESSAGE VIA WEBSOCKET
+      // Notify all connected clients of the new message in real-time
+      if (whatsAppGatewayInstance) {
+        const messageTimestamp = new Date(parseInt(message.timestamp) * 1000);
+        whatsAppGatewayInstance.emitMessage({
+          messageId,
+          chatId,
+          sender: senderPhone,
+          text: textContent,
+          type: messageType,
+          timestamp: messageTimestamp,
+          attachments: mediaMetadata
+            ? [{ type: mediaMetadata.type, mediaId: mediaMetadata.mediaId }]
+            : undefined,
+        });
+      }
+
       // TODO: Trigger automation rules
-      // TODO: Notify frontend via WebSocket
     } catch (error) {
       this.logger.error('Error handling inbound message:', error);
       throw error;
@@ -932,6 +949,16 @@ export class WhatsAppService {
           Delivered: ${msg.deliveredAt || 'pending'} → ${updateData.deliveredAt || msg.deliveredAt || 'pending'}
           Read: ${msg.readAt || 'pending'} → ${updateData.readAt || msg.readAt || 'pending'}
         `);
+
+        // 🔥 EMIT STATUS UPDATE VIA WEBSOCKET
+        // This replaces polling - all connected clients get real-time updates
+        if (whatsAppGatewayInstance) {
+          whatsAppGatewayInstance.emitMessageStatus(
+            messageId,
+            normalizedStatus,
+            statusTimestamp,
+          );
+        }
       } else {
         this.logger.debug(
           `Message not found for status update: ${messageId}. Status: ${status}`,

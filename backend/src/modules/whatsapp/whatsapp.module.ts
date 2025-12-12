@@ -5,6 +5,7 @@ import { S3Service } from '@shared/services/s3.service';
 import { MediaController } from './controllers/media.controller';
 import { MediaService } from './services/media.service';
 import { WhatsAppController } from './whatsapp.controller';
+import { WhatsAppGateway, setWhatsAppGateway } from './whatsapp.gateway';
 import { WhatsAppService } from './whatsapp.service';
 import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
 
@@ -40,12 +41,18 @@ import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
     MediaService,
     S3Service,
     MetaCloudAPIConfigService,
+    WhatsAppGateway,
   ],
   exports: [
     WhatsAppService,
     MediaService,
     S3Service,
     MetaCloudAPIConfigService,
+    WhatsAppGateway,
   ],
 })
-export class WhatsAppModule {}
+export class WhatsAppModule {
+  constructor(gateway: WhatsAppGateway) {
+    setWhatsAppGateway(gateway);
+  }
+}

@@ -16,7 +16,7 @@ import { NotesPanel } from "@/components/ui/notes-panel";
 import { WhatsAppStatusIcon } from "@/components/whatsapp-status-icon";
 import { useAuthProtection } from "@/hooks/use-auth";
 import { useMediaUpload } from "@/hooks/use-media-upload";
-import { useMultipleMessageStatusTracking } from "@/hooks/use-message-status-tracking";
+import { useRealtimeChat } from "@/hooks/use-message-status-socket";
 import { backendApi } from "@/lib/api/endpoints";
 import { mediaApi } from "@/lib/media/api";
 import { Attachment, PendingUpload } from "@/lib/media/types";
@@ -69,6 +69,19 @@ interface Message {
   isDeleted?: boolean;
   deletedAt?: string;
   editedAt?: string;
+}
+
+interface InboundMessage {
+  messageId: string;
+  chatId: string;
+  sender: string;
+  text: string;
+  type: string;
+  timestamp: string;
+  attachments?: Array<{
+    type: string;
+    mediaId: string;
+  }>;
 }
 
 export default function ChatsPage() {
@@ -391,14 +404,8 @@ export default function ChatsPage() {
 
           setMessages(sorted);
 
-          // Start polling for status updates on outbound messages
-          const outboundMessageIds = sorted
-            .filter((msg) => msg.direction === "outbound")
-            .map((msg) => msg.messageId);
-
-          if (outboundMessageIds.length > 0) {
-            startStatusTracking(outboundMessageIds);
-          }
+          // Status updates now come via WebSocket in real-time
+          // No need to poll or track message IDs anymore
         }
       } catch (err) {
         console.error("Error fetching messages:", err);
@@ -407,56 +414,105 @@ export default function ChatsPage() {
     };
 
     fetchMessages();
-    // Refresh messages every 10 seconds (instead of 5) to reduce server load
-    // Message status updates are now handled by status polling, not message list refresh
-    const interval = setInterval(fetchMessages, 10000);
-    return () => clearInterval(interval);
+    // Initial load complete - now WebSocket will provide real-time message updates
+    // This initial fetch loads chat history; subsequent messages arrive via WebSocket
   }, [selectedChatId]);
 
-  // Status tracking for outbound messages
-  const [trackedMessageIds, setTrackedMessageIds] = useState<string[]>([]);
-  const { statusMap, isPolling } = useMultipleMessageStatusTracking(
-    trackedMessageIds,
-    {
-      pollInterval: 15000, // Poll every 15 seconds instead of 3 seconds
-      stopPollOnStatus: "delivered", // Stop polling once message is delivered
-      autoStart: true,
-    }
-  );
+  // 🔥 REAL-TIME UPDATES via WebSocket
+  // Provides instant message status updates AND new inbound messages
+  // Connects to backend and receives updates when webhooks arrive from Meta
+  const {
+    statusMap: socketStatusMap,
+    messages: inboundMessages,
+    isConnected: isSocketConnected,
+  } = useRealtimeChat(selectedChatId || undefined);
 
-  // Update tracked message IDs - only set once per message to avoid restarting polling
-  const startStatusTracking = (messageIds: string[]) => {
-    setTrackedMessageIds((prevIds) => {
-      // Only update if the set of message IDs has actually changed
-      const prevSet = new Set(prevIds);
-      const newSet = new Set(messageIds);
-      const hasChanged =
-        prevSet.size !== newSet.size ||
-        [...newSet].some((id) => !prevSet.has(id));
-
-      return hasChanged ? messageIds : prevIds;
-    });
-  };
-
-  // Update messages with new status information from polling
+  // Merge inbound WebSocket messages into the message list
   useEffect(() => {
-    if (statusMap.size === 0) return;
+    if (inboundMessages.length === 0) return;
+
+    setMessages((prevMessages) => {
+      const existingIds = new Set(prevMessages.map((m) => m.messageId));
+      const newMessages = inboundMessages.filter(
+        (wsMsg: InboundMessage) => !existingIds.has(wsMsg.messageId)
+      );
+
+      if (newMessages.length === 0) return prevMessages;
+
+      // Add new inbound messages to the list
+      const newMessageObjects: Message[] = newMessages.map(
+        (wsMsg: InboundMessage): Message => ({
+          id: undefined,
+          messageId: wsMsg.messageId,
+          text: wsMsg.text,
+          sender: wsMsg.sender,
+          direction: "inbound" as const,
+          timestamp: wsMsg.timestamp,
+          type: wsMsg.type,
+          status: "delivered" as const,
+          attachments: wsMsg.attachments
+            ? wsMsg.attachments.map((att) => ({
+                id: att.mediaId,
+                type: att.type as "image" | "video" | "audio" | "document",
+                mediaId: att.mediaId,
+                fileName: "",
+                mimeType: "application/octet-stream",
+                size: 0,
+                s3Key: att.mediaId,
+                status: "success" as const,
+                uploadedAt: wsMsg.timestamp,
+              }))
+            : undefined,
+          sentAt: wsMsg.timestamp,
+          deliveredAt: new Date().toISOString(),
+          readAt: undefined,
+          isDeleted: false,
+        })
+      );
+
+      const merged = [...prevMessages, ...newMessageObjects];
+
+      // Sort by timestamp ascending (oldest first)
+      return merged.sort(
+        (a, b) =>
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      );
+    });
+
+    // Trigger auto-scroll when new messages arrive
+    setMessageCount((prev) => prev + inboundMessages.length);
+  }, [inboundMessages]);
+
+  // Update messages with status changes from WebSocket
+  useEffect(() => {
+    if (Object.keys(socketStatusMap).length === 0) return;
 
     setMessages((prevMessages) =>
       prevMessages.map((msg) => {
-        const newStatus = statusMap.get(msg.messageId);
-        if (newStatus && newStatus !== msg.status) {
+        const newStatus = socketStatusMap[msg.messageId];
+        if (newStatus && newStatus.status !== msg.status) {
           return {
             ...msg,
-            status: newStatus,
+            status: newStatus.status,
+            sentAt:
+              newStatus.status === "sent"
+                ? new Date(newStatus.timestamp).toISOString()
+                : msg.sentAt,
+            deliveredAt:
+              newStatus.status === "delivered"
+                ? new Date(newStatus.timestamp).toISOString()
+                : msg.deliveredAt,
+            readAt:
+              newStatus.status === "read"
+                ? new Date(newStatus.timestamp).toISOString()
+                : msg.readAt,
           };
         }
         return msg;
       })
     );
     // Don't trigger auto-scroll when just updating message statuses
-    // Keep shouldAutoScroll unchanged
-  }, [statusMap]);
+  }, [socketStatusMap]);
 
   const handleSendMessage = async () => {
     if (
