@@ -1,9 +1,27 @@
 import { NestFactory } from '@nestjs/core';
+import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 declare const module: any;
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  // Parse incoming cookies so they're available in req.cookies
+
+  console.log('[Main] Cookie parser middleware installed');
+  app.use(cookieParser());
+
+  // Middleware to log incoming cookies on protected routes
+  app.use((req, res, next) => {
+    if (req.url.includes('/senders') || req.url.includes('/templates')) {
+      console.log(`[Cookies] ${req.method} ${req.url}`, {
+        cookies: req.cookies || 'no cookies',
+        cookieKeys: req.cookies ? Object.keys(req.cookies) : [],
+        headerCookie: req.headers.cookie || 'no cookie header',
+      });
+    }
+    next();
+  });
 
   // Set request size limits for file uploads
   app.use((req, res, next) => {
@@ -18,14 +36,11 @@ async function bootstrap() {
     next();
   });
 
-  // Enable CORS with explicit configuration
   app.enableCors({
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    optionsSuccessStatus: 200,
-    preflightContinue: false,
   });
 
   // Global logging middleware to debug all requests

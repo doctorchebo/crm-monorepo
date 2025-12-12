@@ -1,38 +1,44 @@
 /**
  * Hook for managing authentication state and redirects in client components
- * Checks token validity and redirects to login if expired
+ * Uses centralized TokenManager for token lifecycle management
  */
 
 "use client";
 
-import { isTokenExpired } from "@/lib/auth/token";
-import { deleteCookie, getCookie } from "@/lib/cookies";
+import { TokenManager } from "@/lib/auth/token-manager";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
+/**
+ * Hook that redirects to login if user is not authenticated
+ * Checks token validity and starts automatic token refresh
+ */
 export function useAuthProtection() {
   const router = useRouter();
 
   useEffect(() => {
     const checkAuth = () => {
-      const token = getCookie("jwt_token");
-
-      // If no token or token is expired, redirect to login
-      if (!token || isTokenExpired(token)) {
-        console.log("Token missing or expired, redirecting to login");
-        deleteCookie("jwt_token");
+      // Check if user has valid access token
+      if (!TokenManager.isAccessTokenValid()) {
+        console.log(
+          "[useAuthProtection] No valid access token, redirecting to login"
+        );
+        TokenManager.clearTokens();
         router.push("/sign-in");
         return;
       }
+
+      // Start automatic refresh checking
+      TokenManager.startAutoRefreshCheck();
     };
 
     // Check auth on mount
     checkAuth();
 
-    // Check auth every 30 seconds to catch expiration
-    const interval = setInterval(checkAuth, 30000);
-
-    return () => clearInterval(interval);
+    return () => {
+      // Cleanup on unmount
+      TokenManager.stopAutoRefreshCheck();
+    };
   }, [router]);
 }
 
@@ -41,11 +47,13 @@ export function useAuthProtection() {
  * Useful for components that need to conditionally render
  */
 export function useAuth() {
-  const token = getCookie("jwt_token");
-  const isAuthenticated = !!(token && !isTokenExpired(token));
+  const isAuthenticated = TokenManager.isAccessTokenValid();
+  const token = isAuthenticated ? TokenManager.getAccessToken() : null;
 
   return {
     isAuthenticated,
-    token: isAuthenticated ? token : null,
+    token,
+    isRefreshTokenValid: TokenManager.isRefreshTokenValid(),
+    getAccessTokenTimeRemaining: TokenManager.getAccessTokenTimeRemaining(),
   };
 }

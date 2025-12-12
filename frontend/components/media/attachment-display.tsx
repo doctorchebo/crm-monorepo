@@ -66,11 +66,11 @@ export function ImageAttachment({
         let url = urlResponse.url;
 
         // Handle Cloud API media (inbound from Meta)
+        // Use the frontend API proxy which includes authentication
         if (url.startsWith("cloud-api://")) {
           const mediaId = url.replace("cloud-api://", "");
-          const response = await mediaApi.fetchCloudAPIMedia(mediaId);
-          const blob = await response.blob();
-          url = URL.createObjectURL(blob);
+          // Use the proxy endpoint which handles authentication via cookies
+          url = `/api/whatsapp/media/cloud-api/${mediaId}`;
         }
 
         setImageUrl(url);
@@ -101,13 +101,13 @@ export function ImageAttachment({
       onClick={() => onPreview?.(0)}
     >
       {!isSquare && (
-        // Single image: fixed width container to prevent layout shift
-        <div className="relative w-80 bg-gray-200 rounded-lg overflow-hidden inline-block">
+        // Single image: constrained width container to prevent overflow
+        <div className="relative max-w-xs bg-gray-200 rounded-lg overflow-hidden">
           {(thumbnailUrl || imageUrl) && (
             <img
               src={thumbnailUrl || imageUrl || ""}
               alt={attachment.fileName}
-              className="w-80 h-auto object-cover"
+              className="w-full h-auto object-cover"
             />
           )}
 
@@ -286,11 +286,10 @@ export function AudioAttachment({
         let url = urlResponse.url;
 
         // Handle Cloud API media (inbound from Meta)
+        // Use the frontend API proxy which includes authentication
         if (url.startsWith("cloud-api://")) {
           const mediaId = url.replace("cloud-api://", "");
-          const response = await mediaApi.fetchCloudAPIMedia(mediaId);
-          const blob = await response.blob();
-          url = URL.createObjectURL(blob);
+          url = `/api/whatsapp/media/cloud-api/${mediaId}`;
         }
 
         setAudioUrl(url);
@@ -462,11 +461,10 @@ export function DocumentAttachment({
         let url = urlResponse.url;
 
         // Handle Cloud API media (inbound from Meta)
+        // Use the frontend API proxy which includes authentication
         if (url.startsWith("cloud-api://")) {
           const mediaId = url.replace("cloud-api://", "");
-          const response = await mediaApi.fetchCloudAPIMedia(mediaId);
-          const blob = await response.blob();
-          url = URL.createObjectURL(blob);
+          url = `/api/whatsapp/media/cloud-api/${mediaId}`;
         }
 
         setDocumentUrl(url);
@@ -596,7 +594,7 @@ export function AttachmentGallery({
         <div
           className={`gap-1 ${
             images.length === 1
-              ? "inline-block"
+              ? "flex w-full"
               : images.length === 2
               ? "grid grid-cols-2"
               : images.length === 3
@@ -617,7 +615,7 @@ export function AttachmentGallery({
 
               {/* Square image container for multiple images */}
               {images.length > 1 ? (
-                <div className="w-24 h-24 rounded-lg overflow-hidden bg-gray-200 inline-block">
+                <div className="w-24 h-24 rounded-lg overflow-hidden bg-gray-200 flex-shrink-0">
                   <ImageAttachment
                     attachment={attachment}
                     messageId={messageId}
@@ -627,14 +625,16 @@ export function AttachmentGallery({
                   />
                 </div>
               ) : (
-                // Single image - let it be full size
-                <ImageAttachment
-                  attachment={attachment}
-                  messageId={messageId}
-                  onDelete={onDelete}
-                  isSquare={false}
-                  onPreview={() => onImageClick?.(0)}
-                />
+                // Single image - constrained width with max-w
+                <div className="max-w-xs w-full">
+                  <ImageAttachment
+                    attachment={attachment}
+                    messageId={messageId}
+                    onDelete={onDelete}
+                    isSquare={false}
+                    onPreview={() => onImageClick?.(0)}
+                  />
+                </div>
               )}
             </div>
           ))}

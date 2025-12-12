@@ -29,7 +29,10 @@ class EnvironmentVariables {
   JWT_SECRET: string;
 
   @IsNumber()
-  JWT_EXPIRATION: number = 3600;
+  JWT_EXPIRATION: number = 3600; // 1 hour - access token
+
+  @IsNumber()
+  JWT_REFRESH_EXPIRATION: number = 604800; // 7 days - refresh token
 
   @IsString()
   @IsNotEmpty()

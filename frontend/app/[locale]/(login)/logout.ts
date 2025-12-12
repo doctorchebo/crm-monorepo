@@ -1,13 +1,13 @@
 "use client";
 
-import { deleteCookie } from "@/lib/cookies";
+import { TokenManager } from "@/lib/auth/token-manager";
 
 /**
- * Client-side logout function to clean up JWT token
+ * Client-side logout function to clean up tokens
  * Should be called after server-side signOut completes
  */
 export function logoutClient() {
-  // Delete JWT token from browser cookies
-  deleteCookie("jwt_token");
-  console.debug("JWT token deleted from cookies");
+  // Clear all tokens (access and refresh) using TokenManager
+  TokenManager.clearTokens();
+  console.debug("All tokens cleared from cookies");
 }

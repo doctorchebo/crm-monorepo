@@ -13,7 +13,6 @@ import {
   invitations,
   teamMembers,
   teams,
-  User,
   users,
   type NewActivityLog,
   type NewTeam,
@@ -47,7 +46,11 @@ async function logActivity(
 async function authenticateWithBackend(
   email: string,
   password: string
-): Promise<string | null> {
+): Promise<{
+  access_token: string;
+  refresh_token: string;
+  expiresAt: { access: string; refresh: string };
+} | null> {
   try {
     const backendUrl =
       process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
@@ -56,6 +59,7 @@ async function authenticateWithBackend(
       headers: {
         "Content-Type": "application/json",
       },
+      credentials: "include", // Important: allow cookies from backend response
       body: JSON.stringify({ email, password }),
     });
 
@@ -64,7 +68,22 @@ async function authenticateWithBackend(
     }
 
     const data = await response.json();
-    return data?.access_token || null;
+
+    // CRITICAL: Get Set-Cookie headers from backend response
+    const setCookieHeaders = response.headers.getSetCookie();
+    console.log(
+      "[authenticateWithBackend] Set-Cookie headers from backend:",
+      setCookieHeaders.length
+    );
+
+    return {
+      access_token: data?.access_token || "",
+      refresh_token: data?.refresh_token || "",
+      expiresAt: data?.expiresAt || {
+        access: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        refresh: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+    };
   } catch (err) {
     console.error("Backend authentication failed:", err);
     return null;
@@ -112,20 +131,79 @@ export const signIn = validatedAction(signInSchema, async (data, formData) => {
       password,
     };
   }
+  // Get JWT tokens from backend (both access and refresh)
+  // The backend sets them as HTTP-only cookies in the response
+  // Browser automatically stores and sends them with subsequent requests
+  console.log("[SignIn] Authenticating with backend...");
+  const authResult = await authenticateWithBackend(email, password);
 
-  // Get JWT token from backend
-  const jwtToken = await authenticateWithBackend(email, password);
-
-  // Set JWT token as cookie server-side so it's available on next request
-  if (jwtToken) {
-    const cookieJar = await cookies();
-    const expiresInOneDay = new Date(Date.now() + 24 * 60 * 60 * 1000);
-    cookieJar.set("jwt_token", jwtToken, {
-      secure: true,
-      sameSite: "lax",
-      expires: expiresInOneDay,
-    });
+  if (!authResult || !authResult.expiresAt) {
+    console.error("[SignIn] Backend auth failed:", authResult);
+    return {
+      error: "Failed to authenticate with backend",
+      email,
+      password,
+    };
   }
+
+  console.log("[SignIn] Backend auth successful", {
+    hasAccessToken: !!authResult.access_token,
+    hasRefreshToken: !!authResult.refresh_token,
+    expiresAt: authResult.expiresAt,
+  });
+
+  // CRITICAL: Manually set JWT cookies from backend response
+  // Server-side fetches don't automatically propagate Set-Cookie headers to the browser
+  // We need to explicitly set them using the cookies API
+  const isProduction = process.env.NODE_ENV === "production";
+  const cookieJar = await cookies();
+  const accessTokenExpiry = new Date(Date.now() + 60 * 60 * 1000);
+  const refreshTokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+  // Set the actual JWT tokens as HTTP-only cookies
+  if (authResult.access_token) {
+    cookieJar.set("jwt_token", authResult.access_token, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: "lax",
+      path: "/",
+      expires: accessTokenExpiry,
+    });
+    console.log("[SignIn] jwt_token cookie set");
+  }
+
+  if (authResult.refresh_token) {
+    cookieJar.set("jwt_refresh_token", authResult.refresh_token, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: "lax",
+      path: "/",
+      expires: refreshTokenExpiry,
+    });
+    console.log("[SignIn] jwt_refresh_token cookie set");
+  }
+
+  // Only store tracking cookies for client-side expiration awareness
+  // The actual JWT tokens are handled by HTTP-only cookies from the backend
+  cookieJar.set("jwt_token_expires_at", accessTokenExpiry.toISOString(), {
+    httpOnly: false, // Client needs to read this
+    secure: isProduction,
+    sameSite: "lax",
+    expires: accessTokenExpiry,
+  });
+
+  cookieJar.set(
+    "jwt_refresh_token_expires_at",
+    refreshTokenExpiry.toISOString(),
+    {
+      httpOnly: false, // Client needs to read this
+      secure: isProduction,
+      sameSite: "lax",
+      expires: refreshTokenExpiry,
+    }
+  );
+
+  console.log("[SignIn] All cookies set successfully");
 
   await Promise.all([
     setSession(foundUser),
@@ -138,8 +216,11 @@ export const signIn = validatedAction(signInSchema, async (data, formData) => {
     return createCheckoutSession({ team: foundTeam, priceId });
   }
 
-  // Return JWT token to client to indicate successful login
-  return { jwtToken };
+  // Return expiration times to client so it can initialize TokenManager
+  // (actual tokens are set as HTTP-only cookies by server action)
+  return {
+    expiresAt: authResult.expiresAt,
+  };
 });
 
 const signUpSchema = z.object({
@@ -266,20 +347,6 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
   // Return JWT token to client so it can be stored in cookies
   return { jwtToken };
 });
-
-export async function signOut() {
-  try {
-    const user = (await getUser()) as User | null;
-    if (user) {
-      const userWithTeam = await getUserWithTeam(user.id);
-      await logActivity(userWithTeam?.teamId, user.id, ActivityType.SIGN_OUT);
-    }
-    (await cookies()).delete("session");
-    // Note: jwt_token is deleted client-side in the logout flow
-  } catch (error) {
-    console.error("Error during sign out:", error);
-  }
-}
 
 const updatePasswordSchema = z.object({
   currentPassword: z.string().min(8).max(100),
@@ -510,3 +577,44 @@ export const inviteTeamMember = validatedActionWithUser(
     return { success: "Invitation sent successfully" };
   }
 );
+
+/**
+ * Server-side logout action
+ * Calls backend to clear JWT cookies and logs the sign-out activity
+ */
+export async function signOut() {
+  try {
+    // Log activity before clearing session
+    const user = await getUser();
+    if (user) {
+      const userWithTeam = await getUserWithTeam(user.id);
+      await logActivity(userWithTeam?.teamId, user.id, ActivityType.SIGN_OUT);
+    }
+
+    const backendUrl =
+      process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+
+    // Call backend logout endpoint to clear HTTP-only cookies
+    const response = await fetch(`${backendUrl}/auth/logout`, {
+      method: "POST",
+      credentials: "include", // Send cookies with request
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      console.error("[SignOut] Backend logout failed:", response.statusText);
+    } else {
+      console.debug("[SignOut] Backend logout successful");
+    }
+  } catch (error) {
+    console.error("[SignOut] Failed to call backend logout:", error);
+  }
+
+  // Clear session cookie
+  const cookieJar = await cookies();
+  cookieJar.delete("session");
+
+  console.debug("[SignOut] Session cookie cleared");
+}

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ActionState } from "@/lib/auth/middleware";
+import { TokenManager } from "@/lib/auth/token-manager";
 import { CircleIcon, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -31,11 +32,23 @@ export function Login({ mode = "signin" }: { mode?: "signin" | "signup" }) {
     if (
       state &&
       typeof state === "object" &&
-      "jwtToken" in state &&
+      "expiresAt" in state &&
       !state.error
     ) {
-      // JWT token is already set server-side as HTTP-only cookie
+      // Initialize TokenManager with expiration times
+      // This will start auto-refresh checking and set tracking cookies
+      const { expiresAt } = state as any;
+      if (expiresAt?.access && expiresAt?.refresh) {
+        TokenManager.storeTokenExpirationTime(
+          new Date(expiresAt.access),
+          new Date(expiresAt.refresh)
+        );
+        console.debug("[Login] TokenManager initialized with expiration times");
+      }
+
+      // JWT tokens are already set server-side as HTTP-only cookies
       // Redirect immediately to dashboard
+      // Middleware will allow the request because tokens exist
       router.push("/dashboard");
     }
   }, [state, router]);

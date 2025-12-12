@@ -1,23 +1,22 @@
 /**
  * Media API Client
  * Handles all media upload/download operations
+ *
+ * Architecture:
+ * - Uses centralized token management from TokenManager
+ * - For simple requests (presigned URL, metadata), uses apiClient for consistency
+ * - For file uploads/downloads with progress tracking, uses XHR but with token from TokenManager
+ * - Automatic token refresh is handled by TokenManager
  */
 
-import { getCookie } from "@/lib/cookies";
 import { DownloadUrlResponse, PresignedUrlResponse } from "./types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
-/**
- * Get JWT token from cookies
- */
-function getAuthToken(): string | null {
-  return getCookie("jwt_token");
-}
-
 export const mediaApi = {
   /**
    * Upload file directly through backend (avoids CORS issues)
+   * Uses XHR for progress tracking with centralized token management
    */
   async uploadFileToBackend(
     file: File,
@@ -31,7 +30,6 @@ export const mediaApi = {
     s3Key: string;
     attachment: any;
   }> {
-    const token = getAuthToken();
     const formData = new FormData();
     formData.append("file", file);
 
@@ -64,6 +62,14 @@ export const mediaApi = {
           } catch (error) {
             reject(new Error(`Failed to parse upload response: ${error}`));
           }
+        } else if (xhr.status === 401) {
+          // Token expired, TokenManager handles refresh on next request
+          console.error("[BackendUpload] Unauthorized (token may be expired)");
+          reject(
+            new Error(
+              "Upload failed: unauthorized (session may have expired, please refresh)"
+            )
+          );
         } else {
           const errorMsg = `Upload failed with status ${xhr.status}`;
           console.error(`[BackendUpload] ${errorMsg}`);
@@ -95,9 +101,8 @@ export const mediaApi = {
         "POST",
         `${API_BASE_URL}/whatsapp/media/upload?${params.toString()}`
       );
-      if (token) {
-        xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-      }
+      // CRITICAL: Enable credentials for XHR to include cookies
+      xhr.withCredentials = true;
 
       xhr.send(formData);
     });
@@ -117,14 +122,13 @@ export const mediaApi = {
     if (senderId) params.append("senderId", senderId.toString());
     if (contactId) params.append("contactId", contactId);
 
-    const token = getAuthToken();
     const response = await fetch(
       `${API_BASE_URL}/whatsapp/media/presigned-url?${params.toString()}`,
       {
         method: "POST",
+        credentials: "include", // CRITICAL: Send cookies for authentication
         headers: {
           "Content-Type": "application/json",
-          ...(token && { Authorization: `Bearer ${token}` }),
         },
         body: JSON.stringify({
           fileName,
@@ -144,6 +148,7 @@ export const mediaApi = {
 
   /**
    * Upload file to S3 using presigned URL
+   * No token needed for S3 presigned URLs
    */
   async uploadToS3(
     presignedUrl: string,
@@ -220,7 +225,6 @@ export const mediaApi = {
     messageId: string,
     duration?: number
   ): Promise<{ success: boolean; attachment: any }> {
-    const token = getAuthToken();
     console.log(`[NotifyUpload] Notifying backend of upload completion`, {
       uploadId,
       fileName,
@@ -233,9 +237,9 @@ export const mediaApi = {
       `${API_BASE_URL}/whatsapp/media/upload-completed?messageId=${messageId}`,
       {
         method: "POST",
+        credentials: "include", // CRITICAL: Send cookies for authentication
         headers: {
           "Content-Type": "application/json",
-          ...(token && { Authorization: `Bearer ${token}` }),
         },
         body: JSON.stringify({
           uploadId,
@@ -265,6 +269,9 @@ export const mediaApi = {
 
   /**
    * Get download URL for attachment
+   * CRITICAL: Uses credentials: 'include' to send JWT cookies automatically
+   * Previously tried using TokenManager.getAccessToken() which always returns null
+   * because HTTP-only cookies cannot be read from JavaScript
    */
   async getDownloadUrl(
     messageId: string,
@@ -274,14 +281,11 @@ export const mediaApi = {
     const params = new URLSearchParams();
     if (expiresIn) params.append("expiresIn", expiresIn.toString());
 
-    const token = getAuthToken();
     const response = await fetch(
       `${API_BASE_URL}/whatsapp/media/${messageId}/${attachmentId}/download-url?${params.toString()}`,
       {
         method: "GET",
-        headers: {
-          ...(token && { Authorization: `Bearer ${token}` }),
-        },
+        credentials: "include", // CRITICAL: Send cookies automatically for authentication
       }
     );
 
@@ -290,13 +294,28 @@ export const mediaApi = {
       throw new Error(error.message || "Failed to get download URL");
     }
 
-    return response.json();
-  },
+    const data = await response.json();
 
+    // CRITICAL: Convert backend URLs to use frontend proxy
+    // The backend returns URLs like http://localhost:3001/whatsapp/media/...
+    // These are direct URLs that don't include credentials
+    // We need to convert them to /api/whatsapp/media/... to use the proxy
+    if (data.url && data.url.includes("/whatsapp/media/")) {
+      // Extract the media path from the backend URL
+      // URL format: http://localhost:3001/whatsapp/media/{path}
+      // We want: /api/whatsapp/media/{path}
+      const mediaPathMatch = data.url.match(/\/whatsapp\/media\/(.+)/);
+      if (mediaPathMatch) {
+        const mediaPath = mediaPathMatch[1];
+        data.url = `/api/whatsapp/media/${mediaPath}`;
+      }
+    }
+
+    return data;
+  },
   /**
    * Get thumbnail URL for attachment
-   */
-  async getThumbnailUrl(
+   */ async getThumbnailUrl(
     messageId: string,
     attachmentId: string,
     expiresIn?: number
@@ -304,14 +323,11 @@ export const mediaApi = {
     const params = new URLSearchParams();
     if (expiresIn) params.append("expiresIn", expiresIn.toString());
 
-    const token = getAuthToken();
     const response = await fetch(
       `${API_BASE_URL}/whatsapp/media/${messageId}/${attachmentId}/thumbnail-url?${params.toString()}`,
       {
         method: "GET",
-        headers: {
-          ...(token && { Authorization: `Bearer ${token}` }),
-        },
+        credentials: "include", // CRITICAL: Send cookies for authentication
       }
     );
 
@@ -326,15 +342,14 @@ export const mediaApi = {
   /**
    * Get all attachments for message
    */
-  async getMessageAttachments(messageId: string): Promise<any[]> {
-    const token = getAuthToken();
+  async getMessageAttachments(
+    messageId: string
+  ): Promise<{ attachments: any[] }> {
     const response = await fetch(
       `${API_BASE_URL}/whatsapp/media/${messageId}/attachments`,
       {
         method: "GET",
-        headers: {
-          ...(token && { Authorization: `Bearer ${token}` }),
-        },
+        credentials: "include", // CRITICAL: Send cookies for authentication
       }
     );
 
@@ -350,18 +365,15 @@ export const mediaApi = {
   /**
    * Delete attachment from message
    */
-  async deleteAttachment(
+  async removeAttachmentFromMessage(
     messageId: string,
     attachmentId: string
   ): Promise<void> {
-    const token = getAuthToken();
     const response = await fetch(
       `${API_BASE_URL}/whatsapp/media/${messageId}/${attachmentId}`,
       {
         method: "DELETE",
-        headers: {
-          ...(token && { Authorization: `Bearer ${token}` }),
-        },
+        credentials: "include", // CRITICAL: Send cookies for authentication
       }
     );
 
@@ -374,15 +386,12 @@ export const mediaApi = {
   /**
    * Delete all attachments from message
    */
-  async deleteAllAttachments(messageId: string): Promise<void> {
-    const token = getAuthToken();
+  async deleteMessageAttachments(messageId: string): Promise<void> {
     const response = await fetch(
       `${API_BASE_URL}/whatsapp/media/${messageId}`,
       {
         method: "DELETE",
-        headers: {
-          ...(token && { Authorization: `Bearer ${token}` }),
-        },
+        credentials: "include", // CRITICAL: Send cookies for authentication
       }
     );
 
@@ -400,14 +409,11 @@ export const mediaApi = {
    * @returns Response object with the media blob
    */
   async fetchCloudAPIMedia(mediaId: string): Promise<Response> {
-    const token = getAuthToken();
     const response = await fetch(
       `${API_BASE_URL}/whatsapp/media/cloud-api/${mediaId}`,
       {
         method: "GET",
-        headers: {
-          ...(token && { Authorization: `Bearer ${token}` }),
-        },
+        credentials: "include", // CRITICAL: Send cookies for authentication
       }
     );
 

@@ -1,3 +1,5 @@
+import { NotificationContainer } from "@/components/notifications/notification-container";
+import { NotificationProvider } from "@/hooks/use-notification";
 import { defaultLocale, locales } from "@/i18n";
 import { getTeamForUser, getUser } from "@/lib/db/queries";
 import { ThemeProvider } from "@/lib/theme/theme-provider";
@@ -10,8 +12,7 @@ import { Manrope } from "next/font/google";
 import { notFound } from "next/navigation";
 import { SWRConfig } from "swr";
 import "./globals.css";
-import { NotificationProvider } from "@/hooks/use-notification";
-import { NotificationContainer } from "@/components/notifications/notification-container";
+import { TokenProvider } from "@/lib/auth/token-provider";
 
 export const metadata: Metadata = {
   title: "Next.js SaaS Starter",
@@ -53,25 +54,27 @@ export default async function RootLayout({ children, params }: Props) {
         <ThemeScript />
       </head>
       <body className="min-h-[100dvh] bg-white dark:bg-gray-950 text-black dark:text-white">
-        <NotificationProvider>
-          <NextIntlClientProvider locale={locale}>
-            <ThemeProvider>
-              <SWRConfig
-                value={{
-                  fallback: {
-                    // We do NOT await here
-                    // Only components that read this data will suspend
-                    "/api/user": getUser(),
-                    "/api/team": getTeamForUser(),
-                  },
-                }}
-              >
-                {children}
-                <NotificationContainer />
-              </SWRConfig>
-            </ThemeProvider>
-          </NextIntlClientProvider>
-        </NotificationProvider>
+        <TokenProvider>
+          <NotificationProvider>
+            <NextIntlClientProvider locale={locale}>
+              <ThemeProvider>
+                <SWRConfig
+                  value={{
+                    fallback: {
+                      // We do NOT await here
+                      // Only components that read this data will suspend
+                      "/api/user": getUser(),
+                      "/api/team": getTeamForUser(),
+                    },
+                  }}
+                >
+                  {children}
+                  <NotificationContainer />
+                </SWRConfig>
+              </ThemeProvider>
+            </NextIntlClientProvider>
+          </NotificationProvider>
+        </TokenProvider>
       </body>
     </html>
   );

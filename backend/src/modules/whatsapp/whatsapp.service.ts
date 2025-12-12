@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { MetaCloudAPIConfigService } from '@shared/services/meta-cloud-api.config';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { OutboundMessageDto } from './dto/outbound-message.dto';
+import { MediaService } from './services/media.service';
 import {
   CloudAPIInboundMessage,
   CloudAPISendMessageResponse,
@@ -50,6 +51,7 @@ export class WhatsAppService {
   constructor(
     private configService: ConfigService,
     private metaCloudAPIConfig: MetaCloudAPIConfigService,
+    private mediaService: MediaService,
   ) {
     this.metaPhoneNumberId = this.configService.getOrThrow<string>(
       'META_PHONE_NUMBER_ID',
@@ -1017,20 +1019,56 @@ export class WhatsAppService {
       }
 
       // Convert media metadata to attachment object if present
+      let s3Key = '';
+
+      // If there's media, download and cache it to S3 immediately
+      // Meta's URLs expire after 5 minutes, so we must cache now
+      if (messageData.mediaMetadata) {
+        try {
+          this.logger.log(
+            `[Inbound Media] Starting to cache media: ${messageData.mediaMetadata.mediaId} (${messageData.mediaMetadata.mimeType})`,
+          );
+          s3Key = await this.mediaService.downloadAndCacheCloudAPIMedia(
+            messageData.mediaMetadata.mediaId,
+            messageData.mediaMetadata.mimeType || 'application/octet-stream',
+            messageData.chatId, // Use chatId as the organization key
+            messageData.mediaMetadata.filename,
+          );
+          if (s3Key) {
+            this.logger.log(
+              `[Inbound Media] ✅ Successfully cached media to S3: ${s3Key}`,
+            );
+          } else {
+            this.logger.warn(
+              `[Inbound Media] ⚠️ Failed to cache media (will use cloud-api:// fallback): ${messageData.mediaMetadata.mediaId}`,
+            );
+          }
+        } catch (error) {
+          this.logger.error(
+            `[Inbound Media] ❌ Exception while caching media: ${error.message}`,
+            error,
+          );
+          // Continue without S3 cache - will fall back to cloud-api:// reference
+        }
+      }
+
       const attachments = messageData.mediaMetadata
         ? [
             {
               id: messageData.mediaMetadata.mediaId,
               type: messageData.type, // The type field contains 'image', 'video', etc.
               fileName:
-                messageData.mediaMetadata.fileName ||
+                messageData.mediaMetadata.filename ||
                 `${messageData.type}_${messageData.mediaMetadata.mediaId}`,
               mimeType: messageData.mediaMetadata.mimeType || '',
-              size: messageData.mediaMetadata.size || 0,
-              s3Key: '', // Inbound media from Meta, not stored in S3
+              size: messageData.mediaMetadata.fileSize || 0,
+              s3Key: s3Key, // Will be empty string if caching failed, that's ok
               status: 'success',
               uploadedAt: new Date().toISOString(),
-              mediaUrl: `cloud-api://${messageData.mediaMetadata.mediaId}`, // Store Cloud API reference
+              // Only use cloud-api:// as fallback if S3 caching failed
+              mediaUrl: s3Key
+                ? ''
+                : `cloud-api://${messageData.mediaMetadata.mediaId}`,
             },
           ]
         : [];

@@ -1,9 +1,16 @@
 /**
  * API Client for communicating with NestJS backend
- * Handles JWT token attachment, error handling, and request/response transformation
+ * Handles HTTP-only cookie-based authentication with automatic token refresh
+ *
+ * Architecture:
+ * - HTTP-only cookies are set by server (CSRF protection)
+ * - Cookies are sent automatically with every request by the browser
+ * - No manual token attachment needed
+ * - 401 responses trigger automatic token refresh via /auth/refresh endpoint
+ * - Transparent refresh to calling code - retries request with new token
  */
 
-import { deleteCookie, getCookie } from "@/lib/cookies";
+import { TokenManager } from "@/lib/auth/token-manager";
 
 interface ApiRequestOptions extends RequestInit {
   headers?: Record<string, string>;
@@ -17,70 +24,80 @@ class ApiClient {
       baseUrl || process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
   }
 
-  private getRouter() {
-    // Import router dynamically to avoid issues in non-React contexts
-    // This will only be used in client components
-    try {
-      return require("next/navigation").useRouter();
-    } catch {
-      return null;
-    }
-  }
+  /**
+   * Handle 401 Unauthorized response
+   * Attempts to refresh token and retry the request
+   */
+  private handleUnauthorized() {
+    console.warn("[ApiClient] 401 Unauthorized - clearing auth");
+    TokenManager.clearTokens();
 
-  private async getToken(): Promise<string | null> {
-    // Get JWT token from browser cookies
-    // This token is issued by the backend and should be used for API authentication
-    const token = getCookie("jwt_token");
-    if (token) {
-      console.debug("JWT token found in cookies");
-      return token;
-    }
-    console.debug("JWT token not found in cookies");
-    return null;
-  }
-
-  private handleAuthError() {
-    // Delete expired/invalid token from cookies
-    deleteCookie("jwt_token");
-
-    // Attempt to redirect to login page
+    // Redirect to login page if in browser
     if (typeof window !== "undefined") {
-      // Client-side: redirect using window.location
       window.location.href = "/sign-in";
     }
   }
 
+  /**
+   * Perform HTTP request with automatic cookie handling and refresh
+   *
+   * Key points:
+   * - credentials: "include" ensures HTTP-only cookies are sent and received
+   * - No manual Authorization header (cookies handle auth automatically)
+   * - 401 triggers automatic refresh via /auth/refresh
+   */
   private async request<T>(
     endpoint: string,
-    options: ApiRequestOptions = {}
+    options: ApiRequestOptions = {},
+    isRetry: boolean = false
   ): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
-    const token = await this.getToken();
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       ...options.headers,
     };
 
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-      console.debug(`Sending request to ${endpoint} with JWT token`);
-    } else {
-      console.warn(`No JWT token available for request to ${endpoint}`);
-    }
+    console.debug(
+      `[ApiClient] Making ${
+        options.method || "GET"
+      } request to ${endpoint} with credentials: "include"`
+    );
 
     const response = await fetch(url, {
       ...options,
       headers,
+      credentials: "include", // CRITICAL: Send and receive HTTP-only cookies
     });
 
-    // Handle 401 Unauthorized - token is invalid or expired
+    console.debug(
+      `[ApiClient] ${options.method || "GET"} ${endpoint} - ${response.status}`
+    );
+
+    // Handle 401 Unauthorized
     if (response.status === 401) {
-      console.warn(
-        "Received 401 Unauthorized response - token expired or invalid"
-      );
-      this.handleAuthError();
-      throw new Error("Unauthorized: Please log in again");
+      if (isRetry) {
+        // Already retried once, give up
+        console.error("[ApiClient] Still unauthorized after refresh attempt");
+        this.handleUnauthorized();
+        throw new Error("Unauthorized: Please log in again");
+      }
+
+      console.warn("[ApiClient] Received 401 - attempting to refresh token");
+
+      try {
+        // Attempt to refresh token
+        // The /auth/refresh endpoint uses the refresh_token HTTP-only cookie automatically
+        await TokenManager.refreshAccessToken();
+
+        // Retry request with new token (sent as HTTP-only cookie)
+        console.debug("[ApiClient] Retrying request after token refresh");
+        return this.request<T>(endpoint, options, true);
+      } catch (refreshError) {
+        console.error("[ApiClient] Token refresh failed:", refreshError);
+        this.handleUnauthorized();
+        throw new Error("Unauthorized: Please log in again");
+      }
     }
 
     if (!response.ok) {

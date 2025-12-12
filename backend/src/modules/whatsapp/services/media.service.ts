@@ -147,6 +147,72 @@ export class MediaService {
   }
 
   /**
+   * Download Cloud API media and cache it in S3
+   * This is called when receiving inbound messages with media
+   *
+   * Meta's media URLs expire after 5 minutes, so we must download and cache immediately
+   * upon receipt to ensure the media is always accessible
+   *
+   * @param mediaId - The media ID from Meta
+   * @param mimeType - The MIME type of the media
+   * @param contactId - The contact ID for organizing in S3
+   * @param fileName - Optional file name (fallback to mediaId)
+   * @returns S3 key where the media was cached
+   */
+  async downloadAndCacheCloudAPIMedia(
+    mediaId: string,
+    mimeType: string,
+    contactId: string,
+    fileName?: string,
+  ): Promise<string> {
+    try {
+      this.logger.log(
+        `[Cache Media] Starting to download and cache Cloud API media: ${mediaId}`,
+      );
+
+      // Step 1: Download from Meta Cloud API
+      const mediaBuffer = await this.fetchCloudAPIMedia(mediaId);
+      this.logger.log(
+        `[Cache Media] Downloaded ${mediaBuffer.length} bytes from Meta`,
+      );
+
+      // Step 2: Generate S3 key for inbound media
+      // Use a special "inbound" sender ID to distinguish from user uploads
+      // Format: inbound/{contactId}/{mediaId}/{fileName}
+      const fileExtension = fileName?.split('.').pop() || '';
+      const finalFileName = fileName || `${mediaId}.media`;
+      const s3Key = `inbound/${contactId}/${mediaId}/${finalFileName}`;
+
+      this.logger.log(
+        `[Cache Media] Uploading to S3 with key: ${s3Key} (${mediaBuffer.length} bytes, mimeType: ${mimeType})`,
+      );
+
+      // Step 3: Upload to S3 for persistent storage
+      const result = await this.s3Service.uploadFile(
+        s3Key,
+        mediaBuffer,
+        mimeType,
+      );
+
+      this.logger.log(
+        `[Cache Media] Successfully cached media to S3: ${result.key}`,
+      );
+
+      return result.key;
+    } catch (error) {
+      this.logger.error(
+        `[Cache Media] FAILED to cache Cloud API media ${mediaId}: ${error.message}`,
+        error instanceof Error ? error.stack : '',
+      );
+      // Don't throw - allow message to be stored with cloud-api:// reference as fallback
+      this.logger.warn(
+        `[Cache Media] Falling back to cloud-api:// reference for media ${mediaId}`,
+      );
+      return '';
+    }
+  }
+
+  /**
    * Generate presigned URL for file upload
    * Validates file and returns S3 presigned URL for direct client upload
    */
@@ -323,39 +389,52 @@ export class MediaService {
         throw new BadRequestException('Attachment not found');
       }
 
-      // Check if this is a Cloud API media (inbound from Meta)
-      if (attachment.mediaUrl?.startsWith('cloud-api://')) {
-        // For inbound Cloud API media, return the Cloud API reference
-        // The client will need to fetch this through our backend endpoint
-        // that has access to the Meta access token
-        const mediaId = attachment.mediaUrl.replace('cloud-api://', '');
+      // CRITICAL: Check S3 key first (inbound media cached from Meta)
+      // S3 cached media is preferred because Meta URLs expire after 5 minutes
+      if (attachment.s3Key) {
+        const downloadData = await this.s3Service.generatePresignedDownloadUrl(
+          attachment.s3Key,
+          { expiresIn },
+        );
+
+        this.logger.log(
+          `Download URL generated for cached S3 media: ${attachment.fileName} (expires in ${expiresIn}s)`,
+        );
 
         return {
-          url: `cloud-api://${mediaId}`,
-          expiresIn: 86400, // Cloud API URLs are long-lived
+          url: downloadData.url,
+          expiresIn: downloadData.expiresIn,
           fileName: attachment.fileName,
           fileSize: attachment.size,
           mimeType: attachment.mimeType,
         };
       }
 
-      // Generate download URL for S3-stored media
-      const downloadData = await this.s3Service.generatePresignedDownloadUrl(
-        attachment.s3Key,
-        { expiresIn },
-      );
+      // Fallback: Check if this is a Cloud API media (inbound from Meta)
+      // Only used if S3 caching failed when message was received
+      if (attachment.mediaUrl?.startsWith('cloud-api://')) {
+        // For inbound Cloud API media, return the Cloud API reference
+        // The client will need to fetch this through our backend endpoint
+        // that has access to the Meta access token
+        const mediaId = attachment.mediaUrl.replace('cloud-api://', '');
 
-      this.logger.log(
-        `Download URL generated for: ${attachment.fileName} (expires in ${expiresIn}s)`,
-      );
+        this.logger.warn(
+          `Using Cloud API fallback for media ${attachment.fileName} - S3 cache was not available`,
+        );
 
-      return {
-        url: downloadData.url,
-        expiresIn: downloadData.expiresIn,
-        fileName: attachment.fileName,
-        fileSize: attachment.size,
-        mimeType: attachment.mimeType,
-      };
+        return {
+          url: `cloud-api://${mediaId}`,
+          expiresIn: 3600, // Cloud API URLs expire quickly, set shorter expiry
+          fileName: attachment.fileName,
+          fileSize: attachment.size,
+          mimeType: attachment.mimeType,
+        };
+      }
+
+      // If neither S3 key nor cloud-api reference is available, throw error
+      throw new BadRequestException(
+        `Attachment ${attachmentId} has no accessible media source (no S3 key or Cloud API reference)`,
+      );
     } catch (error) {
       this.logger.error(
         `Error generating download URL: ${error.message}`,

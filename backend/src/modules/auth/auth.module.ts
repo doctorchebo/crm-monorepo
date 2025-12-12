@@ -5,26 +5,44 @@ import { PassportModule } from '@nestjs/passport';
 import { AuthController } from './auth.controller';
 import { JwtAuthGuard } from './auth.guard';
 import { AuthService } from './auth.service';
+import { RefreshJwtGuard } from './refresh.guard';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { RefreshJwtStrategy } from './strategies/refresh.strategy';
 
 @Module({
   imports: [
     PassportModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        secret: configService.get<string>('JWT_SECRET'),
-        signOptions: {
-          expiresIn: parseInt(
-            configService.get<string>('JWT_EXPIRATION') || '3600',
-            10,
-          ),
-        },
-      }),
+      useFactory: (configService: ConfigService) => {
+        const jwtSecret = configService.get<string>('JWT_SECRET');
+        const jwtExpirationEnv = configService.get<string>('JWT_EXPIRATION');
+        const jwtExpirationParsed = parseInt(jwtExpirationEnv || '3600', 10);
+
+        console.log('[Auth Module] JWT Configuration:', {
+          jwtSecret: jwtSecret ? '***set***' : 'MISSING',
+          jwtExpirationEnv,
+          jwtExpirationParsed,
+          jwtExpirationType: typeof jwtExpirationParsed,
+        });
+
+        return {
+          secret: jwtSecret,
+          signOptions: {
+            expiresIn: jwtExpirationParsed,
+          },
+        };
+      },
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, JwtAuthGuard],
-  exports: [JwtAuthGuard],
+  providers: [
+    AuthService,
+    JwtStrategy,
+    RefreshJwtStrategy,
+    JwtAuthGuard,
+    RefreshJwtGuard,
+  ],
+  exports: [JwtAuthGuard, RefreshJwtGuard],
 })
 export class AuthModule {}
