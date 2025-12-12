@@ -83,9 +83,15 @@ export const messages = pgTable(
     failedReason: text('failed_reason'), // Error reason if status is 'failed'
     timestamp: timestamp('timestamp').notNull(), // Original message timestamp
     updatedAt: timestamp('updated_at').defaultNow(), // Track last status update
+    // Edit and delete tracking (new fields)
+    editedAt: timestamp('edited_at'), // Timestamp when message was edited (null = not edited)
+    isDeleted: boolean('is_deleted').default(false), // Soft delete flag
+    deletedAt: timestamp('deleted_at'), // Timestamp when message was deleted
+    originalText: text('original_text'), // Original text before first edit (for audit trail)
   },
   (table) => ({
     messageIdUnique: unique().on(table.messageId),
+    isDeletedIndex: index().on(table.isDeleted), // Index for efficient queries on deleted messages
   }),
 );
 

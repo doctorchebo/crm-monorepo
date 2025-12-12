@@ -143,6 +143,25 @@ export class MetaCloudAPIConfigService {
         this.buildEndpointWithParams(messageId, {
           access_token: this.accessToken,
         }),
+
+      /**
+       * Edit a message (within 15 minutes of sending)
+       * POST https://graph.facebook.com/v20.0/{MESSAGE_ID}
+       * With a body containing the new text
+       */
+      editMessage: (messageId: string) =>
+        this.buildEndpointWithParams(messageId, {
+          access_token: this.accessToken,
+        }),
+
+      /**
+       * Delete a message
+       * DELETE https://graph.facebook.com/v20.0/{MESSAGE_ID}
+       */
+      deleteMessage: (messageId: string) =>
+        this.buildEndpointWithParams(messageId, {
+          access_token: this.accessToken,
+        }),
     };
   }
 }

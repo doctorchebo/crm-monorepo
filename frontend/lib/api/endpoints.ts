@@ -148,6 +148,11 @@ export const backendApi = {
       apiClient.post("/whatsapp/notes", data),
     getMessageNotes: (messageId: string) =>
       apiClient.get(`/whatsapp/notes/${messageId}`),
+    // Message edit and delete endpoints
+    editMessage: (messageId: string, data: { text: string; chatId?: string }) =>
+      apiClient.put(`/whatsapp/messages/${messageId}/edit`, data),
+    deleteMessage: (messageId: string, data?: { chatId?: string }) =>
+      apiClient.delete(`/whatsapp/messages/${messageId}`),
   },
 
   // Contacts endpoints

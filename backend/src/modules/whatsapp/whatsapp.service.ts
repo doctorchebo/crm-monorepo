@@ -1358,4 +1358,168 @@ export class WhatsAppService {
       throw error;
     }
   }
+
+  /**
+   * Edit a message (only within 15 minutes of sending)
+   * Uses Meta Cloud API message update endpoint
+   *
+   * @param messageId - WhatsApp message ID (from messages.messageId)
+   * @param newText - New message text
+   * @param phoneNumberId - Phone number ID of the sender
+   * @returns Updated message data
+   */
+  async editMessage(
+    messageId: string,
+    newText: string,
+    phoneNumberId: string,
+  ): Promise<any> {
+    try {
+      this.logger.log(
+        `Editing message ${messageId} with new text via Cloud API`,
+      );
+
+      // First, get the message from database to check edit window
+      const [dbMessage] = await db.query.messages.findMany({
+        where: eq(messages.messageId, messageId),
+        limit: 1,
+      });
+
+      if (!dbMessage) {
+        throw new Error(`Message ${messageId} not found in database`);
+      }
+
+      if (dbMessage.direction !== 'outbound') {
+        throw new Error('Can only edit outbound messages');
+      }
+
+      // Check if message is already deleted
+      if (dbMessage.isDeleted) {
+        throw new Error('Cannot edit a deleted message');
+      }
+
+      // Check 15-minute edit window (900 seconds)
+      const messageAgeSeconds = Math.floor(
+        (Date.now() - new Date(dbMessage.timestamp).getTime()) / 1000,
+      );
+      const EDIT_WINDOW_SECONDS = 15 * 60; // 15 minutes
+
+      if (messageAgeSeconds > EDIT_WINDOW_SECONDS) {
+        throw new Error(
+          `Message cannot be edited. Edit window (15 minutes) has passed. Message is ${Math.floor(messageAgeSeconds / 60)} minutes old.`,
+        );
+      }
+
+      // Call Meta Cloud API to edit message
+      const url = this.metaCloudAPIConfig.getEndpoints().editMessage(messageId);
+
+      const payload = {
+        messaging_product: 'whatsapp',
+        text: {
+          body: newText,
+          preview_url: true,
+        },
+      };
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: this.metaCloudAPIConfig.getDefaultHeaders(),
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        this.logger.error('Meta API edit error:', errorData);
+        throw new Error(
+          `Failed to edit message on Meta Cloud API: ${response.status} ${JSON.stringify(errorData)}`,
+        );
+      }
+
+      const data = (await response.json()) as any;
+
+      // Update database - store original text on first edit, then update the text
+      await db
+        .update(messages)
+        .set({
+          text: newText,
+          editedAt: sql`CURRENT_TIMESTAMP`,
+          originalText: dbMessage.originalText || dbMessage.text, // Store original only on first edit
+          updatedAt: sql`CURRENT_TIMESTAMP`,
+        })
+        .where(eq(messages.messageId, messageId));
+
+      this.logger.log(`Message ${messageId} edited successfully`);
+
+      return {
+        success: true,
+        messageId,
+        newText,
+        editedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      this.logger.error(`Error editing message: ${error.message}`, error);
+      throw new Error(`Failed to edit message: ${error.message}`);
+    }
+  }
+
+  /**
+   * Delete a message (soft delete - local only, Cloud API doesn't support message deletion)
+   * The recipient will still see the message on their side
+   * We only mark it as deleted in our database
+   *
+   * @param messageId - WhatsApp message ID (from messages.messageId)
+   * @param phoneNumberId - Phone number ID of the sender
+   * @returns Deletion confirmation
+   */
+  async deleteMessage(messageId: string, phoneNumberId: string): Promise<any> {
+    try {
+      this.logger.log(
+        `Deleting message ${messageId} locally (Cloud API doesn't support message deletion)`,
+      );
+
+      // Get the message from database
+      const [dbMessage] = await db.query.messages.findMany({
+        where: eq(messages.messageId, messageId),
+        limit: 1,
+      });
+
+      if (!dbMessage) {
+        throw new Error(`Message ${messageId} not found in database`);
+      }
+
+      if (dbMessage.direction !== 'outbound') {
+        throw new Error('Can only delete outbound messages');
+      }
+
+      // Check if already deleted
+      if (dbMessage.isDeleted) {
+        throw new Error('Message is already deleted');
+      }
+
+      // Soft delete in database only - Cloud API doesn't support message deletion
+      // Preserve original for audit trail
+      await db
+        .update(messages)
+        .set({
+          isDeleted: true,
+          deletedAt: sql`CURRENT_TIMESTAMP`,
+          text: null, // Clear the text
+          originalText: dbMessage.originalText || dbMessage.text, // Store original before deletion
+          updatedAt: sql`CURRENT_TIMESTAMP`,
+        })
+        .where(eq(messages.messageId, messageId));
+
+      this.logger.log(
+        `Message ${messageId} marked as deleted in database (recipient still sees the message)`,
+      );
+
+      return {
+        success: true,
+        messageId,
+        deletedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      this.logger.error(`Error deleting message: ${error.message}`, error);
+      throw new Error(`Failed to delete message: ${error.message}`);
+    }
+  }
 }

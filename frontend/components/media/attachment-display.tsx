@@ -3,8 +3,15 @@
 /**
  * Attachment Display Components
  * Displays different media types in messages
+ *
+ * Optimizations:
+ * - Uses useMediaUrl hook for automatic caching and cleanup
+ * - Thumbnail + full image URLs are cached to avoid redundant API calls
+ * - Cloud API media uses blob URL cache with lifecycle management
+ * - AbortController prevents race conditions on unmount
  */
 
+import { useMediaUrl } from "@/hooks/use-media-url";
 import { mediaApi } from "@/lib/media/api";
 import {
   Attachment,
@@ -12,15 +19,8 @@ import {
   formatFileSize,
   getMediaIcon,
 } from "@/lib/media/types";
-import {
-  ChevronDown,
-  Download,
-  Pause,
-  Play,
-  Volume2,
-  VolumeX,
-  X,
-} from "lucide-react";
+import { Download, Pause, Play, Volume2, VolumeX, X } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 
 interface AttachmentDisplayProps {
@@ -41,49 +41,37 @@ export function ImageAttachment({
   isSquare = false,
   onPreview,
 }: AttachmentDisplayProps) {
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  // Use optimized hook for media loading with caching
+  const {
+    url: imageUrl,
+    loading,
+    error,
+  } = useMediaUrl(messageId, attachment.id, {
+    loadThumbnail: true,
+    handleCloudApi: true,
+  });
+
+  // Thumbnail is now handled automatically by useMediaUrl
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
+  // Load thumbnail separately if available (will be cached)
   useEffect(() => {
-    const loadImage = async () => {
-      try {
-        // Try to load thumbnail first
-        if (attachment.thumbnailKey) {
-          const thumbUrl = await mediaApi.getThumbnailUrl(
-            messageId,
-            attachment.id
-          );
-          setThumbnailUrl(thumbUrl);
-        }
+    if (!attachment.thumbnailKey) return;
 
-        // Load full image
-        const urlResponse = await mediaApi.getDownloadUrl(
+    const loadThumbnail = async () => {
+      try {
+        const thumbUrl = await mediaApi.getThumbnailUrl(
           messageId,
           attachment.id
         );
-        let url = urlResponse.url;
-
-        // Handle Cloud API media (inbound from Meta)
-        // Use the frontend API proxy which includes authentication
-        if (url.startsWith("cloud-api://")) {
-          const mediaId = url.replace("cloud-api://", "");
-          // Use the proxy endpoint which handles authentication via cookies
-          url = `/api/whatsapp/media/cloud-api/${mediaId}`;
-        }
-
-        setImageUrl(url);
-        setError(null);
+        setThumbnailUrl(thumbUrl);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load image");
-      } finally {
-        setLoading(false);
+        // Thumbnail load failed, that's ok - will use full image
       }
     };
 
-    loadImage();
-  }, [attachment, messageId]);
+    loadThumbnail();
+  }, [attachment.id, attachment.thumbnailKey, messageId]);
 
   if (error) {
     return (
@@ -155,48 +143,37 @@ export function VideoAttachment({
   messageId,
   onDelete,
 }: AttachmentDisplayProps) {
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  // Use optimized hook for media loading
+  const {
+    url: videoUrl,
+    loading,
+    error,
+  } = useMediaUrl(messageId, attachment.id, {
+    loadThumbnail: true,
+    handleCloudApi: true,
+  });
+
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
 
+  // Load thumbnail separately if available (will be cached)
   useEffect(() => {
-    const loadVideo = async () => {
-      try {
-        // Try to load thumbnail
-        if (attachment.thumbnailKey) {
-          const thumbUrl = await mediaApi.getThumbnailUrl(
-            messageId,
-            attachment.id
-          );
-          setThumbnailUrl(thumbUrl);
-        }
+    if (!attachment.thumbnailKey) return;
 
-        // Load video
-        const urlResponse = await mediaApi.getDownloadUrl(
+    const loadThumbnail = async () => {
+      try {
+        const thumbUrl = await mediaApi.getThumbnailUrl(
           messageId,
           attachment.id
         );
-        let url = urlResponse.url;
-
-        // Handle Cloud API media (inbound from Meta)
-        if (url.startsWith("cloud-api://")) {
-          const mediaId = url.replace("cloud-api://", "");
-          url = `/api/whatsapp/media/cloud-api/${mediaId}`;
-        }
-
-        setVideoUrl(url);
-        setError(null);
+        setThumbnailUrl(thumbUrl);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load video");
-      } finally {
-        setLoading(false);
+        // Thumbnail load failed, that's ok
       }
     };
 
-    loadVideo();
-  }, [attachment, messageId]);
+    loadThumbnail();
+  }, [attachment.id, attachment.thumbnailKey, messageId]);
 
   if (error) {
     return (
@@ -266,43 +243,21 @@ export function AudioAttachment({
   messageId,
   onDelete,
 }: AttachmentDisplayProps) {
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Use optimized hook for media loading
+  const {
+    url: audioUrl,
+    loading,
+    error,
+  } = useMediaUrl(messageId, attachment.id, {
+    handleCloudApi: true,
+  });
+
   const [playing, setPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
-
-  useEffect(() => {
-    const loadAudio = async () => {
-      try {
-        const urlResponse = await mediaApi.getDownloadUrl(
-          messageId,
-          attachment.id
-        );
-        let url = urlResponse.url;
-
-        // Handle Cloud API media (inbound from Meta)
-        // Use the frontend API proxy which includes authentication
-        if (url.startsWith("cloud-api://")) {
-          const mediaId = url.replace("cloud-api://", "");
-          url = `/api/whatsapp/media/cloud-api/${mediaId}`;
-        }
-
-        setAudioUrl(url);
-        setError(null);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load audio");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadAudio();
-  }, [attachment, messageId]);
 
   const togglePlayPause = () => {
     if (audioRef.current) {
@@ -536,7 +491,7 @@ export function DocumentAttachment({
 }
 
 /**
- * Attachment Gallery - Displays multiple attachments
+ * Attachment Gallery Component
  */
 interface AttachmentGalleryProps {
   attachments: Attachment[];
@@ -544,6 +499,8 @@ interface AttachmentGalleryProps {
   onDelete?: (attachmentId: string) => void;
   onImageClick?: (imageIndex: number) => void;
   onShowDownloadMenu?: (position: { x: number; y: number }) => void;
+  onMessageDelete?: (messageId: string) => void;
+  isOutbound?: boolean;
 }
 
 export function AttachmentGallery({
@@ -552,7 +509,10 @@ export function AttachmentGallery({
   onDelete,
   onImageClick,
   onShowDownloadMenu,
+  onMessageDelete,
+  isOutbound = false,
 }: AttachmentGalleryProps) {
+  const t = useTranslations("chats");
   const galleryRef = useRef<HTMLDivElement>(null);
 
   if (attachments.length === 0) {
@@ -575,20 +535,8 @@ export function AttachmentGallery({
       });
     }
   };
-
   return (
     <div className="space-y-3 relative group/gallery" ref={galleryRef}>
-      {/* Download button on top right (shown on hover) */}
-      {(images.length > 0 || videos.length > 0) && (
-        <button
-          onClick={handleDownloadClick}
-          className="absolute -top-2 -right-2 opacity-0 group-hover/gallery:opacity-100 transition-opacity p-1.5 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-100 rounded-lg z-20 shadow-md border border-gray-200 dark:border-gray-700"
-          title="Download options"
-        >
-          <ChevronDown className="w-4 h-4" />
-        </button>
-      )}
-
       {/* Images grid - show up to 4 in square format */}
       {images.length > 0 && (
         <div

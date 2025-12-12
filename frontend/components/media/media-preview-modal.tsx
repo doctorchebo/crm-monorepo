@@ -1,11 +1,16 @@
 "use client";
 
+import { useMediaUrl } from "@/hooks/use-media-url";
 /**
  * Media Preview Modal
  * Full-screen media viewer with carousel, toolbar, and zoom controls
+ *
+ * Optimizations:
+ * - Uses useMediaUrl hook for automatic URL caching
+ * - Carousel thumbnails reuse cached URLs
+ * - Cloud API media blob URLs are managed with lifecycle cleanup
  */
 
-import { mediaApi } from "@/lib/media/api";
 import { Attachment } from "@/lib/media/types";
 import {
   ChevronLeft,
@@ -38,42 +43,24 @@ export function MediaPreviewModal({
 }: MediaPreviewModalProps) {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const [zoom, setZoom] = useState(100);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const imgRef = useRef<HTMLImageElement>(null);
 
   const currentAttachment = attachments[currentIndex];
 
-  // Load current image URL
+  // Use optimized hook for media loading with caching
+  const {
+    url: imageUrl,
+    loading: urlLoading,
+    error: urlError,
+  } = useMediaUrl(messageId, currentAttachment?.id || "", {
+    handleCloudApi: true,
+  });
+
+  // Update loading state
   useEffect(() => {
-    if (!isOpen || !currentAttachment) return;
-
-    const loadImage = async () => {
-      try {
-        setLoading(true);
-        const urlResponse = await mediaApi.getDownloadUrl(
-          messageId,
-          currentAttachment.id
-        );
-        let url = urlResponse.url;
-
-        if (url.startsWith("cloud-api://")) {
-          const mediaId = url.replace("cloud-api://", "");
-          const response = await mediaApi.fetchCloudAPIMedia(mediaId);
-          const blob = await response.blob();
-          url = URL.createObjectURL(blob);
-        }
-
-        setImageUrl(url);
-      } catch (err) {
-        console.error("Failed to load preview image:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadImage();
-  }, [currentIndex, isOpen, currentAttachment, messageId]);
+    setLoading(urlLoading);
+  }, [urlLoading]);
 
   const handleNext = () => {
     if (currentIndex < attachments.length - 1) {
@@ -264,6 +251,7 @@ export function MediaPreviewModal({
 
 /**
  * Carousel thumbnail component
+ * Uses cached URLs to avoid redundant API calls
  */
 function CarouselThumbnail({
   attachment,
@@ -272,47 +260,11 @@ function CarouselThumbnail({
   attachment: Attachment;
   messageId: string;
 }) {
-  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    const loadThumbnail = async () => {
-      try {
-        let url: string | null = null;
-
-        // Try to get thumbnail first
-        if (attachment.thumbnailKey) {
-          const thumbUrl = await mediaApi.getThumbnailUrl(
-            messageId,
-            attachment.id
-          );
-          url = thumbUrl;
-        }
-
-        // Fall back to full image if no thumbnail
-        if (!url) {
-          const downloadUrl = await mediaApi.getDownloadUrl(
-            messageId,
-            attachment.id
-          );
-          url = downloadUrl.url;
-        }
-
-        // Handle Cloud API media
-        if (url.startsWith("cloud-api://")) {
-          const mediaId = url.replace("cloud-api://", "");
-          const response = await mediaApi.fetchCloudAPIMedia(mediaId);
-          const blob = await response.blob();
-          url = URL.createObjectURL(blob);
-        }
-
-        setThumbnailUrl(url);
-      } catch (err) {
-        console.error("Failed to load thumbnail:", err);
-      }
-    };
-
-    loadThumbnail();
-  }, [attachment, messageId]);
+  // Use optimized hook for thumbnail loading
+  const { url: thumbnailUrl, loading } = useMediaUrl(messageId, attachment.id, {
+    loadThumbnail: true,
+    handleCloudApi: true,
+  });
 
   if (!thumbnailUrl) {
     return (

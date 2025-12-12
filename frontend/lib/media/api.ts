@@ -7,8 +7,12 @@
  * - For simple requests (presigned URL, metadata), uses apiClient for consistency
  * - For file uploads/downloads with progress tracking, uses XHR but with token from TokenManager
  * - Automatic token refresh is handled by TokenManager
+ * - Uses MediaCache for URL caching to reduce redundant API calls
+ * - Uses BlobUrlManager for Cloud API media blob URL lifecycle management
  */
 
+import { blobUrlManager } from "../cache/blob-url-manager";
+import { mediaCache } from "../cache/media-cache";
 import { DownloadUrlResponse, PresignedUrlResponse } from "./types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
@@ -272,71 +276,97 @@ export const mediaApi = {
    * CRITICAL: Uses credentials: 'include' to send JWT cookies automatically
    * Previously tried using TokenManager.getAccessToken() which always returns null
    * because HTTP-only cookies cannot be read from JavaScript
+   *
+   * Now includes URL caching to eliminate redundant API calls.
+   * URLs are cached for 1 hour since they don't change.
    */
   async getDownloadUrl(
     messageId: string,
     attachmentId: string,
     expiresIn?: number
   ): Promise<DownloadUrlResponse> {
-    const params = new URLSearchParams();
-    if (expiresIn) params.append("expiresIn", expiresIn.toString());
+    // Use cache to avoid redundant API calls
+    const cachedUrl = await mediaCache.getDownloadUrl(
+      messageId,
+      attachmentId,
+      async () => {
+        const params = new URLSearchParams();
+        if (expiresIn) params.append("expiresIn", expiresIn.toString());
 
-    const response = await fetch(
-      `${API_BASE_URL}/whatsapp/media/${messageId}/${attachmentId}/download-url?${params.toString()}`,
-      {
-        method: "GET",
-        credentials: "include", // CRITICAL: Send cookies automatically for authentication
+        const response = await fetch(
+          `${API_BASE_URL}/whatsapp/media/${messageId}/${attachmentId}/download-url?${params.toString()}`,
+          {
+            method: "GET",
+            credentials: "include", // CRITICAL: Send cookies automatically for authentication
+          }
+        );
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.message || "Failed to get download URL");
+        }
+
+        const data = await response.json();
+
+        // CRITICAL: Convert backend URLs to use frontend proxy
+        // The backend returns URLs like http://localhost:3001/whatsapp/media/...
+        // These are direct URLs that don't include credentials
+        // We need to convert them to /api/whatsapp/media/... to use the proxy
+        if (data.url && data.url.includes("/whatsapp/media/")) {
+          // Extract the media path from the backend URL
+          // URL format: http://localhost:3001/whatsapp/media/{path}
+          // We want: /api/whatsapp/media/{path}
+          const mediaPathMatch = data.url.match(/\/whatsapp\/media\/(.+)/);
+          if (mediaPathMatch) {
+            const mediaPath = mediaPathMatch[1];
+            data.url = `/api/whatsapp/media/${mediaPath}`;
+          }
+        }
+
+        // Return full response object as JSON string (cache only handles strings)
+        return JSON.stringify({
+          url: data.url,
+          expiresIn: data.expiresIn,
+          fileName: data.fileName,
+          fileSize: data.fileSize,
+          mimeType: data.mimeType,
+        });
       }
     );
 
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || "Failed to get download URL");
-    }
-
-    const data = await response.json();
-
-    // CRITICAL: Convert backend URLs to use frontend proxy
-    // The backend returns URLs like http://localhost:3001/whatsapp/media/...
-    // These are direct URLs that don't include credentials
-    // We need to convert them to /api/whatsapp/media/... to use the proxy
-    if (data.url && data.url.includes("/whatsapp/media/")) {
-      // Extract the media path from the backend URL
-      // URL format: http://localhost:3001/whatsapp/media/{path}
-      // We want: /api/whatsapp/media/{path}
-      const mediaPathMatch = data.url.match(/\/whatsapp\/media\/(.+)/);
-      if (mediaPathMatch) {
-        const mediaPath = mediaPathMatch[1];
-        data.url = `/api/whatsapp/media/${mediaPath}`;
-      }
-    }
-
-    return data;
+    // Parse cached JSON string back to object
+    return JSON.parse(cachedUrl);
   },
+
   /**
    * Get thumbnail URL for attachment
-   */ async getThumbnailUrl(
+   * Cached to eliminate redundant requests
+   */
+  async getThumbnailUrl(
     messageId: string,
     attachmentId: string,
     expiresIn?: number
   ): Promise<string | null> {
-    const params = new URLSearchParams();
-    if (expiresIn) params.append("expiresIn", expiresIn.toString());
+    // Use cache to avoid redundant API calls
+    return mediaCache.getThumbnailUrl(messageId, attachmentId, async () => {
+      const params = new URLSearchParams();
+      if (expiresIn) params.append("expiresIn", expiresIn.toString());
 
-    const response = await fetch(
-      `${API_BASE_URL}/whatsapp/media/${messageId}/${attachmentId}/thumbnail-url?${params.toString()}`,
-      {
-        method: "GET",
-        credentials: "include", // CRITICAL: Send cookies for authentication
+      const response = await fetch(
+        `${API_BASE_URL}/whatsapp/media/${messageId}/${attachmentId}/thumbnail-url?${params.toString()}`,
+        {
+          method: "GET",
+          credentials: "include", // CRITICAL: Send cookies for authentication
+        }
+      );
+
+      if (!response.ok) {
+        return null;
       }
-    );
 
-    if (!response.ok) {
-      return null;
-    }
-
-    const data = await response.json();
-    return data.url;
+      const data = await response.json();
+      return data.url || null;
+    });
   },
 
   /**
@@ -405,23 +435,56 @@ export const mediaApi = {
    * Fetch media from Meta Cloud API via backend
    * The backend handles authentication with Meta and returns the media buffer
    *
+   * Now uses blob URL caching to prevent repeated Cloud API calls for the same media
+   *
    * @param mediaId - The media ID from a cloud-api:// URL
-   * @returns Response object with the media blob
+   * @param component - Reference to the component requesting the blob (for cleanup tracking)
+   * @returns Blob URL string
    */
-  async fetchCloudAPIMedia(mediaId: string): Promise<Response> {
-    const response = await fetch(
-      `${API_BASE_URL}/whatsapp/media/cloud-api/${mediaId}`,
-      {
-        method: "GET",
-        credentials: "include", // CRITICAL: Send cookies for authentication
-      }
+  async fetchCloudAPIMedia(
+    mediaId: string,
+    component?: object
+  ): Promise<string> {
+    return blobUrlManager.getBlobUrl(
+      mediaId,
+      async () => {
+        const response = await fetch(
+          `${API_BASE_URL}/whatsapp/media/cloud-api/${mediaId}`,
+          {
+            method: "GET",
+            credentials: "include", // CRITICAL: Send cookies for authentication
+          }
+        );
+
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(`Failed to fetch cloud media: ${error}`);
+        }
+
+        return response.blob();
+      },
+      component
     );
+  },
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Failed to fetch cloud media: ${error}`);
-    }
+  /**
+   * Release a blob URL when component unmounts
+   */
+  releaseCloudAPIMedia(mediaId: string): void {
+    blobUrlManager.releaseBlobUrl(mediaId);
+  },
 
-    return response;
+  /**
+   * Track component for automatic cleanup of blob URLs
+   */
+  trackComponentMedia(component: object, mediaIds: string[]): void {
+    blobUrlManager.trackComponent(component, mediaIds);
+  },
+
+  /**
+   * Cleanup all blob URLs for a component (call in useEffect cleanup)
+   */
+  cleanupComponentMedia(component: object): void {
+    blobUrlManager.cleanupComponent(component);
   },
 };

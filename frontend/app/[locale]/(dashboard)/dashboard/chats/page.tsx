@@ -1,6 +1,7 @@
 "use client";
 
 import { ChatsSenderSection } from "@/components/chats-sender-section";
+import { DeleteMessageDialog } from "@/components/delete-message-dialog";
 import { AttachmentGallery } from "@/components/media/attachment-display";
 import {
   FilePicker,
@@ -8,6 +9,7 @@ import {
 } from "@/components/media/file-picker";
 import { MediaDownloadMenu } from "@/components/media/media-download-menu";
 import { MediaPreviewModal } from "@/components/media/media-preview-modal";
+import { MessageActionsMenu } from "@/components/message-actions-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NotesPanel } from "@/components/ui/notes-panel";
@@ -54,7 +56,7 @@ interface Chat {
 interface Message {
   id?: number;
   messageId: string;
-  text?: string;
+  text?: string | null;
   sender: string;
   direction: "inbound" | "outbound";
   timestamp: string;
@@ -64,6 +66,9 @@ interface Message {
   sentAt?: string;
   deliveredAt?: string;
   readAt?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  editedAt?: string;
 }
 
 export default function ChatsPage() {
@@ -122,6 +127,10 @@ export default function ChatsPage() {
   >([]);
   const [currentMessageId, setCurrentMessageId] = useState<string>("");
   const [downloadLoading, setDownloadLoading] = useState(false);
+
+  // Edit and delete message state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deletingMessageId, setDeletingMessageId] = useState<string>("");
 
   // Fetch templates from API
   const { data: templates = [], isLoading: templatesLoading } = useSWR(
@@ -719,6 +728,37 @@ export default function ChatsPage() {
     setDownloadMenuOpen(true);
   };
 
+  // Message delete handler
+  const handleDeleteMessage = (messageId: string) => {
+    setDeletingMessageId(messageId);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleConfirmDeleteMessage = async (messageId: string) => {
+    try {
+      await backendApi.whatsapp.deleteMessage(messageId, {
+        chatId: selectedChatId || undefined,
+      });
+      // Update local message state - mark as deleted
+      setMessages((prevMessages) =>
+        prevMessages.map((msg) =>
+          msg.messageId === messageId
+            ? {
+                ...msg,
+                text: null,
+                isDeleted: true,
+                deletedAt: new Date().toISOString(),
+              }
+            : msg
+        )
+      );
+      console.log(`Message ${messageId} deleted successfully`);
+    } catch (err) {
+      console.error("Failed to delete message:", err);
+      setError(t("deleteFailed"));
+    }
+  };
+
   const handleDownloadSingle = async () => {
     if (!currentMessageAttachments.length) return;
 
@@ -731,13 +771,12 @@ export default function ChatsPage() {
       );
       let url = urlResponse.url;
 
-      let response;
+      let blobUrl = url;
       if (url.startsWith("cloud-api://")) {
         const mediaId = url.replace("cloud-api://", "");
-        response = await mediaApi.fetchCloudAPIMedia(mediaId);
-      } else {
-        response = await fetch(url);
+        blobUrl = await mediaApi.fetchCloudAPIMedia(mediaId);
       }
+      const response = await fetch(blobUrl);
       const blob = await response.blob();
       const dlUrl = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -773,13 +812,12 @@ export default function ChatsPage() {
         );
         let url = urlResponse.url;
 
-        let response;
+        let blobUrl = url;
         if (url.startsWith("cloud-api://")) {
           const mediaId = url.replace("cloud-api://", "");
-          response = await mediaApi.fetchCloudAPIMedia(mediaId);
-        } else {
-          response = await fetch(url);
+          blobUrl = await mediaApi.fetchCloudAPIMedia(mediaId);
         }
+        const response = await fetch(blobUrl);
         const blob = await response.blob();
         zip.file(attachment.fileName || `image_${attachment.id}`, blob);
       }
@@ -940,6 +978,7 @@ export default function ChatsPage() {
                             hour: "2-digit",
                             minute: "2-digit",
                           });
+                          const isDeleted = message.isDeleted;
 
                           return (
                             <div
@@ -949,11 +988,12 @@ export default function ChatsPage() {
                               }`}
                             >
                               <div
-                                className={`px-3 py-1 rounded-lg text-xs ${
+                                className={`group px-3 py-1 rounded-lg text-xs relative ${
                                   // For image-only messages, use standard image width
                                   message.attachments?.length === 1 &&
                                   message.attachments[0].type === "image" &&
-                                  !message.text
+                                  !message.text &&
+                                  !isDeleted
                                     ? "max-w-md"
                                     : "max-w-xs"
                                 } ${
@@ -962,42 +1002,100 @@ export default function ChatsPage() {
                                     : "bg-muted"
                                 }`}
                               >
-                                {message.text && (
-                                  <p className="text-xs">{message.text}</p>
-                                )}
-
-                                {/* Display attachments if present */}
-                                {message.attachments &&
-                                  message.attachments.length > 0 && (
-                                    <div className="mt-2">
-                                      <AttachmentGallery
-                                        attachments={message.attachments}
-                                        messageId={
-                                          message.messageId ||
-                                          message.id?.toString() ||
-                                          ""
+                                {/* Chevron positioned in top-right corner - visible on hover */}
+                                {/* Show for messages with images, and for outbound text messages */}
+                                {!isDeleted &&
+                                  (message.attachments?.some(
+                                    (a) => a.type === "image"
+                                  ) ||
+                                    isOutbound) && (
+                                    <div className="absolute -top-1 -right-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <MessageActionsMenu
+                                        messageId={message.messageId}
+                                        messageTimestamp={message.timestamp}
+                                        isOutbound={isOutbound}
+                                        onDelete={
+                                          isOutbound
+                                            ? handleDeleteMessage
+                                            : undefined
                                         }
-                                        onImageClick={(index) =>
-                                          handleImageClick(
-                                            message.messageId ||
-                                              message.id?.toString() ||
-                                              "",
-                                            message.attachments || [],
-                                            index
+                                        onDownload={
+                                          message.attachments?.some(
+                                            (a) => a.type === "image"
                                           )
-                                        }
-                                        onShowDownloadMenu={(position) =>
-                                          handleShowDownloadMenu(
-                                            message.messageId ||
-                                              message.id?.toString() ||
-                                              "",
-                                            message.attachments || [],
-                                            position
-                                          )
+                                            ? () =>
+                                                handleShowDownloadMenu(
+                                                  message.messageId ||
+                                                    message.id?.toString() ||
+                                                    "",
+                                                  message.attachments || [],
+                                                  {
+                                                    x:
+                                                      typeof window !==
+                                                      "undefined"
+                                                        ? window.innerWidth / 2
+                                                        : 0,
+                                                    y:
+                                                      typeof window !==
+                                                      "undefined"
+                                                        ? window.innerHeight / 2
+                                                        : 0,
+                                                  }
+                                                )
+                                            : undefined
                                         }
                                       />
                                     </div>
                                   )}
+
+                                {isDeleted ? (
+                                  <p className="text-xs italic opacity-60">
+                                    {t("thisMessageWasDeleted")}
+                                  </p>
+                                ) : (
+                                  <>
+                                    {message.text && (
+                                      <p className="text-xs">{message.text}</p>
+                                    )}
+
+                                    {/* Display attachments if present */}
+                                    {message.attachments &&
+                                      message.attachments.length > 0 && (
+                                        <div className="mt-2">
+                                          <AttachmentGallery
+                                            attachments={message.attachments}
+                                            messageId={
+                                              message.messageId ||
+                                              message.id?.toString() ||
+                                              ""
+                                            }
+                                            onImageClick={(index) =>
+                                              handleImageClick(
+                                                message.messageId ||
+                                                  message.id?.toString() ||
+                                                  "",
+                                                message.attachments || [],
+                                                index
+                                              )
+                                            }
+                                            onShowDownloadMenu={(position) =>
+                                              handleShowDownloadMenu(
+                                                message.messageId ||
+                                                  message.id?.toString() ||
+                                                  "",
+                                                message.attachments || [],
+                                                position
+                                              )
+                                            }
+                                            isOutbound={isOutbound}
+                                            onMessageDelete={
+                                              handleDeleteMessage
+                                            }
+                                          />
+                                        </div>
+                                      )}
+                                  </>
+                                )}
 
                                 <div
                                   className={`text-xs mt-0.5 flex items-center justify-between gap-1 ${
@@ -1006,8 +1104,15 @@ export default function ChatsPage() {
                                       : "text-muted-foreground"
                                   }`}
                                 >
-                                  <span>{timeString}</span>
-                                  {isOutbound && (
+                                  <span>
+                                    {timeString}
+                                    {message.editedAt && (
+                                      <span className="ml-1 opacity-60">
+                                        ({t("messageEdited")})
+                                      </span>
+                                    )}
+                                  </span>
+                                  {isOutbound && !isDeleted && (
                                     <WhatsAppStatusIcon
                                       status={message.status || "pending"}
                                       deliveredAt={message.deliveredAt}
@@ -1229,6 +1334,14 @@ export default function ChatsPage() {
         onDownloadSingle={handleDownloadSingle}
         onDownloadPack={handleDownloadPack}
         onClose={() => setDownloadMenuOpen(false)}
+      />
+
+      {/* Delete Message Dialog */}
+      <DeleteMessageDialog
+        open={deleteDialogOpen}
+        messageId={deletingMessageId}
+        onClose={() => setDeleteDialogOpen(false)}
+        onConfirm={handleConfirmDeleteMessage}
       />
     </div>
   );

@@ -1,10 +1,12 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Logger,
   Param,
   Post,
+  Put,
   Query,
   Req,
   UseGuards,
@@ -13,6 +15,7 @@ import { JwtAuthGuard } from '../auth/auth.guard';
 import { SaveNoteDto } from './dto/notes.dto';
 import { OutboundMessageDto } from './dto/outbound-message.dto';
 import { WhatsAppService } from './whatsapp.service';
+import { DeleteMessageDto, EditMessageDto } from './dto/message-edit-delete.dto';
 
 @Controller('whatsapp')
 @UseGuards(JwtAuthGuard)
@@ -127,5 +130,37 @@ export class WhatsAppController {
   async getMessageNotes(@Param('messageId') messageId: string) {
     this.logger.log(`Get notes for message ${messageId}`);
     return this.whatsAppService.getMessageNotes(messageId);
+  }
+
+  /**
+   * Edit a message (within 15 minutes of sending)
+   * PUT /whatsapp/messages/:messageId/edit
+   */
+  @Put('messages/:messageId/edit')
+  async editMessage(
+    @Param('messageId') messageId: string,
+    @Body() dto: EditMessageDto,
+    @Req() req: any,
+  ) {
+    const userId = req.user?.userId;
+    this.logger.log(`Edit message ${messageId} request from user ${userId}`);
+    // Phone number ID will be determined from the message's sender in the service
+    return this.whatsAppService.editMessage(messageId, dto.text, '');
+  }
+
+  /**
+   * Delete a message (soft delete with placeholder)
+   * DELETE /whatsapp/messages/:messageId
+   */
+  @Delete('messages/:messageId')
+  async deleteMessage(
+    @Param('messageId') messageId: string,
+    @Body() dto: DeleteMessageDto,
+    @Req() req: any,
+  ) {
+    const userId = req.user?.userId;
+    this.logger.log(`Delete message ${messageId} request from user ${userId}`);
+    // Phone number ID will be determined from the message's sender in the service
+    return this.whatsAppService.deleteMessage(messageId, '');
   }
 }
