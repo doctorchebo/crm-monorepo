@@ -184,6 +184,61 @@ export class WhatsAppGateway
   }
 
   /**
+   * Emit thumbnail ready event to all connected clients
+   * Called when thumbnail generation completes
+   *
+   * @param event - Thumbnail ready event data
+   */
+  emitThumbnailReady(event: {
+    messageId: string;
+    attachmentId: string;
+    thumbnailKey: string;
+    width: number;
+    height: number;
+    blurhash: string;
+    duration?: number; // For PDFs: page count
+  }): void {
+    if (this.connectedClients.size === 0) {
+      return; // No clients connected
+    }
+
+    console.log(
+      `📡 Emitting thumbnail:ready for ${event.messageId}/${event.attachmentId} to ${this.connectedClients.size} clients`,
+    );
+
+    // Emit to all connected clients
+    this.server.emit('thumbnail:ready', event);
+  }
+
+  /**
+   * Emit batch thumbnail ready events to all connected clients
+   * More efficient when multiple thumbnails complete at once
+   *
+   * @param events - Array of thumbnail ready events
+   */
+  emitThumbnailsBatch(
+    events: Array<{
+      messageId: string;
+      attachmentId: string;
+      thumbnailKey: string;
+      width: number;
+      height: number;
+      blurhash: string;
+    }>,
+  ): void {
+    if (this.connectedClients.size === 0 || events.length === 0) {
+      return;
+    }
+
+    console.log(
+      `📡 Emitting ${events.length} thumbnail:ready events to ${this.connectedClients.size} clients`,
+    );
+
+    // Emit batch to all connected clients
+    this.server.emit('thumbnails:batch', events);
+  }
+
+  /**
    * Get number of connected clients (for monitoring)
    */
   getConnectedClientsCount(): number {

@@ -27,7 +27,8 @@ export const mediaApi = {
     senderId: number,
     contactId: string,
     messageId?: string,
-    onProgress?: (progress: number) => void
+    onProgress?: (progress: number) => void,
+    attachmentId?: string
   ): Promise<{
     success: boolean;
     uploadId: string;
@@ -43,6 +44,7 @@ export const mediaApi = {
       senderId,
       contactId,
       messageId,
+      attachmentId,
     });
 
     return new Promise((resolve, reject) => {
@@ -100,6 +102,7 @@ export const mediaApi = {
       params.append("senderId", senderId.toString());
       params.append("contactId", contactId);
       if (messageId) params.append("messageId", messageId);
+      if (attachmentId) params.append("attachmentId", attachmentId);
 
       xhr.open(
         "POST",
@@ -336,6 +339,38 @@ export const mediaApi = {
 
     // Parse cached JSON string back to object
     return JSON.parse(cachedUrl);
+  },
+
+  /**
+   * Download media file via backend stream (avoids CORS issues with S3)
+   * Returns a Blob that can be used for direct download
+   */
+  async downloadMediaViaStream(
+    messageId: string,
+    attachmentId: string
+  ): Promise<Blob> {
+    const response = await fetch(
+      `${API_BASE_URL}/whatsapp/media/${messageId}/${attachmentId}/stream`,
+      {
+        method: "GET",
+        credentials: "include", // CRITICAL: Send cookies for authentication
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Failed to download media: ${response.statusText}`);
+    }
+
+    return response.blob();
+  },
+
+  /**
+   * Get the streaming URL for media (avoids CORS issues with S3)
+   * This URL can be used directly in <img> and <video> src attributes
+   * The backend will stream the file through with proper CORS headers
+   */
+  getStreamUrl(messageId: string, attachmentId: string): string {
+    return `${API_BASE_URL}/whatsapp/media/${messageId}/${attachmentId}/stream`;
   },
 
   /**

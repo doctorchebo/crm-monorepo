@@ -144,6 +144,7 @@ export class MediaController {
     @Query('senderId') senderId?: string,
     @Query('contactId') contactId?: string,
     @Query('messageId') messageId?: string,
+    @Query('attachmentId') attachmentId?: string,
   ): Promise<{
     success: boolean;
     uploadId: string;
@@ -165,7 +166,7 @@ export class MediaController {
       }
 
       this.logger.log(
-        `File upload started: ${file.originalname} (${file.size} bytes), senderId=${senderId}`,
+        `File upload started: ${file.originalname} (${file.size} bytes), senderId=${senderId}, attachmentId=${attachmentId}`,
       );
 
       const result = await this.mediaService.uploadFileToS3(
@@ -174,6 +175,7 @@ export class MediaController {
         contactId,
         messageId,
         userId,
+        attachmentId,
       );
 
       return {
@@ -275,6 +277,50 @@ export class MediaController {
         error,
       );
       throw new BadRequestException(`Failed to fetch media: ${error.message}`);
+    }
+  }
+
+  /**
+   * Download/stream media file from S3
+   * GET /whatsapp/media/:messageId/:attachmentId/stream
+   *
+   * This endpoint proxies S3 downloads to avoid CORS issues
+   * Streams the file directly to the browser for download
+   */
+  @Get(':messageId/:attachmentId/stream')
+  @UseGuards(JwtAuthGuard)
+  async streamMedia(
+    @Param('messageId') messageId: string,
+    @Param('attachmentId') attachmentId: string,
+    @Req() req: any,
+    @Res() res: any,
+  ): Promise<void> {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) {
+        throw new BadRequestException('User not authenticated');
+      }
+
+      this.logger.log(
+        `Media stream requested: messageId=${messageId}, attachmentId=${attachmentId}`,
+      );
+
+      const { buffer, mimeType, fileName } =
+        await this.mediaService.getMediaStream(messageId, attachmentId);
+
+      // Set appropriate headers for download/streaming
+      res.setHeader('Content-Type', mimeType || 'application/octet-stream');
+      res.setHeader('Content-Length', buffer.length);
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${fileName || 'download'}"`,
+      );
+      res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
+
+      res.send(buffer);
+    } catch (error) {
+      this.logger.error(`Error streaming media: ${error.message}`, error);
+      throw new BadRequestException(`Failed to stream media: ${error.message}`);
     }
   }
 

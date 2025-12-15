@@ -8,7 +8,7 @@ import { useNotification } from "@/hooks/use-notification";
 import { backendApi } from "@/lib/api/endpoints";
 import { ArrowLeft } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { use, useEffect, useState } from "react";
 
 interface Sender {
   id: number;
@@ -23,10 +23,10 @@ interface Sender {
 export default function SenderFormPage({
   params,
 }: {
-  params: { locale: string; id?: string };
+  params: Promise<{ locale: string; id?: string }>;
 }) {
+  const { locale, id: senderId } = use(params);
   const router = useRouter();
-  const { locale, id: senderId } = params;
   const isEdit = !!senderId;
 
   const { addNotification } = useNotification();

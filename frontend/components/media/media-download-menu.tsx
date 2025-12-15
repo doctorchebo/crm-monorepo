@@ -2,7 +2,7 @@
 
 /**
  * Media Download Menu
- * Dropdown menu showing download options for single or multiple images
+ * Dropdown menu showing download options for single or multiple media files (images/videos)
  */
 
 import { Download, Loader2 } from "lucide-react";
@@ -13,7 +13,7 @@ interface MediaDownloadMenuProps {
   position: { x: number; y: number };
   onDownloadSingle: () => void;
   onDownloadPack: () => void;
-  isSingleImage: boolean;
+  isSingleImage: boolean; // Kept for backwards compatibility, actually means single media
   isLoading?: boolean;
   onClose: () => void;
 }
@@ -56,7 +56,7 @@ export function MediaDownloadMenu({
           ) : (
             <Download className="w-4 h-4" />
           )}
-          Download Image
+          Download
         </button>
       ) : (
         <>
@@ -73,7 +73,7 @@ export function MediaDownloadMenu({
             ) : (
               <Download className="w-4 h-4" />
             )}
-            Download All
+            Download All (ZIP)
           </button>
         </>
       )}

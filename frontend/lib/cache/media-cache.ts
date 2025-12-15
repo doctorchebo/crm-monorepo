@@ -71,23 +71,23 @@ export class MediaCache {
     // Check cache first
     const cached = this.downloadUrlCache.get(cacheKey);
     if (cached && !this._isExpired(cached)) {
-      console.debug(`[MediaCache] Cache hit for download URL: ${cacheKey}`);
+      //console.debug(`[MediaCache] Cache hit for download URL: ${cacheKey}`);
       return cached.data;
     }
 
     // Check if request is already in-flight
     const inFlight = this.inFlightDownloadRequests.get(cacheKey);
     if (inFlight) {
-      console.debug(
-        `[MediaCache] Returning in-flight download URL request: ${cacheKey}`
-      );
+      //console.debug(
+      //`[MediaCache] Returning in-flight download URL request: ${cacheKey}`
+      //);
       return inFlight.promise;
     }
 
     // Fetch and cache
-    console.debug(
-      `[MediaCache] Cache miss, fetching download URL: ${cacheKey}`
-    );
+    // console.debug(
+    //   `[MediaCache] Cache miss, fetching download URL: ${cacheKey}`
+    // );
     const promise = fetcher()
       .then((url) => {
         // Store in cache
@@ -139,16 +139,16 @@ export class MediaCache {
     // Check if request is already in-flight
     const inFlight = this.inFlightThumbnailRequests.get(cacheKey);
     if (inFlight) {
-      console.debug(
-        `[MediaCache] Returning in-flight thumbnail URL request: ${cacheKey}`
-      );
+      // console.debug(
+      //   `[MediaCache] Returning in-flight thumbnail URL request: ${cacheKey}`
+      // );
       return inFlight.promise;
     }
 
     // Fetch and cache
-    console.debug(
-      `[MediaCache] Cache miss, fetching thumbnail URL: ${cacheKey}`
-    );
+    // console.debug(
+    //   `[MediaCache] Cache miss, fetching thumbnail URL: ${cacheKey}`
+    // );
     const promise = fetcher()
       .then((url) => {
         // Store in cache (even if null - thumbnail doesn't exist)

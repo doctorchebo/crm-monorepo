@@ -232,6 +232,52 @@ export class S3Service {
   }
 
   /**
+   * Download file from S3 as buffer
+   * Used for thumbnail generation and media processing
+   */
+  async downloadFile(s3Key: string): Promise<Buffer | null> {
+    try {
+      const command = new GetObjectCommand({
+        Bucket: this.bucketName,
+        Key: s3Key,
+      });
+
+      const response = await this.s3Client.send(command);
+
+      if (!response.Body) {
+        this.logger.warn(`Empty response body for S3 download: ${s3Key}`);
+        return null;
+      }
+
+      // Convert stream to buffer
+      const chunks: Buffer[] = [];
+      for await (const chunk of response.Body as AsyncIterable<Buffer>) {
+        chunks.push(chunk);
+      }
+
+      const buffer = Buffer.concat(chunks);
+      this.logger.debug(
+        `Downloaded file from S3: ${s3Key} (${buffer.length} bytes)`,
+      );
+
+      return buffer;
+    } catch (error) {
+      if (
+        error.name === 'NoSuchKey' ||
+        error.$metadata?.httpStatusCode === 404
+      ) {
+        this.logger.warn(`S3 object not found for download: ${s3Key}`);
+        return null;
+      }
+      this.logger.error(
+        `Failed to download file from S3: ${error.message}`,
+        error,
+      );
+      throw new Error(`Failed to download file: ${error.message}`);
+    }
+  }
+
+  /**
    * Upload file to S3 (server-side upload)
    * Used for thumbnail generation or server-processed files
    */

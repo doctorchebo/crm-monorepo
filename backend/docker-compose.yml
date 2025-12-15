@@ -1,0 +1,25 @@
+version: '3.9'
+
+services:
+  redis:
+    image: redis:7
+    container_name: redis-queue
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --appendonly yes
+      --slowlog-log-slower-than 10000
+      --slowlog-max-len 128
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD}', 'PING']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  redis-data:

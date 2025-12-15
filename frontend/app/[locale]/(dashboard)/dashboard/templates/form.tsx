@@ -15,7 +15,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useNotification } from "@/hooks/use-notification";
 import { backendApi } from "@/lib/api/endpoints";
-import { AlertCircle, Eye, Loader } from "lucide-react";
+import { AlertCircle, Eye, Loader, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -587,32 +587,46 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
         </div>
       </form>
 
-      {/* Preview Section */}
+      {/* Preview Modal */}
       {previewOpen && (
-        <Card className="p-6 bg-blue-50 border-2 border-blue-200">
-          <h3 className="font-semibold mb-4 flex items-center gap-2">
-            <Eye className="h-4 w-4" />
-            {t("preview") || "Preview"}
-          </h3>
-
-          <div className="bg-white rounded-lg p-4 border border-blue-200 space-y-3">
-            {formData.header && (
-              <div className="text-sm font-semibold text-blue-900">
-                {formData.header}
-              </div>
-            )}
-
-            <div className="text-sm whitespace-pre-wrap text-gray-900">
-              {renderPreview()}
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-2xl bg-white dark:bg-gray-900">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
+              <h3 className="font-semibold text-lg text-gray-900 dark:text-white">
+                {t("preview") || "Preview"}
+              </h3>
+              <button
+                onClick={() => setPreviewOpen(false)}
+                className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+                title="Close preview"
+              >
+                <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+              </button>
             </div>
 
-            {formData.footer && (
-              <div className="text-xs text-gray-600 border-t pt-3">
-                {formData.footer}
+            {/* Modal Content */}
+            <div className="p-4">
+              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700 space-y-3">
+                {formData.header && (
+                  <div className="text-sm font-semibold text-blue-900 dark:text-blue-300">
+                    {formData.header}
+                  </div>
+                )}
+
+                <div className="text-sm whitespace-pre-wrap text-gray-900 dark:text-gray-100">
+                  {renderPreview()}
+                </div>
+
+                {formData.footer && (
+                  <div className="text-xs text-gray-600 dark:text-gray-400 border-t dark:border-gray-700 pt-3">
+                    {formData.footer}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        </Card>
+            </div>
+          </Card>
+        </div>
       )}
     </div>
   );

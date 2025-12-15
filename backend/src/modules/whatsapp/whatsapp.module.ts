@@ -1,7 +1,10 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ModuleRef } from '@nestjs/core';
 import { MetaCloudAPIConfigService } from '@shared/services/meta-cloud-api.config';
 import { S3Service } from '@shared/services/s3.service';
+import { ThumbnailQueueService } from '../thumbnail/thumbnail-queue.service';
+import { ThumbnailModule } from '../thumbnail/thumbnail.module';
 import { MediaController } from './controllers/media.controller';
 import { MediaService } from './services/media.service';
 import { WhatsAppController } from './whatsapp.controller';
@@ -34,7 +37,7 @@ import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
  * - AWS_S3_BUCKET_NAME: S3 bucket name for media storage
  */
 @Module({
-  imports: [ConfigModule],
+  imports: [ConfigModule, forwardRef(() => ThumbnailModule)],
   controllers: [WhatsAppController, WhatsAppWebhookController, MediaController],
   providers: [
     WhatsAppService,
@@ -51,8 +54,35 @@ import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
     WhatsAppGateway,
   ],
 })
-export class WhatsAppModule {
-  constructor(gateway: WhatsAppGateway) {
+export class WhatsAppModule implements OnModuleInit {
+  constructor(
+    private gateway: WhatsAppGateway,
+    private moduleRef: ModuleRef,
+    private mediaService: MediaService,
+  ) {
     setWhatsAppGateway(gateway);
+  }
+
+  async onModuleInit() {
+    // Inject ThumbnailQueueService into MediaService to avoid circular dependency
+    try {
+      const thumbnailQueueService = this.moduleRef.get(ThumbnailQueueService, {
+        strict: false,
+      });
+      if (thumbnailQueueService) {
+        this.mediaService.setThumbnailQueueService(thumbnailQueueService);
+        console.log(
+          '✅ ThumbnailQueueService injected into MediaService successfully',
+        );
+      } else {
+        console.warn(
+          '⚠️ ThumbnailQueueService not available - thumbnails will not be generated',
+        );
+      }
+    } catch (error) {
+      console.warn(
+        `⚠️ Could not inject ThumbnailQueueService: ${error.message}`,
+      );
+    }
   }
 }

@@ -12,10 +12,13 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/auth.guard';
+import {
+  DeleteMessageDto,
+  EditMessageDto,
+} from './dto/message-edit-delete.dto';
 import { SaveNoteDto } from './dto/notes.dto';
 import { OutboundMessageDto } from './dto/outbound-message.dto';
 import { WhatsAppService } from './whatsapp.service';
-import { DeleteMessageDto, EditMessageDto } from './dto/message-edit-delete.dto';
 
 @Controller('whatsapp')
 @UseGuards(JwtAuthGuard)
@@ -45,7 +48,7 @@ export class WhatsAppController {
   async sendMedia(@Body() mediaDto: any, @Req() req: any) {
     const userId = req.user?.userId;
     this.logger.log(
-      `Send media request from user ${userId}: To ${mediaDto.to}, Type: ${mediaDto.mediaType}`,
+      `Send media request from user ${userId}: To ${mediaDto.to}, Type: ${mediaDto.mediaType}, originalMessageId: ${mediaDto.originalMessageId}`,
     );
     return this.whatsAppService.sendMedia(
       mediaDto.to,
@@ -53,6 +56,8 @@ export class WhatsAppController {
       mediaDto.mediaUrl,
       mediaDto.caption,
       mediaDto.senderId,
+      mediaDto.fileName,
+      mediaDto.originalMessageId,
     );
   }
 

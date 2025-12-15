@@ -11,6 +11,11 @@ import { MetaCloudAPIConfigService } from '@shared/services/meta-cloud-api.confi
 import { S3Service } from '@shared/services/s3.service';
 import { eq } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
+import { ThumbnailQueueService } from '../../thumbnail/thumbnail-queue.service';
+import {
+  ThumbnailJobData,
+  supportsThumbnail,
+} from '../../thumbnail/thumbnail.types';
 import {
   DownloadUrlResponseDto,
   PresignedUrlResponseDto,
@@ -26,12 +31,21 @@ import {
 @Injectable()
 export class MediaService {
   private readonly logger = new Logger(MediaService.name);
+  private thumbnailQueueService: ThumbnailQueueService | null = null;
 
   constructor(
     private s3Service: S3Service,
     private configService: ConfigService,
     private metaCloudAPIConfig: MetaCloudAPIConfigService,
   ) {}
+
+  /**
+   * Set the thumbnail queue service (called during module initialization)
+   * This avoids circular dependency issues
+   */
+  setThumbnailQueueService(service: ThumbnailQueueService): void {
+    this.thumbnailQueueService = service;
+  }
 
   /**
    * Fetch media from Meta Cloud API
@@ -308,6 +322,11 @@ export class MediaService {
         );
       }
 
+      // Determine thumbnail status
+      const thumbnailStatus = supportsThumbnail(mediaType)
+        ? 'pending'
+        : 'not-applicable';
+
       // Create attachment metadata
       const attachment: AttachmentMetadata = {
         id: dto.uploadId,
@@ -316,6 +335,7 @@ export class MediaService {
         mimeType: dto.mimeType,
         size: dto.fileSize,
         s3Key: dto.s3Key,
+        thumbnailStatus: thumbnailStatus,
         duration: dto.duration,
         uploadedAt: new Date().toISOString(),
         status: 'success',
@@ -349,6 +369,40 @@ export class MediaService {
         this.logger.log(
           `Updated message ${messageId} with attachment: ${dto.fileName}`,
         );
+      }
+
+      // Queue thumbnail generation for image/video
+      if (this.thumbnailQueueService && supportsThumbnail(mediaType)) {
+        try {
+          // Extract senderId and contactId from S3 key
+          // Format: {senderId}/{contactId}/{messageId}/original.{ext}
+          const keyParts = dto.s3Key.split('/');
+          const senderId = keyParts[0] || '';
+          const contactId = keyParts[1] || '';
+
+          const thumbnailJobData: ThumbnailJobData = {
+            messageId: messageId,
+            attachmentId: dto.uploadId,
+            s3Key: dto.s3Key,
+            mediaType: mediaType,
+            mimeType: dto.mimeType,
+            chatId: message?.chatId || '',
+            pathPrefix: senderId,
+            contactId: contactId,
+          };
+
+          await this.thumbnailQueueService.queueThumbnailGeneration(
+            thumbnailJobData,
+          );
+          this.logger.log(
+            `[Upload] ✅ Queued thumbnail generation for ${dto.uploadId}`,
+          );
+        } catch (error) {
+          this.logger.warn(
+            `[Upload] ⚠️ Failed to queue thumbnail generation: ${error.message}`,
+          );
+          // Don't fail the upload - thumbnail will remain pending
+        }
       }
 
       this.logger.log(
@@ -440,6 +494,73 @@ export class MediaService {
         `Error generating download URL: ${error.message}`,
         error,
       );
+      throw error;
+    }
+  }
+
+  /**
+   * Get media as buffer for streaming (proxied download)
+   * Avoids CORS issues by streaming through the backend
+   */
+  async getMediaStream(
+    messageId: string,
+    attachmentId: string,
+  ): Promise<{ buffer: Buffer; mimeType: string; fileName: string }> {
+    try {
+      // Retrieve message and verify it exists
+      const message = await db.query.messages.findFirst({
+        where: eq(messages.messageId, messageId),
+      });
+
+      if (!message) {
+        throw new BadRequestException('Message not found');
+      }
+
+      // Get attachments from JSONB
+      const attachmentsList = (message.attachments ||
+        []) as AttachmentMetadata[];
+      const attachment = attachmentsList.find((a) => a.id === attachmentId);
+
+      if (!attachment) {
+        throw new BadRequestException('Attachment not found');
+      }
+
+      // Download from S3 if we have a key
+      if (attachment.s3Key) {
+        const buffer = await this.s3Service.downloadFile(attachment.s3Key);
+
+        if (!buffer) {
+          throw new BadRequestException('Failed to download media from S3');
+        }
+
+        this.logger.log(
+          `Media streamed for: ${attachment.fileName} (${buffer.length} bytes)`,
+        );
+
+        return {
+          buffer,
+          mimeType: attachment.mimeType || 'application/octet-stream',
+          fileName: attachment.fileName || 'download',
+        };
+      }
+
+      // Fallback to Cloud API
+      if (attachment.mediaUrl?.startsWith('cloud-api://')) {
+        const mediaId = attachment.mediaUrl.replace('cloud-api://', '');
+        const buffer = await this.fetchCloudAPIMedia(mediaId);
+
+        return {
+          buffer,
+          mimeType: attachment.mimeType || 'application/octet-stream',
+          fileName: attachment.fileName || 'download',
+        };
+      }
+
+      throw new BadRequestException(
+        `Attachment ${attachmentId} has no accessible media source`,
+      );
+    } catch (error) {
+      this.logger.error(`Error streaming media: ${error.message}`, error);
       throw error;
     }
   }
@@ -662,9 +783,12 @@ export class MediaService {
     contactId: string,
     messageId?: string,
     userId?: number,
+    attachmentId?: string,
   ): Promise<AttachmentMetadata> {
     try {
-      const uploadId = file.originalname.split('.')[0] + '-' + Date.now();
+      // Use provided attachmentId from frontend, or generate a new one
+      const uploadId =
+        attachmentId || file.originalname.split('.')[0] + '-' + Date.now();
       const finalMessageId = messageId || `msg-${uuidv4()}`;
 
       // Generate S3 key
@@ -683,6 +807,11 @@ export class MediaService {
         );
       }
 
+      // Determine thumbnail status
+      const thumbnailStatus = supportsThumbnail(mediaType, file.mimetype)
+        ? 'pending'
+        : 'not-applicable';
+
       // Create attachment metadata
       const attachment: AttachmentMetadata = {
         id: uploadId,
@@ -691,6 +820,7 @@ export class MediaService {
         mimeType: file.mimetype,
         size: file.size,
         s3Key,
+        thumbnailStatus,
         uploadedAt: new Date().toISOString(),
         status: 'success',
       };
@@ -725,6 +855,37 @@ export class MediaService {
           this.logger.log(
             `Updated message ${messageId} with attachment: ${file.originalname}`,
           );
+
+          // Queue thumbnail generation for supported media types
+          if (
+            this.thumbnailQueueService &&
+            supportsThumbnail(mediaType, file.mimetype)
+          ) {
+            try {
+              const thumbnailJobData: ThumbnailJobData = {
+                messageId: finalMessageId,
+                attachmentId: uploadId,
+                s3Key: s3Key,
+                mediaType: mediaType,
+                mimeType: file.mimetype,
+                chatId: message.chatId || '',
+                pathPrefix: String(senderId),
+                contactId: contactId,
+              };
+
+              await this.thumbnailQueueService.queueThumbnailGeneration(
+                thumbnailJobData,
+              );
+              this.logger.log(
+                `[Outbound Upload] ✅ Queued thumbnail generation for ${file.originalname}`,
+              );
+            } catch (error) {
+              this.logger.warn(
+                `[Outbound Upload] ⚠️ Failed to queue thumbnail generation: ${error.message}`,
+              );
+              // Don't fail the upload - thumbnail will remain pending
+            }
+          }
         }
       }
 

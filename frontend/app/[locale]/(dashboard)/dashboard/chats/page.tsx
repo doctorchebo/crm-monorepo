@@ -4,26 +4,41 @@ import { ChatsSenderSection } from "@/components/chats-sender-section";
 import { DeleteMessageDialog } from "@/components/delete-message-dialog";
 import { AttachmentGallery } from "@/components/media/attachment-display";
 import {
-  FilePicker,
-  PendingUploadsDisplay,
-} from "@/components/media/file-picker";
+  AttachmentMenu,
+  AttachmentType,
+} from "@/components/media/attachment-menu";
+import { GroupedMediaBubble } from "@/components/media/grouped-media-bubble";
 import { MediaDownloadMenu } from "@/components/media/media-download-menu";
 import { MediaPreviewModal } from "@/components/media/media-preview-modal";
+import {
+  MediaStagingPanel,
+  StagedFile,
+} from "@/components/media/media-staging-panel";
+import {
+  PendingMediaUpload,
+  PendingUploadGroup,
+} from "@/components/media/pending-upload-bubble";
 import { MessageActionsMenu } from "@/components/message-actions-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MessageInput } from "@/components/ui/message-input";
 import { NotesPanel } from "@/components/ui/notes-panel";
 import { WhatsAppStatusIcon } from "@/components/whatsapp-status-icon";
 import { useAuthProtection } from "@/hooks/use-auth";
 import { useMediaUpload } from "@/hooks/use-media-upload";
 import { useRealtimeChat } from "@/hooks/use-message-status-socket";
+import { useThumbnailUpdates } from "@/hooks/use-thumbnail-updates";
 import { backendApi } from "@/lib/api/endpoints";
 import { mediaApi } from "@/lib/media/api";
-import { Attachment, PendingUpload } from "@/lib/media/types";
-import { Loader, MessageSquare, Send } from "lucide-react";
+import {
+  Attachment,
+  PendingUpload,
+  ThumbnailReadyEvent,
+} from "@/lib/media/types";
+import { ArrowDown, Loader, MessageSquare, Send } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 
 interface Template {
@@ -84,6 +99,151 @@ interface InboundMessage {
   }>;
 }
 
+/**
+ * Scroll controller utility for reliable message scroll-to-bottom behavior
+ * Handles async image loading and container size changes
+ */
+class ScrollController {
+  private container: HTMLElement | null = null;
+  private scrollTimeout: NodeJS.Timeout | null = null;
+  private mutationObserver: MutationObserver | null = null;
+  private resizeObserver: ResizeObserver | null = null;
+  private pendingImageLoads = new Set<HTMLImageElement>();
+
+  constructor(container: HTMLElement | null) {
+    this.container = container;
+  }
+
+  /**
+   * Scroll to bottom with proper handling of async image loads
+   * Uses requestIdleCallback for optimal timing after all paints
+   */
+  scrollToBottom(smooth = false) {
+    if (!this.container) return;
+
+    // Clear any pending scroll operations
+    if (this.scrollTimeout) {
+      clearTimeout(this.scrollTimeout);
+    }
+
+    // First pass: immediate scroll
+    this.container.scrollTop = this.container.scrollHeight;
+
+    // Second pass: wait for images to load and re-scroll
+    // This ensures we account for dynamic image sizing
+    this.scheduleScrollAfterImageLoad(smooth);
+  }
+
+  /**
+   * Schedule scroll after images finish loading
+   */
+  private scheduleScrollAfterImageLoad(smooth = false) {
+    if (!this.container) return;
+
+    // Wait a microtask to ensure DOM is settled
+    Promise.resolve().then(() => {
+      // Get all images in the container
+      const images = this.container!.querySelectorAll("img");
+      let loadedCount = 0;
+      const totalImages = images.length;
+
+      if (totalImages === 0) {
+        // No images, scroll immediately
+        this.performScroll(smooth);
+        return;
+      }
+
+      // Track image loads
+      const handleImageLoad = () => {
+        loadedCount++;
+        if (loadedCount === totalImages) {
+          // All images loaded
+          this.performScroll(smooth);
+        }
+      };
+
+      const handleImageError = () => {
+        loadedCount++;
+        if (loadedCount === totalImages) {
+          this.performScroll(smooth);
+        }
+      };
+
+      // Add listeners to all images
+      images.forEach((img) => {
+        if (img.complete) {
+          // Image already loaded
+          loadedCount++;
+        } else {
+          img.addEventListener("load", handleImageLoad, { once: true });
+          img.addEventListener("error", handleImageError, { once: true });
+        }
+      });
+
+      // If all images are already loaded
+      if (loadedCount === totalImages) {
+        this.performScroll(smooth);
+      }
+
+      // Fallback: scroll after max 2 seconds in case images never load
+      this.scrollTimeout = setTimeout(() => {
+        this.performScroll(smooth);
+      }, 2000);
+    });
+  }
+
+  /**
+   * Perform the actual scroll
+   */
+  private performScroll(smooth = false) {
+    if (!this.container) return;
+
+    if (this.scrollTimeout) {
+      clearTimeout(this.scrollTimeout);
+      this.scrollTimeout = null;
+    }
+
+    // Use requestAnimationFrame for smooth visual result
+    requestAnimationFrame(() => {
+      if (!this.container) return;
+
+      if (smooth) {
+        this.container.scrollTo({
+          top: this.container!.scrollHeight,
+          behavior: "smooth",
+        });
+      } else {
+        this.container.scrollTop = this.container.scrollHeight;
+      }
+    });
+  }
+
+  /**
+   * Check if user is at the bottom of the container
+   */
+  isAtBottom(threshold = 50): boolean {
+    if (!this.container) return false;
+    const { scrollTop, scrollHeight, clientHeight } = this.container;
+    return scrollHeight - scrollTop - clientHeight < threshold;
+  }
+
+  /**
+   * Cleanup all observers and timeouts
+   */
+  destroy() {
+    if (this.scrollTimeout) {
+      clearTimeout(this.scrollTimeout);
+    }
+    if (this.mutationObserver) {
+      this.mutationObserver.disconnect();
+    }
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+    }
+    this.pendingImageLoads.clear();
+  }
+}
+
 export default function ChatsPage() {
   const t = useTranslations("chats");
   const router = useRouter();
@@ -91,6 +251,7 @@ export default function ChatsPage() {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const separatorRef = useRef<HTMLDivElement>(null);
+  const scrollControllerRef = useRef<ScrollController | null>(null);
 
   // Protect this route - redirect to login if token is missing or expired
   useAuthProtection();
@@ -121,6 +282,18 @@ export default function ChatsPage() {
   const [notesPanelWidth, setNotesPanelWidth] = useState(320); // Default width in pixels
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true); // Control auto-scroll
 
+  // Scroll position memory
+  const scrollPositionsRef = useRef<Map<string, number>>(new Map());
+  const previousChatIdRef = useRef<string | null>(null);
+  const [hasNewMessages, setHasNewMessages] = useState(false); // Show "scroll to bottom" arrow
+  const previousMessageCountRef = useRef(0);
+  const isTransitioningRef = useRef(false); // Flag to prevent scroll effects during chat transition
+  const [isScrollRestoring, setIsScrollRestoring] = useState(false); // Hide container during scroll restoration
+  const allowScrollSaveRef = useRef(false); // Only allow scroll saves after initial load settles
+
+  // Messages cache - store messages per chat to avoid re-fetching
+  const messagesCacheRef = useRef<Map<string, Message[]>>(new Map());
+
   // Media preview modal state
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const [previewAttachments, setPreviewAttachments] = useState<Attachment[]>(
@@ -144,6 +317,63 @@ export default function ChatsPage() {
   // Edit and delete message state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletingMessageId, setDeletingMessageId] = useState<string>("");
+
+  // Media staging modal state (WhatsApp-style media preview before sending)
+  const [mediaStagingOpen, setMediaStagingOpen] = useState(false);
+  const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
+  const [currentAttachmentType, setCurrentAttachmentType] =
+    useState<AttachmentType>("photos-videos");
+  const addMoreInputRef = useRef<HTMLInputElement>(null);
+
+  // Pending media uploads to show in chat with progress
+  const [pendingMediaUploads, setPendingMediaUploads] = useState<
+    PendingMediaUpload[]
+  >([]);
+  const [pendingCaption, setPendingCaption] = useState("");
+
+  // Handler to select chat and save scroll position before switching
+  const handleSelectChat = useCallback(
+    (chatId: string) => {
+      console.log("=== HANDLE SELECT CHAT ===");
+      console.log("Switching FROM:", selectedChatId, "TO:", chatId);
+
+      const messagesContainer = messagesContainerRef.current;
+      // Save the current chat's scroll position if we're switching away
+      if (selectedChatId && messagesContainer) {
+        const currentScroll = messagesContainer.scrollTop;
+        // Save scrollTop directly (with caching, content height is stable)
+        scrollPositionsRef.current.set(selectedChatId, currentScroll);
+        console.log("SAVED scroll for", selectedChatId, ":", currentScroll);
+        console.log(
+          "scrollPositionsRef now:",
+          Array.from(scrollPositionsRef.current.entries())
+        );
+
+        // Also cache the current messages for this chat
+        if (messages.length > 0) {
+          messagesCacheRef.current.set(selectedChatId, [...messages]);
+          console.log(
+            "CACHED",
+            messages.length,
+            "messages for",
+            selectedChatId
+          );
+        } else {
+          console.log("NO messages to cache for", selectedChatId);
+        }
+      } else {
+        console.log(
+          "NOT saving scroll - selectedChatId:",
+          selectedChatId,
+          "container:",
+          !!messagesContainer
+        );
+      }
+      // Now switch to the new chat
+      setSelectedChatId(chatId);
+    },
+    [selectedChatId, messages]
+  );
 
   // Fetch templates from API
   const { data: templates = [], isLoading: templatesLoading } = useSWR(
@@ -179,22 +409,19 @@ export default function ChatsPage() {
 
   const [messageCount, setMessageCount] = useState(0);
 
-  // Auto-scroll to bottom when messages change, but only if we should auto-scroll
+  // Initialize scroll controller
   useEffect(() => {
-    if (messagesEndRef.current && shouldAutoScroll) {
-      // Use requestAnimationFrame to ensure DOM has been painted
-      requestAnimationFrame(() => {
-        if (messagesEndRef.current) {
-          messagesEndRef.current.scrollIntoView({
-            behavior: isInitialLoad ? "auto" : "smooth",
-          });
-        }
-      });
-      setIsInitialLoad(false);
+    const container = messagesContainerRef.current;
+    if (container) {
+      scrollControllerRef.current = new ScrollController(container);
     }
-  }, [messageCount, shouldAutoScroll, isInitialLoad]);
 
-  // Track scroll position to disable auto-scroll when user scrolls up
+    return () => {
+      scrollControllerRef.current?.destroy();
+    };
+  }, []);
+
+  // Handle scroll position tracking to disable auto-scroll when user scrolls up
   useEffect(() => {
     const messagesContainer = messagesContainerRef.current;
     if (!messagesContainer) return;
@@ -202,12 +429,26 @@ export default function ChatsPage() {
     let scrollTimeout: NodeJS.Timeout;
 
     const handleScroll = () => {
-      // Calculate if user is at the bottom
-      const { scrollTop, scrollHeight, clientHeight } = messagesContainer;
-      const isAtBottom = scrollHeight - scrollTop - clientHeight < 50; // 50px threshold
-
-      // Set shouldAutoScroll based on whether user is at the bottom
+      // Check if user is at the bottom
+      const isAtBottom = scrollControllerRef.current?.isAtBottom(50) ?? false;
       setShouldAutoScroll(isAtBottom);
+
+      // Clear new messages indicator when user scrolls to bottom
+      if (isAtBottom) {
+        setHasNewMessages(false);
+      }
+
+      // Only save scroll position after initial load has settled
+      if (selectedChatId && allowScrollSaveRef.current) {
+        const scrollPos = messagesContainer.scrollTop;
+        scrollPositionsRef.current.set(selectedChatId, scrollPos);
+        // console.log(
+        //   "Saved scroll position for",
+        //   selectedChatId,
+        //   ":",
+        //   scrollPos
+        // );
+      }
     };
 
     const debouncedHandleScroll = () => {
@@ -220,38 +461,153 @@ export default function ChatsPage() {
       messagesContainer.removeEventListener("scroll", debouncedHandleScroll);
       clearTimeout(scrollTimeout);
     };
-  }, []);
+  }, [selectedChatId]);
 
-  // Auto-scroll when content size changes (e.g., images loading)
+  // Handle chat switch - reset initial load and save last scroll position
   useEffect(() => {
-    const messagesContainer = messagesContainerRef.current;
-    if (!messagesContainer) return;
+    if (selectedChatId && selectedChatId !== previousChatIdRef.current) {
+      console.log("=== CHAT SWITCH EFFECT ===");
+      console.log(
+        "Switching to chat:",
+        selectedChatId,
+        "from:",
+        previousChatIdRef.current
+      );
+      console.log(
+        "scrollPositionsRef at switch:",
+        Array.from(scrollPositionsRef.current.entries())
+      );
 
-    // Use ResizeObserver to detect when images load and container size changes
-    const resizeObserver = new ResizeObserver(() => {
-      // Check if we should be at the bottom
-      // If shouldAutoScroll is true, always scroll to bottom
-      // If shouldAutoScroll is false but user is very close to bottom (within 100px), still scroll
-      if (shouldAutoScroll) {
-        // User wants to stay at bottom
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-      } else {
-        // Check if user is close to bottom (within 100px)
-        const { scrollTop, scrollHeight, clientHeight } = messagesContainer;
-        const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-        if (distanceFromBottom < 100) {
-          // User is close to bottom, scroll to bottom
-          messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        }
+      // Mark that we're transitioning - this prevents scroll effects from firing
+      isTransitioningRef.current = true;
+      allowScrollSaveRef.current = false; // Disable scroll saving during transition
+      setIsScrollRestoring(true); // Hide container to prevent visual jump
+
+      // Update the previous chat ref
+      previousChatIdRef.current = selectedChatId;
+      setIsInitialLoad(true);
+      setHasNewMessages(false);
+      console.log("Switched to chat", selectedChatId);
+    }
+  }, [selectedChatId]);
+
+  // Handle first-time visit to chat - scroll to bottom as images load
+  // For cached chats (returning visits), scroll is handled in fetchMessages effect
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    // Only run when NOT transitioning, have messages, and in initial load state
+    if (
+      isTransitioningRef.current ||
+      !container ||
+      messages.length === 0 ||
+      !isInitialLoad
+    ) {
+      return;
+    }
+
+    // Check if this chat has cached messages (returning visit)
+    const hasCachedMessages = selectedChatId
+      ? messagesCacheRef.current.has(selectedChatId)
+      : false;
+
+    if (hasCachedMessages) {
+      // Cached visit - scroll already handled, just enable saving
+      setIsInitialLoad(false);
+      allowScrollSaveRef.current = true;
+      return;
+    }
+
+    // First visit to chat - scroll to bottom as images load
+    console.log("First visit, scrolling to bottom with image handling");
+    let shouldContinueScrolling = true;
+
+    const performScroll = () => {
+      if (container && shouldContinueScrolling) {
+        container.scrollTop = container.scrollHeight;
       }
+    };
+
+    performScroll();
+
+    const resizeObserver = new ResizeObserver(() => {
+      performScroll();
     });
 
-    resizeObserver.observe(messagesContainer);
+    resizeObserver.observe(container);
+
+    const stopScrollTimer = setTimeout(() => {
+      shouldContinueScrolling = false;
+      setIsInitialLoad(false);
+      setShouldAutoScroll(true);
+      allowScrollSaveRef.current = true;
+      resizeObserver.disconnect();
+      console.log("Initial load complete, scroll saving enabled");
+    }, 2500);
 
     return () => {
+      clearTimeout(stopScrollTimer);
       resizeObserver.disconnect();
     };
-  }, [shouldAutoScroll]);
+  }, [selectedChatId, messages.length, isInitialLoad]);
+
+  // Auto-scroll to bottom when NEW messages arrive (not on chat switch)
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    // Skip during transitions, initial load, or if user scrolled up
+    if (
+      isTransitioningRef.current ||
+      !container ||
+      messages.length === 0 ||
+      isInitialLoad ||
+      !shouldAutoScroll
+    ) {
+      return;
+    }
+
+    // Double-check scroll position directly (state might be stale due to debouncing)
+    const isActuallyAtBottom =
+      scrollControllerRef.current?.isAtBottom(100) ?? false;
+    if (!isActuallyAtBottom) {
+      console.log("Skipping auto-scroll - user has scrolled up (direct check)");
+      return;
+    }
+
+    // Only scroll for new messages when user is already at bottom
+    console.log("Auto-scrolling to bottom for new messages");
+    let shouldContinueScrolling = true;
+
+    const performScroll = () => {
+      if (container && shouldContinueScrolling && !isTransitioningRef.current) {
+        // Re-check if still at bottom before scrolling
+        const stillAtBottom =
+          scrollControllerRef.current?.isAtBottom(100) ?? false;
+        if (stillAtBottom) {
+          container.scrollTop = container.scrollHeight;
+        } else {
+          // User scrolled away, stop auto-scrolling
+          shouldContinueScrolling = false;
+        }
+      }
+    };
+
+    performScroll();
+
+    const resizeObserver = new ResizeObserver(() => {
+      performScroll();
+    });
+
+    resizeObserver.observe(container);
+
+    const stopScrollTimer = setTimeout(() => {
+      shouldContinueScrolling = false;
+      resizeObserver.disconnect();
+    }, 2000);
+
+    return () => {
+      clearTimeout(stopScrollTimer);
+      resizeObserver.disconnect();
+    };
+  }, [messages.length, isInitialLoad, shouldAutoScroll]);
 
   // Fetch chats on mount
   useEffect(() => {
@@ -378,8 +734,132 @@ export default function ChatsPage() {
   useEffect(() => {
     if (!selectedChatId) return;
 
-    setIsInitialLoad(true);
-    setShouldAutoScroll(true); // Enable auto-scroll when changing chats
+    // Check if we have cached messages for this chat
+    const cachedMessages = messagesCacheRef.current.get(selectedChatId);
+    const savedScrollPosition = scrollPositionsRef.current.get(selectedChatId);
+
+    console.log("=== FETCH MESSAGES EFFECT ===");
+    console.log("selectedChatId:", selectedChatId);
+    console.log("cachedMessages:", cachedMessages?.length ?? "none");
+    console.log("savedScrollPosition:", savedScrollPosition);
+    console.log(
+      "scrollPositionsRef contents:",
+      Array.from(scrollPositionsRef.current.entries())
+    );
+
+    if (cachedMessages && cachedMessages.length > 0) {
+      // Use cached messages - this means images are already in browser cache
+      console.log(
+        "Using cached messages for",
+        selectedChatId,
+        "count:",
+        cachedMessages.length,
+        "restoring scroll to:",
+        savedScrollPosition
+      );
+      setMessages(cachedMessages);
+      setMessageCount(cachedMessages.length);
+
+      // We need to wait for React to actually render the messages before restoring scroll
+      // Use a small timeout + ResizeObserver to detect when content is ready
+      const restoreScrollWhenReady = () => {
+        const container = messagesContainerRef.current;
+        if (!container) {
+          isTransitioningRef.current = false;
+          setIsScrollRestoring(false);
+          return;
+        }
+
+        // Track if we've restored scroll
+        let scrollRestored = false;
+        let attempts = 0;
+        const maxAttempts = 50; // 50 * 20ms = 1 second max
+
+        const tryRestoreScroll = () => {
+          if (scrollRestored) return;
+          attempts++;
+
+          const currentScrollHeight = container.scrollHeight;
+          const currentClientHeight = container.clientHeight;
+          const maxScrollTop = currentScrollHeight - currentClientHeight;
+
+          console.log(
+            `Attempt ${attempts}: scrollHeight=${currentScrollHeight}, clientHeight=${currentClientHeight}, maxScrollTop=${maxScrollTop}, target=${savedScrollPosition}`
+          );
+
+          // Check if content has rendered (scrollHeight should be larger than clientHeight for scrollable content)
+          // AND if savedScrollPosition is achievable
+          const isContentReady =
+            savedScrollPosition === undefined ||
+            savedScrollPosition <= maxScrollTop ||
+            attempts >= maxAttempts;
+
+          if (isContentReady) {
+            scrollRestored = true;
+
+            if (savedScrollPosition !== undefined && savedScrollPosition >= 0) {
+              console.log("RESTORING scroll position to:", savedScrollPosition);
+              container.scrollTop = savedScrollPosition;
+              const isAtBottom =
+                currentScrollHeight -
+                  savedScrollPosition -
+                  currentClientHeight <
+                50;
+              setShouldAutoScroll(isAtBottom);
+            } else {
+              console.log("NO saved position, scrolling to bottom");
+              container.scrollTop = container.scrollHeight;
+              setShouldAutoScroll(true);
+            }
+
+            console.log("Final scrollTop:", container.scrollTop);
+
+            // Enable everything AFTER a small delay to let scroll settle
+            setTimeout(() => {
+              isTransitioningRef.current = false;
+              setIsScrollRestoring(false);
+              setIsInitialLoad(false);
+              allowScrollSaveRef.current = true;
+            }, 50);
+          } else {
+            // Content not ready yet, try again
+            setTimeout(tryRestoreScroll, 20);
+          }
+        };
+
+        // Start trying after one animation frame
+        requestAnimationFrame(() => {
+          tryRestoreScroll();
+        });
+      };
+
+      restoreScrollWhenReady();
+
+      // Still fetch fresh data in background to check for new messages
+      backendApi.whatsapp
+        .getChatMessages(selectedChatId, 0, 50)
+        .then((data) => {
+          if (Array.isArray(data)) {
+            const sorted = [...data].sort(
+              (a, b) =>
+                new Date(a.timestamp).getTime() -
+                new Date(b.timestamp).getTime()
+            );
+            // Only update if there are new messages
+            if (sorted.length > cachedMessages.length) {
+              setMessages(sorted);
+              setMessageCount(sorted.length);
+              messagesCacheRef.current.set(selectedChatId, sorted);
+            }
+          }
+        })
+        .catch(console.error);
+
+      return;
+    }
+
+    // No cache - fetch messages (first visit to this chat)
+    setMessages([]);
 
     const fetchMessages = async () => {
       try {
@@ -395,27 +875,42 @@ export default function ChatsPage() {
             (a, b) =>
               new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
           );
-
-          // Check if message count changed (new messages arrived)
-          const newCount = sorted.length;
-          if (newCount !== messages.length) {
-            setMessageCount(newCount);
-          }
-
           setMessages(sorted);
+          setMessageCount(sorted.length);
 
-          // Status updates now come via WebSocket in real-time
-          // No need to poll or track message IDs anymore
+          // Restore scroll position after messages are rendered
+          // Use double requestAnimationFrame to ensure DOM is fully painted
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              const container = messagesContainerRef.current;
+              if (!container) {
+                isTransitioningRef.current = false;
+                setIsScrollRestoring(false);
+                return;
+              }
+
+              // First visit to this chat - scroll to bottom
+              // Cache messages for future visits
+              messagesCacheRef.current.set(selectedChatId, sorted);
+
+              console.log("First visit to chat, scrolling to bottom");
+              container.scrollTop = container.scrollHeight;
+              setShouldAutoScroll(true);
+
+              // Mark transition as complete and show container
+              isTransitioningRef.current = false;
+              setIsScrollRestoring(false);
+            });
+          });
         }
       } catch (err) {
         console.error("Error fetching messages:", err);
         setError("Failed to load messages");
+        isTransitioningRef.current = false;
+        setIsScrollRestoring(false);
       }
     };
-
     fetchMessages();
-    // Initial load complete - now WebSocket will provide real-time message updates
-    // This initial fetch loads chat history; subsequent messages arrive via WebSocket
   }, [selectedChatId]);
 
   // 🔥 REAL-TIME UPDATES via WebSocket
@@ -451,15 +946,16 @@ export default function ChatsPage() {
           type: wsMsg.type,
           status: "delivered" as const,
           attachments: wsMsg.attachments
-            ? wsMsg.attachments.map((att) => ({
-                id: att.mediaId,
+            ? wsMsg.attachments.map((att: any) => ({
+                id: att.id || att.mediaId,
                 type: att.type as "image" | "video" | "audio" | "document",
-                mediaId: att.mediaId,
-                fileName: "",
-                mimeType: "application/octet-stream",
-                size: 0,
-                s3Key: att.mediaId,
-                status: "success" as const,
+                mediaId: att.id || att.mediaId,
+                fileName: att.fileName || "",
+                mimeType: att.mimeType || "application/octet-stream",
+                size: att.size || 0,
+                s3Key: att.s3Key || att.id || att.mediaId,
+                thumbnailStatus: att.thumbnailStatus,
+                status: att.status || ("success" as const),
                 uploadedAt: wsMsg.timestamp,
               }))
             : undefined,
@@ -479,9 +975,46 @@ export default function ChatsPage() {
       );
     });
 
+    // Show new message indicator if user is not at bottom
+    console.log(
+      "New inbound messages received, shouldAutoScroll:",
+      shouldAutoScroll
+    );
+    if (!shouldAutoScroll) {
+      console.log("Setting hasNewMessages to TRUE - user is not at bottom");
+      setHasNewMessages(true);
+    } else {
+      // Hide indicator if user scrolled back to bottom
+      setHasNewMessages(false);
+
+      // For media messages, we need to scroll after a delay to let media load
+      const hasMedia = inboundMessages.some(
+        (msg: InboundMessage) => msg.attachments && msg.attachments.length > 0
+      );
+      if (hasMedia) {
+        // Multiple scroll attempts to handle media loading
+        const scrollToBottom = () => {
+          const container = messagesContainerRef.current;
+          if (container) {
+            container.scrollTop = container.scrollHeight;
+          }
+        };
+        // Scroll immediately
+        setTimeout(scrollToBottom, 50);
+        // Scroll again after media placeholder renders
+        setTimeout(scrollToBottom, 200);
+        // Scroll again after media starts loading
+        setTimeout(scrollToBottom, 500);
+        // Extra scrolls for video thumbnails that load asynchronously
+        setTimeout(scrollToBottom, 1000);
+        setTimeout(scrollToBottom, 1500);
+        setTimeout(scrollToBottom, 2000);
+      }
+    }
+
     // Trigger auto-scroll when new messages arrive
     setMessageCount((prev) => prev + inboundMessages.length);
-  }, [inboundMessages]);
+  }, [inboundMessages, shouldAutoScroll]);
 
   // Update messages with status changes from WebSocket
   useEffect(() => {
@@ -514,24 +1047,311 @@ export default function ChatsPage() {
     // Don't trigger auto-scroll when just updating message statuses
   }, [socketStatusMap]);
 
+  // 🖼️ Listen for thumbnail ready events via WebSocket
+  // When thumbnails are generated (async), update the message attachments
+  const handleThumbnailReady = useCallback((event: ThumbnailReadyEvent) => {
+    console.log("📷 Thumbnail ready event received:", event);
+
+    // Update the specific attachment in the message
+    setMessages((prevMessages) =>
+      prevMessages.map((message) => {
+        if (message.messageId !== event.messageId) {
+          return message;
+        }
+
+        // Update the specific attachment
+        const updatedAttachments = (message.attachments || []).map(
+          (attachment: Attachment) => {
+            if (attachment.id !== event.attachmentId) {
+              return attachment;
+            }
+
+            return {
+              ...attachment,
+              thumbnailKey: event.thumbnailKey,
+              thumbnailStatus: "ready" as const,
+              width: event.width,
+              height: event.height,
+              blurhash: event.blurhash,
+              // For PDFs, duration contains page count
+              ...(event.duration
+                ? { pageCount: event.duration, duration: event.duration }
+                : {}),
+            };
+          }
+        );
+
+        return {
+          ...message,
+          attachments: updatedAttachments,
+        };
+      })
+    );
+
+    // Trigger a re-scroll for media messages when thumbnail becomes ready
+    // Use ref directly to avoid stale closure
+    const container = messagesContainerRef.current;
+    if (container) {
+      const isAtBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight <
+        100;
+      if (isAtBottom) {
+        setTimeout(() => {
+          container.scrollTop = container.scrollHeight;
+        }, 100);
+      }
+    }
+  }, []);
+
+  useThumbnailUpdates({
+    onThumbnailReady: handleThumbnailReady,
+  });
+
+  // Handle files selected from attachment menu
+  const handleFilesSelected = useCallback(
+    (files: File[], type: AttachmentType) => {
+      setCurrentAttachmentType(type);
+
+      // Create staged files with preview URLs
+      const newStagedFiles: StagedFile[] = files.map((file) => {
+        const fileType = file.type.startsWith("image/")
+          ? "image"
+          : file.type.startsWith("video/")
+          ? "video"
+          : file.type.startsWith("audio/")
+          ? "audio"
+          : "document";
+
+        return {
+          id: Math.random().toString(36).substring(7),
+          file,
+          previewUrl:
+            fileType === "image" || fileType === "video"
+              ? URL.createObjectURL(file)
+              : fileType === "audio"
+              ? URL.createObjectURL(file)
+              : undefined,
+          type: fileType,
+        };
+      });
+
+      setStagedFiles((prev) => [...prev, ...newStagedFiles]);
+      setMediaStagingOpen(true);
+    },
+    []
+  );
+
+  // Handle removing a staged file
+  const handleRemoveStagedFile = useCallback((id: string) => {
+    setStagedFiles((prev) => {
+      const file = prev.find((f) => f.id === id);
+      // Revoke preview URL to free memory
+      if (file?.previewUrl) {
+        URL.revokeObjectURL(file.previewUrl);
+      }
+      const newFiles = prev.filter((f) => f.id !== id);
+      // Close modal if no files left
+      if (newFiles.length === 0) {
+        setMediaStagingOpen(false);
+      }
+      return newFiles;
+    });
+  }, []);
+
+  // Handle closing the staging modal
+  const handleCloseStagingModal = useCallback(() => {
+    // Don't revoke URLs if we're sending - they're needed for preview
+    setStagedFiles([]);
+    setMediaStagingOpen(false);
+  }, []);
+
+  // Handle sending media from staging modal
+  const handleSendMediaFromStaging = useCallback(
+    async (caption: string) => {
+      if (stagedFiles.length === 0 || !selectedChatId) return;
+
+      try {
+        setError(null);
+        const selectedChat = chats.find((c) => c.chatId === selectedChatId);
+        if (!selectedChat) return;
+
+        // Create pending media uploads for immediate display in chat
+        const newPendingUploads: PendingMediaUpload[] = stagedFiles.map(
+          (sf) => ({
+            id: sf.id,
+            file: sf.file,
+            previewUrl: sf.previewUrl,
+            type: sf.type,
+            progress: 0,
+            status: "queued" as const,
+          })
+        );
+
+        setPendingMediaUploads(newPendingUploads);
+        setPendingCaption(caption);
+
+        // Close the staging modal (don't revoke URLs yet)
+        setStagedFiles([]);
+        setMediaStagingOpen(false);
+
+        // Scroll to bottom to show the pending upload
+        setShouldAutoScroll(true);
+        setTimeout(() => {
+          scrollControllerRef.current?.scrollToBottom(true);
+        }, 100);
+
+        // Now actually send and upload
+        let messagePayload: any = {
+          to: selectedChat.participantPhone,
+          senderId: selectedChat.senderId,
+        };
+
+        if (caption.trim()) {
+          messagePayload.body = caption;
+        }
+
+        // Include placeholder attachments
+        messagePayload.attachments = newPendingUploads.map((upload) => ({
+          id: upload.id,
+          type: upload.type,
+          fileName: upload.file.name,
+          mimeType: upload.file.type || "application/octet-stream",
+          size: upload.file.size,
+          s3Key: "",
+          status: "pending",
+          uploadedAt: new Date().toISOString(),
+        }));
+
+        // Send message to get messageId
+        const sentMessage = (await backendApi.whatsapp.sendMessage(
+          messagePayload
+        )) as { messageId?: string };
+
+        if (!sentMessage?.messageId) {
+          throw new Error("Failed to get message ID");
+        }
+
+        const messageId = sentMessage.messageId;
+
+        // Upload each file with progress tracking
+        for (let i = 0; i < newPendingUploads.length; i++) {
+          const upload = newPendingUploads[i];
+
+          // Update status to uploading
+          setPendingMediaUploads((prev) =>
+            prev.map((u) =>
+              u.id === upload.id ? { ...u, status: "uploading" as const } : u
+            )
+          );
+
+          try {
+            // Upload file with progress callback
+            // Pass upload.id as attachmentId so WebSocket thumbnail events can match
+            const result = await mediaApi.uploadFileToBackend(
+              upload.file,
+              selectedChat.senderId,
+              selectedChatId,
+              messageId,
+              (progress) => {
+                setPendingMediaUploads((prev) =>
+                  prev.map((u) => (u.id === upload.id ? { ...u, progress } : u))
+                );
+              },
+              upload.id // Pass attachment ID for WebSocket event matching
+            );
+
+            // Get download URL and send to WhatsApp
+            const downloadUrl = (await backendApi.whatsapp.getDownloadUrl(
+              messageId,
+              result.uploadId
+            )) as { url?: string };
+
+            if (downloadUrl?.url) {
+              await backendApi.whatsapp.sendMedia({
+                to: selectedChat.participantPhone,
+                mediaType: upload.type,
+                mediaUrl: downloadUrl.url,
+                caption: i === 0 ? caption : undefined, // Caption only on first
+                senderId: selectedChat.senderId,
+                fileName: upload.file.name, // Include filename for documents
+                originalMessageId: messageId, // Link to original message for status updates
+              });
+            }
+
+            // Mark as completed
+            setPendingMediaUploads((prev) =>
+              prev.map((u) =>
+                u.id === upload.id
+                  ? { ...u, status: "completed" as const, progress: 100 }
+                  : u
+              )
+            );
+          } catch (uploadError) {
+            console.error(`Failed to upload ${upload.file.name}:`, uploadError);
+            setPendingMediaUploads((prev) =>
+              prev.map((u) =>
+                u.id === upload.id
+                  ? {
+                      ...u,
+                      status: "error" as const,
+                      error: "Upload failed",
+                    }
+                  : u
+              )
+            );
+          }
+        }
+
+        // After all uploads complete, refresh messages and clear pending
+        const data = await backendApi.whatsapp.getChatMessages(
+          selectedChatId,
+          0,
+          50
+        );
+        if (Array.isArray(data)) {
+          const sorted = [...data].sort(
+            (a, b) =>
+              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+          );
+          setMessages(sorted);
+          setMessageCount(sorted.length);
+        }
+
+        // Clear pending uploads after a short delay
+        setTimeout(() => {
+          // Revoke preview URLs
+          newPendingUploads.forEach((u) => {
+            if (u.previewUrl) {
+              URL.revokeObjectURL(u.previewUrl);
+            }
+          });
+          setPendingMediaUploads([]);
+          setPendingCaption("");
+        }, 500);
+      } catch (err) {
+        console.error("Error sending media:", err);
+        setError("Failed to send media");
+        // Clear pending on error
+        setPendingMediaUploads([]);
+        setPendingCaption("");
+      }
+    },
+    [stagedFiles, selectedChatId, chats]
+  );
+
+  // Handle "Add More" from staging modal
+  const handleAddMoreMedia = useCallback(() => {
+    addMoreInputRef.current?.click();
+  }, []);
+
   const handleSendMessage = async () => {
-    if (
-      (!messageInput.trim() &&
-        !templateInput.trim() &&
-        pendingUploads.size === 0) ||
-      !selectedChatId
-    )
+    if ((!messageInput.trim() && !templateInput.trim()) || !selectedChatId)
       return;
 
     try {
       setError(null);
       const selectedChat = chats.find((c) => c.chatId === selectedChatId);
       if (!selectedChat) return;
-
-      // Check if this is a recipient-initiated conversation (has inbound messages)
-      const hasInboundMessages = messages.some(
-        (m) => m.direction === "inbound"
-      );
 
       let messagePayload: any = {
         to: selectedChat.participantPhone,
@@ -545,113 +1365,12 @@ export default function ChatsPage() {
         messagePayload.body = messageInput;
       }
 
-      // For image-only messages, include placeholder attachments so validation passes
-      if (pendingUploads.size > 0) {
-        messagePayload.attachments = Array.from(pendingUploads.values()).map(
-          (upload) => ({
-            id: upload.id,
-            type: upload.file.type.split("/")[0] || "file",
-            fileName: upload.file.name,
-            mimeType: upload.file.type || "application/octet-stream",
-            size: upload.file.size,
-            s3Key: "", // Will be filled after upload
-            status: "pending",
-            uploadedAt: new Date().toISOString(),
-          })
-        );
-      }
-
-      // Determine if we have text or only media
-      const hasText =
-        messagePayload.body && messagePayload.body.trim().length > 0;
-      const hasMedia = pendingUploads.size > 0;
-
-      // Send message first to get the messageId (only if there's text or no media)
-      let sentMessage: any;
-
-      if (hasText || !hasMedia) {
-        // Send text message (or placeholder for media-only messages to record in DB)
-        try {
-          sentMessage = await backendApi.whatsapp.sendMessage(messagePayload);
-        } catch (sendError) {
-          console.error("Error sending message:", sendError);
-          throw sendError;
-        }
-      }
-
-      // Upload attachments after message is sent, using the real messageId
-      if (hasMedia && sentMessage?.messageId) {
-        try {
-          console.log(
-            `[Chats] Starting attachment upload for messageId: ${
-              (sentMessage as any).messageId
-            }`
-          );
-          const attachments = await uploadAll(
-            (sentMessage as any).messageId,
-            selectedChat.senderId,
-            selectedChatId
-          );
-          console.log(`[Chats] Attachments uploaded:`, attachments);
-
-          // Send the media to the recipient for each attachment
-          for (const attachment of attachments) {
-            try {
-              console.log(
-                `[Chats] Getting download URL for attachment: ${attachment.fileName}`
-              );
-              // Get download URL for the file in S3
-              const downloadUrl = (await backendApi.whatsapp.getDownloadUrl(
-                (sentMessage as any).messageId,
-                attachment.id
-              )) as any;
-
-              console.log(`[Chats] Download URL received:`, downloadUrl);
-
-              // Send media message to recipient
-              if (downloadUrl && downloadUrl.url) {
-                console.log(
-                  `[Chats] Sending media message to WhatsApp for: ${attachment.fileName}`
-                );
-                await backendApi.whatsapp.sendMedia({
-                  to: selectedChat.participantPhone,
-                  mediaType: attachment.type,
-                  mediaUrl: downloadUrl.url,
-                  caption: messagePayload.body || undefined, // Include text as caption if present
-                  senderId: selectedChat.senderId,
-                });
-                console.log(
-                  `[Chats] Media message sent successfully: ${attachment.fileName}`
-                );
-              } else {
-                console.error(
-                  `[Chats] No download URL received for: ${attachment.fileName}`
-                );
-              }
-            } catch (mediaError) {
-              console.error(
-                `Failed to send media attachment ${attachment.fileName}:`,
-                mediaError
-              );
-              setError(
-                `Attachment uploaded but failed to send: ${attachment.fileName}`
-              );
-            }
-          }
-        } catch (uploadError) {
-          console.error("Batch upload error:", uploadError);
-          // Don't throw - message was already sent, just warn about attachment upload failure
-          setError(
-            `Message sent but attachments failed to upload: ${
-              (uploadError as Error).message
-            }`
-          );
-        }
-      }
+      // Send text message
+      await backendApi.whatsapp.sendMessage(messagePayload);
 
       setMessageInput("");
       setTemplateInput("");
-      clearUploads();
+
       // Refresh messages
       const data = await backendApi.whatsapp.getChatMessages(
         selectedChatId,
@@ -667,6 +1386,10 @@ export default function ChatsPage() {
         setMessageCount(sorted.length);
         // Re-enable auto-scroll when a message is sent so it scrolls to the new message
         setShouldAutoScroll(true);
+        // Explicitly scroll to bottom with smooth animation
+        setTimeout(() => {
+          scrollControllerRef.current?.scrollToBottom(true);
+        }, 0);
       }
     } catch (err) {
       console.error("Error sending message:", err);
@@ -727,6 +1450,18 @@ export default function ChatsPage() {
     }
   };
 
+  const handleScrollToBottom = () => {
+    const container = messagesContainerRef.current;
+    if (container) {
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: "smooth",
+      });
+      setHasNewMessages(false);
+      setShouldAutoScroll(true);
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -759,16 +1494,21 @@ export default function ChatsPage() {
     document.addEventListener("mouseup", handleMouseUp);
   };
 
-  // Media preview modal handlers
+  // Media preview modal handlers - supports both images and videos
   const handleImageClick = (
     messageId: string,
     attachments: Attachment[],
     index: number
   ) => {
-    const images = attachments.filter((a) => a.type === "image");
-    setPreviewAttachments(images);
+    // Include both images and videos in the preview
+    const visualMedia = attachments.filter(
+      (a) => a.type === "image" || a.type === "video"
+    );
+    setPreviewAttachments(visualMedia);
     setPreviewMessageId(messageId);
-    setPreviewInitialIndex(index);
+    // Adjust index if we filtered out non-visual attachments
+    const adjustedIndex = Math.min(index, visualMedia.length - 1);
+    setPreviewInitialIndex(adjustedIndex >= 0 ? adjustedIndex : 0);
     setPreviewModalOpen(true);
   };
 
@@ -779,7 +1519,10 @@ export default function ChatsPage() {
     position: { x: number; y: number }
   ) => {
     setCurrentMessageId(messageId);
-    setCurrentMessageAttachments(attachments.filter((a) => a.type === "image"));
+    // Include both images and videos for download
+    setCurrentMessageAttachments(
+      attachments.filter((a) => a.type === "image" || a.type === "video")
+    );
     setDownloadMenuPosition(position);
     setDownloadMenuOpen(true);
   };
@@ -821,30 +1564,26 @@ export default function ChatsPage() {
     try {
       setDownloadLoading(true);
       const attachment = currentMessageAttachments[0];
-      const urlResponse = await mediaApi.getDownloadUrl(
+
+      // Use the backend stream endpoint to avoid CORS issues with S3
+      const blob = await mediaApi.downloadMediaViaStream(
         currentMessageId,
         attachment.id
       );
-      let url = urlResponse.url;
 
-      let blobUrl = url;
-      if (url.startsWith("cloud-api://")) {
-        const mediaId = url.replace("cloud-api://", "");
-        blobUrl = await mediaApi.fetchCloudAPIMedia(mediaId);
-      }
-      const response = await fetch(blobUrl);
-      const blob = await response.blob();
       const dlUrl = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = dlUrl;
-      a.download = attachment.fileName || "image";
+      a.download =
+        attachment.fileName ||
+        (attachment.type === "video" ? "video.mp4" : "image.jpg");
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(dlUrl);
       document.body.removeChild(a);
     } catch (err) {
-      console.error("Failed to download image:", err);
-      setError("Failed to download image");
+      console.error("Failed to download media:", err);
+      setError("Failed to download media");
     } finally {
       setDownloadLoading(false);
     }
@@ -860,36 +1599,27 @@ export default function ChatsPage() {
       const JSZip = (await import("jszip")).default;
       const zip = new JSZip();
 
-      // Download all images and add to zip
+      // Download all media (images and videos) and add to zip via backend stream
       for (const attachment of currentMessageAttachments) {
-        const urlResponse = await mediaApi.getDownloadUrl(
+        const blob = await mediaApi.downloadMediaViaStream(
           currentMessageId,
           attachment.id
         );
-        let url = urlResponse.url;
-
-        let blobUrl = url;
-        if (url.startsWith("cloud-api://")) {
-          const mediaId = url.replace("cloud-api://", "");
-          blobUrl = await mediaApi.fetchCloudAPIMedia(mediaId);
-        }
-        const response = await fetch(blobUrl);
-        const blob = await response.blob();
-        zip.file(attachment.fileName || `image_${attachment.id}`, blob);
+        zip.file(attachment.fileName || `media_${attachment.id}`, blob);
       }
 
       const zipBlob = await zip.generateAsync({ type: "blob" });
       const dlUrl = window.URL.createObjectURL(zipBlob);
       const a = document.createElement("a");
       a.href = dlUrl;
-      a.download = `images_${Date.now()}.zip`;
+      a.download = `media_${Date.now()}.zip`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(dlUrl);
       document.body.removeChild(a);
     } catch (err) {
-      console.error("Failed to download images pack:", err);
-      setError("Failed to download images pack");
+      console.error("Failed to download media pack:", err);
+      setError("Failed to download media pack");
     } finally {
       setDownloadLoading(false);
     }
@@ -929,8 +1659,90 @@ export default function ChatsPage() {
 
   const selectedChat = chats.find((c) => c.chatId === selectedChatId) || null;
 
+  // Group consecutive outbound media messages that were sent within 2 seconds
+  // This creates WhatsApp-like grouped media bubbles
+  interface GroupedMessage {
+    type: "single" | "group";
+    messages: Message[];
+    id: string;
+  }
+
+  const groupedMessages = React.useMemo((): GroupedMessage[] => {
+    if (messages.length === 0) return [];
+
+    const result: GroupedMessage[] = [];
+    let currentGroup: Message[] = [];
+
+    const isMediaOnlyMessage = (msg: Message) => {
+      return (
+        msg.direction === "outbound" &&
+        !msg.text &&
+        msg.attachments &&
+        msg.attachments.length > 0 &&
+        msg.attachments.every((a) => a.type === "image" || a.type === "video")
+      );
+    };
+
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      const prevMsg = i > 0 ? messages[i - 1] : null;
+
+      if (isMediaOnlyMessage(msg)) {
+        // Check if this should be grouped with previous media messages
+        if (currentGroup.length > 0 && prevMsg && isMediaOnlyMessage(prevMsg)) {
+          const timeDiff =
+            new Date(msg.timestamp).getTime() -
+            new Date(prevMsg.timestamp).getTime();
+          // Group if within 2 seconds
+          if (timeDiff <= 2000) {
+            currentGroup.push(msg);
+            continue;
+          }
+        }
+
+        // Start new group or add to existing
+        if (currentGroup.length > 0) {
+          result.push({
+            type: currentGroup.length > 1 ? "group" : "single",
+            messages: currentGroup,
+            id:
+              currentGroup[0].messageId || currentGroup[0].id?.toString() || "",
+          });
+        }
+        currentGroup = [msg];
+      } else {
+        // Not a media-only message, flush current group and add single
+        if (currentGroup.length > 0) {
+          result.push({
+            type: currentGroup.length > 1 ? "group" : "single",
+            messages: currentGroup,
+            id:
+              currentGroup[0].messageId || currentGroup[0].id?.toString() || "",
+          });
+          currentGroup = [];
+        }
+        result.push({
+          type: "single",
+          messages: [msg],
+          id: msg.messageId || msg.id?.toString() || "",
+        });
+      }
+    }
+
+    // Flush remaining group
+    if (currentGroup.length > 0) {
+      result.push({
+        type: currentGroup.length > 1 ? "group" : "single",
+        messages: currentGroup,
+        id: currentGroup[0].messageId || currentGroup[0].id?.toString() || "",
+      });
+    }
+
+    return result;
+  }, [messages]);
+
   return (
-    <div className="flex flex-col h-screen gap-0">
+    <div className="flex flex-col min-h-screen gap-0">
       {/* Header with Controls */}
       <div className="border-b px-6 py-2 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
@@ -985,7 +1797,7 @@ export default function ChatsPage() {
                     senderDisplayName={sender.displayName}
                     chats={senderChats}
                     selectedChatId={selectedChatId}
-                    onSelectChat={(chatId) => setSelectedChatId(chatId)}
+                    onSelectChat={handleSelectChat}
                   />
                 );
               })
@@ -1013,12 +1825,13 @@ export default function ChatsPage() {
               {/* Messages + Notes Container */}
               <div className="flex flex-1 overflow-hidden" ref={containerRef}>
                 {/* Messages Area */}
-                <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+                <div className="flex-1 flex flex-col overflow-hidden min-h-0 relative">
                   <div
                     ref={messagesContainerRef}
-                    className="overflow-y-auto p-3 space-y-2 flex-1"
+                    className="flex-1 overflow-y-auto p-3 space-y-2 min-h-0 group"
                     style={{
-                      scrollBehavior: "smooth",
+                      maxHeight: "calc(100vh - 420px)",
+                      opacity: isScrollRestoring ? 0 : 1,
                     }}
                   >
                     {messages.length === 0 ? (
@@ -1027,7 +1840,43 @@ export default function ChatsPage() {
                       </div>
                     ) : (
                       <>
-                        {messages.map((message) => {
+                        {groupedMessages.map((group) => {
+                          // Grouped media messages - render as single bubble
+                          if (
+                            group.type === "group" &&
+                            group.messages.length > 1
+                          ) {
+                            const lastMessage =
+                              group.messages[group.messages.length - 1];
+                            const timestamp = new Date(lastMessage.timestamp);
+                            const timeString = timestamp.toLocaleTimeString(
+                              [],
+                              {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              }
+                            );
+
+                            return (
+                              <GroupedMediaBubble
+                                key={group.id}
+                                messages={group.messages}
+                                onImageClick={handleImageClick}
+                                statusIcon={
+                                  <WhatsAppStatusIcon
+                                    status={lastMessage.status || "pending"}
+                                    deliveredAt={lastMessage.deliveredAt}
+                                    readAt={lastMessage.readAt}
+                                    className="ml-1"
+                                  />
+                                }
+                                timeString={timeString}
+                              />
+                            );
+                          }
+
+                          // Single message - render normally
+                          const message = group.messages[0];
                           const isOutbound = message.direction === "outbound";
                           const timestamp = new Date(message.timestamp);
                           const timeString = timestamp.toLocaleTimeString([], {
@@ -1059,13 +1908,14 @@ export default function ChatsPage() {
                                 }`}
                               >
                                 {/* Chevron positioned in top-right corner - visible on hover */}
-                                {/* Show for messages with images, and for outbound text messages */}
+                                {/* Show for messages with media (images/videos), and for outbound text messages */}
                                 {!isDeleted &&
                                   (message.attachments?.some(
-                                    (a) => a.type === "image"
+                                    (a) =>
+                                      a.type === "image" || a.type === "video"
                                   ) ||
                                     isOutbound) && (
-                                    <div className="absolute -top-1 -right-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <div className="absolute -top-1 -right-1 opacity-0 group-hover:opacity-100 transition-opacity z-20">
                                       <MessageActionsMenu
                                         messageId={message.messageId}
                                         messageTimestamp={message.timestamp}
@@ -1077,7 +1927,9 @@ export default function ChatsPage() {
                                         }
                                         onDownload={
                                           message.attachments?.some(
-                                            (a) => a.type === "image"
+                                            (a) =>
+                                              a.type === "image" ||
+                                              a.type === "video"
                                           )
                                             ? () =>
                                                 handleShowDownloadMenu(
@@ -1110,14 +1962,12 @@ export default function ChatsPage() {
                                   </p>
                                 ) : (
                                   <>
-                                    {message.text && (
-                                      <p className="text-xs">{message.text}</p>
-                                    )}
-
-                                    {/* Display attachments if present */}
+                                    {/* Display attachments first, then text below */}
                                     {message.attachments &&
                                       message.attachments.length > 0 && (
-                                        <div className="mt-2">
+                                        <div
+                                          className={message.text ? "mb-2" : ""}
+                                        >
                                           <AttachmentGallery
                                             attachments={message.attachments}
                                             messageId={
@@ -1150,6 +2000,11 @@ export default function ChatsPage() {
                                           />
                                         </div>
                                       )}
+
+                                    {/* Text shown below media */}
+                                    {message.text && (
+                                      <p className="text-xs">{message.text}</p>
+                                    )}
                                   </>
                                 )}
 
@@ -1181,10 +2036,37 @@ export default function ChatsPage() {
                             </div>
                           );
                         })}
+
+                        {/* Pending Media Uploads - show grouped with progress */}
+                        {pendingMediaUploads.length > 0 && (
+                          <PendingUploadGroup
+                            uploads={pendingMediaUploads}
+                            caption={pendingCaption}
+                            timestamp={new Date().toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          />
+                        )}
+
                         <div ref={messagesEndRef} />
                       </>
                     )}
                   </div>
+
+                  {/* Scroll to Bottom Button - positioned outside scrollable area */}
+                  {hasNewMessages && (
+                    <div className="absolute bottom-[180px] right-4 z-20">
+                      <Button
+                        onClick={handleScrollToBottom}
+                        size="sm"
+                        className="rounded-full shadow-lg bg-primary hover:bg-primary/90"
+                        title="Scroll to latest message"
+                      >
+                        <ArrowDown className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
 
                   {/* Template Buttons */}
                   <div
@@ -1273,54 +2155,93 @@ export default function ChatsPage() {
                     )}
                   </div>
 
-                  {/* Input Area */}
+                  {/* Input Area - WhatsApp Style */}
                   <div className="border-t p-3 flex-shrink-0">
-                    {/* File Picker */}
-                    <FilePicker
-                      onFilesSelected={queueFiles}
-                      disabled={isUploading}
+                    {/* Hidden input for "Add More" in staging modal */}
+                    <input
+                      ref={addMoreInputRef}
+                      type="file"
+                      multiple
+                      accept={
+                        currentAttachmentType === "photos-videos"
+                          ? "image/*,video/*"
+                          : currentAttachmentType === "document"
+                          ? "application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/plain,audio/*"
+                          : "*/*"
+                      }
+                      onChange={(e) => {
+                        const files = Array.from(e.target.files || []);
+                        if (files.length > 0) {
+                          handleFilesSelected(files, currentAttachmentType);
+                        }
+                        e.target.value = "";
+                      }}
+                      className="hidden"
                     />
 
-                    {/* Pending Uploads Display */}
-                    {pendingUploads.size > 0 && (
-                      <div className="mb-4">
-                        <PendingUploadsDisplay
-                          uploads={Array.from(pendingUploads.values())}
-                          onRemove={removeUpload}
-                          disabled={isUploading}
-                        />
-                      </div>
-                    )}
-
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder={t("typeMessageOrUseTemplates")}
-                        className="flex-1"
-                        value={templateInput || messageInput}
-                        onChange={(e) => {
-                          if (templateInput) {
-                            setTemplateInput("");
-                          }
-                          setMessageInput(e.target.value);
-                        }}
-                        onKeyDown={handleKeyDown}
-                        disabled={isUploading}
-                      />
-                      <Button
-                        onClick={handleSendMessage}
-                        disabled={
-                          (!messageInput.trim() &&
-                            !templateInput.trim() &&
-                            pendingUploads.size === 0) ||
-                          isUploading
+                    {/* Message Input with Attachment Button Inside */}
+                    <MessageInput
+                      value={templateInput || messageInput}
+                      onChange={(value) => {
+                        if (templateInput) {
+                          setTemplateInput("");
                         }
-                        className="gap-2"
-                      >
-                        <Send className="h-4 w-4" />
-                        {t("send")}
-                      </Button>
-                    </div>
+                        setMessageInput(value);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSendMessage();
+                        }
+                      }}
+                      placeholder={t("typeMessageOrUseTemplates")}
+                      disabled={isUploading || pendingMediaUploads.length > 0}
+                      maxRows={5}
+                      leftElement={
+                        <AttachmentMenu
+                          onFilesSelected={handleFilesSelected}
+                          disabled={
+                            isUploading || pendingMediaUploads.length > 0
+                          }
+                        />
+                      }
+                      rightElement={
+                        <Button
+                          onClick={handleSendMessage}
+                          disabled={
+                            (!messageInput.trim() && !templateInput.trim()) ||
+                            isUploading ||
+                            pendingMediaUploads.length > 0
+                          }
+                          size="sm"
+                          className="h-8"
+                        >
+                          <Send className="h-4 w-4" />
+                        </Button>
+                      }
+                    />
                   </div>
+
+                  {/* Media Staging Panel (positioned within messages area) */}
+                  <MediaStagingPanel
+                    isOpen={mediaStagingOpen}
+                    files={stagedFiles}
+                    onClose={handleCloseStagingModal}
+                    onSend={handleSendMediaFromStaging}
+                    onAddMore={handleAddMoreMedia}
+                    onRemove={handleRemoveStagedFile}
+                    disabled={isUploading}
+                    sendButtonText={t("send")}
+                  />
+
+                  {/* Media Preview Modal (positioned within messages area) */}
+                  <MediaPreviewModal
+                    isOpen={previewModalOpen}
+                    attachments={previewAttachments}
+                    messageId={previewMessageId}
+                    initialIndex={previewInitialIndex}
+                    onClose={() => setPreviewModalOpen(false)}
+                  />
                 </div>
 
                 {/* Resizable Separator */}
@@ -1371,15 +2292,6 @@ export default function ChatsPage() {
           </p>
         </div>
       )}
-
-      {/* Media Preview Modal */}
-      <MediaPreviewModal
-        isOpen={previewModalOpen}
-        attachments={previewAttachments}
-        messageId={previewMessageId}
-        initialIndex={previewInitialIndex}
-        onClose={() => setPreviewModalOpen(false)}
-      />
 
       {/* Download Menu */}
       <MediaDownloadMenu

@@ -128,6 +128,8 @@ export const backendApi = {
       mediaUrl: string;
       caption?: string;
       senderId?: number;
+      fileName?: string;
+      originalMessageId?: string;
     }) => apiClient.post("/whatsapp/send-media", data),
     getStatus: (messageId: string) =>
       apiClient.get(`/whatsapp/status/${messageId}`),

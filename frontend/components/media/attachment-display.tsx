@@ -9,19 +9,24 @@
  * - Thumbnail + full image URLs are cached to avoid redundant API calls
  * - Cloud API media uses blob URL cache with lifecycle management
  * - AbortController prevents race conditions on unmount
+ * - Progressive loading with blurhash placeholders
  */
 
 import { useMediaUrl } from "@/hooks/use-media-url";
 import { mediaApi } from "@/lib/media/api";
+import { Attachment, formatDuration, formatFileSize } from "@/lib/media/types";
 import {
-  Attachment,
-  formatDuration,
-  formatFileSize,
-  getMediaIcon,
-} from "@/lib/media/types";
-import { Download, Pause, Play, Volume2, VolumeX, X } from "lucide-react";
+  Download,
+  FileText,
+  Pause,
+  Play,
+  Volume2,
+  VolumeX,
+  X,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ThumbnailSkeleton } from "./thumbnail-skeleton";
 
 interface AttachmentDisplayProps {
   attachment: Attachment;
@@ -33,6 +38,7 @@ interface AttachmentDisplayProps {
 
 /**
  * Image Attachment Viewer
+ * Now with progressive loading support via thumbnails and blurhash
  */
 export function ImageAttachment({
   attachment,
@@ -41,37 +47,32 @@ export function ImageAttachment({
   isSquare = false,
   onPreview,
 }: AttachmentDisplayProps) {
-  // Use optimized hook for media loading with caching
+  // Use enhanced hook for media loading with thumbnail support
   const {
     url: imageUrl,
+    thumbnailUrl,
     loading,
     error,
+    thumbnailStatus,
+    hasThumbnail,
+    blurhash,
+    dimensions,
   } = useMediaUrl(messageId, attachment.id, {
     loadThumbnail: true,
     handleCloudApi: true,
+    attachment,
   });
 
-  // Thumbnail is now handled automatically by useMediaUrl
-  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
+  // Show skeleton while thumbnail is being generated or loading
+  const showSkeleton =
+    !thumbnailUrl &&
+    !imageUrl &&
+    (loading ||
+      thumbnailStatus === "pending" ||
+      thumbnailStatus === "processing");
 
-  // Load thumbnail separately if available (will be cached)
-  useEffect(() => {
-    if (!attachment.thumbnailKey) return;
-
-    const loadThumbnail = async () => {
-      try {
-        const thumbUrl = await mediaApi.getThumbnailUrl(
-          messageId,
-          attachment.id
-        );
-        setThumbnailUrl(thumbUrl);
-      } catch (err) {
-        // Thumbnail load failed, that's ok - will use full image
-      }
-    };
-
-    loadThumbnail();
-  }, [attachment.id, attachment.thumbnailKey, messageId]);
+  // Determine which URL to display (prefer thumbnail for initial view)
+  const displayUrl = thumbnailUrl || imageUrl;
 
   if (error) {
     return (
@@ -90,16 +91,23 @@ export function ImageAttachment({
     >
       {!isSquare && (
         // Single image: constrained width container to prevent overflow
-        <div className="relative max-w-xs bg-gray-200 rounded-lg overflow-hidden">
-          {(thumbnailUrl || imageUrl) && (
-            <img
-              src={thumbnailUrl || imageUrl || ""}
-              alt={attachment.fileName}
-              className="w-full h-auto object-cover"
+        <div className="relative max-w-xs bg-gray-200 dark:bg-gray-700 rounded-lg overflow-hidden">
+          {showSkeleton ? (
+            <ThumbnailSkeleton
+              width={dimensions?.width || 280}
+              height={dimensions?.height || 200}
+              blurhash={blurhash}
+              variant="medium"
             />
-          )}
+          ) : displayUrl ? (
+            <img
+              src={displayUrl}
+              alt={attachment.fileName}
+              className="w-full h-auto object-cover transition-opacity duration-300"
+            />
+          ) : null}
 
-          {loading && (
+          {loading && displayUrl && (
             <div className="absolute inset-0 bg-black/30 rounded-lg flex items-center justify-center">
               <div className="animate-spin rounded-full h-8 w-8 border-2 border-white border-t-blue-500" />
             </div>
@@ -107,25 +115,40 @@ export function ImageAttachment({
         </div>
       )}
 
-      {isSquare && (thumbnailUrl || imageUrl) && (
-        <img
-          src={thumbnailUrl || imageUrl || ""}
-          alt={attachment.fileName}
-          className="w-full h-full object-cover rounded-lg"
-        />
-      )}
+      {isSquare && (
+        <>
+          {showSkeleton ? (
+            <ThumbnailSkeleton
+              width="100%"
+              height="100%"
+              blurhash={blurhash}
+              variant="medium"
+              className="rounded-lg"
+            />
+          ) : displayUrl ? (
+            <img
+              src={displayUrl}
+              alt={attachment.fileName}
+              className="w-full h-full object-cover rounded-lg transition-opacity duration-300"
+            />
+          ) : null}
 
-      {isSquare && loading && (
-        <div className="absolute inset-0 bg-black/30 rounded-lg flex items-center justify-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-2 border-white border-t-blue-500" />
-        </div>
+          {loading && displayUrl && (
+            <div className="absolute inset-0 bg-black/30 rounded-lg flex items-center justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-2 border-white border-t-blue-500" />
+            </div>
+          )}
+        </>
       )}
 
       {/* Delete button on hover - only shown on hover */}
       {onDelete && (
         <button
-          onClick={() => onDelete(attachment.id)}
-          className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(attachment.id);
+          }}
+          className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 z-10"
           title="Delete attachment"
         >
           <X className="w-4 h-4" />
@@ -137,43 +160,39 @@ export function ImageAttachment({
 
 /**
  * Video Attachment Viewer
+ * With progressive loading via thumbnails and blurhash
+ * Click to open preview modal where video autoplays
  */
 export function VideoAttachment({
   attachment,
   messageId,
   onDelete,
+  onPreview,
 }: AttachmentDisplayProps) {
-  // Use optimized hook for media loading
+  // Use enhanced hook for media loading with thumbnail support
   const {
     url: videoUrl,
+    thumbnailUrl,
     loading,
     error,
+    thumbnailStatus,
+    blurhash,
+    dimensions,
   } = useMediaUrl(messageId, attachment.id, {
     loadThumbnail: true,
     handleCloudApi: true,
+    attachment,
   });
 
-  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
-  const [playing, setPlaying] = useState(false);
+  // Show skeleton while thumbnail is being generated or loading
+  // For videos, we wait for thumbnail instead of downloading full video
+  const showSkeleton =
+    loading ||
+    (!thumbnailUrl &&
+      (thumbnailStatus === "pending" || thumbnailStatus === "processing"));
 
-  // Load thumbnail separately if available (will be cached)
-  useEffect(() => {
-    if (!attachment.thumbnailKey) return;
-
-    const loadThumbnail = async () => {
-      try {
-        const thumbUrl = await mediaApi.getThumbnailUrl(
-          messageId,
-          attachment.id
-        );
-        setThumbnailUrl(thumbUrl);
-      } catch (err) {
-        // Thumbnail load failed, that's ok
-      }
-    };
-
-    loadThumbnail();
-  }, [attachment.id, attachment.thumbnailKey, messageId]);
+  // Display URL is thumbnail for poster display (prefer thumbnail over video)
+  const displayUrl = thumbnailUrl;
 
   if (error) {
     return (
@@ -184,53 +203,171 @@ export function VideoAttachment({
   }
 
   return (
-    <div className="relative group inline-block max-w-xs">
-      {(videoUrl || thumbnailUrl) && (
-        <video
-          src={videoUrl || undefined}
-          poster={thumbnailUrl || undefined}
-          controls={playing}
-          onPlay={() => setPlaying(true)}
-          onPause={() => setPlaying(false)}
-          className="rounded-lg max-w-full h-auto"
+    <div
+      className="relative group inline-block max-w-xs cursor-pointer"
+      onClick={() => onPreview?.(0)}
+    >
+      {showSkeleton ? (
+        <ThumbnailSkeleton
+          width={dimensions?.width || 320}
+          height={dimensions?.height || 180}
+          blurhash={blurhash}
+          variant="medium"
+          mediaType="video"
         />
+      ) : displayUrl ? (
+        <div className="relative">
+          {/* Show thumbnail/poster image instead of video element */}
+          <img
+            src={displayUrl}
+            alt={attachment.fileName}
+            className="rounded-lg max-w-full h-auto"
+          />
+          {/* Video duration badge */}
+          {attachment.duration && (
+            <div className="absolute bottom-2 left-2 bg-black/70 text-white text-xs px-1.5 py-0.5 rounded">
+              {formatDuration(attachment.duration)}
+            </div>
+          )}
+        </div>
+      ) : (
+        // No thumbnail available yet - show video placeholder with play button
+        <div className="w-64 h-40 bg-gray-200 dark:bg-gray-700 rounded-lg flex items-center justify-center">
+          <div className="flex flex-col items-center gap-2 text-gray-500 dark:text-gray-400">
+            <Play className="w-10 h-10" />
+            <span className="text-xs">
+              {thumbnailStatus === "pending" || thumbnailStatus === "processing"
+                ? "Generating preview..."
+                : "Video"}
+            </span>
+          </div>
+        </div>
       )}
 
-      {loading && (
+      {loading && displayUrl && (
         <div className="absolute inset-0 bg-black/30 rounded-lg flex items-center justify-center">
           <div className="animate-spin rounded-full h-8 w-8 border-2 border-white border-t-blue-500" />
         </div>
       )}
 
-      {!playing && (
-        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 rounded-lg transition-colors flex items-center justify-center">
-          <Play className="w-12 h-12 text-white opacity-75 group-hover:opacity-100" />
+      {/* Play button overlay - shown when we have a thumbnail */}
+      {!showSkeleton && displayUrl && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="w-14 h-14 rounded-full bg-black/50 flex items-center justify-center">
+            <Play className="w-7 h-7 text-white ml-1" fill="white" />
+          </div>
         </div>
       )}
 
-      {/* Overlay actions */}
-      <div className="absolute top-2 right-2 gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex">
-        {videoUrl && (
-          <a
-            href={videoUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="bg-white text-black rounded-full p-2 hover:bg-gray-200"
-            title="Download video"
-          >
-            <Download className="w-4 h-4" />
-          </a>
-        )}
-        {onDelete && (
-          <button
-            onClick={() => onDelete(attachment.id)}
-            className="bg-red-500 text-white rounded-full p-2 hover:bg-red-600"
-            title="Delete attachment"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        )}
+      {/* Delete button on hover */}
+      {onDelete && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(attachment.id);
+          }}
+          className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 z-10"
+          title="Delete attachment"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Video Thumbnail for Grid Display
+ * Shows video thumbnail with play icon overlay - used in multi-media grids
+ * With progressive loading via thumbnails and blurhash
+ */
+export function VideoThumbnail({
+  attachment,
+  messageId,
+  onDelete,
+  isSquare = false,
+  onPreview,
+}: AttachmentDisplayProps) {
+  const {
+    url: videoUrl,
+    thumbnailUrl,
+    loading,
+    error,
+    thumbnailStatus,
+    blurhash,
+    dimensions,
+  } = useMediaUrl(messageId, attachment.id, {
+    loadThumbnail: true,
+    handleCloudApi: true,
+    attachment,
+  });
+
+  // Show skeleton while thumbnail is being generated
+  const showSkeleton =
+    !thumbnailUrl &&
+    (loading ||
+      thumbnailStatus === "pending" ||
+      thumbnailStatus === "processing");
+
+  if (error) {
+    return (
+      <div className="w-full h-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+        <Play className="w-6 h-6 text-gray-400" />
       </div>
+    );
+  }
+
+  return (
+    <div
+      className={`relative w-full h-full cursor-pointer group`}
+      onClick={() => onPreview?.(0)}
+    >
+      {showSkeleton ? (
+        <ThumbnailSkeleton
+          width="100%"
+          height="100%"
+          blurhash={blurhash}
+          variant="small"
+        />
+      ) : thumbnailUrl ? (
+        <img
+          src={thumbnailUrl}
+          alt={attachment.fileName}
+          className="w-full h-full object-cover transition-opacity duration-300"
+        />
+      ) : (
+        <div className="w-full h-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center">
+          <Play className="w-6 h-6 text-gray-500" />
+        </div>
+      )}
+
+      {/* Video play icon overlay */}
+      {!showSkeleton && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+          <div className="w-8 h-8 rounded-full bg-black/50 flex items-center justify-center">
+            <Play className="w-4 h-4 text-white" />
+          </div>
+        </div>
+      )}
+
+      {loading && (
+        <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
+          <div className="animate-spin rounded-full h-6 w-6 border-2 border-white border-t-blue-500" />
+        </div>
+      )}
+
+      {onDelete && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(attachment.id);
+          }}
+          className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
+          title="Delete attachment"
+        >
+          <X className="w-3 h-3" />
+        </button>
+      )}
     </div>
   );
 }
@@ -395,46 +532,100 @@ export function AudioAttachment({
 }
 
 /**
- * Document Attachment Link
+ * Document Attachment with Thumbnail Preview (WhatsApp-style)
+ * Shows thumbnail of first page for PDFs, with file info below
  */
 export function DocumentAttachment({
   attachment,
   messageId,
   onDelete,
 }: AttachmentDisplayProps) {
-  const [documentUrl, setDocumentUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const loadDocument = async () => {
-      try {
-        const urlResponse = await mediaApi.getDownloadUrl(
-          messageId,
-          attachment.id
-        );
-        let url = urlResponse.url;
+  // Use media URL hook for thumbnail loading (for PDFs with thumbnails)
+  const {
+    thumbnailUrl,
+    loading: thumbnailLoading,
+    thumbnailStatus,
+    blurhash,
+  } = useMediaUrl(messageId, attachment.id, {
+    loadThumbnail: true,
+    handleCloudApi: true,
+    attachment,
+  });
 
-        // Handle Cloud API media (inbound from Meta)
-        // Use the frontend API proxy which includes authentication
-        if (url.startsWith("cloud-api://")) {
-          const mediaId = url.replace("cloud-api://", "");
-          url = `/api/whatsapp/media/cloud-api/${mediaId}`;
-        }
+  // Check if this is a PDF with thumbnail support
+  const isPdf = attachment.mimeType === "application/pdf";
+  const hasThumbnail = isPdf && thumbnailStatus === "ready" && thumbnailUrl;
+  const isGeneratingThumbnail =
+    isPdf &&
+    (thumbnailStatus === "pending" || thumbnailStatus === "processing");
 
-        setDocumentUrl(url);
-        setError(null);
-      } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Failed to load document"
-        );
-      } finally {
-        setLoading(false);
-      }
+  // Get document format display name
+  const getFormatName = (mimeType: string): string => {
+    const formats: Record<string, string> = {
+      "application/pdf": "PDF",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        "DOCX",
+      "application/msword": "DOC",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+        "XLSX",
+      "application/vnd.ms-excel": "XLS",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+        "PPTX",
+      "application/vnd.ms-powerpoint": "PPT",
+      "text/plain": "TXT",
+      "text/csv": "CSV",
+      "application/zip": "ZIP",
+      "application/x-rar-compressed": "RAR",
     };
+    return formats[mimeType] || "FILE";
+  };
 
-    loadDocument();
-  }, [attachment, messageId]);
+  // Get document icon based on type
+  const getDocIcon = (mimeType: string): string => {
+    if (mimeType === "application/pdf") return "📄";
+    if (mimeType.includes("word")) return "📝";
+    if (mimeType.includes("excel") || mimeType.includes("spreadsheet"))
+      return "📊";
+    if (mimeType.includes("powerpoint") || mimeType.includes("presentation"))
+      return "📽️";
+    if (mimeType.includes("text")) return "📃";
+    if (mimeType.includes("zip") || mimeType.includes("rar")) return "📦";
+    return "📄";
+  };
+
+  // Direct download handler
+  const handleDownload = useCallback(async () => {
+    setDownloading(true);
+    setError(null);
+
+    try {
+      // Use streaming endpoint to download the file
+      const blob = await mediaApi.downloadMediaViaStream(
+        messageId,
+        attachment.id
+      );
+
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = attachment.fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Download failed");
+    } finally {
+      setDownloading(false);
+    }
+  }, [messageId, attachment.id, attachment.fileName]);
+
+  const formatName = getFormatName(attachment.mimeType);
+  const pageCount = attachment.pageCount || attachment.duration; // duration stores page count for PDFs
 
   if (error) {
     return (
@@ -445,47 +636,94 @@ export function DocumentAttachment({
   }
 
   return (
-    <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex items-center gap-3 group">
-      <div className="bg-gray-200 rounded p-2 flex-shrink-0">
-        <span className="text-xl">{getMediaIcon("document")}</span>
-      </div>
+    <div className="relative group max-w-xs">
+      {/* Main container with thumbnail preview */}
+      <div
+        className="bg-gray-100 dark:bg-gray-800 rounded-lg overflow-hidden cursor-pointer"
+        onClick={handleDownload}
+      >
+        {/* Thumbnail area (top half) */}
+        {isPdf && (
+          <div className="relative w-full h-32 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+            {hasThumbnail ? (
+              <img
+                src={thumbnailUrl}
+                alt={`Preview of ${attachment.fileName}`}
+                className="w-full h-full object-cover"
+              />
+            ) : isGeneratingThumbnail || thumbnailLoading ? (
+              <ThumbnailSkeleton
+                width="100%"
+                height="100%"
+                blurhash={blurhash}
+                variant="medium"
+              />
+            ) : (
+              <FileText className="w-12 h-12 text-gray-400" />
+            )}
 
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-gray-800 truncate">
-          {attachment.fileName}
-        </p>
-        <p className="text-xs text-gray-500">
-          {formatFileSize(attachment.size)}
-        </p>
-      </div>
-
-      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-        {documentUrl && !loading && (
-          <a
-            href={documentUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="bg-blue-500 text-white rounded-full p-2 hover:bg-blue-600"
-            title="Download document"
-          >
-            <Download className="w-4 h-4" />
-          </a>
+            {/* Download overlay on hover */}
+            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+              {downloading ? (
+                <div className="animate-spin rounded-full h-8 w-8 border-2 border-white border-t-transparent" />
+              ) : (
+                <Download className="w-8 h-8 text-white" />
+              )}
+            </div>
+          </div>
         )}
 
-        {loading && (
-          <div className="animate-spin rounded-full h-6 w-6 border-2 border-gray-300 border-t-blue-500" />
-        )}
+        {/* File info area (bottom half) */}
+        <div className="p-3 flex items-center gap-3">
+          {/* Document icon */}
+          <div className="flex-shrink-0 w-10 h-10 bg-red-100 dark:bg-red-900/30 rounded-lg flex items-center justify-center">
+            <span className="text-lg">{getDocIcon(attachment.mimeType)}</span>
+          </div>
 
-        {onDelete && (
-          <button
-            onClick={() => onDelete(attachment.id)}
-            className="bg-red-500 text-white rounded-full p-2 hover:bg-red-600"
-            title="Delete attachment"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        )}
+          {/* File details */}
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
+              {attachment.fileName}
+            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              {pageCount && pageCount > 0 ? `${pageCount} pages • ` : ""}
+              {formatName} • {formatFileSize(attachment.size)}
+            </p>
+          </div>
+
+          {/* Download button (visible without hover for non-PDF) */}
+          {!isPdf && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDownload();
+              }}
+              disabled={downloading}
+              className="flex-shrink-0 p-2 rounded-full bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50"
+            >
+              {downloading ? (
+                <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+              ) : (
+                <Download className="w-4 h-4" />
+              )}
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Delete button on hover */}
+      {onDelete && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(attachment.id);
+          }}
+          className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 z-10"
+          title="Delete attachment"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      )}
     </div>
   );
 }
@@ -519,11 +757,15 @@ export function AttachmentGallery({
     return null;
   }
 
-  // Separate attachments by type
+  // Separate attachments by type - combine images and videos for visual grid
   const images = attachments.filter((a) => a.type === "image");
   const videos = attachments.filter((a) => a.type === "video");
+  const visualMedia = [...images, ...videos]; // Combined for grid display
   const audios = attachments.filter((a) => a.type === "audio");
   const documents = attachments.filter((a) => a.type === "document");
+
+  const displayCount = Math.min(visualMedia.length, 4);
+  const extraCount = visualMedia.length - 4;
 
   const handleDownloadClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -535,71 +777,83 @@ export function AttachmentGallery({
       });
     }
   };
+
+  // Determine grid layout class
+  const getGridClass = () => {
+    if (displayCount === 1) return "flex w-full";
+    if (displayCount === 2) return "grid grid-cols-2";
+    if (displayCount === 3) return "grid grid-cols-3";
+    return "grid grid-cols-2"; // 4 items in 2x2 grid
+  };
+
   return (
     <div className="space-y-3 relative group/gallery" ref={galleryRef}>
-      {/* Images grid - show up to 4 in square format */}
-      {images.length > 0 && (
-        <div
-          className={`gap-1 ${
-            images.length === 1
-              ? "flex w-full"
-              : images.length === 2
-              ? "grid grid-cols-2"
-              : images.length === 3
-              ? "grid grid-cols-3"
-              : "grid grid-cols-2"
-          }`}
-        >
-          {images.slice(0, 4).map((attachment, index) => (
-            <div key={attachment.id} className="relative">
-              {/* Show +N badge for additional images */}
-              {index === 3 && images.length > 4 && (
-                <div className="absolute inset-0 bg-black/60 rounded-lg flex items-center justify-center z-10">
-                  <span className="text-white text-2xl font-bold">
-                    +{images.length - 4}
-                  </span>
-                </div>
-              )}
+      {/* Combined Visual Media Grid (Images + Videos) */}
+      {visualMedia.length > 0 && (
+        <div className={`gap-1 ${getGridClass()}`}>
+          {visualMedia.slice(0, 4).map((attachment, index) => {
+            const isLastWithMore = index === 3 && extraCount > 0;
+            const isVideo = attachment.type === "video";
 
-              {/* Square image container for multiple images */}
-              {images.length > 1 ? (
-                <div className="w-24 h-24 rounded-lg overflow-hidden bg-gray-200 flex-shrink-0">
-                  <ImageAttachment
-                    attachment={attachment}
-                    messageId={messageId}
-                    onDelete={onDelete}
-                    isSquare={true}
-                    onPreview={() => onImageClick?.(index)}
-                  />
-                </div>
-              ) : (
-                // Single image - constrained width with max-w
-                <div className="max-w-xs w-full">
-                  <ImageAttachment
-                    attachment={attachment}
-                    messageId={messageId}
-                    onDelete={onDelete}
-                    isSquare={false}
-                    onPreview={() => onImageClick?.(0)}
-                  />
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+            return (
+              <div key={attachment.id} className="relative">
+                {/* Show +N badge for additional media */}
+                {isLastWithMore && (
+                  <div
+                    className="absolute inset-0 bg-black/60 rounded-lg flex items-center justify-center z-10 cursor-pointer"
+                    onClick={() => onImageClick?.(index)}
+                  >
+                    <span className="text-white text-2xl font-bold">
+                      +{extraCount}
+                    </span>
+                  </div>
+                )}
 
-      {/* Videos */}
-      {videos.length > 0 && (
-        <div className="space-y-2">
-          {videos.map((attachment) => (
-            <VideoAttachment
-              key={attachment.id}
-              attachment={attachment}
-              messageId={messageId}
-              onDelete={onDelete}
-            />
-          ))}
+                {/* Square container for multiple media */}
+                {visualMedia.length > 1 ? (
+                  <div className="w-24 h-24 rounded-lg overflow-hidden bg-gray-200 flex-shrink-0">
+                    {isVideo ? (
+                      <VideoThumbnail
+                        attachment={attachment}
+                        messageId={messageId}
+                        onDelete={onDelete}
+                        isSquare={true}
+                        onPreview={() => onImageClick?.(index)}
+                      />
+                    ) : (
+                      <ImageAttachment
+                        attachment={attachment}
+                        messageId={messageId}
+                        onDelete={onDelete}
+                        isSquare={true}
+                        onPreview={() => onImageClick?.(index)}
+                      />
+                    )}
+                  </div>
+                ) : (
+                  // Single media - constrained width with max-w
+                  <div className="max-w-xs w-full">
+                    {isVideo ? (
+                      <VideoAttachment
+                        attachment={attachment}
+                        messageId={messageId}
+                        onDelete={onDelete}
+                        onPreview={() => onImageClick?.(0)}
+                      />
+                    ) : (
+                      <ImageAttachment
+                        attachment={attachment}
+                        messageId={messageId}
+                        onDelete={onDelete}
+                        isSquare={false}
+                        onPreview={() => onImageClick?.(0)}
+                      />
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 

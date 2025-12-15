@@ -9,6 +9,16 @@
 export type MediaType = "image" | "video" | "audio" | "document";
 
 /**
+ * Thumbnail generation status
+ */
+export type ThumbnailStatus =
+  | "pending" // Queued for processing
+  | "processing" // Currently being generated
+  | "ready" // Thumbnail available
+  | "failed" // Generation failed
+  | "not-applicable"; // Documents, audio (icon only)
+
+/**
  * Attachment metadata (mirrors backend)
  */
 export interface Attachment {
@@ -18,12 +28,31 @@ export interface Attachment {
   mimeType: string;
   size: number;
   s3Key: string;
-  thumbnailKey?: string;
-  duration?: number;
+  thumbnailKey?: string; // S3 key for thumbnail
+  thumbnailStatus?: ThumbnailStatus; // Status of thumbnail generation
+  width?: number; // Original media width in pixels
+  height?: number; // Original media height in pixels
+  blurhash?: string; // Blurhash for progressive loading placeholder
+  duration?: number; // For videos: duration in seconds. For PDFs: page count
+  pageCount?: number; // For documents: number of pages
   uploadedAt: string;
   status: "success" | "pending" | "failed";
   errorMessage?: string;
+  thumbnailError?: string; // Error details if thumbnail generation failed
   mediaUrl?: string; // For Cloud API media (inbound from Meta), format: "cloud-api://mediaId"
+}
+
+/**
+ * Thumbnail ready event from WebSocket
+ */
+export interface ThumbnailReadyEvent {
+  messageId: string;
+  attachmentId: string;
+  thumbnailKey: string;
+  width: number;
+  height: number;
+  blurhash: string;
+  duration?: number; // For PDFs: page count
 }
 
 /**

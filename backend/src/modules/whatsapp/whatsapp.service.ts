@@ -3,7 +3,12 @@ import { Chat, chats, Message, messages, senders } from '@database/schema';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MetaCloudAPIConfigService } from '@shared/services/meta-cloud-api.config';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
+import { ThumbnailQueueService } from '../thumbnail/thumbnail-queue.service';
+import {
+  supportsThumbnail,
+  ThumbnailJobData,
+} from '../thumbnail/thumbnail.types';
 import { OutboundMessageDto } from './dto/outbound-message.dto';
 import { MediaService } from './services/media.service';
 import {
@@ -53,6 +58,7 @@ export class WhatsAppService {
     private configService: ConfigService,
     private metaCloudAPIConfig: MetaCloudAPIConfigService,
     private mediaService: MediaService,
+    private thumbnailQueueService: ThumbnailQueueService,
   ) {
     this.metaPhoneNumberId = this.configService.getOrThrow<string>(
       'META_PHONE_NUMBER_ID',
@@ -413,41 +419,6 @@ export class WhatsAppService {
         `Sending message from sender ${senderId} (${senderPhoneNumber}) with phoneNumberId ${senderRecord.phoneNumberId} to ${recipientPhone}`,
       );
 
-      // Build message payload for Cloud API
-      // If there's no body but there are attachments, we'll just create the database record
-      // The attachments will be sent separately via media uploads
-      const message = {
-        messaging_product: 'whatsapp' as const,
-        to: recipientPhone,
-        type: 'text' as const,
-        text: {
-          preview_url: true,
-          body: messageDto.body || '📎', // Use a placeholder emoji if no body
-        },
-      };
-
-      // Validate message
-      const validation = validateCloudAPIMessage(message);
-      if (!validation.valid) {
-        throw new Error(`Invalid message: ${validation.errors.join(', ')}`);
-      }
-
-      // Send via Cloud API using the sender's phoneNumberId
-      const response = await this.sendCloudAPIMessage(
-        message,
-        senderRecord.phoneNumberId,
-      );
-
-      if (!response.messages || response.messages.length === 0) {
-        throw new Error('No message ID returned from Cloud API');
-      }
-
-      const waMessageId = response.messages[0].id;
-
-      this.logger.log(
-        `Message sent successfully. ID: ${waMessageId}, To: ${recipientPhone}`,
-      );
-
       // Generate chat ID using the sender's phone number
       const chatId = generateChatId(senderPhoneNumber, recipientPhone);
 
@@ -457,6 +428,52 @@ export class WhatsAppService {
         senderPhoneNumber,
         recipientPhone,
         senderId,
+      );
+
+      let waMessageId: string;
+
+      // If there are attachments, don't send a text message via Cloud API
+      // The media will be sent separately via sendMedia endpoint with the caption
+      // This avoids sending duplicate messages (text + document with text)
+      if (hasAttachments) {
+        // Generate a placeholder message ID - the real one will come from sendMedia
+        waMessageId = `pending-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        this.logger.log(
+          `Message has attachments - skipping Cloud API text send. Placeholder ID: ${waMessageId}`,
+        );
+      } else {
+        // No attachments - send text message via Cloud API
+        const message = {
+          messaging_product: 'whatsapp' as const,
+          to: recipientPhone,
+          type: 'text' as const,
+          text: {
+            preview_url: true,
+            body: messageDto.body || '',
+          },
+        };
+
+        // Validate message
+        const validation = validateCloudAPIMessage(message);
+        if (!validation.valid) {
+          throw new Error(`Invalid message: ${validation.errors.join(', ')}`);
+        }
+
+        // Send via Cloud API using the sender's phoneNumberId
+        const response = await this.sendCloudAPIMessage(
+          message,
+          senderRecord.phoneNumberId,
+        );
+
+        if (!response.messages || response.messages.length === 0) {
+          throw new Error('No message ID returned from Cloud API');
+        }
+
+        waMessageId = response.messages[0].id;
+      }
+
+      this.logger.log(
+        `Message processed. ID: ${waMessageId}, To: ${recipientPhone}`,
       );
 
       // Store message metadata
@@ -492,6 +509,7 @@ export class WhatsAppService {
    * @param mediaUrl - URL of media file
    * @param caption - Optional caption for media
    * @param senderId - Optional sender ID to determine which phoneNumberId to use
+   * @param fileName - Optional filename for documents (required for WhatsApp to display correct name)
    * @returns Response with message ID
    */
   async sendMedia(
@@ -500,6 +518,8 @@ export class WhatsAppService {
     mediaUrl: string,
     caption?: string,
     senderId?: number,
+    fileName?: string,
+    originalMessageId?: string,
   ): Promise<any> {
     try {
       const cleanedPhone = cleanPhoneNumber(recipientPhone);
@@ -511,6 +531,11 @@ export class WhatsAppService {
       // Add caption if provided and supported
       if (caption && ['image', 'video', 'document'].includes(mediaType)) {
         mediaPayload.caption = caption;
+      }
+
+      // Add filename for documents (required by WhatsApp Cloud API to display correct name)
+      if (mediaType === 'document' && fileName) {
+        mediaPayload.filename = fileName;
       }
 
       const message = {
@@ -552,9 +577,45 @@ export class WhatsAppService {
         `Media message sent successfully. ID: ${waMessageId}, Type: ${mediaType}`,
       );
 
+      // If originalMessageId provided, update the existing database message status
+      // NOTE: We keep the original messageId to avoid breaking thumbnail updates and other
+      // operations that reference this ID. The WhatsApp message ID is stored in mediaUrl
+      // field (prefixed with 'wa:') for webhook lookups.
+      if (originalMessageId) {
+        try {
+          await db
+            .update(messages)
+            .set({
+              status: 'sent',
+              sentAt: new Date(),
+              updatedAt: new Date(),
+              // Store WhatsApp message ID in mediaUrl for webhook lookups
+              mediaUrl: `wa:${waMessageId}`,
+            })
+            .where(eq(messages.messageId, originalMessageId));
+
+          this.logger.log(
+            `Updated message ${originalMessageId} with status 'sent' (WhatsApp ID: ${waMessageId})`,
+          );
+
+          // Emit status update via WebSocket using original messageId
+          if (whatsAppGatewayInstance) {
+            whatsAppGatewayInstance.emitMessageStatus(
+              originalMessageId,
+              'sent',
+            );
+          }
+        } catch (updateError) {
+          this.logger.warn(
+            `Failed to update message ${originalMessageId}: ${updateError.message}`,
+          );
+        }
+      }
+
       return {
         success: true,
-        messageId: waMessageId,
+        messageId: originalMessageId || waMessageId,
+        waMessageId: waMessageId,
         to: cleanedPhone,
         type: mediaType,
         status: 'sent',
@@ -794,7 +855,8 @@ export class WhatsAppService {
             mediaId: message.document?.id || '',
             filename: message.document?.filename,
           };
-          textContent = `[Document: ${message.document?.filename || 'unknown'}]`;
+          // Don't include filename in text - it will be shown separately in the attachment display
+          textContent = '';
           break;
         case 'button':
           textContent = message.button?.text || '[Button]';
@@ -836,8 +898,31 @@ export class WhatsAppService {
 
       // 🔥 EMIT MESSAGE VIA WEBSOCKET
       // Notify all connected clients of the new message in real-time
+      // Fetch the stored message to get the complete attachment data (including s3Key)
       if (whatsAppGatewayInstance) {
         const messageTimestamp = new Date(parseInt(message.timestamp) * 1000);
+
+        // Fetch the stored message to get complete attachment data
+        const storedMessage = await db.query.messages.findFirst({
+          where: eq(messages.messageId, messageId),
+        });
+
+        // Use the complete attachment data from the database
+        const attachments =
+          storedMessage?.attachments && Array.isArray(storedMessage.attachments)
+            ? (storedMessage.attachments as any[]).map((att) => ({
+                id: att.id,
+                type: att.type,
+                mediaId: att.id, // For backwards compatibility
+                fileName: att.fileName,
+                mimeType: att.mimeType,
+                size: att.size,
+                s3Key: att.s3Key,
+                thumbnailStatus: att.thumbnailStatus,
+                status: att.status,
+              }))
+            : undefined;
+
         whatsAppGatewayInstance.emitMessage({
           messageId,
           chatId,
@@ -845,9 +930,7 @@ export class WhatsAppService {
           text: textContent,
           type: messageType,
           timestamp: messageTimestamp,
-          attachments: mediaMetadata
-            ? [{ type: mediaMetadata.type, mediaId: mediaMetadata.mediaId }]
-            : undefined,
+          attachments,
         });
       }
 
@@ -886,15 +969,31 @@ export class WhatsAppService {
         return;
       }
 
+      console.log(
+        `🔔 STATUS WEBHOOK RECEIVED: messageId=${messageId}, status=${status}`,
+      );
+
       const normalizedStatus = mapCloudAPIStatus(status);
       const statusTimestamp = timestamp
         ? new Date(parseInt(timestamp) * 1000)
         : new Date();
 
-      // Find message to update
+      // Find message to update - search by messageId or by WhatsApp ID stored in mediaUrl
+      // Outbound attachment messages store WhatsApp ID in mediaUrl with 'wa:' prefix
+      console.log(
+        `🔍 Searching for message by messageId="${messageId}" OR mediaUrl="wa:${messageId}"`,
+      );
+
       const msg = await db.query.messages.findFirst({
-        where: eq(messages.messageId, messageId),
+        where: or(
+          eq(messages.messageId, messageId),
+          eq(messages.mediaUrl, `wa:${messageId}`),
+        ),
       });
+
+      console.log(
+        `🔍 Message found: ${msg ? `YES (id=${msg.id}, messageId=${msg.messageId}, mediaUrl=${msg.mediaUrl})` : 'NO'}`,
+      );
 
       if (msg) {
         // Build update data based on status
@@ -932,18 +1031,20 @@ export class WhatsAppService {
             break;
         }
 
+        // Use the message's actual messageId (not the WhatsApp ID from webhook)
+        // This ensures we update the correct record even if found by mediaUrl
         await db
           .update(messages)
           .set(updateData)
-          .where(eq(messages.messageId, messageId));
+          .where(eq(messages.messageId, msg.messageId));
 
         this.logger.log(
-          `Message status updated. ID: ${messageId}, Status: ${normalizedStatus}, Timestamp: ${statusTimestamp.toISOString()}`,
+          `Message status updated. ID: ${msg.messageId}, WhatsApp ID: ${messageId}, Status: ${normalizedStatus}, Timestamp: ${statusTimestamp.toISOString()}`,
         );
 
         // Log status progression for debugging
         console.log(`📊 Message Status Update:
-          ID: ${messageId}
+          ID: ${msg.messageId} (WhatsApp: ${messageId})
           Status: ${msg.status} → ${normalizedStatus}
           Sent: ${msg.sentAt || 'pending'} → ${updateData.sentAt || msg.sentAt || 'pending'}
           Delivered: ${msg.deliveredAt || 'pending'} → ${updateData.deliveredAt || msg.deliveredAt || 'pending'}
@@ -952,9 +1053,10 @@ export class WhatsAppService {
 
         // 🔥 EMIT STATUS UPDATE VIA WEBSOCKET
         // This replaces polling - all connected clients get real-time updates
+        // Use the message's actual messageId so frontend can match it
         if (whatsAppGatewayInstance) {
           whatsAppGatewayInstance.emitMessageStatus(
-            messageId,
+            msg.messageId,
             normalizedStatus,
             statusTimestamp,
           );
@@ -1079,6 +1181,17 @@ export class WhatsAppService {
         }
       }
 
+      // Determine thumbnail status based on media type
+      const mediaType = messageData.type as
+        | 'image'
+        | 'video'
+        | 'audio'
+        | 'document';
+      const mimeType = messageData.mediaMetadata?.mimeType || '';
+      const thumbnailStatus = supportsThumbnail(mediaType, mimeType)
+        ? 'pending'
+        : 'not-applicable';
+
       const attachments = messageData.mediaMetadata
         ? [
             {
@@ -1090,6 +1203,7 @@ export class WhatsAppService {
               mimeType: messageData.mediaMetadata.mimeType || '',
               size: messageData.mediaMetadata.fileSize || 0,
               s3Key: s3Key, // Will be empty string if caching failed, that's ok
+              thumbnailStatus: thumbnailStatus,
               status: 'success',
               uploadedAt: new Date().toISOString(),
               // Only use cloud-api:// as fallback if S3 caching failed
@@ -1112,6 +1226,37 @@ export class WhatsAppService {
         status: 'delivered',
         timestamp: messageData.timestamp,
       });
+
+      // Queue thumbnail generation if media was cached to S3 and supports thumbnails
+      if (
+        s3Key &&
+        messageData.mediaMetadata &&
+        supportsThumbnail(mediaType, mimeType)
+      ) {
+        try {
+          const thumbnailJobData: ThumbnailJobData = {
+            messageId: messageData.waMessageId,
+            attachmentId: messageData.mediaMetadata.mediaId,
+            s3Key: s3Key,
+            mediaType: mediaType,
+            mimeType: mimeType,
+            chatId: messageData.chatId,
+            pathPrefix: 'inbound',
+          };
+
+          await this.thumbnailQueueService.queueThumbnailGeneration(
+            thumbnailJobData,
+          );
+          this.logger.log(
+            `[Inbound Media] ✅ Queued thumbnail generation for ${messageData.mediaMetadata.mediaId}`,
+          );
+        } catch (error) {
+          this.logger.warn(
+            `[Inbound Media] ⚠️ Failed to queue thumbnail generation: ${error.message}`,
+          );
+          // Don't fail the message storage - thumbnail will remain pending
+        }
+      }
 
       this.logger.debug('Inbound message stored', messageData.waMessageId);
     } catch (error) {

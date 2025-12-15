@@ -1,3 +1,4 @@
+import { NotesModule } from '@modules/notes/notes.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
@@ -14,9 +15,9 @@ import { SendersModule } from './modules/senders/senders.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { TeamModule } from './modules/team/team.module';
 import { TemplatesModule } from './modules/templates/templates.module';
+import { ThumbnailModule } from './modules/thumbnail/thumbnail.module';
 import { UserModule } from './modules/user/user.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
-import { NotesModule } from '@modules/notes/notes.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { NotesModule } from '@modules/notes/notes.module';
     KanbanModule,
     SettingsModule,
     BillingModule,
+    ThumbnailModule,
     DatabaseModule,
   ],
   controllers: [AppController],

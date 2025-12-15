@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useNotification } from "@/hooks/use-notification";
 import { backendApi, CreateContactDto } from "@/lib/api/endpoints";
+import { ArrowLeft } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -265,9 +266,21 @@ export default function ContactFormPage() {
 
   return (
     <div className="flex-1 space-y-4 p-4 md:p-8">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">{pageTitle}</h1>
-        <p className="text-muted-foreground mt-2">{t("description")}</p>
+      {/* Header with Back Button */}
+      <div className="flex items-center gap-4">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => router.push(`/${locale}/dashboard/contacts`)}
+          className="gap-2"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back
+        </Button>
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">{pageTitle}</h1>
+          <p className="text-muted-foreground mt-2">{t("description")}</p>
+        </div>
       </div>
 
       <Card>

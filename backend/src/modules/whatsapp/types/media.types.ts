@@ -66,6 +66,16 @@ export const EXTENSION_MAP: Record<string, string> = {
 };
 
 /**
+ * Thumbnail generation status
+ */
+export type ThumbnailStatus =
+  | 'pending' // Queued for processing
+  | 'processing' // Currently being generated
+  | 'ready' // Thumbnail available
+  | 'failed' // Generation failed
+  | 'not-applicable'; // Documents, audio (icon only)
+
+/**
  * Attachment metadata stored in database
  */
 export interface AttachmentMetadata {
@@ -75,11 +85,16 @@ export interface AttachmentMetadata {
   mimeType: string; // MIME type (image/jpeg, video/mp4, etc)
   size: number; // File size in bytes
   s3Key: string; // S3 object key to original file
-  thumbnailKey?: string; // S3 object key to thumbnail (for images)
+  thumbnailKey?: string; // S3 object key to thumbnail (for images/videos)
+  thumbnailStatus?: ThumbnailStatus; // Status of thumbnail generation
+  width?: number; // Original media width in pixels
+  height?: number; // Original media height in pixels
+  blurhash?: string; // Blurhash for progressive loading placeholder
   duration?: number; // Duration in seconds (for audio/video)
   uploadedAt: string; // ISO timestamp
   status: 'success' | 'pending' | 'failed'; // Upload status
   errorMessage?: string; // Error details if failed
+  thumbnailError?: string; // Error details if thumbnail generation failed
   mediaUrl?: string; // Cloud API media URL reference (for inbound messages from Meta)
 }
 
