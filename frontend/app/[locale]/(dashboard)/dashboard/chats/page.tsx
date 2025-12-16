@@ -1,7 +1,13 @@
 "use client";
 
 import { ChatsSenderSection } from "@/components/chats-sender-section";
+import { ContactMessageBubble } from "@/components/contacts/contact-message-bubble";
 import { DeleteMessageDialog } from "@/components/delete-message-dialog";
+import { ContactPreviewModal } from "@/components/dialogs/contact-preview-modal";
+import { QuickContactFormModal } from "@/components/dialogs/quick-contact-form-modal";
+import { SelectSenderModal } from "@/components/dialogs/select-sender-modal";
+import { SendContactsModal } from "@/components/dialogs/send-contacts-modal";
+import { ViewContactsModal } from "@/components/dialogs/view-contacts-modal";
 import { AttachmentGallery } from "@/components/media/attachment-display";
 import {
   AttachmentMenu,
@@ -22,7 +28,9 @@ import { MessageActionsMenu } from "@/components/message-actions-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MessageInput } from "@/components/ui/message-input";
+import { MessageText } from "@/components/ui/message-text";
 import { NotesPanel } from "@/components/ui/notes-panel";
+import { VideoPreviewPlayer } from "@/components/ui/video-preview-player";
 import { WhatsAppStatusIcon } from "@/components/whatsapp-status-icon";
 import { useAuthProtection } from "@/hooks/use-auth";
 import { useMediaUpload } from "@/hooks/use-media-upload";
@@ -35,6 +43,10 @@ import {
   PendingUpload,
   ThumbnailReadyEvent,
 } from "@/lib/media/types";
+import {
+  ContactToSend,
+  ReceivedContact,
+} from "@/lib/types/contact-message.types";
 import { ArrowDown, Loader, MessageSquare, Send } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
@@ -78,6 +90,7 @@ interface Message {
   type: string;
   status: "pending" | "sent" | "delivered" | "read" | "failed";
   attachments?: Attachment[];
+  mediaMetadata?: Record<string, any>; // For contacts and other special message types
   sentAt?: string;
   deliveredAt?: string;
   readAt?: string;
@@ -330,6 +343,39 @@ export default function ChatsPage() {
     PendingMediaUpload[]
   >([]);
   const [pendingCaption, setPendingCaption] = useState("");
+
+  // Video preview player state (draggable YouTube/video player)
+  const [videoPreview, setVideoPreview] = useState<{
+    videoId: string;
+    url: string;
+    title?: string;
+  } | null>(null);
+
+  // Contact sending modal states
+  const [sendContactsModalOpen, setSendContactsModalOpen] = useState(false);
+  const [contactPreviewModalOpen, setContactPreviewModalOpen] = useState(false);
+  const [viewContactsModalOpen, setViewContactsModalOpen] = useState(false);
+  const [quickContactFormOpen, setQuickContactFormOpen] = useState(false);
+  const [senderSelectModalOpen, setSenderSelectModalOpen] = useState(false);
+  const [contactsToSend, setContactsToSend] = useState<ContactToSend[]>([]);
+  const [contactsToView, setContactsToView] = useState<ReceivedContact[]>([]);
+  const [contactToSave, setContactToSave] = useState<ReceivedContact | null>(
+    null
+  );
+  const [contactToStartChat, setContactToStartChat] = useState<{
+    firstName: string;
+    lastName?: string;
+    phoneNumber: string;
+  } | null>(null);
+  const [isSendingContacts, setIsSendingContacts] = useState(false);
+  const [isSavingContact, setIsSavingContact] = useState(false);
+  const [allContacts, setAllContacts] = useState<ContactToSend[]>([]);
+  const [contactsLoading, setContactsLoading] = useState(false);
+
+  // Handler for playing video in preview player
+  const handleVideoPlay = useCallback((videoId: string, url: string) => {
+    setVideoPreview({ videoId, url });
+  }, []);
 
   // Handler to select chat and save scroll position before switching
   const handleSelectChat = useCallback(
@@ -1462,6 +1508,331 @@ export default function ChatsPage() {
     }
   };
 
+  // ==========================================
+  // CONTACT SENDING HANDLERS
+  // ==========================================
+
+  // Open contacts modal from attachment menu
+  const handleContactsClick = useCallback(async () => {
+    try {
+      setContactsLoading(true);
+      const contactsData = await backendApi.contacts.list(0, 100);
+      if (Array.isArray(contactsData)) {
+        setAllContacts(
+          contactsData.map((c: any) => ({
+            id: c.id?.toString(),
+            contactId: c.contactId,
+            firstName: c.firstName,
+            lastName: c.lastName || undefined,
+            phoneNumber: c.phoneNumber,
+            countryCode: c.countryCode,
+            avatar: c.avatar,
+            isActive: c.isActive,
+          }))
+        );
+      }
+      setSendContactsModalOpen(true);
+    } catch (err) {
+      console.error("Failed to load contacts:", err);
+    } finally {
+      setContactsLoading(false);
+    }
+  }, []);
+
+  // Handle contacts selected for sending - show preview modal
+  const handleContactsSelected = useCallback((contacts: ContactToSend[]) => {
+    setContactsToSend(contacts);
+    setSendContactsModalOpen(false);
+    setContactPreviewModalOpen(true);
+  }, []);
+
+  // Send contacts via WhatsApp
+  const handleSendContacts = useCallback(async () => {
+    if (!selectedChatId || contactsToSend.length === 0) return;
+
+    const selectedChat = chats.find((c) => c.chatId === selectedChatId);
+    if (!selectedChat) return;
+
+    try {
+      setIsSendingContacts(true);
+
+      // Transform contacts to API format
+      const contactsPayload = contactsToSend.map((contact) => ({
+        name: {
+          formatted_name: contact.lastName
+            ? `${contact.firstName} ${contact.lastName}`
+            : contact.firstName,
+          first_name: contact.firstName,
+          last_name: contact.lastName,
+        },
+        phones: [
+          {
+            phone: contact.phoneNumber,
+            type: "CELL" as const,
+          },
+        ],
+      }));
+
+      await backendApi.whatsapp.sendContacts({
+        to: selectedChat.participantPhone,
+        senderId: selectedChat.senderId,
+        contacts: contactsPayload,
+      });
+
+      // Close modal and refresh messages
+      setContactPreviewModalOpen(false);
+      setContactsToSend([]);
+
+      // Refresh messages
+      const data = await backendApi.whatsapp.getChatMessages(
+        selectedChatId,
+        0,
+        50
+      );
+      if (Array.isArray(data)) {
+        const sorted = [...data].sort(
+          (a, b) =>
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        );
+        setMessages(sorted);
+        setMessageCount(sorted.length);
+        setShouldAutoScroll(true);
+        setTimeout(() => {
+          scrollControllerRef.current?.scrollToBottom(true);
+        }, 0);
+      }
+    } catch (err) {
+      console.error("Error sending contacts:", err);
+    } finally {
+      setIsSendingContacts(false);
+    }
+  }, [selectedChatId, contactsToSend, chats]);
+
+  // Start chat with a contact (from contact preview or view modals)
+  const handleStartChatWithContact = useCallback(
+    (contact: ContactToSend | ReceivedContact) => {
+      // Determine phone and name based on contact type
+      let phoneNumber: string;
+      let firstName: string;
+      let lastName: string | undefined;
+
+      if ("name" in contact && typeof contact.name === "object") {
+        // ReceivedContact type
+        phoneNumber =
+          contact.phones?.[0]?.phone || contact.phones?.[0]?.wa_id || "";
+        firstName =
+          contact.name.first_name || contact.name.formatted_name || "";
+        lastName = contact.name.last_name;
+      } else {
+        // ContactToSend type
+        phoneNumber = (contact as ContactToSend).phoneNumber;
+        firstName = (contact as ContactToSend).firstName;
+        lastName = (contact as ContactToSend).lastName;
+      }
+
+      if (!phoneNumber) {
+        console.error("No phone number for contact");
+        return;
+      }
+
+      setContactToStartChat({ firstName, lastName, phoneNumber });
+      setSenderSelectModalOpen(true);
+    },
+    []
+  );
+
+  // Handle sender selection for starting a new chat with contact
+  const handleSenderSelectedForContact = useCallback(
+    async (senderId: number, senderPhoneNumber: string) => {
+      if (!contactToStartChat) return;
+
+      try {
+        const participantName = contactToStartChat.lastName
+          ? `${contactToStartChat.firstName} ${contactToStartChat.lastName}`
+          : contactToStartChat.firstName;
+
+        console.log("Starting chat with contact:", {
+          businessPhone: senderPhoneNumber,
+          participantPhone: contactToStartChat.phoneNumber,
+          participantName,
+          senderId,
+        });
+
+        const createdChat = await backendApi.chats.startWithContact({
+          businessPhone: senderPhoneNumber,
+          participantPhone: contactToStartChat.phoneNumber,
+          participantName,
+          senderId,
+        });
+
+        console.log("Created/retrieved chat:", createdChat);
+
+        // Navigate to the new chat
+        const chatId = (createdChat as any)?.chatId;
+        if (chatId) {
+          // Close all contact modals
+          setSenderSelectModalOpen(false);
+          setContactPreviewModalOpen(false);
+          setViewContactsModalOpen(false);
+          setContactToStartChat(null);
+
+          // Refresh the chats list to include the new chat
+          const updatedChats = await backendApi.whatsapp.getChats(0, 50);
+          if (Array.isArray(updatedChats)) {
+            setChats(updatedChats);
+          }
+
+          // Select the new chat
+          setSelectedChatId(chatId);
+        }
+      } catch (err) {
+        console.error("Failed to start chat:", err);
+      }
+    },
+    [contactToStartChat]
+  );
+
+  // View all contacts from a contact message
+  const handleViewAllContacts = useCallback((contacts: ReceivedContact[]) => {
+    setContactsToView(contacts);
+    setViewContactsModalOpen(true);
+  }, []);
+
+  // Open save contact form
+  const handleSaveContactFromMessage = useCallback(
+    (contact: ReceivedContact) => {
+      setContactToSave(contact);
+      setQuickContactFormOpen(true);
+    },
+    []
+  );
+
+  // Save contact from quick form (create or update)
+  const handleQuickSaveContact = useCallback(
+    async (data: {
+      firstName: string;
+      lastName: string;
+      countryCode: string;
+      phoneNumber: string;
+    }) => {
+      try {
+        setIsSavingContact(true);
+
+        const fullPhoneNumber = `${data.countryCode}${data.phoneNumber}`;
+
+        // Check if contact already exists by phone number
+        let existingContact: { contactId?: string } | null = null;
+        try {
+          existingContact = (await backendApi.contacts.getByPhone(
+            fullPhoneNumber
+          )) as { contactId?: string } | null;
+        } catch {
+          // Contact doesn't exist, will create new one
+        }
+
+        if (existingContact && existingContact.contactId) {
+          // Update existing contact
+          await backendApi.contacts.update(existingContact.contactId, {
+            firstName: data.firstName,
+            lastName: data.lastName || undefined,
+            countryCode: data.countryCode,
+            phoneNumber: fullPhoneNumber,
+          });
+        } else {
+          // Get first available sender for linking (only needed for new contacts)
+          const sendersData = await backendApi.senders.list();
+          const firstSenderId =
+            Array.isArray(sendersData) && sendersData.length > 0
+              ? sendersData[0].id
+              : null;
+
+          if (!firstSenderId) {
+            console.error("No senders available to link contact");
+            return;
+          }
+
+          // Create new contact
+          await backendApi.contacts.create({
+            firstName: data.firstName,
+            lastName: data.lastName || undefined,
+            countryCode: data.countryCode,
+            phoneNumber: fullPhoneNumber,
+            senderIds: [firstSenderId],
+          });
+        }
+
+        setQuickContactFormOpen(false);
+        setContactToSave(null);
+      } catch (err) {
+        console.error("Failed to save contact:", err);
+      } finally {
+        setIsSavingContact(false);
+      }
+    },
+    []
+  );
+
+  // Parse contacts from message metadata
+  const parseContactsFromMessage = useCallback(
+    (message: Message): ReceivedContact[] | null => {
+      if (message.type !== "contacts") return null;
+
+      try {
+        // Try to parse from mediaMetadata if available (legacy field)
+        const metadata = message.mediaMetadata;
+        if (metadata) {
+          const parsed =
+            typeof metadata === "string" ? JSON.parse(metadata) : metadata;
+          if (parsed.contacts) return parsed.contacts;
+        }
+
+        // Try to parse from attachments field (new storage format)
+        if (message.attachments) {
+          const attachments =
+            typeof message.attachments === "string"
+              ? JSON.parse(message.attachments)
+              : message.attachments;
+          // Check if attachments contains contact data directly
+          if (attachments.type === "contacts" && attachments.contacts) {
+            return attachments.contacts;
+          }
+          // Or if it's an array with contact data as first item
+          if (
+            Array.isArray(attachments) &&
+            attachments[0]?.type === "contacts"
+          ) {
+            return attachments[0].contacts;
+          }
+        }
+
+        // Check if text contains contact summary and try to extract names
+        // This is a fallback for when full contact data isn't stored
+        if (
+          message.text?.startsWith("Contact:") ||
+          message.text?.includes("contacts:")
+        ) {
+          // Return minimal contact data from text
+          const names = message.text
+            .replace(/^\d+ contacts: |^Contact: /, "")
+            .split(", ");
+          return names.map((name) => ({
+            name: { formatted_name: name.trim() },
+            phones: [],
+          }));
+        }
+
+        return null;
+      } catch {
+        return null;
+      }
+    },
+    []
+  );
+
+  // ==========================================
+  // END CONTACT HANDLERS
+  // ==========================================
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -1885,6 +2256,28 @@ export default function ChatsPage() {
                           });
                           const isDeleted = message.isDeleted;
 
+                          // Handle contact message type
+                          if (message.type === "contacts" && !isDeleted) {
+                            const contacts = parseContactsFromMessage(message);
+                            if (contacts && contacts.length > 0) {
+                              return (
+                                <ContactMessageBubble
+                                  key={message.messageId || message.id}
+                                  contacts={contacts}
+                                  isOutbound={isOutbound}
+                                  timestamp={message.timestamp}
+                                  status={message.status}
+                                  deliveredAt={message.deliveredAt}
+                                  readAt={message.readAt}
+                                  onViewAll={() =>
+                                    handleViewAllContacts(contacts)
+                                  }
+                                  onStartChat={handleStartChatWithContact}
+                                />
+                              );
+                            }
+                          }
+
                           return (
                             <div
                               key={message.messageId || message.id}
@@ -2001,9 +2394,16 @@ export default function ChatsPage() {
                                         </div>
                                       )}
 
-                                    {/* Text shown below media */}
+                                    {/* Text shown below media with link previews */}
                                     {message.text && (
-                                      <p className="text-xs">{message.text}</p>
+                                      <MessageText
+                                        text={message.text}
+                                        isOutbound={isOutbound}
+                                        showPreviews={
+                                          !message.attachments?.length
+                                        }
+                                        onVideoPlay={handleVideoPlay}
+                                      />
                                     )}
                                   </>
                                 )}
@@ -2200,6 +2600,7 @@ export default function ChatsPage() {
                       leftElement={
                         <AttachmentMenu
                           onFilesSelected={handleFilesSelected}
+                          onContactsClick={handleContactsClick}
                           disabled={
                             isUploading || pendingMediaUploads.length > 0
                           }
@@ -2310,6 +2711,102 @@ export default function ChatsPage() {
         messageId={deletingMessageId}
         onClose={() => setDeleteDialogOpen(false)}
         onConfirm={handleConfirmDeleteMessage}
+      />
+
+      {/* Video Preview Player - Draggable YouTube/Video player */}
+      {videoPreview && (
+        <VideoPreviewPlayer
+          videoId={videoPreview.videoId}
+          url={videoPreview.url}
+          title={videoPreview.title}
+          onClose={() => setVideoPreview(null)}
+        />
+      )}
+
+      {/* Send Contacts Modal - Step 1: Select contacts */}
+      <SendContactsModal
+        isOpen={sendContactsModalOpen}
+        onClose={() => setSendContactsModalOpen(false)}
+        onSend={handleContactsSelected}
+        contacts={allContacts}
+        initialSelectedContacts={contactsToSend}
+        isLoading={contactsLoading}
+      />
+
+      {/* Contact Preview Modal - Step 2: Preview before sending */}
+      <ContactPreviewModal
+        isOpen={contactPreviewModalOpen}
+        onClose={() => {
+          setContactPreviewModalOpen(false);
+          setContactsToSend([]);
+        }}
+        onBack={() => {
+          // Go back to selection modal, keeping selected contacts
+          setContactPreviewModalOpen(false);
+          setSendContactsModalOpen(true);
+        }}
+        onConfirmSend={handleSendContacts}
+        contacts={contactsToSend}
+        onStartChat={handleStartChatWithContact}
+        isLoading={isSendingContacts}
+      />
+
+      {/* View Contacts Modal - For viewing received contacts */}
+      <ViewContactsModal
+        isOpen={viewContactsModalOpen}
+        onClose={() => {
+          setViewContactsModalOpen(false);
+          setContactsToView([]);
+        }}
+        contacts={contactsToView}
+        onStartChat={handleStartChatWithContact}
+        onSaveContact={handleSaveContactFromMessage}
+      />
+
+      {/* Quick Contact Form Modal - For saving received contacts */}
+      <QuickContactFormModal
+        isOpen={quickContactFormOpen}
+        onClose={() => {
+          setQuickContactFormOpen(false);
+          setContactToSave(null);
+        }}
+        onSave={handleQuickSaveContact}
+        initialData={
+          contactToSave
+            ? {
+                firstName:
+                  contactToSave.name.first_name ||
+                  contactToSave.name.formatted_name ||
+                  "",
+                lastName: contactToSave.name.last_name || "",
+                phoneNumber:
+                  contactToSave.phones?.[0]?.phone ||
+                  contactToSave.phones?.[0]?.wa_id ||
+                  "",
+              }
+            : undefined
+        }
+        isLoading={isSavingContact}
+      />
+
+      {/* Sender Select Modal - For starting new chat with contact */}
+      <SelectSenderModal
+        isOpen={senderSelectModalOpen}
+        onClose={() => {
+          setSenderSelectModalOpen(false);
+          setContactToStartChat(null);
+        }}
+        onSelect={handleSenderSelectedForContact}
+        contact={
+          contactToStartChat
+            ? {
+                firstName: contactToStartChat.firstName,
+                lastName: contactToStartChat.lastName,
+                phoneNumber: contactToStartChat.phoneNumber,
+              }
+            : undefined
+        }
+        senders={senders}
       />
     </div>
   );

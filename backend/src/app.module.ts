@@ -10,6 +10,7 @@ import { BillingModule } from './modules/billing/billing.module';
 import { ChatsModule } from './modules/chats/chats.module';
 import { ContactsModule } from './modules/contacts/contacts.module';
 import { KanbanModule } from './modules/kanban/kanban.module';
+import { LinkPreviewModule } from './modules/link-preview/link-preview.module';
 import { MessagingModule } from './modules/messaging/messaging.module';
 import { SendersModule } from './modules/senders/senders.module';
 import { SettingsModule } from './modules/settings/settings.module';
@@ -40,6 +41,7 @@ import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
     SettingsModule,
     BillingModule,
     ThumbnailModule,
+    LinkPreviewModule,
     DatabaseModule,
   ],
   controllers: [AppController],

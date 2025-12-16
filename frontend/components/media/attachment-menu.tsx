@@ -32,11 +32,13 @@ export type AttachmentType =
 
 interface AttachmentMenuProps {
   onFilesSelected: (files: File[], type: AttachmentType) => void;
+  onContactsClick?: () => void;
   disabled?: boolean;
 }
 
 export function AttachmentMenu({
   onFilesSelected,
+  onContactsClick,
   disabled = false,
 }: AttachmentMenuProps) {
   const photoVideoInputRef = useRef<HTMLInputElement>(null);
@@ -77,8 +79,10 @@ export function AttachmentMenu({
         cameraInputRef.current?.click();
         break;
       case "contact":
-        // Contact sharing - could be implemented later
-        console.log("Contact sharing not yet implemented");
+        // Contact sharing - trigger the contacts modal
+        if (onContactsClick) {
+          onContactsClick();
+        }
         break;
       case "location":
         // Location sharing - not supported in WhatsApp Cloud API
@@ -171,8 +175,7 @@ export function AttachmentMenu({
 
           <DropdownMenuItem
             onClick={() => handleMenuItemClick("contact")}
-            className="cursor-pointer gap-3 py-2.5 opacity-50"
-            disabled
+            className="cursor-pointer gap-3 py-2.5"
           >
             <div className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-500 text-white">
               <Contact className="h-4 w-4" />

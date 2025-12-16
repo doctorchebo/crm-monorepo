@@ -102,17 +102,17 @@ export function extractConversationId(waMessageId: string): string | undefined {
  */
 export function mapCloudAPIMessageType(
   cloudAPIType: string,
-): 'text' | 'image' | 'video' | 'audio' | 'document' | 'unknown' {
+): 'text' | 'image' | 'video' | 'audio' | 'document' | 'contacts' | 'unknown' {
   const typeMap: Record<string, any> = {
     text: 'text',
     image: 'image',
     video: 'video',
     audio: 'audio',
     document: 'document',
+    contacts: 'contacts',
     button: 'text',
     interactive: 'text',
     location: 'unknown',
-    contacts: 'unknown',
     reaction: 'unknown',
     unknown: 'unknown',
   };

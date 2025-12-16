@@ -4,6 +4,7 @@ import {
   messages,
   NewNote,
   notes as notesTable,
+  senders,
   users,
 } from '@database/schema';
 import {
@@ -50,14 +51,11 @@ export class NotesService {
     // In the future, this will use team-based permissions
     const senderCount = await db
       .select()
-      .from(require('@database/schema').senders)
+      .from(senders)
       .where(
         and(
-          eq(require('@database/schema').senders.userId, userId),
-          eq(
-            require('@database/schema').senders.phoneNumber,
-            chat.businessPhone,
-          ),
+          eq(senders.userId, userId),
+          eq(senders.phoneNumber, chat.businessPhone),
         ),
       );
 

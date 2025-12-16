@@ -354,6 +354,29 @@ export interface NormalizedCloudAPIMessage {
   type: string;
   text?: string;
   mediaMetadata?: MediaMetadata;
+  contactsData?: {
+    type: 'contacts';
+    contacts: Array<{
+      name: {
+        formatted_name?: string;
+        first_name?: string;
+        last_name?: string;
+        middle_name?: string;
+        prefix?: string;
+        suffix?: string;
+      };
+      phones?: Array<{
+        phone: string;
+        type?: string;
+        wa_id?: string;
+      }>;
+      emails?: any[];
+      addresses?: any[];
+      org?: any;
+      birthday?: string;
+      urls?: any[];
+    }>;
+  };
   direction: 'inbound' | 'outbound';
   status: 'sent' | 'delivered' | 'read' | 'failed' | 'pending';
   timestamp: Date;

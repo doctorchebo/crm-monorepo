@@ -9,6 +9,14 @@ const nextConfig: NextConfig = {
     clientSegmentCache: true,
     nodeMiddleware: true,
   },
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "**",
+      },
+    ],
+  },
 };
 
 export default withNextIntl(nextConfig);

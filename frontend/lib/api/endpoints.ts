@@ -131,6 +131,22 @@ export const backendApi = {
       fileName?: string;
       originalMessageId?: string;
     }) => apiClient.post("/whatsapp/send-media", data),
+    sendContacts: (data: {
+      to: string;
+      senderId?: number;
+      contacts: Array<{
+        name: {
+          formatted_name: string;
+          first_name?: string;
+          last_name?: string;
+        };
+        phones?: Array<{
+          phone: string;
+          type?: string;
+          wa_id?: string;
+        }>;
+      }>;
+    }) => apiClient.post("/whatsapp/send-contacts", data),
     getStatus: (messageId: string) =>
       apiClient.get(`/whatsapp/status/${messageId}`),
     getDownloadUrl: (messageId: string, attachmentId: string) =>
@@ -229,5 +245,13 @@ export const backendApi = {
     getMessageNotes: (messageId: string) =>
       apiClient.get(`/notes/message/${messageId}`),
     delete: (noteId: number) => apiClient.delete(`/notes/${noteId}`),
+  },
+
+  // Link Preview endpoints
+  linkPreview: {
+    get: (url: string) =>
+      apiClient.get(`/link-preview?url=${encodeURIComponent(url)}`),
+    getBatch: (urls: string[]) =>
+      apiClient.post("/link-preview/batch", { urls }),
   },
 };

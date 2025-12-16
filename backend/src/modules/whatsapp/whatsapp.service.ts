@@ -813,6 +813,31 @@ export class WhatsAppService {
       const messageType = mapCloudAPIMessageType(message.type);
       let textContent = '';
       let mediaMetadata: MediaMetadata | undefined;
+      let contactsData:
+        | {
+            type: 'contacts';
+            contacts: Array<{
+              name: {
+                formatted_name?: string;
+                first_name?: string;
+                last_name?: string;
+                middle_name?: string;
+                prefix?: string;
+                suffix?: string;
+              };
+              phones?: Array<{
+                phone: string;
+                type?: string;
+                wa_id?: string;
+              }>;
+              emails?: any[];
+              addresses?: any[];
+              org?: any;
+              birthday?: string;
+              urls?: any[];
+            }>;
+          }
+        | undefined;
 
       switch (message.type) {
         case 'text':
@@ -864,6 +889,44 @@ export class WhatsAppService {
         case 'interactive':
           textContent = '[Interactive message]';
           break;
+        case 'contacts':
+          // Handle incoming contacts message
+          const contacts = message.contacts || [];
+          const contactNames = contacts
+            .map(
+              (c: any) =>
+                c.name?.formatted_name || c.name?.first_name || 'Contact',
+            )
+            .join(', ');
+          textContent =
+            contacts.length === 1
+              ? `Contact: ${contactNames}`
+              : `${contacts.length} contacts: ${contactNames}`;
+          // Store contacts data separately (not in mediaMetadata which is for files)
+          contactsData = {
+            type: 'contacts',
+            contacts: contacts.map((c: any) => ({
+              name: {
+                formatted_name: c.name?.formatted_name,
+                first_name: c.name?.first_name,
+                last_name: c.name?.last_name,
+                middle_name: c.name?.middle_name,
+                prefix: c.name?.prefix,
+                suffix: c.name?.suffix,
+              },
+              phones: c.phones?.map((p: any) => ({
+                phone: p.phone,
+                type: p.type,
+                wa_id: p.wa_id,
+              })),
+              emails: c.emails,
+              addresses: c.addresses,
+              org: c.org,
+              birthday: c.birthday,
+              urls: c.urls,
+            })),
+          };
+          break;
         default:
           textContent = '[Unsupported message type]';
       }
@@ -877,6 +940,7 @@ export class WhatsAppService {
         type: messageType,
         text: textContent,
         mediaMetadata,
+        contactsData,
         direction: 'inbound',
         status: 'delivered',
         timestamp: new Date(parseInt(message.timestamp) * 1000),
@@ -1212,7 +1276,10 @@ export class WhatsAppService {
                 : `cloud-api://${messageData.mediaMetadata.mediaId}`,
             },
           ]
-        : [];
+        : messageData.contactsData
+          ? // For contacts, store the contact data in attachments as JSON
+            messageData.contactsData
+          : [];
 
       await db.insert(messages).values({
         messageId: messageData.waMessageId,
@@ -1221,7 +1288,7 @@ export class WhatsAppService {
         sender: messageData.sender,
         type: messageData.type,
         text: messageData.text,
-        attachments: attachments.length > 0 ? (attachments as any) : [],
+        attachments: attachments ? (attachments as any) : [],
         direction: 'inbound',
         status: 'delivered',
         timestamp: messageData.timestamp,
@@ -1630,6 +1697,184 @@ export class WhatsAppService {
     } catch (error) {
       this.logger.error(`Error editing message: ${error.message}`, error);
       throw new Error(`Failed to edit message: ${error.message}`);
+    }
+  }
+
+  /**
+   * Send contacts via WhatsApp Cloud API
+   * Sends one or more contacts as a contact card message
+   *
+   * @param to - Recipient phone number
+   * @param contacts - Array of contacts to send
+   * @param senderId - Optional sender ID to determine which phoneNumberId to use
+   * @returns Response with message ID and status
+   */
+  async sendContacts(
+    to: string,
+    contacts: Array<{
+      name: {
+        formatted_name: string;
+        first_name?: string;
+        last_name?: string;
+      };
+      phones?: Array<{
+        phone: string;
+        type?: string;
+        wa_id?: string;
+      }>;
+    }>,
+    senderId?: number,
+  ): Promise<any> {
+    try {
+      const recipientPhone = cleanPhoneNumber(to);
+
+      if (!contacts || contacts.length === 0) {
+        throw new Error('At least one contact is required');
+      }
+
+      // Determine which sender this message is from
+      let senderRecord: any = null;
+      let senderPhoneNumber: string;
+
+      if (senderId) {
+        senderRecord = await db.query.senders.findFirst({
+          where: eq(senders.id, senderId),
+        });
+        if (!senderRecord) {
+          throw new Error(`Sender with ID ${senderId} not found`);
+        }
+      } else {
+        // Use first available sender
+        senderRecord = await db.query.senders.findFirst();
+        if (!senderRecord) {
+          throw new Error(
+            'No senders configured. Please add a WhatsApp sender first.',
+          );
+        }
+      }
+
+      senderPhoneNumber = senderRecord.phoneNumber;
+
+      if (!senderRecord.phoneNumberId) {
+        throw new Error(
+          `Sender ${senderRecord.id} (${senderPhoneNumber}) does not have a phoneNumberId set.`,
+        );
+      }
+
+      this.logger.log(
+        `Sending ${contacts.length} contact(s) from sender ${senderRecord.id} (${senderPhoneNumber}) to ${recipientPhone}`,
+      );
+
+      // Generate chat ID
+      const chatId = generateChatId(senderPhoneNumber, recipientPhone);
+
+      // Ensure chat exists
+      await this.getOrCreateChat(
+        chatId,
+        senderPhoneNumber,
+        recipientPhone,
+        senderRecord.id,
+      );
+
+      // Build Cloud API contacts message
+      // For each contact phone, we need:
+      // - phone: the display number (can include formatting)
+      // - wa_id: the WhatsApp ID (clean number without + for API matching)
+      const message = {
+        messaging_product: 'whatsapp' as const,
+        to: recipientPhone,
+        type: 'contacts' as const,
+        contacts: contacts.map((contact) => ({
+          name: {
+            formatted_name: contact.name.formatted_name,
+            first_name: contact.name.first_name,
+            last_name: contact.name.last_name,
+          },
+          phones: contact.phones?.map((phone) => {
+            // Clean the phone number - remove all non-digit characters except leading +
+            const cleanedPhone = phone.phone.replace(/[^\d+]/g, '');
+            // wa_id should be digits only (no +)
+            const waId =
+              phone.wa_id || cleanedPhone.replace(/^\+/, '').replace(/\D/g, '');
+            return {
+              phone: cleanedPhone, // E.164 format for display
+              type: phone.type || 'CELL',
+              wa_id: waId, // WhatsApp ID for matching
+            };
+          }),
+        })),
+      };
+
+      // Send via Cloud API
+      const response = await this.sendCloudAPIMessage(
+        message,
+        senderRecord.phoneNumberId,
+      );
+
+      if (!response.messages || response.messages.length === 0) {
+        throw new Error('No message ID returned from Cloud API');
+      }
+
+      const waMessageId = response.messages[0].id;
+      this.logger.log(
+        `Contacts message sent successfully. ID: ${waMessageId}, Count: ${contacts.length}`,
+      );
+
+      // Store message in database
+      // Build contact summary for text field
+      const contactNames = contacts
+        .map((c) => c.name.formatted_name || c.name.first_name || 'Contact')
+        .join(', ');
+      const textSummary =
+        contacts.length === 1
+          ? `Contact: ${contactNames}`
+          : `${contacts.length} contacts: ${contactNames}`;
+
+      await db.insert(messages).values({
+        messageId: waMessageId,
+        chatId: chatId,
+        source: 'whatsapp',
+        sender: senderPhoneNumber,
+        direction: 'outbound',
+        text: textSummary,
+        type: 'contacts',
+        status: 'sent',
+        sentAt: new Date(),
+        timestamp: new Date(),
+        // Store full contacts data in attachments field as JSON
+        // Using contacts-specific format for frontend parsing
+        attachments: JSON.stringify({
+          type: 'contacts',
+          contacts: contacts,
+        }),
+      });
+
+      // Emit via WebSocket for real-time updates
+      if (whatsAppGatewayInstance) {
+        whatsAppGatewayInstance.emitMessage({
+          messageId: waMessageId,
+          chatId,
+          sender: senderPhoneNumber,
+          direction: 'outbound',
+          text: textSummary,
+          type: 'contacts',
+          status: 'sent',
+          timestamp: new Date(),
+          attachments: undefined,
+        });
+      }
+
+      return {
+        success: true,
+        messageId: waMessageId,
+        to: recipientPhone,
+        type: 'contacts',
+        contactCount: contacts.length,
+        status: 'sent',
+      };
+    } catch (error) {
+      this.logger.error(`Error sending contacts: ${error.message}`, error);
+      throw new Error(`Failed to send contacts: ${error.message}`);
     }
   }
 

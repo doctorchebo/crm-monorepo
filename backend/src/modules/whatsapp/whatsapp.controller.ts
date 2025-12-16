@@ -62,6 +62,23 @@ export class WhatsAppController {
   }
 
   /**
+   * Send contacts via WhatsApp
+   * POST /whatsapp/send-contacts
+   */
+  @Post('send-contacts')
+  async sendContacts(@Body() dto: SendContactsDto, @Req() req: any) {
+    const userId = req.user?.userId;
+    this.logger.log(
+      `Send contacts request from user ${userId}: To ${dto.to}, Count: ${dto.contacts.length}`,
+    );
+    return this.whatsAppService.sendContacts(
+      dto.to,
+      dto.contacts,
+      dto.senderId,
+    );
+  }
+
+  /**
    * Get message status
    * GET /whatsapp/status/:messageSid
    */
