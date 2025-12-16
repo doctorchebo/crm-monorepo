@@ -26,10 +26,10 @@ import {
 } from "@/components/media/pending-upload-bubble";
 import { MessageActionsMenu } from "@/components/message-actions-menu";
 import { Button } from "@/components/ui/button";
+import { ChatSidebar } from "@/components/ui/chat-sidebar";
 import { Input } from "@/components/ui/input";
 import { MessageInput } from "@/components/ui/message-input";
 import { MessageText } from "@/components/ui/message-text";
-import { NotesPanel } from "@/components/ui/notes-panel";
 import { VideoPreviewPlayer } from "@/components/ui/video-preview-player";
 import { WhatsAppStatusIcon } from "@/components/whatsapp-status-icon";
 import { useAuthProtection } from "@/hooks/use-auth";
@@ -280,6 +280,9 @@ export default function ChatsPage() {
 
   const [automationEnabled, setAutomationEnabled] = useState(false);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  const [selectedContactId, setSelectedContactId] = useState<string | null>(
+    null
+  );
   const [chats, setChats] = useState<Chat[]>([]);
   const [senders, setSenders] = useState<any[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -776,6 +779,38 @@ export default function ChatsPage() {
 
     fetchNotes();
   }, [selectedChatId]);
+
+  // Fetch contact for sidebar when chat changes
+  useEffect(() => {
+    if (!selectedChatId) {
+      setSelectedContactId(null);
+      return;
+    }
+
+    const selectedChat = chats.find((c) => c.chatId === selectedChatId);
+    if (!selectedChat?.participantPhone) {
+      setSelectedContactId(null);
+      return;
+    }
+
+    const fetchContact = async () => {
+      try {
+        const contact = await backendApi.contacts.getByPhone(
+          selectedChat.participantPhone
+        );
+        if (contact && typeof contact === "object" && "contactId" in contact) {
+          setSelectedContactId((contact as { contactId: string }).contactId);
+        } else {
+          setSelectedContactId(null);
+        }
+      } catch (error) {
+        // Contact not found - this is okay, the chat participant may not be saved as a contact
+        setSelectedContactId(null);
+      }
+    };
+
+    fetchContact();
+  }, [selectedChatId, chats]);
 
   useEffect(() => {
     if (!selectedChatId) return;
@@ -1476,13 +1511,38 @@ export default function ChatsPage() {
     }
   };
 
-  const handleApplyTemplate = (template: Template) => {
+  const handleApplyTemplate = async (template: Template) => {
     if (template.locales && template.locales.length > 0) {
-      // Use the first locale's body or render with example vars
       const locale = template.locales[0];
-      let body = locale.body;
+      const selectedChat = chats.find((c) => c.chatId === selectedChatId);
 
-      // Replace example variables if available
+      // If we have a contact, resolve variables against actual contact data
+      if (selectedContactId && selectedChat) {
+        try {
+          const result = await backendApi.templates.resolve(template.id, {
+            locale: locale.locale,
+            contactId: selectedContactId,
+            senderId: selectedChat.senderId,
+            chatId: selectedChatId || undefined,
+          });
+
+          if (result.success) {
+            setTemplateInput(result.body);
+            return;
+          }
+          // If resolution failed but we got a body, still use it
+          if (result.body) {
+            setTemplateInput(result.body);
+            return;
+          }
+        } catch (error) {
+          console.error("Failed to resolve template variables:", error);
+          // Fall through to use template with sample values
+        }
+      }
+
+      // Fallback: Use template body with example vars (for preview/when no contact)
+      let body = locale.body;
       if (locale.exampleVars) {
         Object.entries(locale.exampleVars).forEach(([key, value]) => {
           body = body.replace(
@@ -1491,7 +1551,6 @@ export default function ChatsPage() {
           );
         });
       }
-
       setTemplateInput(body);
     }
   };
@@ -2659,13 +2718,17 @@ export default function ChatsPage() {
                   style={{ width: `${notesPanelWidth}px` }}
                 >
                   {selectedChatId && currentUserId && (
-                    <NotesPanel
+                    <ChatSidebar
                       chatId={selectedChatId}
+                      contactId={selectedContactId}
                       currentUserId={currentUserId}
                       notes={notes}
-                      loading={notesLoading}
+                      notesLoading={notesLoading}
                       onAddNote={handleAddNote}
                       onDeleteNote={handleDeleteNote}
+                      onProfileUpdate={() => {
+                        // Optionally refresh contact data when profile is updated
+                      }}
                     />
                   )}
                 </div>

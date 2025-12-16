@@ -290,6 +290,7 @@
     "header": "Encabezado (Opcional)",
     "messageBody": "Cuerpo del Mensaje",
     "useVariables": "Usa '{{variable_name}}' para marcadores de posición",
+    "useVariablesHint": "Escribe '{{' para insertar variables",
     "footer": "Pie de Página (Opcional)",
     "variables": "Variables",
     "preview": "Vista Previa",

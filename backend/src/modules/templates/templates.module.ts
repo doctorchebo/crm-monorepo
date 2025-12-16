@@ -6,6 +6,7 @@ import {
   TemplateRenderService,
   TemplatesService,
   TemplateValidatorService,
+  VariableResolutionService,
 } from './services';
 import { TemplatesController } from './templates.controller';
 
@@ -17,8 +18,9 @@ import { TemplatesController } from './templates.controller';
     TemplateParserService,
     TemplateValidatorService,
     TemplateRenderService,
+    VariableResolutionService,
     TwilioProviderAdapter,
   ],
-  exports: [TemplatesService],
+  exports: [TemplatesService, VariableResolutionService],
 })
 export class TemplatesModule {}

@@ -128,6 +128,7 @@ export const contacts = pgTable(
     phoneNumberId: integer('phone_number_id'), // Foreign key to senders.id (the WhatsApp Business phone this contact belongs to)
     firstName: varchar('first_name').notNull(),
     lastName: varchar('last_name'),
+    email: varchar('email'), // Contact email address
     countryCode: varchar('country_code').notNull(), // e.g., '+591' for Bolivia
     phoneNumber: varchar('phone_number').notNull(), // Full phone number
     twilioContactId: varchar('twilio_contact_id'), // Contact ID from Twilio if synced
@@ -148,6 +149,30 @@ export const contacts = pgTable(
 
 export type Contact = typeof contacts.$inferSelect;
 export type NewContact = typeof contacts.$inferInsert;
+
+// Contact Attributes table - custom key-value profile fields
+export const contactAttributes = pgTable(
+  'contact_attributes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    contactId: uuid('contact_id')
+      .notNull()
+      .references(() => contacts.contactId, { onDelete: 'cascade' }),
+    key: varchar('key', { length: 100 }).notNull(),
+    value: text('value'),
+    valueType: varchar('value_type', { length: 20 }).default('string'), // 'string', 'number', 'date', 'phone', 'email'
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (table) => ({
+    contactIdIndex: index().on(table.contactId),
+    keyIndex: index().on(table.key),
+    uniqueContactKey: unique().on(table.contactId, table.key),
+  }),
+);
+
+export type ContactAttribute = typeof contactAttributes.$inferSelect;
+export type NewContactAttribute = typeof contactAttributes.$inferInsert;
 
 // Senders table - link between users and WhatsApp business phone numbers
 export const senders = pgTable(
@@ -263,6 +288,36 @@ export const templateVariables = pgTable(
 
 export type TemplateVariable = typeof templateVariables.$inferSelect;
 export type NewTemplateVariable = typeof templateVariables.$inferInsert;
+
+// Variable Definitions - system-level registry of allowed template variables
+// Users cannot create arbitrary variables - they must use registered ones
+export const variableDefinitions = pgTable(
+  'variable_definitions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    category: varchar('category', { length: 50 }).notNull(), // 'customer', 'chat', 'sender', 'order', 'property', 'custom'
+    property: varchar('property', { length: 100 }).notNull(), // 'first_name', 'email', etc.
+    displayName: varchar('display_name', { length: 100 }).notNull(), // User-friendly name
+    description: text('description'), // Help text for users
+    dataType: varchar('data_type', { length: 20 }).notNull().default('string'), // 'string', 'number', 'date', 'phone', 'email', 'currency'
+    sourceTable: varchar('source_table', { length: 100 }), // Source table for resolution (e.g., 'contacts', 'chats')
+    sourceColumn: varchar('source_column', { length: 100 }), // Column to read from
+    fallbackValue: text('fallback_value'), // Default if value is missing
+    isRequired: boolean('is_required').default(false), // Whether value must be present to send
+    isSystem: boolean('is_system').default(true), // System-defined vs user-defined (for future extensibility)
+    isActive: boolean('is_active').default(true),
+    sortOrder: integer('sort_order').default(0), // For UI ordering
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (table) => ({
+    categoryIndex: index().on(table.category),
+    categoryPropertyUnique: unique().on(table.category, table.property),
+  }),
+);
+
+export type VariableDefinition = typeof variableDefinitions.$inferSelect;
+export type NewVariableDefinition = typeof variableDefinitions.$inferInsert;
 
 // Template Versions - versioning and provider submission status
 export const templateVersions = pgTable(
@@ -427,3 +482,19 @@ export const chatsRelations = relations(chats, ({ many }) => ({
 export const messagesRelations = relations(messages, ({ many }) => ({
   notes: many(notes),
 }));
+
+// Contact and ContactAttributes relations
+export const contactsRelations = relations(contacts, ({ many }) => ({
+  attributes: many(contactAttributes),
+  contactSenders: many(contactSenders),
+}));
+
+export const contactAttributesRelations = relations(
+  contactAttributes,
+  ({ one }) => ({
+    contact: one(contacts, {
+      fields: [contactAttributes.contactId],
+      references: [contacts.contactId],
+    }),
+  }),
+);

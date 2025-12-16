@@ -353,6 +353,9 @@ export class ContactsService {
       if (updateContactDto.lastName !== undefined) {
         updateData.lastName = updateContactDto.lastName || null;
       }
+      if (updateContactDto.email !== undefined) {
+        updateData.email = updateContactDto.email || null;
+      }
       if (updateContactDto.avatar !== undefined) {
         updateData.avatar = updateContactDto.avatar || null;
       }

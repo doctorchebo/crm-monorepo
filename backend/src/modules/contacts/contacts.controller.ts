@@ -12,6 +12,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/auth.guard';
+import { ContactAttributesService } from './contact-attributes.service';
 import { ContactsService } from './contacts.service';
 import { CreateContactDto } from './dto/create-contact.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
@@ -21,7 +22,10 @@ import { UpdateContactDto } from './dto/update-contact.dto';
 export class ContactsController {
   private readonly logger = new Logger(ContactsController.name);
 
-  constructor(private contactsService: ContactsService) {}
+  constructor(
+    private contactsService: ContactsService,
+    private contactAttributesService: ContactAttributesService,
+  ) {}
 
   /**
    * Create a new contact
@@ -96,5 +100,117 @@ export class ContactsController {
     this.logger.log(`Delete contact: ${contactId}`);
     await this.contactsService.delete(contactId);
     return { success: true };
+  }
+
+  // ==================== Contact Attributes Endpoints ====================
+
+  /**
+   * Get all attributes for a contact
+   * GET /contacts/:contactId/attributes
+   */
+  @Get(':contactId/attributes')
+  async getAttributes(@Param('contactId') contactId: string) {
+    this.logger.log(`Get attributes for contact: ${contactId}`);
+    return this.contactAttributesService.getAttributes(contactId);
+  }
+
+  /**
+   * Get a specific attribute by key
+   * GET /contacts/:contactId/attributes/:key
+   */
+  @Get(':contactId/attributes/:key')
+  async getAttribute(
+    @Param('contactId') contactId: string,
+    @Param('key') key: string,
+  ) {
+    this.logger.log(`Get attribute '${key}' for contact: ${contactId}`);
+    return this.contactAttributesService.getAttribute(contactId, key);
+  }
+
+  /**
+   * Create or update a single attribute
+   * PUT /contacts/:contactId/attributes
+   */
+  @Post(':contactId/attributes')
+  async upsertAttribute(
+    @Param('contactId') contactId: string,
+    @Body() dto: CreateContactAttributeDto,
+  ) {
+    this.logger.log(`Upsert attribute '${dto.key}' for contact: ${contactId}`);
+    return this.contactAttributesService.upsertAttribute(contactId, dto);
+  }
+
+  /**
+   * Update an attribute value
+   * PATCH /contacts/:contactId/attributes/:key
+   */
+  @Patch(':contactId/attributes/:key')
+  async updateAttribute(
+    @Param('contactId') contactId: string,
+    @Param('key') key: string,
+    @Body() dto: UpdateContactAttributeDto,
+  ) {
+    this.logger.log(`Update attribute '${key}' for contact: ${contactId}`);
+    return this.contactAttributesService.updateAttribute(contactId, key, dto);
+  }
+
+  /**
+   * Delete an attribute
+   * DELETE /contacts/:contactId/attributes/:key
+   */
+  @Delete(':contactId/attributes/:key')
+  async deleteAttribute(
+    @Param('contactId') contactId: string,
+    @Param('key') key: string,
+  ) {
+    this.logger.log(`Delete attribute '${key}' for contact: ${contactId}`);
+    return this.contactAttributesService.deleteAttribute(contactId, key);
+  }
+
+  /**
+   * Bulk upsert attributes
+   * PUT /contacts/:contactId/attributes/bulk
+   */
+  @Post(':contactId/attributes/bulk')
+  async bulkUpsertAttributes(
+    @Param('contactId') contactId: string,
+    @Body() dto: BulkUpsertAttributesDto,
+  ) {
+    this.logger.log(`Bulk upsert attributes for contact: ${contactId}`);
+    return this.contactAttributesService.bulkUpsertAttributes(contactId, dto);
+  }
+
+  /**
+   * Get customer profile (contact + attributes) for template variable resolution
+   * GET /contacts/:contactId/profile
+   */
+  @Get(':contactId/profile')
+  async getProfile(@Param('contactId') contactId: string) {
+    this.logger.log(`Get profile for contact: ${contactId}`);
+    const contact = await this.contactsService.findOne(contactId);
+    const attributes =
+      await this.contactAttributesService.getAttributes(contactId);
+
+    return {
+      contact,
+      attributes,
+      // Flatten for easy template access
+      customer: {
+        first_name: contact.firstName,
+        last_name: contact.lastName || '',
+        email: contact.email || '',
+        phone: contact.phoneNumber,
+        full_name: [contact.firstName, contact.lastName]
+          .filter(Boolean)
+          .join(' '),
+      },
+      custom: attributes.reduce(
+        (map, attr) => {
+          map[attr.key] = attr.value;
+          return map;
+        },
+        {} as Record<string, string | null>,
+      ),
+    };
   }
 }

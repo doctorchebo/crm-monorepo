@@ -1,5 +1,6 @@
 "use client";
 
+import { VariableAutocomplete } from "@/components/templates/variable-autocomplete";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -450,17 +451,14 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
               <Label htmlFor="body">
                 {t("messageBody") || "Message Body"}
                 <span className="text-xs text-gray-500 ml-2">
-                  {t("useVariables") ||
-                    "Use {{variable_name}} for placeholders"}
+                  {t("useVariablesHint") || "Type {{ to insert variables"}
                 </span>
               </Label>
-              <Textarea
+              <VariableAutocomplete
                 id="body"
                 value={formData.body}
-                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                  setFormData({ ...formData, body: e.target.value })
-                }
-                placeholder="Hello {{customer_name}}, your order {{order_id}} is ready!"
+                onChange={(value) => setFormData({ ...formData, body: value })}
+                placeholder="Hello {{customer.first_name}}, your order {{order.order_id}} is ready!"
                 rows={6}
               />
             </div>

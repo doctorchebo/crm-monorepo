@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsEmail,
   IsNumber,
   IsOptional,
   IsString,
@@ -13,6 +14,10 @@ export class CreateContactDto {
   @IsOptional()
   @IsString()
   lastName?: string;
+
+  @IsOptional()
+  @IsEmail()
+  email?: string;
 
   @IsString()
   @Matches(/^\+\d{1,3}$/, {

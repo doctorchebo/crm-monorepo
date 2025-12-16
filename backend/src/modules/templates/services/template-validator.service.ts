@@ -1,5 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { TemplateParserService } from './template-parser.service';
+import {
+  CHAT_FIELDS,
+  CUSTOMER_FIELDS,
+  ORDER_FIELDS,
+  PROPERTY_FIELDS,
+  SENDER_FIELDS,
+  SYSTEM_FIELDS,
+  VARIABLE_PREFIXES,
+} from './variable-resolution.service';
 
 export interface ValidationError {
   field: string;
@@ -97,6 +106,10 @@ export class TemplateValidatorService {
       });
     }
 
+    // Validate variable naming convention (prefix.field format)
+    const variableNamingErrors = this.validateVariableNames(variables);
+    errors.push(...variableNamingErrors);
+
     // Check for markdown formatting patterns (actual usage, not just presence of characters)
     // Only warn if characters are used for formatting: **bold**, __italic__, ~~strikethrough~~
     // Exclude single backticks and single underscores as they're common in regular text
@@ -191,6 +204,123 @@ export class TemplateValidatorService {
         message: 'Footer cannot contain variables',
         severity: 'error',
       });
+    }
+
+    return errors;
+  }
+
+  /**
+   * Validate variable names follow the structured naming convention:
+   * - customer.first_name, customer.email, etc.
+   * - chat.participant_name, chat.participant_phone, etc.
+   * - sender.business_name, sender.business_phone
+   * - order.order_id, order.delivery_date, etc.
+   * - property.property_address, property.bedrooms, etc.
+   * - system.current_date, system.greeting, etc.
+   * - custom.<any_key> for user-defined variables
+   */
+  private validateVariableNames(variables: string[]): ValidationError[] {
+    const errors: ValidationError[] = [];
+    const validPrefixes = Object.values(VARIABLE_PREFIXES);
+
+    for (const varName of variables) {
+      const parts = varName.split('.');
+
+      // Must have exactly 2 parts (prefix.field)
+      if (parts.length !== 2) {
+        errors.push({
+          field: 'body',
+          message: `Invalid variable format "${varName}". Use prefix.field format (e.g., customer.first_name, order.order_id)`,
+          severity: 'error',
+        });
+        continue;
+      }
+
+      const [prefix, field] = parts;
+
+      // Validate prefix
+      if (!validPrefixes.includes(prefix as any)) {
+        errors.push({
+          field: 'body',
+          message: `Invalid variable prefix "${prefix}" in "${varName}". Allowed: ${validPrefixes.join(', ')}`,
+          severity: 'error',
+        });
+        continue;
+      }
+
+      // Validate fields based on prefix
+      switch (prefix) {
+        case VARIABLE_PREFIXES.CUSTOMER:
+          if (!CUSTOMER_FIELDS.includes(field as any)) {
+            errors.push({
+              field: 'body',
+              message: `Invalid customer field "${field}" in "${varName}". Allowed: ${CUSTOMER_FIELDS.join(', ')}`,
+              severity: 'error',
+            });
+          }
+          break;
+
+        case VARIABLE_PREFIXES.CHAT:
+          if (!CHAT_FIELDS.includes(field as any)) {
+            errors.push({
+              field: 'body',
+              message: `Invalid chat field "${field}" in "${varName}". Allowed: ${CHAT_FIELDS.join(', ')}`,
+              severity: 'error',
+            });
+          }
+          break;
+
+        case VARIABLE_PREFIXES.SENDER:
+          if (!SENDER_FIELDS.includes(field as any)) {
+            errors.push({
+              field: 'body',
+              message: `Invalid sender field "${field}" in "${varName}". Allowed: ${SENDER_FIELDS.join(', ')}`,
+              severity: 'error',
+            });
+          }
+          break;
+
+        case VARIABLE_PREFIXES.ORDER:
+          if (!ORDER_FIELDS.includes(field as any)) {
+            errors.push({
+              field: 'body',
+              message: `Invalid order field "${field}" in "${varName}". Allowed: ${ORDER_FIELDS.join(', ')}`,
+              severity: 'error',
+            });
+          }
+          break;
+
+        case VARIABLE_PREFIXES.PROPERTY:
+          if (!PROPERTY_FIELDS.includes(field as any)) {
+            errors.push({
+              field: 'body',
+              message: `Invalid property field "${field}" in "${varName}". Allowed: ${PROPERTY_FIELDS.join(', ')}`,
+              severity: 'error',
+            });
+          }
+          break;
+
+        case VARIABLE_PREFIXES.SYSTEM:
+          if (!SYSTEM_FIELDS.includes(field as any)) {
+            errors.push({
+              field: 'body',
+              message: `Invalid system field "${field}" in "${varName}". Allowed: ${SYSTEM_FIELDS.join(', ')}`,
+              severity: 'error',
+            });
+          }
+          break;
+
+        case VARIABLE_PREFIXES.CUSTOM:
+          // Validate custom field naming (alphanumeric with underscores, starting with letter)
+          if (!/^[a-z][a-z0-9_]*$/.test(field)) {
+            errors.push({
+              field: 'body',
+              message: `Invalid custom field name "${field}" in "${varName}". Use lowercase letters, numbers, and underscores (must start with a letter)`,
+              severity: 'error',
+            });
+          }
+          break;
+      }
     }
 
     return errors;

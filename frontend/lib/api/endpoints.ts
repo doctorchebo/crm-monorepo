@@ -7,12 +7,72 @@ import { apiClient } from "./client";
 export interface CreateContactDto {
   firstName: string;
   lastName?: string;
+  email?: string;
   countryCode: string;
   phoneNumber: string;
   senderIds: number[];
 }
 
 export interface UpdateContactDto extends Partial<CreateContactDto> {}
+
+export interface ContactAttribute {
+  id: string;
+  contactId: string;
+  key: string;
+  value: string | null;
+  valueType: "string" | "number" | "date" | "phone" | "email";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CustomerProfile {
+  contact: any;
+  attributes: ContactAttribute[];
+  customer: {
+    first_name: string;
+    last_name: string;
+    email: string;
+    phone: string;
+    full_name: string;
+  };
+  custom: Record<string, string | null>;
+}
+
+export interface VariableResolutionResult {
+  success: boolean;
+  body: string;
+  header?: string;
+  footer?: string;
+  resolvedVariables: Record<string, string>;
+  unresolvedVariables: string[];
+  errors: Array<{
+    variable: string;
+    message: string;
+    type: "missing" | "invalid_type" | "validation_failed";
+  }>;
+}
+
+export interface VariableDefinition {
+  id: string;
+  category: string;
+  property: string;
+  displayName: string;
+  description: string | null;
+  dataType: string;
+  sourceTable: string | null;
+  sourceColumn: string | null;
+  fallbackValue: string | null;
+  isRequired: boolean;
+  isSystem: boolean;
+  isActive: boolean;
+  sortOrder: number;
+}
+
+export interface VariableDefinitionsResponse {
+  definitions: VariableDefinition[];
+  grouped: Record<string, VariableDefinition[]>;
+  categories: string[];
+}
 
 export interface UserProfileDto {
   id: number;
@@ -188,6 +248,33 @@ export const backendApi = {
     delete: (contactId: string) => apiClient.delete(`/contacts/${contactId}`),
     getByPhone: (phoneNumber: string) =>
       apiClient.get(`/contacts/phone/${phoneNumber}`),
+    // Profile endpoints
+    getProfile: (contactId: string): Promise<CustomerProfile> =>
+      apiClient.get(`/contacts/${contactId}/profile`),
+    // Attributes endpoints
+    getAttributes: (contactId: string): Promise<ContactAttribute[]> =>
+      apiClient.get(`/contacts/${contactId}/attributes`),
+    getAttribute: (contactId: string, key: string): Promise<ContactAttribute> =>
+      apiClient.get(`/contacts/${contactId}/attributes/${key}`),
+    upsertAttribute: (
+      contactId: string,
+      data: { key: string; value?: string; valueType?: string }
+    ): Promise<ContactAttribute> =>
+      apiClient.post(`/contacts/${contactId}/attributes`, data),
+    updateAttribute: (
+      contactId: string,
+      key: string,
+      data: { value?: string; valueType?: string }
+    ): Promise<ContactAttribute> =>
+      apiClient.patch(`/contacts/${contactId}/attributes/${key}`, data),
+    deleteAttribute: (contactId: string, key: string) =>
+      apiClient.delete(`/contacts/${contactId}/attributes/${key}`),
+    bulkUpsertAttributes: (
+      contactId: string,
+      data: {
+        attributes: Array<{ key: string; value?: string; valueType?: string }>;
+      }
+    ) => apiClient.post(`/contacts/${contactId}/attributes/bulk`, data),
   },
 
   // Senders endpoints
@@ -235,6 +322,32 @@ export const backendApi = {
       apiClient.post(`/templates/${templateId}/test`, data),
     getVersions: (templateId: string) =>
       apiClient.get(`/templates/${templateId}/versions`),
+    // Variable definitions
+    getVariableDefinitions: (): Promise<VariableDefinitionsResponse> =>
+      apiClient.get("/templates/variables/definitions"),
+    // Variable resolution endpoints
+    resolve: (
+      templateId: string,
+      data: {
+        locale: string;
+        contactId: string;
+        senderId?: number;
+        chatId?: string;
+        overrides?: Record<string, string>;
+      }
+    ): Promise<VariableResolutionResult> =>
+      apiClient.post(`/templates/${templateId}/resolve`, data),
+    getAutoFill: (
+      templateId: string,
+      data: {
+        locale: string;
+        contactId: string;
+        senderId?: number;
+        chatId?: string;
+      }
+    ) => apiClient.post(`/templates/${templateId}/autofill`, data),
+    validateVariables: (variables: string[]) =>
+      apiClient.post("/templates/validate-variables", { variables }),
   },
 
   // Notes endpoints

@@ -267,6 +267,7 @@
     "header": "Header (Optional)",
     "messageBody": "Message Body",
     "useVariables": "Use '{{variable_name}}' for placeholders",
+    "useVariablesHint": "Type '{{' to insert variables",
     "footer": "Footer (Optional)",
     "variables": "Variables",
     "preview": "Preview",
