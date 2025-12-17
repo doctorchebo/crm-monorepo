@@ -328,6 +328,13 @@ export default function ChatsPage() {
   const [notesPanelWidth, setNotesPanelWidth] = useState(320); // Default width in pixels
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true); // Control auto-scroll
 
+  // Infinite scroll state for loading older messages
+  const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
+  const loadOlderMessagesLockRef = useRef(false); // Prevent concurrent requests
+  const currentCursorRef = useRef<number>(0); // Track pagination cursor
+  const PAGE_SIZE = 50;
+
   // Scroll position memory
   const scrollPositionsRef = useRef<Map<string, number>>(new Map());
   const previousChatIdRef = useRef<string | null>(null);
@@ -337,8 +344,17 @@ export default function ChatsPage() {
   const [isScrollRestoring, setIsScrollRestoring] = useState(false); // Hide container during scroll restoration
   const allowScrollSaveRef = useRef(false); // Only allow scroll saves after initial load settles
 
-  // Messages cache - store messages per chat to avoid re-fetching
-  const messagesCacheRef = useRef<Map<string, Message[]>>(new Map());
+  // Messages cache - store messages per chat with pagination metadata
+  const messagesCacheRef = useRef<
+    Map<
+      string,
+      {
+        messages: Message[];
+        hasMore: boolean;
+        cursor: number;
+      }
+    >
+  >(new Map());
 
   // Media preview modal state
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
@@ -508,9 +524,13 @@ export default function ChatsPage() {
           Array.from(scrollPositionsRef.current.entries())
         );
 
-        // Also cache the current messages for this chat
+        // Also cache the current messages for this chat with pagination metadata
         if (messages.length > 0) {
-          messagesCacheRef.current.set(selectedChatId, [...messages]);
+          messagesCacheRef.current.set(selectedChatId, {
+            messages: [...messages],
+            hasMore: hasMoreMessages,
+            cursor: currentCursorRef.current,
+          });
           console.log(
             "CACHED",
             messages.length,
@@ -533,7 +553,7 @@ export default function ChatsPage() {
       // Clear reply state when switching chats
       setReplyingToMessage(null);
     },
-    [selectedChatId, messages]
+    [selectedChatId, messages, hasMoreMessages]
   );
 
   // Fetch templates from API
@@ -582,7 +602,94 @@ export default function ChatsPage() {
     };
   }, []);
 
+  /**
+   * Load older messages when user scrolls to top
+   * Preserves scroll position after prepending older messages
+   */
+  const loadOlderMessages = useCallback(async () => {
+    if (
+      !selectedChatId ||
+      !hasMoreMessages ||
+      isLoadingOlderMessages ||
+      loadOlderMessagesLockRef.current
+    ) {
+      return;
+    }
+
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    // Set lock to prevent concurrent requests
+    loadOlderMessagesLockRef.current = true;
+    setIsLoadingOlderMessages(true);
+
+    // Capture scroll position before loading
+    const previousScrollHeight = container.scrollHeight;
+    const previousScrollTop = container.scrollTop;
+
+    try {
+      const response = await backendApi.whatsapp.getChatMessages(
+        selectedChatId,
+        currentCursorRef.current,
+        PAGE_SIZE
+      );
+
+      if (!response.messages || response.messages.length === 0) {
+        setHasMoreMessages(false);
+        return;
+      }
+
+      // Sort older messages by timestamp ascending
+      const sortedOlderMessages = [...response.messages].sort(
+        (a, b) =>
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      );
+
+      // Prepend older messages to existing messages
+      setMessages((prevMessages) => {
+        // Deduplicate by messageId
+        const existingIds = new Set(prevMessages.map((m) => m.messageId));
+        const newMessages = sortedOlderMessages.filter(
+          (m) => !existingIds.has(m.messageId)
+        );
+
+        // Combine: older messages first, then existing messages
+        const combined = [...newMessages, ...prevMessages];
+
+        // Update cache with combined messages
+        const cached = messagesCacheRef.current.get(selectedChatId);
+        messagesCacheRef.current.set(selectedChatId, {
+          messages: combined,
+          hasMore: response.hasMore,
+          cursor: response.nextCursor,
+        });
+
+        return combined;
+      });
+
+      // Update pagination state
+      setHasMoreMessages(response.hasMore);
+      currentCursorRef.current = response.nextCursor;
+
+      // Restore scroll position after React re-renders
+      // Use requestAnimationFrame to wait for DOM update
+      requestAnimationFrame(() => {
+        if (container) {
+          const newScrollHeight = container.scrollHeight;
+          const scrollDifference = newScrollHeight - previousScrollHeight;
+          container.scrollTop = previousScrollTop + scrollDifference;
+        }
+      });
+    } catch (err) {
+      console.error("Error loading older messages:", err);
+    } finally {
+      setIsLoadingOlderMessages(false);
+      loadOlderMessagesLockRef.current = false;
+    }
+  }, [selectedChatId, hasMoreMessages, isLoadingOlderMessages]);
+
   // Handle scroll position tracking to disable auto-scroll when user scrolls up
+  // Also triggers loading older messages when scrolling to top
   useEffect(() => {
     const messagesContainer = messagesContainerRef.current;
     if (!messagesContainer) return;
@@ -597,6 +704,19 @@ export default function ChatsPage() {
       // Clear new messages indicator when user scrolls to bottom
       if (isAtBottom) {
         setHasNewMessages(false);
+      }
+
+      // Check if user scrolled to top - trigger loading older messages
+      const scrollTop = messagesContainer.scrollTop;
+      const threshold = 100; // pixels from top to trigger load
+      if (
+        scrollTop < threshold &&
+        hasMoreMessages &&
+        !isLoadingOlderMessages &&
+        !loadOlderMessagesLockRef.current &&
+        !isTransitioningRef.current
+      ) {
+        loadOlderMessages();
       }
 
       // Only save scroll position after initial load has settled
@@ -622,7 +742,12 @@ export default function ChatsPage() {
       messagesContainer.removeEventListener("scroll", debouncedHandleScroll);
       clearTimeout(scrollTimeout);
     };
-  }, [selectedChatId]);
+  }, [
+    selectedChatId,
+    hasMoreMessages,
+    isLoadingOlderMessages,
+    loadOlderMessages,
+  ]);
 
   // Handle chat switch - reset initial load and save last scroll position
   useEffect(() => {
@@ -638,6 +763,12 @@ export default function ChatsPage() {
         "scrollPositionsRef at switch:",
         Array.from(scrollPositionsRef.current.entries())
       );
+
+      // Reset infinite scroll state for new chat
+      setHasMoreMessages(true);
+      setIsLoadingOlderMessages(false);
+      loadOlderMessagesLockRef.current = false;
+      currentCursorRef.current = 0;
 
       // Mark that we're transitioning - this prevents scroll effects from firing
       isTransitioningRef.current = true;
@@ -928,30 +1059,32 @@ export default function ChatsPage() {
     if (!selectedChatId) return;
 
     // Check if we have cached messages for this chat
-    const cachedMessages = messagesCacheRef.current.get(selectedChatId);
+    const cachedData = messagesCacheRef.current.get(selectedChatId);
     const savedScrollPosition = scrollPositionsRef.current.get(selectedChatId);
 
     console.log("=== FETCH MESSAGES EFFECT ===");
     console.log("selectedChatId:", selectedChatId);
-    console.log("cachedMessages:", cachedMessages?.length ?? "none");
+    console.log("cachedMessages:", cachedData?.messages?.length ?? "none");
     console.log("savedScrollPosition:", savedScrollPosition);
     console.log(
       "scrollPositionsRef contents:",
       Array.from(scrollPositionsRef.current.entries())
     );
 
-    if (cachedMessages && cachedMessages.length > 0) {
+    if (cachedData && cachedData.messages.length > 0) {
       // Use cached messages - this means images are already in browser cache
       console.log(
         "Using cached messages for",
         selectedChatId,
         "count:",
-        cachedMessages.length,
+        cachedData.messages.length,
         "restoring scroll to:",
         savedScrollPosition
       );
-      setMessages(cachedMessages);
-      setMessageCount(cachedMessages.length);
+      setMessages(cachedData.messages);
+      setMessageCount(cachedData.messages.length);
+      setHasMoreMessages(cachedData.hasMore);
+      currentCursorRef.current = cachedData.cursor;
 
       // We need to wait for React to actually render the messages before restoring scroll
       // Use a small timeout + ResizeObserver to detect when content is ready
@@ -1030,19 +1163,33 @@ export default function ChatsPage() {
 
       // Still fetch fresh data in background to check for new messages
       backendApi.whatsapp
-        .getChatMessages(selectedChatId, 0, 50)
-        .then((data) => {
-          if (Array.isArray(data)) {
-            const sorted = [...data].sort(
+        .getChatMessages(selectedChatId, 0, PAGE_SIZE)
+        .then((response) => {
+          if (response && response.messages) {
+            const sorted = [...response.messages].sort(
               (a, b) =>
                 new Date(a.timestamp).getTime() -
                 new Date(b.timestamp).getTime()
             );
             // Only update if there are new messages
-            if (sorted.length > cachedMessages.length) {
-              setMessages(sorted);
-              setMessageCount(sorted.length);
-              messagesCacheRef.current.set(selectedChatId, sorted);
+            if (sorted.length > cachedData.messages.length) {
+              // Merge with existing older messages that may have been loaded
+              const existingIds = new Set(sorted.map((m) => m.messageId));
+              const olderMessages = cachedData.messages.filter(
+                (m) => !existingIds.has(m.messageId)
+              );
+              const combined = [...olderMessages, ...sorted].sort(
+                (a, b) =>
+                  new Date(a.timestamp).getTime() -
+                  new Date(b.timestamp).getTime()
+              );
+              setMessages(combined);
+              setMessageCount(combined.length);
+              messagesCacheRef.current.set(selectedChatId, {
+                messages: combined,
+                hasMore: cachedData.hasMore,
+                cursor: cachedData.cursor,
+              });
             }
           }
         })
@@ -1057,19 +1204,21 @@ export default function ChatsPage() {
     const fetchMessages = async () => {
       try {
         setError(null);
-        const data = await backendApi.whatsapp.getChatMessages(
+        const response = await backendApi.whatsapp.getChatMessages(
           selectedChatId,
           0,
-          50
+          PAGE_SIZE
         );
-        if (Array.isArray(data)) {
+        if (response && response.messages) {
           // Sort by timestamp ascending (oldest first)
-          const sorted = [...data].sort(
+          const sorted = [...response.messages].sort(
             (a, b) =>
               new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
           );
           setMessages(sorted);
           setMessageCount(sorted.length);
+          setHasMoreMessages(response.hasMore);
+          currentCursorRef.current = response.nextCursor;
 
           // Restore scroll position after messages are rendered
           // Use double requestAnimationFrame to ensure DOM is fully painted
@@ -1084,7 +1233,11 @@ export default function ChatsPage() {
 
               // First visit to this chat - scroll to bottom
               // Cache messages for future visits
-              messagesCacheRef.current.set(selectedChatId, sorted);
+              messagesCacheRef.current.set(selectedChatId, {
+                messages: sorted,
+                hasMore: response.hasMore,
+                cursor: response.nextCursor,
+              });
 
               console.log("First visit to chat, scrolling to bottom");
               container.scrollTop = container.scrollHeight;
@@ -2392,6 +2545,25 @@ export default function ChatsPage() {
                       opacity: isScrollRestoring ? 0 : 1,
                     }}
                   >
+                    {/* Loading older messages indicator */}
+                    {isLoadingOlderMessages && (
+                      <div className="flex items-center justify-center py-3">
+                        <Loader className="h-5 w-5 animate-spin text-muted-foreground" />
+                        <span className="ml-2 text-sm text-muted-foreground">
+                          Loading older messages...
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Beginning of conversation indicator */}
+                    {!hasMoreMessages && messages.length > 0 && (
+                      <div className="flex items-center justify-center py-3">
+                        <div className="text-xs text-muted-foreground bg-muted/50 px-3 py-1.5 rounded-full">
+                          Beginning of conversation
+                        </div>
+                      </div>
+                    )}
+
                     {messages.length === 0 ? (
                       <div className="flex items-center justify-center h-full">
                         <p className="text-muted-foreground">No messages yet</p>

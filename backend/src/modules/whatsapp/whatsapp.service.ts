@@ -1677,22 +1677,48 @@ export class WhatsAppService {
   }
 
   /**
-   * Get messages for a specific chat
+   * Get messages for a specific chat with pagination metadata
    */
   async getChatMessages(
     chatId: string,
     skip: number = 0,
     take: number = 50,
-  ): Promise<Message[]> {
+  ): Promise<{
+    messages: Message[];
+    hasMore: boolean;
+    totalCount: number;
+    nextCursor: number;
+  }> {
     try {
+      // Get total count for this chat
+      const countResult = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(messages)
+        .where(eq(messages.chatId, chatId));
+      const totalCount = countResult[0]?.count || 0;
+
+      // Get messages with one extra to determine if there are more
       const chatMessages = await db.query.messages.findMany({
         where: eq(messages.chatId, chatId),
         orderBy: desc(messages.timestamp),
-        limit: take,
+        limit: take + 1,
         offset: skip,
       });
 
-      return chatMessages;
+      // Check if there are more messages beyond this batch
+      const hasMore = chatMessages.length > take;
+
+      // Remove the extra message if it exists
+      const resultMessages = hasMore
+        ? chatMessages.slice(0, take)
+        : chatMessages;
+
+      return {
+        messages: resultMessages,
+        hasMore,
+        totalCount,
+        nextCursor: skip + resultMessages.length,
+      };
     } catch (error) {
       this.logger.error(`Error retrieving chat messages: ${error.message}`);
       throw new Error(`Failed to retrieve chat messages: ${error.message}`);

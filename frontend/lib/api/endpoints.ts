@@ -220,7 +220,16 @@ export const backendApi = {
     getMessages: () => apiClient.get("/whatsapp/messages"),
     getChats: (skip?: number, take?: number) =>
       apiClient.get(`/whatsapp/chats?skip=${skip || 0}&take=${take || 20}`),
-    getChatMessages: (chatId: string, skip?: number, take?: number) =>
+    getChatMessages: (
+      chatId: string,
+      skip?: number,
+      take?: number
+    ): Promise<{
+      messages: any[];
+      hasMore: boolean;
+      totalCount: number;
+      nextCursor: number;
+    }> =>
       apiClient.get(
         `/whatsapp/chats/${chatId}/messages?skip=${skip || 0}&take=${
           take || 50
