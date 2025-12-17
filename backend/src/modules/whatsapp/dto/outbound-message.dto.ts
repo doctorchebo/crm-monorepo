@@ -34,6 +34,10 @@ export class OutboundMessageDto {
   @IsOptional()
   mediaUrl?: string;
 
+  @IsString()
+  @IsOptional()
+  replyToMessageId?: string; // Message ID to reply to (for reply messages)
+
   @IsArray()
   @IsOptional()
   attachments?: Array<{

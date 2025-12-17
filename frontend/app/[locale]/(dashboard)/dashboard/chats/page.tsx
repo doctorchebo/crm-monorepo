@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  ChatMessageInput,
+  ChatMessageInputRef,
+} from "@/components/chat-message-input";
 import { ChatsSenderSection } from "@/components/chats-sender-section";
 import { ContactMessageBubble } from "@/components/contacts/contact-message-bubble";
 import { DeleteMessageDialog } from "@/components/delete-message-dialog";
@@ -25,10 +29,11 @@ import {
   PendingUploadGroup,
 } from "@/components/media/pending-upload-bubble";
 import { MessageActionsMenu } from "@/components/message-actions-menu";
+import { QuotedMessage } from "@/components/quoted-message";
+import { ReplyBanner } from "@/components/reply-banner";
 import { Button } from "@/components/ui/button";
 import { ChatSidebar } from "@/components/ui/chat-sidebar";
 import { Input } from "@/components/ui/input";
-import { MessageInput } from "@/components/ui/message-input";
 import { MessageText } from "@/components/ui/message-text";
 import { VideoPreviewPlayer } from "@/components/ui/video-preview-player";
 import { WhatsAppStatusIcon } from "@/components/whatsapp-status-icon";
@@ -47,10 +52,16 @@ import {
   ContactToSend,
   ReceivedContact,
 } from "@/lib/types/contact-message.types";
-import { ArrowDown, Loader, MessageSquare, Send } from "lucide-react";
+import { ArrowDown, Loader, MessageSquare } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, {
+  startTransition,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import useSWR from "swr";
 
 interface Template {
@@ -80,6 +91,21 @@ interface Chat {
   businessPhone?: string;
 }
 
+interface ReplyPreview {
+  messageId: string;
+  senderType: "customer" | "agent";
+  senderName: string;
+  type: "text" | "image" | "video" | "audio" | "document" | "contacts";
+  text?: string;
+  media?: {
+    url?: string;
+    mimeType: string;
+    thumbnailUrl?: string;
+    fileName?: string;
+  };
+  unavailable?: boolean;
+}
+
 interface Message {
   id?: number;
   messageId: string;
@@ -97,6 +123,8 @@ interface Message {
   isDeleted?: boolean;
   deletedAt?: string;
   editedAt?: string;
+  replyToMessageId?: string | null;
+  replyPreview?: ReplyPreview | null;
 }
 
 interface InboundMessage {
@@ -110,6 +138,8 @@ interface InboundMessage {
     type: string;
     mediaId: string;
   }>;
+  replyToMessageId?: string;
+  replyPreview?: ReplyPreview;
 }
 
 /**
@@ -265,6 +295,7 @@ export default function ChatsPage() {
   const containerRef = useRef<HTMLDivElement>(null);
   const separatorRef = useRef<HTMLDivElement>(null);
   const scrollControllerRef = useRef<ScrollController | null>(null);
+  const messageInputRef = useRef<ChatMessageInputRef>(null);
 
   // Protect this route - redirect to login if token is missing or expired
   useAuthProtection();
@@ -286,7 +317,6 @@ export default function ChatsPage() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [senders, setSenders] = useState<any[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [messageInput, setMessageInput] = useState("");
   const [templateInput, setTemplateInput] = useState("");
   const [templateSearch, setTemplateSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -375,9 +405,89 @@ export default function ChatsPage() {
   const [allContacts, setAllContacts] = useState<ContactToSend[]>([]);
   const [contactsLoading, setContactsLoading] = useState(false);
 
+  // Reply state
+  const [replyingToMessage, setReplyingToMessage] = useState<Message | null>(
+    null
+  );
+  const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
   // Handler for playing video in preview player
   const handleVideoPlay = useCallback((videoId: string, url: string) => {
     setVideoPreview({ videoId, url });
+  }, []);
+
+  // Handler for replying to a message - accepts messageId and looks up the message
+  const handleReplyById = useCallback(
+    (messageId: string) => {
+      const message = messages.find((m) => m.messageId === messageId);
+      if (!message || message.isDeleted) return;
+
+      // Use startTransition to mark this as a non-urgent update
+      // This allows React to keep the UI responsive during re-render
+      startTransition(() => {
+        setReplyingToMessage(message);
+      });
+
+      // Focus the input with a small delay to let the dropdown close
+      setTimeout(() => {
+        messageInputRef.current?.focus();
+      }, 0);
+    },
+    [messages]
+  );
+
+  // Handler for download - accepts messageId and looks up the message
+  const handleDownloadById = useCallback(
+    (messageId: string) => {
+      const message = messages.find((m) => m.messageId === messageId);
+      if (!message?.attachments?.length) return;
+
+      const downloadableAttachments = message.attachments.filter(
+        (a) => a.type === "image" || a.type === "video"
+      );
+      if (!downloadableAttachments.length) return;
+
+      setCurrentMessageId(messageId);
+      setCurrentMessageAttachments(downloadableAttachments);
+      setDownloadMenuPosition({
+        x: typeof window !== "undefined" ? window.innerWidth / 2 : 0,
+        y: typeof window !== "undefined" ? window.innerHeight / 2 : 0,
+      });
+      setDownloadMenuOpen(true);
+    },
+    [messages]
+  );
+
+  // Focus the message input when reply is set (backup for other entry points)
+  useEffect(() => {
+    if (replyingToMessage) {
+      messageInputRef.current?.focus();
+    }
+  }, [replyingToMessage]);
+
+  // Handler for canceling reply
+  const handleCancelReply = useCallback(() => {
+    startTransition(() => {
+      setReplyingToMessage(null);
+    });
+  }, []);
+
+  // Handler for clearing template (when user starts typing)
+  const handleTemplateUsed = useCallback(() => {
+    setTemplateInput("");
+  }, []);
+
+  // Handler for scrolling to a replied message
+  const handleScrollToMessage = useCallback((messageId: string) => {
+    const messageElement = messageRefs.current.get(messageId);
+    if (messageElement) {
+      messageElement.scrollIntoView({ behavior: "smooth", block: "center" });
+      // Highlight the message briefly
+      messageElement.classList.add("bg-primary/10", "transition-colors");
+      setTimeout(() => {
+        messageElement.classList.remove("bg-primary/10");
+      }, 1500);
+    }
   }, []);
 
   // Handler to select chat and save scroll position before switching
@@ -420,6 +530,8 @@ export default function ChatsPage() {
       }
       // Now switch to the new chat
       setSelectedChatId(chatId);
+      // Clear reply state when switching chats
+      setReplyingToMessage(null);
     },
     [selectedChatId, messages]
   );
@@ -1291,6 +1403,11 @@ export default function ChatsPage() {
           messagePayload.body = caption;
         }
 
+        // Add reply context if replying to a message
+        if (replyingToMessage?.messageId) {
+          messagePayload.replyToMessageId = replyingToMessage.messageId;
+        }
+
         // Include placeholder attachments
         messagePayload.attachments = newPendingUploads.map((upload) => ({
           id: upload.id,
@@ -1409,6 +1526,9 @@ export default function ChatsPage() {
           setPendingMediaUploads([]);
           setPendingCaption("");
         }, 500);
+
+        // Clear reply state after sending media
+        setReplyingToMessage(null);
       } catch (err) {
         console.error("Error sending media:", err);
         setError("Failed to send media");
@@ -1417,7 +1537,7 @@ export default function ChatsPage() {
         setPendingCaption("");
       }
     },
-    [stagedFiles, selectedChatId, chats]
+    [stagedFiles, selectedChatId, chats, replyingToMessage]
   );
 
   // Handle "Add More" from staging modal
@@ -1425,58 +1545,69 @@ export default function ChatsPage() {
     addMoreInputRef.current?.click();
   }, []);
 
-  const handleSendMessage = async () => {
-    if ((!messageInput.trim() && !templateInput.trim()) || !selectedChatId)
-      return;
+  // Callback for sending a message - receives the message text from the input component
+  const handleSendMessage = useCallback(
+    async (messageText: string) => {
+      if (!messageText.trim() || !selectedChatId) return;
 
-    try {
-      setError(null);
-      const selectedChat = chats.find((c) => c.chatId === selectedChatId);
-      if (!selectedChat) return;
+      try {
+        setError(null);
+        const selectedChat = chats.find((c) => c.chatId === selectedChatId);
+        if (!selectedChat) return;
 
-      let messagePayload: any = {
-        to: selectedChat.participantPhone,
-        senderId: selectedChat.senderId,
-      };
+        const messagePayload: any = {
+          to: selectedChat.participantPhone,
+          senderId: selectedChat.senderId,
+          body: messageText,
+        };
 
-      // Use template content if available, otherwise use free-form message
-      if (templateInput.trim()) {
-        messagePayload.body = templateInput;
-      } else if (messageInput.trim()) {
-        messagePayload.body = messageInput;
-      }
+        // Add reply context if replying to a message
+        if (replyingToMessage?.messageId) {
+          messagePayload.replyToMessageId = replyingToMessage.messageId;
+        }
 
-      // Send text message
-      await backendApi.whatsapp.sendMessage(messagePayload);
+        // Send text message
+        await backendApi.whatsapp.sendMessage(messagePayload);
 
-      setMessageInput("");
-      setTemplateInput("");
+        setTemplateInput("");
+        setReplyingToMessage(null); // Clear reply state after sending
 
-      // Refresh messages
-      const data = await backendApi.whatsapp.getChatMessages(
-        selectedChatId,
-        0,
-        50
-      );
-      if (Array.isArray(data)) {
-        const sorted = [...data].sort(
-          (a, b) =>
-            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        // Refresh messages
+        const data = await backendApi.whatsapp.getChatMessages(
+          selectedChatId,
+          0,
+          50
         );
-        setMessages(sorted);
-        setMessageCount(sorted.length);
-        // Re-enable auto-scroll when a message is sent so it scrolls to the new message
-        setShouldAutoScroll(true);
-        // Explicitly scroll to bottom with smooth animation
-        setTimeout(() => {
-          scrollControllerRef.current?.scrollToBottom(true);
-        }, 0);
+        if (Array.isArray(data)) {
+          const sorted = [...data].sort(
+            (a, b) =>
+              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+          );
+          setMessages(sorted);
+          setMessageCount(sorted.length);
+          // Re-enable auto-scroll when a message is sent so it scrolls to the new message
+          setShouldAutoScroll(true);
+          // Explicitly scroll to bottom with smooth animation after DOM updates
+          // Use requestAnimationFrame to ensure DOM has updated
+          requestAnimationFrame(() => {
+            setTimeout(() => {
+              const container = messagesContainerRef.current;
+              if (container) {
+                container.scrollTo({
+                  top: container.scrollHeight,
+                  behavior: "smooth",
+                });
+              }
+            }, 50);
+          });
+        }
+      } catch (err) {
+        console.error("Error sending message:", err);
+        setError("Failed to send message");
       }
-    } catch (err) {
-      console.error("Error sending message:", err);
-      setError("Failed to send message");
-    }
-  };
+    },
+    [selectedChatId, chats, replyingToMessage]
+  );
 
   const handleAddNote = async (noteText: string, messageId?: string) => {
     if (!selectedChatId) return;
@@ -1892,13 +2023,6 @@ export default function ChatsPage() {
   // END CONTACT HANDLERS
   // ==========================================
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
-    }
-  };
-
   // Handle separator drag to resize notes panel
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -2087,7 +2211,11 @@ export default function ChatsPage() {
     };
   }, [downloadMenuOpen]);
 
-  const selectedChat = chats.find((c) => c.chatId === selectedChatId) || null;
+  // Memoize selectedChat to avoid redundant .find() calls during render
+  const selectedChat = React.useMemo(
+    () => chats.find((c) => c.chatId === selectedChatId) || null,
+    [chats, selectedChatId]
+  );
 
   // Group consecutive outbound media messages that were sent within 2 seconds
   // This creates WhatsApp-like grouped media bubbles
@@ -2258,7 +2386,7 @@ export default function ChatsPage() {
                 <div className="flex-1 flex flex-col overflow-hidden min-h-0 relative">
                   <div
                     ref={messagesContainerRef}
-                    className="flex-1 overflow-y-auto p-3 space-y-2 min-h-0 group"
+                    className="flex-1 overflow-y-auto p-3 space-y-2 min-h-0"
                     style={{
                       maxHeight: "calc(100vh - 420px)",
                       opacity: isScrollRestoring ? 0 : 1,
@@ -2325,6 +2453,7 @@ export default function ChatsPage() {
                                   contacts={contacts}
                                   isOutbound={isOutbound}
                                   timestamp={message.timestamp}
+                                  messageId={message.messageId}
                                   status={message.status}
                                   deliveredAt={message.deliveredAt}
                                   readAt={message.readAt}
@@ -2332,6 +2461,10 @@ export default function ChatsPage() {
                                     handleViewAllContacts(contacts)
                                   }
                                   onStartChat={handleStartChatWithContact}
+                                  onReply={handleReplyById}
+                                  onDelete={
+                                    isOutbound ? handleDeleteMessage : undefined
+                                  }
                                 />
                               );
                             }
@@ -2340,6 +2473,14 @@ export default function ChatsPage() {
                           return (
                             <div
                               key={message.messageId || message.id}
+                              ref={(el) => {
+                                if (el && message.messageId) {
+                                  messageRefs.current.set(
+                                    message.messageId,
+                                    el
+                                  );
+                                }
+                              }}
                               className={`flex ${
                                 isOutbound ? "justify-end" : "justify-start"
                               }`}
@@ -2360,53 +2501,28 @@ export default function ChatsPage() {
                                 }`}
                               >
                                 {/* Chevron positioned in top-right corner - visible on hover */}
-                                {/* Show for messages with media (images/videos), and for outbound text messages */}
-                                {!isDeleted &&
-                                  (message.attachments?.some(
-                                    (a) =>
-                                      a.type === "image" || a.type === "video"
-                                  ) ||
-                                    isOutbound) && (
-                                    <div className="absolute -top-1 -right-1 opacity-0 group-hover:opacity-100 transition-opacity z-20">
-                                      <MessageActionsMenu
-                                        messageId={message.messageId}
-                                        messageTimestamp={message.timestamp}
-                                        isOutbound={isOutbound}
-                                        onDelete={
-                                          isOutbound
-                                            ? handleDeleteMessage
-                                            : undefined
-                                        }
-                                        onDownload={
-                                          message.attachments?.some(
-                                            (a) =>
-                                              a.type === "image" ||
-                                              a.type === "video"
-                                          )
-                                            ? () =>
-                                                handleShowDownloadMenu(
-                                                  message.messageId ||
-                                                    message.id?.toString() ||
-                                                    "",
-                                                  message.attachments || [],
-                                                  {
-                                                    x:
-                                                      typeof window !==
-                                                      "undefined"
-                                                        ? window.innerWidth / 2
-                                                        : 0,
-                                                    y:
-                                                      typeof window !==
-                                                      "undefined"
-                                                        ? window.innerHeight / 2
-                                                        : 0,
-                                                  }
-                                                )
-                                            : undefined
-                                        }
-                                      />
-                                    </div>
-                                  )}
+                                {/* Show for all messages, appears only on hover */}
+                                {!isDeleted && (
+                                  <div className="absolute -top-1 -right-1 opacity-0 group-hover:opacity-100 transition-opacity z-20">
+                                    <MessageActionsMenu
+                                      messageId={message.messageId}
+                                      messageTimestamp={message.timestamp}
+                                      isOutbound={isOutbound}
+                                      hasDownloadableMedia={message.attachments?.some(
+                                        (a) =>
+                                          a.type === "image" ||
+                                          a.type === "video"
+                                      )}
+                                      onReply={handleReplyById}
+                                      onDelete={
+                                        isOutbound
+                                          ? handleDeleteMessage
+                                          : undefined
+                                      }
+                                      onDownload={handleDownloadById}
+                                    />
+                                  </div>
+                                )}
 
                                 {isDeleted ? (
                                   <p className="text-xs italic opacity-60">
@@ -2414,6 +2530,35 @@ export default function ChatsPage() {
                                   </p>
                                 ) : (
                                   <>
+                                    {/* Quoted message block for replies */}
+                                    {message.replyPreview && (
+                                      <QuotedMessage
+                                        replyPreview={{
+                                          ...message.replyPreview,
+                                          // Override senderName for inbound messages with the chat's participant name
+                                          senderName:
+                                            message.replyPreview.senderType ===
+                                            "customer"
+                                              ? selectedChat?.participantName ||
+                                                message.replyPreview.senderName
+                                              : message.replyPreview.senderName,
+                                        }}
+                                        originalMessageId={
+                                          message.replyPreview.messageId
+                                        }
+                                        isOutbound={isOutbound}
+                                        onClick={() => {
+                                          if (
+                                            message.replyPreview?.messageId &&
+                                            !message.replyPreview?.unavailable
+                                          ) {
+                                            handleScrollToMessage(
+                                              message.replyPreview.messageId
+                                            );
+                                          }
+                                        }}
+                                      />
+                                    )}
                                     {/* Display attachments first, then text below */}
                                     {message.attachments &&
                                       message.attachments.length > 0 && (
@@ -2615,71 +2760,92 @@ export default function ChatsPage() {
                   </div>
 
                   {/* Input Area - WhatsApp Style */}
-                  <div className="border-t p-3 flex-shrink-0">
+                  <div className="border-t flex-shrink-0">
+                    {/* Reply Banner */}
+                    {replyingToMessage && (
+                      <ReplyBanner
+                        replyPreview={{
+                          messageId: replyingToMessage.messageId,
+                          senderType:
+                            replyingToMessage.direction === "outbound"
+                              ? "agent"
+                              : "customer",
+                          senderName:
+                            replyingToMessage.direction === "outbound"
+                              ? "You" // This value is ignored - ReplyBanner uses t("you") for agent messages
+                              : selectedChat?.participantName ||
+                                selectedChat?.participantPhone ||
+                                replyingToMessage.sender,
+                          type: replyingToMessage.type as
+                            | "text"
+                            | "image"
+                            | "video"
+                            | "audio"
+                            | "document"
+                            | "contacts",
+                          text: replyingToMessage.text || undefined,
+                          media: replyingToMessage.attachments?.[0]
+                            ? {
+                                mimeType:
+                                  replyingToMessage.attachments[0].mimeType ||
+                                  "application/octet-stream",
+                                thumbnailUrl:
+                                  replyingToMessage.attachments[0]
+                                    .thumbnailKey ||
+                                  replyingToMessage.attachments[0].s3Key,
+                                fileName:
+                                  replyingToMessage.attachments[0].fileName,
+                              }
+                            : undefined,
+                        }}
+                        messageId={replyingToMessage.messageId}
+                        attachmentId={replyingToMessage.attachments?.[0]?.id}
+                        attachment={replyingToMessage.attachments?.[0]}
+                        onCancel={handleCancelReply}
+                      />
+                    )}
                     {/* Hidden input for "Add More" in staging modal */}
-                    <input
-                      ref={addMoreInputRef}
-                      type="file"
-                      multiple
-                      accept={
-                        currentAttachmentType === "photos-videos"
-                          ? "image/*,video/*"
-                          : currentAttachmentType === "document"
-                          ? "application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/plain,audio/*"
-                          : "*/*"
-                      }
-                      onChange={(e) => {
-                        const files = Array.from(e.target.files || []);
-                        if (files.length > 0) {
-                          handleFilesSelected(files, currentAttachmentType);
+                    <div className="p-3">
+                      <input
+                        ref={addMoreInputRef}
+                        type="file"
+                        multiple
+                        accept={
+                          currentAttachmentType === "photos-videos"
+                            ? "image/*,video/*"
+                            : currentAttachmentType === "document"
+                            ? "application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/plain,audio/*"
+                            : "*/*"
                         }
-                        e.target.value = "";
-                      }}
-                      className="hidden"
-                    />
+                        onChange={(e) => {
+                          const files = Array.from(e.target.files || []);
+                          if (files.length > 0) {
+                            handleFilesSelected(files, currentAttachmentType);
+                          }
+                          e.target.value = "";
+                        }}
+                        className="hidden"
+                      />
 
-                    {/* Message Input with Attachment Button Inside */}
-                    <MessageInput
-                      value={templateInput || messageInput}
-                      onChange={(value) => {
-                        if (templateInput) {
-                          setTemplateInput("");
+                      {/* Message Input with Attachment Button Inside */}
+                      <ChatMessageInput
+                        ref={messageInputRef}
+                        onSend={handleSendMessage}
+                        placeholder={t("typeMessageOrUseTemplates")}
+                        disabled={isUploading || pendingMediaUploads.length > 0}
+                        templateValue={templateInput}
+                        onTemplateUsed={handleTemplateUsed}
+                        leftElement={
+                          <AttachmentMenu
+                            onFilesSelected={handleFilesSelected}
+                            onContactsClick={handleContactsClick}
+                            disabled={
+                              isUploading || pendingMediaUploads.length > 0
+                            }
+                          />
                         }
-                        setMessageInput(value);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey) {
-                          e.preventDefault();
-                          handleSendMessage();
-                        }
-                      }}
-                      placeholder={t("typeMessageOrUseTemplates")}
-                      disabled={isUploading || pendingMediaUploads.length > 0}
-                      maxRows={5}
-                      leftElement={
-                        <AttachmentMenu
-                          onFilesSelected={handleFilesSelected}
-                          onContactsClick={handleContactsClick}
-                          disabled={
-                            isUploading || pendingMediaUploads.length > 0
-                          }
-                        />
-                      }
-                      rightElement={
-                        <Button
-                          onClick={handleSendMessage}
-                          disabled={
-                            (!messageInput.trim() && !templateInput.trim()) ||
-                            isUploading ||
-                            pendingMediaUploads.length > 0
-                          }
-                          size="sm"
-                          className="h-8"
-                        >
-                          <Send className="h-4 w-4" />
-                        </Button>
-                      }
-                    />
+                      />
+                    </div>
                   </div>
 
                   {/* Media Staging Panel (positioned within messages area) */}

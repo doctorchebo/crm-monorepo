@@ -46,6 +46,21 @@ export interface InboundMessage {
     type: string;
     mediaId: string;
   }>;
+  replyToMessageId?: string;
+  replyPreview?: {
+    messageId: string;
+    senderType: "customer" | "agent";
+    senderName: string;
+    type: "text" | "image" | "video" | "audio" | "document" | "contacts";
+    text?: string;
+    media?: {
+      url?: string;
+      mimeType: string;
+      thumbnailUrl?: string;
+      fileName?: string;
+    };
+    unavailable?: boolean;
+  };
 }
 
 /**

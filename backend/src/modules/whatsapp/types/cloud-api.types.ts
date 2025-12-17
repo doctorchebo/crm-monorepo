@@ -144,6 +144,15 @@ export interface CloudAPIInboundMessage {
     | 'contacts'
     | 'reaction'
     | 'unknown';
+  // Reply context - present when this message is a reply to another message
+  context?: {
+    from?: string; // Phone number of sender of original message
+    id?: string; // Message ID (wamid) of the message being replied to
+    referred_product?: {
+      catalog_id: string;
+      product_retailer_id: string;
+    };
+  };
   text?: {
     body: string;
   };
@@ -382,4 +391,20 @@ export interface NormalizedCloudAPIMessage {
   timestamp: Date;
   waPhoneNumberId?: string;
   conversationId?: string;
+  // Reply context for inbound messages that are replies
+  replyToMessageId?: string;
+  replyPreview?: {
+    messageId: string;
+    senderType: 'customer' | 'agent';
+    senderName: string;
+    type: 'text' | 'image' | 'video' | 'audio' | 'document' | 'contacts';
+    text?: string;
+    media?: {
+      url?: string;
+      mimeType: string;
+      thumbnailUrl?: string;
+      fileName?: string;
+    };
+    unavailable?: boolean;
+  };
 }

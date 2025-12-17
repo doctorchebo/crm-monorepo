@@ -180,8 +180,12 @@ export const backendApi = {
 
   // WhatsApp endpoints
   whatsapp: {
-    sendMessage: (data: { to: string; body: string; senderId?: number }) =>
-      apiClient.post("/whatsapp/send", data),
+    sendMessage: (data: {
+      to: string;
+      body: string;
+      senderId?: number;
+      replyToMessageId?: string;
+    }) => apiClient.post("/whatsapp/send", data),
     sendMedia: (data: {
       to: string;
       mediaType: "image" | "video" | "audio" | "document";

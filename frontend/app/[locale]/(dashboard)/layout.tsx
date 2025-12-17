@@ -10,46 +10,50 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { User } from "@/lib/db/schema";
+import { backendApi } from "@/lib/api/endpoints";
+import { TokenManager } from "@/lib/auth/token-manager";
 import { CircleIcon, Home, LogOut } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Suspense } from "react";
-import useSWR from "swr";
-import { signOut } from "../(login)/actions";
+import { Suspense, useEffect, useState } from "react";
 import { logoutClient } from "../(login)/logout";
 
-const fetcher = async (url: string) => {
-  const res = await fetch(url);
-  if (res.status === 401) {
-    return null;
-  }
-  if (!res.ok) {
-    throw new Error("Failed to fetch");
-  }
-  return res.json();
-};
+interface UserData {
+  id: number;
+  email: string;
+  name?: string;
+}
 
 function UserMenu() {
   const t = useTranslations("header");
-  const { data: user, mutate: mutateUser } = useSWR<User | null>(
-    "/api/user",
-    fetcher,
-    {
-      revalidateOnFocus: true,
-      revalidateOnReconnect: true,
-    }
-  );
+  const [user, setUser] = useState<UserData | null>(null);
   const router = useRouter();
+
+  // Fetch user from backend API on mount
+  useEffect(() => {
+    const fetchUser = async () => {
+      if (!TokenManager.isAccessTokenValid()) {
+        setUser(null);
+        return;
+      }
+      try {
+        const userData = await backendApi.user.getProfile();
+        setUser(userData);
+      } catch (error) {
+        console.error("Failed to fetch user:", error);
+        setUser(null);
+      }
+    };
+
+    fetchUser();
+  }, []);
 
   async function handleSignOut() {
     try {
-      await signOut();
       // Clean up JWT token from client-side cookies
       logoutClient();
-      // Clear the user data immediately
-      await mutateUser(undefined, false);
+      setUser(null);
     } catch (error) {
       console.error("Sign out error:", error);
     } finally {

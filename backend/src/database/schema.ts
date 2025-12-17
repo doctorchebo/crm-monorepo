@@ -88,10 +88,14 @@ export const messages = pgTable(
     isDeleted: boolean('is_deleted').default(false), // Soft delete flag
     deletedAt: timestamp('deleted_at'), // Timestamp when message was deleted
     originalText: text('original_text'), // Original text before first edit (for audit trail)
+    // Reply support fields
+    replyToMessageId: varchar('reply_to_message_id'), // References the message_id of the original message being replied to
+    replyPreview: jsonb('reply_preview'), // Cached snapshot of the original message for fast rendering
   },
   (table) => ({
     messageIdUnique: unique().on(table.messageId),
     isDeletedIndex: index().on(table.isDeleted), // Index for efficient queries on deleted messages
+    replyToMessageIdIndex: index().on(table.replyToMessageId), // Index for reply lookups
   }),
 );
 

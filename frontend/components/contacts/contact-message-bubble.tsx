@@ -19,14 +19,19 @@ import { WhatsAppStatusIcon } from "@/components/whatsapp-status-icon";
 import { ReceivedContact } from "@/lib/types/contact-message.types";
 import { cn } from "@/lib/utils";
 import { Eye, User } from "lucide-react";
+import { memo } from "react";
+import { MessageActionsMenu } from "../message-actions-menu";
 
 interface ContactMessageBubbleProps {
   contacts: ReceivedContact[];
   isOutbound: boolean;
   timestamp: string;
+  messageId: string;
   status?: "pending" | "sent" | "delivered" | "read" | "failed";
   onViewAll: () => void;
   onStartChat: (contact: ReceivedContact) => void;
+  onReply?: (messageId: string) => void;
+  onDelete?: (messageId: string) => void;
   deliveredAt?: string;
   readAt?: string;
 }
@@ -56,13 +61,16 @@ function getPhoneNumber(contact: ReceivedContact): string {
   return contact.phones?.[0]?.phone || contact.phones?.[0]?.wa_id || "";
 }
 
-export function ContactMessageBubble({
+export const ContactMessageBubble = memo(function ContactMessageBubble({
   contacts,
   isOutbound,
   timestamp,
+  messageId,
   status = "sent",
   onViewAll,
   onStartChat,
+  onReply,
+  onDelete,
   deliveredAt,
   readAt,
 }: ContactMessageBubbleProps) {
@@ -82,10 +90,21 @@ export function ContactMessageBubble({
       <div className={cn("flex", isOutbound ? "justify-end" : "justify-start")}>
         <div
           className={cn(
-            "rounded-lg overflow-hidden max-w-xs",
+            "group relative rounded-lg overflow-hidden max-w-xs",
             isOutbound ? "bg-primary text-primary-foreground" : "bg-muted"
           )}
         >
+          {/* Chevron positioned in top-right corner - visible on hover */}
+          <div className="absolute -top-1 -right-1 opacity-0 group-hover:opacity-100 transition-opacity z-20">
+            <MessageActionsMenu
+              messageId={messageId}
+              messageTimestamp={timestamp}
+              isOutbound={isOutbound}
+              onReply={onReply}
+              onDelete={isOutbound && onDelete ? onDelete : undefined}
+            />
+          </div>
+
           {/* Contact Card */}
           <div className="p-3 flex items-center gap-3">
             <Avatar className="h-12 w-12 shrink-0">
@@ -165,10 +184,21 @@ export function ContactMessageBubble({
     <div className={cn("flex", isOutbound ? "justify-end" : "justify-start")}>
       <div
         className={cn(
-          "rounded-lg overflow-hidden max-w-xs",
+          "group relative rounded-lg overflow-hidden max-w-xs",
           isOutbound ? "bg-primary text-primary-foreground" : "bg-muted"
         )}
       >
+        {/* Chevron positioned in top-right corner - visible on hover */}
+        <div className="absolute -top-1 -right-1 opacity-0 group-hover:opacity-100 transition-opacity z-20">
+          <MessageActionsMenu
+            messageId={messageId}
+            messageTimestamp={timestamp}
+            isOutbound={isOutbound}
+            onReply={onReply}
+            onDelete={isOutbound && onDelete ? onDelete : undefined}
+          />
+        </div>
+
         {/* Contact Card with Stacked Avatars */}
         <div className="p-3 flex items-center gap-3">
           {/* Stacked Avatars */}
@@ -268,4 +298,6 @@ export function ContactMessageBubble({
       </div>
     </div>
   );
-}
+});
+
+ContactMessageBubble.displayName = "ContactMessageBubble";

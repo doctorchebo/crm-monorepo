@@ -25,7 +25,7 @@ import {
   X,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { ThumbnailSkeleton } from "./thumbnail-skeleton";
 
 interface AttachmentDisplayProps {
@@ -741,7 +741,7 @@ interface AttachmentGalleryProps {
   isOutbound?: boolean;
 }
 
-export function AttachmentGallery({
+export const AttachmentGallery = memo(function AttachmentGallery({
   attachments,
   messageId,
   onDelete,
@@ -886,4 +886,6 @@ export function AttachmentGallery({
       )}
     </div>
   );
-}
+});
+
+AttachmentGallery.displayName = "AttachmentGallery";

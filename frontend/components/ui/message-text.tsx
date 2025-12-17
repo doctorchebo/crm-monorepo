@@ -9,7 +9,7 @@
  */
 
 import { extractUrls, URL_REGEX } from "@/lib/link-preview";
-import React, { useMemo } from "react";
+import React, { memo, useMemo } from "react";
 import { LinkPreview } from "./link-preview";
 
 interface MessageTextProps {
@@ -25,7 +25,7 @@ interface TextPart {
   content: string;
 }
 
-export function MessageText({
+export const MessageText = memo(function MessageText({
   text,
   isOutbound = false,
   showPreviews = true,
@@ -124,4 +124,6 @@ export function MessageText({
       </p>
     </div>
   );
-}
+});
+
+MessageText.displayName = "MessageText";

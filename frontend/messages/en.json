@@ -52,6 +52,7 @@
     "editMessage": "Edit",
     "deleteMessage": "Delete",
     "downloadMessage": "Download",
+    "replyMessage": "Reply",
     "messageEdited": "Edited",
     "thisMessageWasDeleted": "This message was deleted",
     "editMessageTitle": "Edit message",
@@ -66,7 +67,16 @@
     "messageSaved": "Message edited",
     "messageDeleted": "Message deleted",
     "editFailed": "Failed to edit message",
-    "deleteFailed": "Failed to delete message"
+    "deleteFailed": "Failed to delete message",
+    "you": "You",
+    "messageUnavailable": "Message unavailable",
+    "cancelReply": "Cancel reply",
+    "photo": "Photo",
+    "video": "Video",
+    "audioMessage": "Audio message",
+    "document": "Document",
+    "contact": "Contact",
+    "replyingTo": "Replying to"
   },
   "contacts": {
     "title": "Contacts",

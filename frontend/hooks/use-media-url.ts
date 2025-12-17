@@ -83,6 +83,15 @@ export function useMediaUrl(
   }, []);
 
   useEffect(() => {
+    // Skip loading if no attachmentId is provided
+    if (!attachmentId) {
+      setLoading(false);
+      setUrl(null);
+      setThumbnailUrl(null);
+      setFullUrl(null);
+      return;
+    }
+
     // Create abort controller for this effect
     abortControllerRef.current = new AbortController();
     let isMounted = true;

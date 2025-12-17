@@ -18,6 +18,7 @@ import {
   MediaMetadata,
   NormalizedCloudAPIMessage,
 } from './types/cloud-api.types';
+import { generateReplyPreview, ReplyPreview } from './types/reply.types';
 import {
   buildCloudAPIUrl,
   cleanPhoneNumber,
@@ -432,6 +433,60 @@ export class WhatsAppService {
 
       let waMessageId: string;
 
+      // Handle reply context if this is a reply
+      let replyContext: { message_id: string } | undefined;
+      let replyPreview: ReplyPreview | undefined;
+
+      if (messageDto.replyToMessageId) {
+        // Validate that the message being replied to exists and is in the same chat
+        const originalMessage = await db.query.messages.findFirst({
+          where: eq(messages.messageId, messageDto.replyToMessageId),
+        });
+
+        if (!originalMessage) {
+          this.logger.warn(
+            `Reply target message not found: ${messageDto.replyToMessageId}`,
+          );
+          // Don't fail - continue without reply context
+        } else if (originalMessage.chatId !== chatId) {
+          this.logger.warn(
+            `Cross-chat reply attempt blocked: ${messageDto.replyToMessageId}`,
+          );
+          // Don't fail - continue without reply context
+        } else {
+          // Generate reply preview from original message
+          const senderName =
+            originalMessage.direction === 'outbound'
+              ? 'You'
+              : await this.getContactNameForReply(originalMessage.sender);
+
+          replyPreview = generateReplyPreview(
+            {
+              messageId: originalMessage.messageId,
+              text: originalMessage.text,
+              type: originalMessage.type,
+              direction: originalMessage.direction as 'inbound' | 'outbound',
+              sender: originalMessage.sender,
+              attachments: originalMessage.attachments as any[],
+              isDeleted: originalMessage.isDeleted || false,
+            },
+            senderName,
+          );
+
+          // For Cloud API, we need to find the WhatsApp message ID (wamid)
+          // It could be stored in messageId directly, or in mediaUrl with 'wa:' prefix for outbound media
+          let waReplyId = originalMessage.messageId;
+          if (originalMessage.mediaUrl?.startsWith('wa:')) {
+            waReplyId = originalMessage.mediaUrl.substring(3);
+          }
+
+          replyContext = { message_id: waReplyId };
+          this.logger.log(
+            `Sending reply to message: ${messageDto.replyToMessageId} (WhatsApp ID: ${waReplyId})`,
+          );
+        }
+      }
+
       // If there are attachments, don't send a text message via Cloud API
       // The media will be sent separately via sendMedia endpoint with the caption
       // This avoids sending duplicate messages (text + document with text)
@@ -443,7 +498,7 @@ export class WhatsAppService {
         );
       } else {
         // No attachments - send text message via Cloud API
-        const message = {
+        const message: any = {
           messaging_product: 'whatsapp' as const,
           to: recipientPhone,
           type: 'text' as const,
@@ -452,6 +507,11 @@ export class WhatsAppService {
             body: messageDto.body || '',
           },
         };
+
+        // Add reply context if this is a reply
+        if (replyContext) {
+          message.context = replyContext;
+        }
 
         // Validate message
         const validation = validateCloudAPIMessage(message);
@@ -486,6 +546,8 @@ export class WhatsAppService {
         attachments: messageDto.attachments,
         userId,
         senderId,
+        replyToMessageId: messageDto.replyToMessageId,
+        replyPreview,
       });
 
       return {
@@ -493,6 +555,7 @@ export class WhatsAppService {
         messageId: waMessageId,
         to: recipientPhone,
         status: 'sent',
+        replyToMessageId: messageDto.replyToMessageId,
       };
     } catch (error) {
       this.logger.error(`Error sending message: ${error.message}`, error);
@@ -931,6 +994,63 @@ export class WhatsAppService {
           textContent = '[Unsupported message type]';
       }
 
+      // Handle reply context from incoming message
+      let replyToMessageId: string | undefined;
+      let replyPreview: ReplyPreview | undefined;
+
+      if (message.context?.id) {
+        // This is a reply - try to find the original message
+        this.logger.log(`Inbound message is a reply to: ${message.context.id}`);
+
+        // Look up original message by WhatsApp ID (could be messageId or stored in mediaUrl with 'wa:' prefix)
+        const originalMessage = await db.query.messages.findFirst({
+          where: or(
+            eq(messages.messageId, message.context.id),
+            eq(messages.mediaUrl, `wa:${message.context.id}`),
+          ),
+        });
+
+        if (originalMessage) {
+          replyToMessageId = originalMessage.messageId;
+
+          // Generate reply preview from the original message
+          const senderName =
+            originalMessage.direction === 'outbound'
+              ? 'You'
+              : await this.getContactNameForReply(originalMessage.sender);
+
+          replyPreview = generateReplyPreview(
+            {
+              messageId: originalMessage.messageId,
+              text: originalMessage.text,
+              type: originalMessage.type,
+              direction: originalMessage.direction as 'inbound' | 'outbound',
+              sender: originalMessage.sender,
+              attachments: originalMessage.attachments as any[],
+              isDeleted: originalMessage.isDeleted || false,
+            },
+            senderName,
+          );
+
+          this.logger.log(
+            `Found original message for reply: ${originalMessage.messageId}`,
+          );
+        } else {
+          // Original message not found - create unavailable preview
+          this.logger.warn(
+            `Original message not found for reply context: ${message.context.id}`,
+          );
+          replyPreview = {
+            messageId: message.context.id,
+            senderType: 'customer',
+            senderName: message.context.from || 'Unknown',
+            type: 'text',
+            text: 'Message unavailable',
+            unavailable: true,
+          };
+        }
+      }
+
       // Store inbound message
       await this.storeInboundMessage({
         waMessageId: messageId,
@@ -945,6 +1065,8 @@ export class WhatsAppService {
         status: 'delivered',
         timestamp: new Date(parseInt(message.timestamp) * 1000),
         waPhoneNumberId: businessPhone,
+        replyToMessageId,
+        replyPreview,
       });
 
       console.log('Message stored successfully:', {
@@ -995,6 +1117,9 @@ export class WhatsAppService {
           type: messageType,
           timestamp: messageTimestamp,
           attachments,
+          // Include reply data for real-time updates
+          replyToMessageId,
+          replyPreview,
         });
       }
 
@@ -1157,6 +1282,8 @@ export class WhatsAppService {
     attachments?: Array<any>;
     userId?: number;
     senderId?: number;
+    replyToMessageId?: string;
+    replyPreview?: ReplyPreview;
   }): Promise<void> {
     try {
       const now = new Date();
@@ -1175,6 +1302,9 @@ export class WhatsAppService {
         status: 'pending', // Start as pending, will update to 'sent' when Cloud API confirms
         timestamp: now,
         updatedAt: now,
+        // Reply fields
+        replyToMessageId: messageData.replyToMessageId || null,
+        replyPreview: messageData.replyPreview || null,
       });
 
       this.logger.debug('Outbound message stored', messageData.waMessageId);
@@ -1292,6 +1422,9 @@ export class WhatsAppService {
         direction: 'inbound',
         status: 'delivered',
         timestamp: messageData.timestamp,
+        // Reply fields
+        replyToMessageId: messageData.replyToMessageId || null,
+        replyPreview: messageData.replyPreview || null,
       });
 
       // Queue thumbnail generation if media was cached to S3 and supports thumbnails
@@ -1329,6 +1462,35 @@ export class WhatsAppService {
     } catch (error) {
       this.logger.error(`Error storing inbound message: ${error.message}`);
       throw error;
+    }
+  }
+
+  /**
+   * Get contact name for a phone number (for reply preview)
+   * Falls back to phone number if no contact found
+   * @private
+   */
+  private async getContactNameForReply(phoneNumber: string): Promise<string> {
+    try {
+      const contact = await db.query.contacts.findFirst({
+        where: and(
+          eq(contacts.phoneNumber, phoneNumber),
+          eq(contacts.isActive, true),
+        ),
+      });
+
+      if (contact) {
+        return contact.lastName
+          ? `${contact.firstName} ${contact.lastName}`
+          : contact.firstName;
+      }
+
+      return phoneNumber;
+    } catch (error) {
+      this.logger.warn(
+        `Error looking up contact name for ${phoneNumber}: ${error.message}`,
+      );
+      return phoneNumber;
     }
   }
 

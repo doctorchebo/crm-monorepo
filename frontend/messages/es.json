@@ -52,6 +52,7 @@
     "editMessage": "Editar",
     "deleteMessage": "Eliminar",
     "downloadMessage": "Descargar",
+    "replyMessage": "Responder",
     "messageEdited": "Editado",
     "thisMessageWasDeleted": "Este mensaje fue eliminado",
     "editMessageTitle": "Editar mensaje",
@@ -66,7 +67,16 @@
     "messageSaved": "Mensaje editado",
     "messageDeleted": "Mensaje eliminado",
     "editFailed": "No se pudo editar el mensaje",
-    "deleteFailed": "No se pudo eliminar el mensaje"
+    "deleteFailed": "No se pudo eliminar el mensaje",
+    "you": "Tú",
+    "messageUnavailable": "Mensaje no disponible",
+    "cancelReply": "Cancelar respuesta",
+    "photo": "Foto",
+    "video": "Video",
+    "audioMessage": "Mensaje de audio",
+    "document": "Documento",
+    "contact": "Contacto",
+    "replyingTo": "Respondiendo a"
   },
   "contacts": {
     "title": "Contactos",

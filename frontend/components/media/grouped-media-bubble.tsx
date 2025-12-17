@@ -10,7 +10,7 @@ import { useMediaUrl } from "@/hooks/use-media-url";
 import { mediaApi } from "@/lib/media/api";
 import { Attachment } from "@/lib/media/types";
 import { Film, Play } from "lucide-react";
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 
 interface Message {
   id?: number;
@@ -128,7 +128,7 @@ function MediaThumbnail({
   );
 }
 
-export function GroupedMediaBubble({
+export const GroupedMediaBubble = memo(function GroupedMediaBubble({
   messages,
   onImageClick,
   statusIcon,
@@ -213,4 +213,6 @@ export function GroupedMediaBubble({
       </div>
     </div>
   );
-}
+});
+
+GroupedMediaBubble.displayName = "GroupedMediaBubble";
