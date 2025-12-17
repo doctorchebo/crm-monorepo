@@ -172,6 +172,7 @@ export interface CloudAPIInboundMessage {
     mime_type: string;
     sha256: string;
     id: string;
+    voice?: boolean; // true if this is a voice message (PTT)
   };
   document?: {
     caption?: string;
@@ -349,6 +350,7 @@ export interface MediaMetadata {
   filename?: string; // For documents
   fileSize?: number;
   downloadUrl?: string; // Generated URL for secure download
+  isVoiceNote?: boolean; // For audio: true if voice note (PTT) vs file upload
 }
 
 /**

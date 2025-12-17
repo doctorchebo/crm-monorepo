@@ -62,6 +62,11 @@ export const QuotedMessage = memo(function QuotedMessage({
     const icon = getReplyMediaIcon(replyPreview.type);
     const text = replyPreview.text || "";
 
+    // If text already contains the icon (from backend), don't add it again
+    if (text && icon && text.startsWith(icon)) {
+      return truncateReplyText(text, 60);
+    }
+
     if (icon && !text) {
       switch (replyPreview.type) {
         case "image":

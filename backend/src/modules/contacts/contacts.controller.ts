@@ -16,6 +16,7 @@ import { ContactAttributesService } from './contact-attributes.service';
 import { ContactsService } from './contacts.service';
 import { CreateContactDto } from './dto/create-contact.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
+import { BulkUpsertAttributesDto, CreateContactAttributeDto, UpdateContactAttributeDto } from './dto/contact-attribute.dto';
 
 @Controller('contacts')
 @UseGuards(JwtAuthGuard)

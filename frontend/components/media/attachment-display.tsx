@@ -25,7 +25,8 @@ import {
   X,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { VoiceMessageBubble } from "../voice-message-bubble";
 import { ThumbnailSkeleton } from "./thumbnail-skeleton";
 
 interface AttachmentDisplayProps {
@@ -532,6 +533,45 @@ export function AudioAttachment({
 }
 
 /**
+ * Voice Note Attachment (WhatsApp-style PTT message)
+ * Uses the VoiceMessageBubble component with global audio playback context
+ */
+interface VoiceNoteAttachmentProps {
+  attachment: Attachment;
+  messageId: string;
+  isOutbound?: boolean;
+  senderName?: string;
+  senderAvatar?: string;
+}
+
+export function VoiceNoteAttachment({
+  attachment,
+  messageId,
+  isOutbound = false,
+  senderName,
+  senderAvatar,
+}: VoiceNoteAttachmentProps) {
+  // Use stream URL directly - browser handles caching, audio loads on-demand when user clicks play
+  // This avoids creating blob URLs that get cleaned up on component unmount and re-fetched
+  const audioUrl = useMemo(
+    () => mediaApi.getStreamUrl(messageId, attachment.id),
+    [messageId, attachment.id]
+  );
+
+  return (
+    <VoiceMessageBubble
+      audioId={`${messageId}-${attachment.id}`}
+      audioUrl={audioUrl}
+      duration={attachment.duration || 0}
+      waveformData={attachment.waveformData}
+      isOutgoing={isOutbound}
+      senderName={senderName}
+      senderAvatar={senderAvatar}
+    />
+  );
+}
+
+/**
  * Document Attachment with Thumbnail Preview (WhatsApp-style)
  * Shows thumbnail of first page for PDFs, with file info below
  */
@@ -579,8 +619,20 @@ export function DocumentAttachment({
       "text/csv": "CSV",
       "application/zip": "ZIP",
       "application/x-rar-compressed": "RAR",
+      // Audio formats
+      "audio/mpeg": "MP3",
+      "audio/mp3": "MP3",
+      "audio/wav": "WAV",
+      "audio/ogg": "OGG",
+      "audio/webm": "WEBM",
+      "audio/aac": "AAC",
+      "audio/m4a": "M4A",
+      "audio/x-m4a": "M4A",
+      "audio/flac": "FLAC",
     };
-    return formats[mimeType] || "FILE";
+    return (
+      formats[mimeType] || (mimeType.startsWith("audio/") ? "AUDIO" : "FILE")
+    );
   };
 
   // Get document icon based on type
@@ -593,6 +645,7 @@ export function DocumentAttachment({
       return "📽️";
     if (mimeType.includes("text")) return "📃";
     if (mimeType.includes("zip") || mimeType.includes("rar")) return "📦";
+    if (mimeType.startsWith("audio/")) return "🎵";
     return "📄";
   };
 
@@ -739,6 +792,8 @@ interface AttachmentGalleryProps {
   onShowDownloadMenu?: (position: { x: number; y: number }) => void;
   onMessageDelete?: (messageId: string) => void;
   isOutbound?: boolean;
+  senderName?: string;
+  senderAvatar?: string;
 }
 
 export const AttachmentGallery = memo(function AttachmentGallery({
@@ -749,6 +804,8 @@ export const AttachmentGallery = memo(function AttachmentGallery({
   onShowDownloadMenu,
   onMessageDelete,
   isOutbound = false,
+  senderName,
+  senderAvatar,
 }: AttachmentGalleryProps) {
   const t = useTranslations("chats");
   const galleryRef = useRef<HTMLDivElement>(null);
@@ -762,7 +819,11 @@ export const AttachmentGallery = memo(function AttachmentGallery({
   const videos = attachments.filter((a) => a.type === "video");
   const visualMedia = [...images, ...videos]; // Combined for grid display
   const audios = attachments.filter((a) => a.type === "audio");
+  const voiceNotes = audios.filter((a) => a.isVoiceNote);
+  const audioFiles = audios.filter((a) => !a.isVoiceNote); // Non-voice audio treated as documents
   const documents = attachments.filter((a) => a.type === "document");
+  // Combine regular audio files with documents - they should download on click
+  const downloadableFiles = [...documents, ...audioFiles];
 
   const displayCount = Math.min(visualMedia.length, 4);
   const extraCount = visualMedia.length - 4;
@@ -857,24 +918,26 @@ export const AttachmentGallery = memo(function AttachmentGallery({
         </div>
       )}
 
-      {/* Audio */}
-      {audios.length > 0 && (
+      {/* Voice Notes (WhatsApp-style) */}
+      {voiceNotes.length > 0 && (
         <div className="space-y-2">
-          {audios.map((attachment) => (
-            <AudioAttachment
+          {voiceNotes.map((attachment) => (
+            <VoiceNoteAttachment
               key={attachment.id}
               attachment={attachment}
               messageId={messageId}
-              onDelete={onDelete}
+              isOutbound={isOutbound}
+              senderName={senderName}
+              senderAvatar={senderAvatar}
             />
           ))}
         </div>
       )}
 
-      {/* Documents */}
-      {documents.length > 0 && (
+      {/* Documents and Audio Files (download on click) */}
+      {downloadableFiles.length > 0 && (
         <div className="space-y-2">
-          {documents.map((attachment) => (
+          {downloadableFiles.map((attachment) => (
             <DocumentAttachment
               key={attachment.id}
               attachment={attachment}

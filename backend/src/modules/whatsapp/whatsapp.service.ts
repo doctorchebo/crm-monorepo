@@ -1,8 +1,16 @@
 import { db } from '@database/db.connection';
-import { Chat, chats, Message, messages, senders } from '@database/schema';
+import {
+  Chat,
+  chats,
+  contacts,
+  Message,
+  messages,
+  senders,
+} from '@database/schema';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MetaCloudAPIConfigService } from '@shared/services/meta-cloud-api.config';
+import { S3Service } from '@shared/services/s3.service';
 import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import { ThumbnailQueueService } from '../thumbnail/thumbnail-queue.service';
 import {
@@ -10,6 +18,7 @@ import {
   ThumbnailJobData,
 } from '../thumbnail/thumbnail.types';
 import { OutboundMessageDto } from './dto/outbound-message.dto';
+import { AudioConverterService } from './services/audio-converter.service';
 import { MediaService } from './services/media.service';
 import {
   CloudAPIInboundMessage,
@@ -60,6 +69,8 @@ export class WhatsAppService {
     private metaCloudAPIConfig: MetaCloudAPIConfigService,
     private mediaService: MediaService,
     private thumbnailQueueService: ThumbnailQueueService,
+    private audioConverterService: AudioConverterService,
+    private s3Service: S3Service,
   ) {
     this.metaPhoneNumberId = this.configService.getOrThrow<string>(
       'META_PHONE_NUMBER_ID',
@@ -587,8 +598,24 @@ export class WhatsAppService {
     try {
       const cleanedPhone = cleanPhoneNumber(recipientPhone);
 
+      let finalMediaUrl = mediaUrl;
+
+      // For audio, check if conversion is needed (webm -> ogg for WhatsApp compatibility)
+      if (mediaType === 'audio' && originalMessageId) {
+        const convertedUrl = await this.convertAudioIfNeeded(
+          originalMessageId,
+          senderId,
+        );
+        if (convertedUrl) {
+          finalMediaUrl = convertedUrl;
+          this.logger.log(
+            `Audio converted for WhatsApp compatibility. Using converted URL.`,
+          );
+        }
+      }
+
       const mediaPayload: any = {
-        link: mediaUrl,
+        link: finalMediaUrl,
       };
 
       // Add caption if provided and supported
@@ -686,6 +713,118 @@ export class WhatsAppService {
     } catch (error) {
       this.logger.error(`Error sending media: ${error.message}`, error);
       throw new Error(`Failed to send media: ${error.message}`);
+    }
+  }
+
+  /**
+   * Convert audio to WhatsApp-compatible format if needed
+   * Downloads webm audio from S3, converts to ogg/opus, uploads back to S3
+   * @returns New presigned URL for converted audio, or null if no conversion needed
+   */
+  private async convertAudioIfNeeded(
+    messageId: string,
+    senderId?: number,
+  ): Promise<string | null> {
+    try {
+      // Get message to find attachment info
+      const message = await db.query.messages.findFirst({
+        where: eq(messages.messageId, messageId),
+      });
+
+      if (!message || !message.attachments) {
+        return null;
+      }
+
+      const attachments = message.attachments as any[];
+      const audioAttachment = attachments.find((a) => a.type === 'audio');
+
+      if (!audioAttachment) {
+        return null;
+      }
+
+      // Check if conversion is needed (webm format)
+      const mimeType = audioAttachment.mimeType || '';
+      if (!this.audioConverterService.needsConversion(mimeType)) {
+        this.logger.log(
+          `Audio format ${mimeType} is WhatsApp-compatible, no conversion needed`,
+        );
+        return null;
+      }
+
+      // Check if already converted (look for converted s3Key)
+      if (audioAttachment.convertedS3Key) {
+        this.logger.log(
+          `Using previously converted audio: ${audioAttachment.convertedS3Key}`,
+        );
+        const downloadData = await this.s3Service.generatePresignedDownloadUrl(
+          audioAttachment.convertedS3Key,
+          { expiresIn: 3600 },
+        );
+        return downloadData.url;
+      }
+
+      this.logger.log(
+        `Converting audio from ${mimeType} to ogg/opus for WhatsApp compatibility`,
+      );
+
+      // Download original audio from S3
+      const originalBuffer = await this.s3Service.downloadFile(
+        audioAttachment.s3Key,
+      );
+      if (!originalBuffer) {
+        this.logger.error(
+          `Failed to download audio from S3: ${audioAttachment.s3Key}`,
+        );
+        return null;
+      }
+
+      // Convert to ogg/opus
+      const converted = await this.audioConverterService.convertToOggOpus(
+        originalBuffer,
+        mimeType,
+      );
+
+      // Generate new S3 key for converted file
+      const originalKey = audioAttachment.s3Key;
+      const convertedKey = originalKey.replace(/\.[^.]+$/, '.ogg');
+
+      // Upload converted file to S3
+      await this.s3Service.uploadFile(
+        convertedKey,
+        converted.buffer,
+        converted.mimeType,
+      );
+
+      this.logger.log(`Converted audio uploaded to S3: ${convertedKey}`);
+
+      // Update attachment in database with converted file info
+      const updatedAttachments = attachments.map((a) => {
+        if (a.id === audioAttachment.id) {
+          return {
+            ...a,
+            convertedS3Key: convertedKey,
+            convertedMimeType: converted.mimeType,
+          };
+        }
+        return a;
+      });
+
+      await db
+        .update(messages)
+        .set({ attachments: updatedAttachments as any })
+        .where(eq(messages.messageId, messageId));
+
+      // Generate presigned URL for converted file
+      const downloadData = await this.s3Service.generatePresignedDownloadUrl(
+        convertedKey,
+        { expiresIn: 3600 },
+      );
+
+      return downloadData.url;
+    } catch (error) {
+      this.logger.error(`Error converting audio: ${error.message}`, error);
+      // Return null to fall back to original URL (may fail on WhatsApp side)
+      return null;
     }
   }
 
@@ -927,13 +1066,19 @@ export class WhatsAppService {
           textContent = message.video?.caption || '[Video]';
           break;
         case 'audio':
+          // Log audio message details to debug voice note detection
+          this.logger.log(
+            `[Inbound Audio] voice=${message.audio?.voice}, mime_type=${message.audio?.mime_type}, id=${message.audio?.id}`,
+          );
           mediaMetadata = {
             type: 'audio',
             mimeType: message.audio?.mime_type || 'audio/mpeg',
             sha256: message.audio?.sha256 || '',
             mediaId: message.audio?.id || '',
+            isVoiceNote: message.audio?.voice === true, // WhatsApp sets voice=true for PTT messages
           };
-          textContent = '[Audio]';
+          // Don't show text for audio messages - the audio bubble is self-explanatory
+          textContent = '';
           break;
         case 'document':
           mediaMetadata = {
@@ -1106,6 +1251,7 @@ export class WhatsAppService {
                 s3Key: att.s3Key,
                 thumbnailStatus: att.thumbnailStatus,
                 status: att.status,
+                isVoiceNote: att.isVoiceNote || false, // Include voice note flag
               }))
             : undefined;
 
@@ -1404,6 +1550,8 @@ export class WhatsAppService {
               mediaUrl: s3Key
                 ? ''
                 : `cloud-api://${messageData.mediaMetadata.mediaId}`,
+              // Voice note flag for audio messages
+              isVoiceNote: messageData.mediaMetadata.isVoiceNote || false,
             },
           ]
         : messageData.contactsData

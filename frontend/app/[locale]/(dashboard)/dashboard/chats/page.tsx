@@ -1311,6 +1311,7 @@ export default function ChatsPage() {
                 thumbnailStatus: att.thumbnailStatus,
                 status: att.status || ("success" as const),
                 uploadedAt: wsMsg.timestamp,
+                isVoiceNote: att.isVoiceNote || false, // Include voice note flag
               }))
             : undefined,
           sentAt: wsMsg.timestamp,
@@ -1811,6 +1812,177 @@ export default function ChatsPage() {
       } catch (err) {
         console.error("Error sending message:", err);
         setError("Failed to send message");
+      }
+    },
+    [selectedChatId, chats, replyingToMessage]
+  );
+
+  // Handle sending a voice note
+  const handleSendVoiceNote = useCallback(
+    async (audioBlob: Blob, duration: number, waveformData: number[]) => {
+      if (!selectedChatId) return;
+
+      try {
+        setError(null);
+        const selectedChat = chats.find((c) => c.chatId === selectedChatId);
+        if (!selectedChat) return;
+
+        // Generate a unique ID for the upload
+        const uploadId = `voice-${Date.now()}-${Math.random()
+          .toString(36)
+          .substr(2, 9)}`;
+
+        // Create a File object from the blob
+        const voiceFile = new File([audioBlob], `voice-note-${uploadId}.webm`, {
+          type: audioBlob.type || "audio/webm",
+        });
+
+        // Create pending media upload for immediate display
+        const pendingUpload: PendingMediaUpload = {
+          id: uploadId,
+          file: voiceFile,
+          previewUrl: undefined,
+          type: "audio",
+          progress: 0,
+          status: "queued" as const,
+        };
+
+        setPendingMediaUploads([pendingUpload]);
+        setPendingCaption("");
+
+        // Scroll to bottom to show the pending upload
+        setShouldAutoScroll(true);
+        setTimeout(() => {
+          scrollControllerRef.current?.scrollToBottom(true);
+        }, 100);
+
+        // Build message payload with voice note metadata
+        const messagePayload: any = {
+          to: selectedChat.participantPhone,
+          senderId: selectedChat.senderId,
+          attachments: [
+            {
+              id: uploadId,
+              type: "audio",
+              fileName: voiceFile.name,
+              mimeType: voiceFile.type || "audio/webm",
+              size: voiceFile.size,
+              s3Key: "",
+              status: "pending",
+              uploadedAt: new Date().toISOString(),
+              isVoiceNote: true,
+              waveformData: waveformData,
+              duration: duration,
+            },
+          ],
+        };
+
+        // Add reply context if replying to a message
+        if (replyingToMessage?.messageId) {
+          messagePayload.replyToMessageId = replyingToMessage.messageId;
+        }
+
+        // Send message to get messageId
+        const sentMessage = (await backendApi.whatsapp.sendMessage(
+          messagePayload
+        )) as { messageId?: string };
+
+        if (!sentMessage?.messageId) {
+          throw new Error("Failed to get message ID");
+        }
+
+        const messageId = sentMessage.messageId;
+
+        // Update status to uploading
+        setPendingMediaUploads((prev) =>
+          prev.map((u) =>
+            u.id === uploadId ? { ...u, status: "uploading" as const } : u
+          )
+        );
+
+        try {
+          // Upload file with progress callback
+          const result = await mediaApi.uploadFileToBackend(
+            voiceFile,
+            selectedChat.senderId,
+            selectedChatId,
+            messageId,
+            (progress) => {
+              setPendingMediaUploads((prev) =>
+                prev.map((u) => (u.id === uploadId ? { ...u, progress } : u))
+              );
+            },
+            uploadId
+          );
+
+          // Get download URL and send to WhatsApp
+          const downloadUrl = (await backendApi.whatsapp.getDownloadUrl(
+            messageId,
+            result.uploadId
+          )) as { url?: string };
+
+          if (downloadUrl?.url) {
+            await backendApi.whatsapp.sendMedia({
+              to: selectedChat.participantPhone,
+              mediaType: "audio",
+              mediaUrl: downloadUrl.url,
+              senderId: selectedChat.senderId,
+              originalMessageId: messageId,
+            });
+          }
+
+          // Mark as completed
+          setPendingMediaUploads((prev) =>
+            prev.map((u) =>
+              u.id === uploadId
+                ? { ...u, status: "completed" as const, progress: 100 }
+                : u
+            )
+          );
+        } catch (uploadError) {
+          console.error("Failed to upload voice note:", uploadError);
+          setPendingMediaUploads((prev) =>
+            prev.map((u) =>
+              u.id === uploadId
+                ? {
+                    ...u,
+                    status: "error" as const,
+                    error: "Upload failed",
+                  }
+                : u
+            )
+          );
+        }
+
+        setReplyingToMessage(null);
+
+        // Refresh messages after upload
+        const response = await backendApi.whatsapp.getChatMessages(
+          selectedChatId,
+          0,
+          PAGE_SIZE
+        );
+        if (response && response.messages) {
+          const sorted = [...response.messages].sort(
+            (a, b) =>
+              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+          );
+          setMessages(sorted);
+          setMessageCount(sorted.length);
+          messagesCacheRef.current.set(selectedChatId, {
+            messages: sorted,
+            hasMore: response.hasMore,
+            cursor: response.nextCursor,
+          });
+        }
+
+        // Clean up pending uploads after a delay
+        setTimeout(() => {
+          setPendingMediaUploads([]);
+        }, 2000);
+      } catch (err) {
+        console.error("Error sending voice note:", err);
+        setError("Failed to send voice note");
       }
     },
     [selectedChatId, chats, replyingToMessage]
@@ -2839,6 +3011,12 @@ export default function ChatsPage() {
                                             onMessageDelete={
                                               handleDeleteMessage
                                             }
+                                            senderName={
+                                              isOutbound
+                                                ? "You"
+                                                : selectedChat?.participantName ||
+                                                  selectedChat?.participantPhone
+                                            }
                                           />
                                         </div>
                                       )}
@@ -3076,6 +3254,7 @@ export default function ChatsPage() {
                       <ChatMessageInput
                         ref={messageInputRef}
                         onSend={handleSendMessage}
+                        onSendVoiceNote={handleSendVoiceNote}
                         placeholder={t("typeMessageOrUseTemplates")}
                         disabled={isUploading || pendingMediaUploads.length > 0}
                         templateValue={templateInput}

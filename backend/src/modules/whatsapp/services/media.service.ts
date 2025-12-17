@@ -827,25 +827,55 @@ export class MediaService {
 
       // If messageId was provided, update the message with this attachment
       if (messageId) {
+        this.logger.log(
+          `Looking up message ${messageId} to update attachment ${uploadId}`,
+        );
+
         const message = await db.query.messages.findFirst({
           where: eq(messages.messageId, messageId),
         });
+
+        if (!message) {
+          this.logger.warn(
+            `Message ${messageId} not found - cannot update attachment. ` +
+              `File was uploaded to S3 at ${s3Key} but message record doesn't exist yet.`,
+          );
+        } else {
+          this.logger.log(
+            `Found message ${messageId}, existing attachments: ${JSON.stringify(message.attachments)}`,
+          );
+        }
 
         if (message) {
           const existingAttachments = (message.attachments ||
             []) as AttachmentMetadata[];
 
-          // Remove placeholder attachment with matching filename (s3Key is empty)
+          // Find existing placeholder attachment to preserve any extra metadata (e.g., isVoiceNote, waveformData)
+          const existingPlaceholder = existingAttachments.find(
+            (a) => a.id === uploadId && (!a.s3Key || a.s3Key === ''),
+          );
+
+          // Remove placeholder attachment with matching ID (more reliable than fileName)
           const filteredAttachments = existingAttachments.filter(
-            (a) =>
-              !(
-                a.fileName === file.originalname &&
-                (!a.s3Key || a.s3Key === '')
-              ),
+            (a) => a.id !== uploadId || (a.s3Key && a.s3Key !== ''),
+          );
+
+          this.logger.log(
+            `Placeholder found: ${!!existingPlaceholder}, filtered attachments count: ${filteredAttachments.length}`,
+          );
+
+          // Merge placeholder metadata with uploaded attachment (preserve isVoiceNote, waveformData, etc.)
+          const mergedAttachment = {
+            ...existingPlaceholder,
+            ...attachment,
+          };
+
+          this.logger.log(
+            `Merged attachment s3Key: ${mergedAttachment.s3Key}, id: ${mergedAttachment.id}`,
           );
 
           // Add the real attachment
-          const updatedAttachments = [...filteredAttachments, attachment];
+          const updatedAttachments = [...filteredAttachments, mergedAttachment];
 
           await db
             .update(messages)
@@ -853,7 +883,7 @@ export class MediaService {
             .where(eq(messages.messageId, messageId));
 
           this.logger.log(
-            `Updated message ${messageId} with attachment: ${file.originalname}`,
+            `Updated message ${messageId} with attachment: ${file.originalname}, s3Key: ${mergedAttachment.s3Key}`,
           );
 
           // Queue thumbnail generation for supported media types

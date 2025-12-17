@@ -24,6 +24,9 @@ export const MIME_TYPES: Record<string, string> = {
   'audio/ogg': 'audio',
   'audio/wav': 'audio',
   'audio/aac': 'audio',
+  'audio/webm': 'audio',
+  'audio/webm;codecs=opus': 'audio',
+  'audio/ogg;codecs=opus': 'audio',
   'application/pdf': 'document',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
     'document',
@@ -55,6 +58,8 @@ export const EXTENSION_MAP: Record<string, string> = {
   wav: 'audio/wav',
   aac: 'audio/aac',
   m4a: 'audio/aac',
+  webm: 'audio/webm',
+  opus: 'audio/ogg;codecs=opus',
 
   // Documents
   pdf: 'application/pdf',
@@ -96,6 +101,8 @@ export interface AttachmentMetadata {
   errorMessage?: string; // Error details if failed
   thumbnailError?: string; // Error details if thumbnail generation failed
   mediaUrl?: string; // Cloud API media URL reference (for inbound messages from Meta)
+  isVoiceNote?: boolean; // True if this is a voice note (PTT)
+  waveformData?: number[]; // Waveform samples for voice notes (0-1 range)
 }
 
 /**

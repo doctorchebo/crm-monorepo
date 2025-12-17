@@ -11,6 +11,7 @@ import { WhatsAppController } from './whatsapp.controller';
 import { WhatsAppGateway, setWhatsAppGateway } from './whatsapp.gateway';
 import { WhatsAppService } from './whatsapp.service';
 import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
+import { AudioConverterService } from './services/audio-converter.service';
 
 /**
  * WhatsApp Module
@@ -42,6 +43,7 @@ import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
   providers: [
     WhatsAppService,
     MediaService,
+    AudioConverterService,
     S3Service,
     MetaCloudAPIConfigService,
     WhatsAppGateway,
@@ -49,6 +51,7 @@ import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
   exports: [
     WhatsAppService,
     MediaService,
+    AudioConverterService,
     S3Service,
     MetaCloudAPIConfigService,
     WhatsAppGateway,

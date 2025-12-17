@@ -129,6 +129,10 @@ export class WhatsAppGateway
     type: string;
     timestamp: Date;
     attachments?: any[];
+    direction?: string;
+    status?: string;
+    replyToMessageId?: string;
+    replyPreview?: any;
   }): void {
     if (this.connectedClients.size === 0) {
       return; // No clients connected

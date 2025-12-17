@@ -40,6 +40,8 @@ export interface Attachment {
   errorMessage?: string;
   thumbnailError?: string; // Error details if thumbnail generation failed
   mediaUrl?: string; // For Cloud API media (inbound from Meta), format: "cloud-api://mediaId"
+  isVoiceNote?: boolean; // For audio: true if recorded voice note (vs file upload)
+  waveformData?: number[]; // For voice notes: amplitude samples for waveform display
 }
 
 /**

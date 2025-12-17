@@ -19,6 +19,7 @@ import {
 import { SaveNoteDto } from './dto/notes.dto';
 import { OutboundMessageDto } from './dto/outbound-message.dto';
 import { WhatsAppService } from './whatsapp.service';
+import { SendContactsDto } from './dto/send-contacts.dto';
 
 @Controller('whatsapp')
 @UseGuards(JwtAuthGuard)

@@ -12,6 +12,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
+import { AudioPlaybackProvider } from "@/lib/audio-playback-context";
 import {
   Activity,
   FileText,
@@ -81,16 +82,18 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   return (
-    <SidebarProvider>
-      <DashboardSidebar />
-      <SidebarInset>
-        <div className="flex flex-col h-screen">
-          <div className="flex items-center gap-2 border-b px-4 py-3 md:hidden flex-shrink-0">
-            <SidebarTrigger />
+    <AudioPlaybackProvider>
+      <SidebarProvider>
+        <DashboardSidebar />
+        <SidebarInset>
+          <div className="flex flex-col h-screen">
+            <div className="flex items-center gap-2 border-b px-4 py-3 md:hidden flex-shrink-0">
+              <SidebarTrigger />
+            </div>
+            <main className="flex-1 overflow-hidden">{children}</main>
           </div>
-          <main className="flex-1 overflow-hidden">{children}</main>
-        </div>
-      </SidebarInset>
-    </SidebarProvider>
+        </SidebarInset>
+      </SidebarProvider>
+    </AudioPlaybackProvider>
   );
 }
