@@ -294,6 +294,7 @@ export default function ChatsPage() {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const separatorRef = useRef<HTMLDivElement>(null);
+  const notesPanelRef = useRef<HTMLDivElement>(null);
   const scrollControllerRef = useRef<ScrollController | null>(null);
   const messageInputRef = useRef<ChatMessageInputRef>(null);
 
@@ -819,13 +820,30 @@ export default function ChatsPage() {
       }
     };
 
+    // Initial scroll with multiple attempts to catch async content
     performScroll();
+
+    // Use requestAnimationFrame for smoother initial scroll
+    requestAnimationFrame(() => {
+      performScroll();
+      requestAnimationFrame(performScroll);
+    });
+
+    // Also scroll after a short delay to catch any late-rendering content
+    const initialScrollTimer = setTimeout(performScroll, 50);
+    const secondScrollTimer = setTimeout(performScroll, 150);
 
     const resizeObserver = new ResizeObserver(() => {
       performScroll();
     });
 
+    // Also observe mutations for dynamic content
+    const mutationObserver = new MutationObserver(() => {
+      performScroll();
+    });
+
     resizeObserver.observe(container);
+    mutationObserver.observe(container, { childList: true, subtree: true });
 
     const stopScrollTimer = setTimeout(() => {
       shouldContinueScrolling = false;
@@ -833,12 +851,16 @@ export default function ChatsPage() {
       setShouldAutoScroll(true);
       allowScrollSaveRef.current = true;
       resizeObserver.disconnect();
+      mutationObserver.disconnect();
       console.log("Initial load complete, scroll saving enabled");
     }, 2500);
 
     return () => {
+      clearTimeout(initialScrollTimer);
+      clearTimeout(secondScrollTimer);
       clearTimeout(stopScrollTimer);
       resizeObserver.disconnect();
+      mutationObserver.disconnect();
     };
   }, [selectedChatId, messages.length, isInitialLoad]);
 
@@ -1242,6 +1264,13 @@ export default function ChatsPage() {
               console.log("First visit to chat, scrolling to bottom");
               container.scrollTop = container.scrollHeight;
               setShouldAutoScroll(true);
+
+              // Additional scroll after a short delay to handle late-loading content
+              setTimeout(() => {
+                if (container) {
+                  container.scrollTop = container.scrollHeight;
+                }
+              }, 100);
 
               // Mark transition as complete and show container
               isTransitioningRef.current = false;
@@ -2422,10 +2451,16 @@ export default function ChatsPage() {
   // ==========================================
 
   // Handle separator drag to resize notes panel
+  // Uses direct DOM manipulation during drag for smooth performance (no React re-renders)
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
     const startX = e.clientX;
     const startWidth = notesPanelWidth;
+    let currentWidth = startWidth;
+
+    // Add class to body to prevent text selection during drag
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
       const deltaX = moveEvent.clientX - startX;
@@ -2433,13 +2468,24 @@ export default function ChatsPage() {
       const maxWidth = containerRef.current
         ? containerRef.current.clientWidth * 0.6
         : 800;
-      const newWidth = Math.max(250, Math.min(startWidth - deltaX, maxWidth));
-      setNotesPanelWidth(newWidth);
+      currentWidth = Math.max(250, Math.min(startWidth - deltaX, maxWidth));
+
+      // Direct DOM manipulation - no React state update during drag
+      if (notesPanelRef.current) {
+        notesPanelRef.current.style.width = `${currentWidth}px`;
+      }
     };
 
     const handleMouseUp = () => {
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("mouseup", handleMouseUp);
+
+      // Restore cursor and user-select
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+
+      // Only update React state once at the end
+      setNotesPanelWidth(currentWidth);
     };
 
     document.addEventListener("mousemove", handleMouseMove);
@@ -3304,6 +3350,7 @@ export default function ChatsPage() {
 
                 {/* Notes Panel (Right Sidebar) - Dynamic Width */}
                 <div
+                  ref={notesPanelRef}
                   className="hidden xl:flex flex-col overflow-hidden"
                   style={{ width: `${notesPanelWidth}px` }}
                 >

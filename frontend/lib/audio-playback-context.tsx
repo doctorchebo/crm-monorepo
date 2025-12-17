@@ -35,6 +35,7 @@ interface AudioPlaybackContextValue {
   registerAudio: (audioId: string, duration: number) => void;
   unregisterAudio: (audioId: string) => void;
   getSavedPosition: (audioId: string) => number;
+  setSavedPosition: (audioId: string, time: number) => void;
   isAudioPlaying: (audioId: string) => boolean;
   subscribeToTime: (callback: () => void) => () => void;
   getCurrentTime: () => number;
@@ -306,6 +307,14 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     [positions]
   );
 
+  // Set saved position for an audio (for seeking before play)
+  const setSavedPosition = useCallback((audioId: string, time: number) => {
+    setPositions((prev) => ({
+      ...prev,
+      [audioId]: time,
+    }));
+  }, []);
+
   // Check if specific audio is playing
   const isAudioPlaying = useCallback(
     (audioId: string): boolean => {
@@ -338,6 +347,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     registerAudio,
     unregisterAudio,
     getSavedPosition,
+    setSavedPosition,
     isAudioPlaying,
     subscribeToTime,
     getCurrentTime,
@@ -369,6 +379,7 @@ export function useAudioItem(audioId: string, audioUrl: string) {
     seek,
     cyclePlaybackSpeed,
     getSavedPosition,
+    setSavedPosition,
     isAudioPlaying,
     registerAudio,
     subscribeToTime,
@@ -399,10 +410,14 @@ export function useAudioItem(audioId: string, audioUrl: string) {
   const seekTo = useCallback(
     (time: number) => {
       if (isCurrentAudio) {
+        // Audio is currently loaded - seek directly
         seek(time);
+      } else {
+        // Audio not yet loaded - save position for when it plays
+        setSavedPosition(audioId, time);
       }
     },
-    [isCurrentAudio, seek]
+    [isCurrentAudio, seek, setSavedPosition, audioId]
   );
 
   return {

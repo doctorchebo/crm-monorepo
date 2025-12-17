@@ -50,6 +50,8 @@ function WaveformSeekBar({
   progress = 0,
   duration,
   onSeek,
+  onSeekStart,
+  onSeekEnd,
   isPlaying,
   className,
 }: {
@@ -57,11 +59,18 @@ function WaveformSeekBar({
   progress: number;
   duration: number;
   onSeek?: (time: number) => void;
+  onSeekStart?: () => void;
+  onSeekEnd?: () => void;
   isPlaying?: boolean;
   className?: string;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const isDraggingRef = useRef(false);
+  const hasStartedSeekingRef = useRef(false);
+
+  // Padding for the progress ball (6px radius + 2px margin)
+  const BALL_PADDING = 8;
 
   // Draw waveform
   useEffect(() => {
@@ -88,16 +97,20 @@ function WaveformSeekBar({
         ? [...data, ...Array(barCount - data.length).fill(0.2)]
         : data;
 
-    const barWidth = rect.width / sampledData.length;
+    // Account for ball padding on both sides
+    const effectiveWidth = rect.width - BALL_PADDING * 2;
+    const barWidth = effectiveWidth / sampledData.length;
     const barGap = 2;
     const maxBarHeight = rect.height * 0.85;
     const centerY = rect.height / 2;
-    const progressX = progress * rect.width;
 
-    // Draw bars
+    // Progress position with padding offset
+    const progressX = BALL_PADDING + progress * effectiveWidth;
+
+    // Draw bars (offset by BALL_PADDING)
     sampledData.forEach((value, index) => {
       const barHeight = Math.max(value * maxBarHeight, 4);
-      const x = index * barWidth + barGap / 2;
+      const x = BALL_PADDING + index * barWidth + barGap / 2;
       const y = centerY - barHeight / 2;
       const barMidX = x + (barWidth - barGap) / 2;
 
@@ -119,25 +132,143 @@ function WaveformSeekBar({
     ctx.shadowBlur = 0;
   }, [data, progress]);
 
+  // Calculate seek time from mouse/touch position
+  const getSeekTimeFromPosition = useCallback(
+    (clientX: number) => {
+      if (!containerRef.current) return null;
+      const rect = containerRef.current.getBoundingClientRect();
+      const clickX = clientX - rect.left;
+      // Account for padding when calculating percentage
+      const effectiveWidth = rect.width - BALL_PADDING * 2;
+      const adjustedX = Math.max(
+        0,
+        Math.min(clickX - BALL_PADDING, effectiveWidth)
+      );
+      const percentage = adjustedX / effectiveWidth;
+      return Math.max(0, Math.min(percentage * duration, duration));
+    },
+    [duration]
+  );
+
   // Handle click to seek
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      if (!containerRef.current || !onSeek) return;
-
-      const rect = containerRef.current.getBoundingClientRect();
-      const clickX = e.clientX - rect.left;
-      const percentage = clickX / rect.width;
-      const seekTime = percentage * duration;
-      onSeek(Math.max(0, Math.min(seekTime, duration)));
+      // Don't handle click if we were dragging
+      if (isDraggingRef.current) {
+        isDraggingRef.current = false;
+        return;
+      }
+      if (!onSeek) return;
+      const seekTime = getSeekTimeFromPosition(e.clientX);
+      if (seekTime !== null) {
+        onSeekStart?.();
+        onSeek(seekTime);
+        // Small delay to show the position briefly before reverting
+        setTimeout(() => {
+          onSeekEnd?.();
+        }, 100);
+      }
     },
-    [duration, onSeek]
+    [getSeekTimeFromPosition, onSeek, onSeekStart, onSeekEnd]
+  );
+
+  // Handle drag start
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!onSeek) return;
+      e.preventDefault();
+
+      // Notify seek started
+      hasStartedSeekingRef.current = true;
+      onSeekStart?.();
+
+      const seekTime = getSeekTimeFromPosition(e.clientX);
+      if (seekTime !== null) {
+        onSeek(seekTime);
+      }
+
+      const handleMouseMove = (moveEvent: MouseEvent) => {
+        isDraggingRef.current = true;
+        const time = getSeekTimeFromPosition(moveEvent.clientX);
+        if (time !== null) {
+          onSeek(time);
+        }
+      };
+
+      const handleMouseUp = () => {
+        document.removeEventListener("mousemove", handleMouseMove);
+        document.removeEventListener("mouseup", handleMouseUp);
+
+        // Notify seek ended
+        if (hasStartedSeekingRef.current) {
+          hasStartedSeekingRef.current = false;
+          onSeekEnd?.();
+        }
+
+        // Reset dragging flag after a short delay to prevent click from firing
+        setTimeout(() => {
+          isDraggingRef.current = false;
+        }, 10);
+      };
+
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+    },
+    [getSeekTimeFromPosition, onSeek, onSeekStart, onSeekEnd]
+  );
+
+  // Handle touch drag
+  const handleTouchStart = useCallback(
+    (e: React.TouchEvent<HTMLDivElement>) => {
+      if (!onSeek) return;
+
+      // Notify seek started
+      hasStartedSeekingRef.current = true;
+      onSeekStart?.();
+
+      const touch = e.touches[0];
+      const seekTime = getSeekTimeFromPosition(touch.clientX);
+      if (seekTime !== null) {
+        onSeek(seekTime);
+      }
+
+      const handleTouchMove = (moveEvent: TouchEvent) => {
+        isDraggingRef.current = true;
+        const t = moveEvent.touches[0];
+        const time = getSeekTimeFromPosition(t.clientX);
+        if (time !== null) {
+          onSeek(time);
+        }
+      };
+
+      const handleTouchEnd = () => {
+        document.removeEventListener("touchmove", handleTouchMove);
+        document.removeEventListener("touchend", handleTouchEnd);
+
+        // Notify seek ended
+        if (hasStartedSeekingRef.current) {
+          hasStartedSeekingRef.current = false;
+          onSeekEnd?.();
+        }
+
+        setTimeout(() => {
+          isDraggingRef.current = false;
+        }, 10);
+      };
+
+      document.addEventListener("touchmove", handleTouchMove);
+      document.addEventListener("touchend", handleTouchEnd);
+    },
+    [getSeekTimeFromPosition, onSeek, onSeekStart, onSeekEnd]
   );
 
   return (
     <div
       ref={containerRef}
-      className={cn("relative cursor-pointer", className)}
+      className={cn("relative cursor-pointer select-none", className)}
       onClick={handleClick}
+      onMouseDown={handleMouseDown}
+      onTouchStart={handleTouchStart}
     >
       <canvas
         ref={canvasRef}
@@ -246,6 +377,7 @@ export function VoiceMessageBubble({
   } = useAudioItem(audioId, audioUrl);
 
   const [audioDuration, setAudioDuration] = useState(duration);
+  const [isSeeking, setIsSeeking] = useState(false);
 
   // Memoize waveform to prevent regeneration on every render
   // Use audioId as seed for consistent placeholder generation
@@ -273,9 +405,12 @@ export function VoiceMessageBubble({
 
   // Calculate progress
   const progress = audioDuration > 0 ? currentPosition / audioDuration : 0;
-  const displayTime = isPlaying
-    ? formatDuration(currentPosition)
-    : formatDuration(audioDuration);
+
+  // Show current position while playing OR seeking, otherwise show total duration
+  const displayTime =
+    isPlaying || isSeeking
+      ? formatDuration(currentPosition)
+      : formatDuration(audioDuration);
 
   return (
     <div
@@ -309,6 +444,8 @@ export function VoiceMessageBubble({
           progress={progress}
           duration={audioDuration}
           onSeek={seek}
+          onSeekStart={() => setIsSeeking(true)}
+          onSeekEnd={() => setIsSeeking(false)}
           isPlaying={isPlaying}
         />
         <div className="flex items-center justify-between">
