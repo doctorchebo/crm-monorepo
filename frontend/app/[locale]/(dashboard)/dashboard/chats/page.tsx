@@ -1272,6 +1272,14 @@ export default function ChatsPage() {
   useEffect(() => {
     if (inboundMessages.length === 0) return;
 
+    // Check if user is at bottom RIGHT NOW before adding messages
+    // This is more reliable than using the debounced state
+    const container = messagesContainerRef.current;
+    const isCurrentlyAtBottom = container
+      ? container.scrollHeight - container.scrollTop - container.clientHeight <
+        100
+      : true;
+
     setMessages((prevMessages) => {
       const existingIds = new Set(prevMessages.map((m) => m.messageId));
       const newMessages = inboundMessages.filter(
@@ -1321,37 +1329,43 @@ export default function ChatsPage() {
       );
     });
 
-    // Show new message indicator if user is not at bottom
+    // Show new message indicator or auto-scroll based on current position
     console.log(
-      "New inbound messages received, shouldAutoScroll:",
-      shouldAutoScroll
+      "New inbound messages received, isCurrentlyAtBottom:",
+      isCurrentlyAtBottom
     );
-    if (!shouldAutoScroll) {
+    if (!isCurrentlyAtBottom) {
       console.log("Setting hasNewMessages to TRUE - user is not at bottom");
       setHasNewMessages(true);
     } else {
-      // Hide indicator if user scrolled back to bottom
+      // Hide indicator if user is at bottom
       setHasNewMessages(false);
+      setShouldAutoScroll(true);
 
-      // For media messages, we need to scroll after a delay to let media load
+      // Auto-scroll to show new message
+      const scrollToBottom = () => {
+        const cont = messagesContainerRef.current;
+        if (cont) {
+          cont.scrollTop = cont.scrollHeight;
+        }
+      };
+
+      // For media messages, we need multiple scroll attempts to let media load
       const hasMedia = inboundMessages.some(
         (msg: InboundMessage) => msg.attachments && msg.attachments.length > 0
       );
+
+      // Always scroll after React re-renders with the new message
+      requestAnimationFrame(() => {
+        scrollToBottom();
+        // Additional scroll after a short delay
+        setTimeout(scrollToBottom, 100);
+      });
+
       if (hasMedia) {
-        // Multiple scroll attempts to handle media loading
-        const scrollToBottom = () => {
-          const container = messagesContainerRef.current;
-          if (container) {
-            container.scrollTop = container.scrollHeight;
-          }
-        };
-        // Scroll immediately
-        setTimeout(scrollToBottom, 50);
-        // Scroll again after media placeholder renders
-        setTimeout(scrollToBottom, 200);
-        // Scroll again after media starts loading
-        setTimeout(scrollToBottom, 500);
-        // Extra scrolls for video thumbnails that load asynchronously
+        // Extra scroll attempts for media loading
+        setTimeout(scrollToBottom, 300);
+        setTimeout(scrollToBottom, 600);
         setTimeout(scrollToBottom, 1000);
         setTimeout(scrollToBottom, 1500);
         setTimeout(scrollToBottom, 2000);
@@ -1360,7 +1374,7 @@ export default function ChatsPage() {
 
     // Trigger auto-scroll when new messages arrive
     setMessageCount((prev) => prev + inboundMessages.length);
-  }, [inboundMessages, shouldAutoScroll]);
+  }, [inboundMessages]);
 
   // Update messages with status changes from WebSocket
   useEffect(() => {
@@ -1654,18 +1668,38 @@ export default function ChatsPage() {
         }
 
         // After all uploads complete, refresh messages and clear pending
-        const data = await backendApi.whatsapp.getChatMessages(
+        const response = await backendApi.whatsapp.getChatMessages(
           selectedChatId,
           0,
-          50
+          PAGE_SIZE
         );
-        if (Array.isArray(data)) {
-          const sorted = [...data].sort(
+        if (response && response.messages) {
+          const sorted = [...response.messages].sort(
             (a, b) =>
               new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
           );
-          setMessages(sorted);
-          setMessageCount(sorted.length);
+          // Merge with any older messages that were loaded via infinite scroll
+          const cachedData = messagesCacheRef.current.get(selectedChatId);
+          let combined = sorted;
+          if (cachedData && cachedData.cursor > PAGE_SIZE) {
+            const existingIds = new Set(sorted.map((m) => m.messageId));
+            const olderMessages = cachedData.messages.filter(
+              (m) => !existingIds.has(m.messageId)
+            );
+            combined = [...olderMessages, ...sorted].sort(
+              (a, b) =>
+                new Date(a.timestamp).getTime() -
+                new Date(b.timestamp).getTime()
+            );
+          }
+          setMessages(combined);
+          setMessageCount(combined.length);
+          // Update cache
+          messagesCacheRef.current.set(selectedChatId, {
+            messages: combined,
+            hasMore: cachedData?.hasMore ?? response.hasMore,
+            cursor: cachedData?.cursor ?? response.nextCursor,
+          });
         }
 
         // Clear pending uploads after a short delay
@@ -1726,18 +1760,38 @@ export default function ChatsPage() {
         setReplyingToMessage(null); // Clear reply state after sending
 
         // Refresh messages
-        const data = await backendApi.whatsapp.getChatMessages(
+        const response = await backendApi.whatsapp.getChatMessages(
           selectedChatId,
           0,
-          50
+          PAGE_SIZE
         );
-        if (Array.isArray(data)) {
-          const sorted = [...data].sort(
+        if (response && response.messages) {
+          const sorted = [...response.messages].sort(
             (a, b) =>
               new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
           );
-          setMessages(sorted);
-          setMessageCount(sorted.length);
+          // Merge with any older messages that were loaded via infinite scroll
+          const cachedData = messagesCacheRef.current.get(selectedChatId);
+          let combined = sorted;
+          if (cachedData && cachedData.cursor > PAGE_SIZE) {
+            const existingIds = new Set(sorted.map((m) => m.messageId));
+            const olderMessages = cachedData.messages.filter(
+              (m) => !existingIds.has(m.messageId)
+            );
+            combined = [...olderMessages, ...sorted].sort(
+              (a, b) =>
+                new Date(a.timestamp).getTime() -
+                new Date(b.timestamp).getTime()
+            );
+          }
+          setMessages(combined);
+          setMessageCount(combined.length);
+          // Update cache
+          messagesCacheRef.current.set(selectedChatId, {
+            messages: combined,
+            hasMore: cachedData?.hasMore ?? response.hasMore,
+            cursor: cachedData?.cursor ?? response.nextCursor,
+          });
           // Re-enable auto-scroll when a message is sent so it scrolls to the new message
           setShouldAutoScroll(true);
           // Explicitly scroll to bottom with smooth animation after DOM updates
@@ -1927,18 +1981,37 @@ export default function ChatsPage() {
       setContactsToSend([]);
 
       // Refresh messages
-      const data = await backendApi.whatsapp.getChatMessages(
+      const response = await backendApi.whatsapp.getChatMessages(
         selectedChatId,
         0,
-        50
+        PAGE_SIZE
       );
-      if (Array.isArray(data)) {
-        const sorted = [...data].sort(
+      if (response && response.messages) {
+        const sorted = [...response.messages].sort(
           (a, b) =>
             new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
         );
-        setMessages(sorted);
-        setMessageCount(sorted.length);
+        // Merge with any older messages that were loaded via infinite scroll
+        const cachedData = messagesCacheRef.current.get(selectedChatId);
+        let combined = sorted;
+        if (cachedData && cachedData.cursor > PAGE_SIZE) {
+          const existingIds = new Set(sorted.map((m) => m.messageId));
+          const olderMessages = cachedData.messages.filter(
+            (m) => !existingIds.has(m.messageId)
+          );
+          combined = [...olderMessages, ...sorted].sort(
+            (a, b) =>
+              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+          );
+        }
+        setMessages(combined);
+        setMessageCount(combined.length);
+        // Update cache
+        messagesCacheRef.current.set(selectedChatId, {
+          messages: combined,
+          hasMore: cachedData?.hasMore ?? response.hasMore,
+          cursor: cachedData?.cursor ?? response.nextCursor,
+        });
         setShouldAutoScroll(true);
         setTimeout(() => {
           scrollControllerRef.current?.scrollToBottom(true);
