@@ -66,7 +66,7 @@ export interface InboundMessage {
 /**
  * Hook to connect to WebSocket and listen for real-time message and status updates
  *
- * @param chatId - The chat ID (optional, for logging)
+ * @param chatId - The chat ID to filter messages (only messages matching this chatId will be added to state)
  * @returns Object with:
  *   - statusMap: Record<messageId, StatusMapEntry>
  *   - messages: InboundMessage[]
@@ -75,6 +75,7 @@ export interface InboundMessage {
  */
 export function useRealtimeChat(chatId?: string) {
   const socketRef = useRef<Socket | null>(null);
+  const chatIdRef = useRef<string | undefined>(chatId);
   const [statusMap, setStatusMap] = useState<Record<string, StatusMapEntry>>(
     {}
   );
@@ -83,6 +84,13 @@ export function useRealtimeChat(chatId?: string) {
   const [connectionStatus, setConnectionStatus] = useState<
     "idle" | "connecting" | "connected" | "disconnected"
   >("idle");
+
+  // Keep chatIdRef in sync with chatId prop
+  useEffect(() => {
+    chatIdRef.current = chatId;
+    // Clear messages when chat changes to avoid showing old messages in new chat
+    setMessages([]);
+  }, [chatId]);
 
   useEffect(() => {
     // Connect to WebSocket server
@@ -147,10 +155,19 @@ export function useRealtimeChat(chatId?: string) {
     // Listen for new inbound message
     socket.on("message:new", (message: InboundMessage) => {
       console.log(
-        `[RealtimeChat] 📨 Received new message: ${message.messageId} from ${message.sender}`
+        `[RealtimeChat] 📨 Received new message: ${message.messageId} from ${message.sender} for chat ${message.chatId}`
       );
 
-      // Only add message if it matches current chat, or if no specific chat is being monitored
+      // Only add message if it matches the currently selected chat
+      // This prevents messages from appearing in the wrong chat
+      const currentChatId = chatIdRef.current;
+      if (currentChatId && message.chatId !== currentChatId) {
+        console.log(
+          `[RealtimeChat] ⏭️ Skipping message - belongs to chat ${message.chatId}, not current chat ${currentChatId}`
+        );
+        return;
+      }
+
       setMessages((prev) => {
         // Check if message already exists (avoid duplicates)
         const exists = prev.some((m) => m.messageId === message.messageId);
@@ -167,10 +184,15 @@ export function useRealtimeChat(chatId?: string) {
         `[RealtimeChat] 📨 Received ${messageList.length} new messages`
       );
 
+      const currentChatId = chatIdRef.current;
+
       setMessages((prev) => {
         const existingIds = new Set(prev.map((m) => m.messageId));
+        // Filter for messages that belong to the current chat and don't already exist
         const newMessages = messageList.filter(
-          (m) => !existingIds.has(m.messageId)
+          (m) =>
+            !existingIds.has(m.messageId) &&
+            (!currentChatId || m.chatId === currentChatId)
         );
         return [...prev, ...newMessages];
       });

@@ -1695,22 +1695,41 @@ export class WhatsAppService {
   }
 
   /**
-   * Update chat with latest message info
+   * Update chat with latest message info and increment unread count for inbound messages
    * @private
    */
   private async updateChatLastMessage(
     chatId: string,
     lastMessage: string,
+    isInbound: boolean = true,
   ): Promise<void> {
     try {
-      await db
+      const updateData: any = {
+        lastMessage,
+        lastMessageTime: new Date(),
+        updatedAt: new Date(),
+      };
+
+      // Only increment unread count for inbound messages
+      if (isInbound) {
+        updateData.unreadCount = sql`${chats.unreadCount} + 1`;
+      }
+
+      const [updatedChat] = await db
         .update(chats)
-        .set({
-          lastMessage,
-          lastMessageTime: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(chats.chatId, chatId));
+        .set(updateData)
+        .where(eq(chats.chatId, chatId))
+        .returning();
+
+      // Emit chat update via WebSocket for real-time UI updates
+      if (updatedChat && whatsAppGatewayInstance) {
+        whatsAppGatewayInstance.emitChatUpdate({
+          chatId,
+          unreadCount: updatedChat.unreadCount,
+          lastMessage: updatedChat.lastMessage || undefined,
+          lastMessageTime: updatedChat.lastMessageTime || undefined,
+        });
+      }
     } catch (error) {
       this.logger.error(`Error updating chat last message: ${error.message}`);
       // Don't throw - not critical

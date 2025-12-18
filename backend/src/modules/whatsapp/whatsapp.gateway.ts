@@ -243,6 +243,33 @@ export class WhatsAppGateway
   }
 
   /**
+   * Emit chat update event to all connected clients
+   * Called when chat metadata changes (unread count, last message, etc.)
+   *
+   * @param chatUpdate - The chat update data
+   */
+  emitChatUpdate(chatUpdate: {
+    chatId: string;
+    unreadCount: number;
+    lastMessage?: string;
+    lastMessageTime?: Date;
+  }): void {
+    if (this.connectedClients.size === 0) {
+      return; // No clients connected
+    }
+
+    console.log(
+      `📡 Emitting chat:update for ${chatUpdate.chatId} (unread: ${chatUpdate.unreadCount}) to ${this.connectedClients.size} clients`,
+    );
+
+    // Emit to all connected clients
+    this.server.emit('chat:update', {
+      ...chatUpdate,
+      lastMessageTime: chatUpdate.lastMessageTime?.toISOString(),
+    });
+  }
+
+  /**
    * Get number of connected clients (for monitoring)
    */
   getConnectedClientsCount(): number {

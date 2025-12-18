@@ -10,6 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ChatNotificationsProvider } from "@/hooks/use-chat-notifications";
 import { backendApi } from "@/lib/api/endpoints";
 import { TokenManager } from "@/lib/auth/token-manager";
 import { CircleIcon, Home, LogOut } from "lucide-react";
@@ -138,9 +139,11 @@ function Header() {
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <section className="flex flex-col h-screen">
-      <Header />
-      <div className="flex-1 overflow-auto">{children}</div>
-    </section>
+    <ChatNotificationsProvider soundEnabled={true} soundVolume={0.5}>
+      <section className="flex flex-col h-screen">
+        <Header />
+        <div className="flex-1 overflow-auto">{children}</div>
+      </section>
+    </ChatNotificationsProvider>
   );
 }

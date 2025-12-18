@@ -131,6 +131,7 @@ export const backendApi = {
     create: (data: any) => apiClient.post("/chats", data),
     update: (id: string, data: any) => apiClient.patch(`/chats/${id}`, data),
     close: (id: string) => apiClient.post(`/chats/${id}/close`, {}),
+    markAsRead: (id: string) => apiClient.post(`/chats/${id}/mark-read`, {}),
     getMessages: (id: string, skip?: number, take?: number) =>
       apiClient.get(
         `/chats/${id}/messages?skip=${skip || 0}&take=${take || 50}`

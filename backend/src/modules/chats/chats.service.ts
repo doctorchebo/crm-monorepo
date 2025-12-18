@@ -2,13 +2,28 @@ import { db } from '@database/db.connection';
 import { Chat, chats, contacts, messages, senders } from '@database/schema';
 import {
   BadRequestException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { CreateChatDto } from './dto/create-chat.dto';
 import { UpdateChatDto } from './dto/update-chat.dto';
+
+// Interface for the gateway to avoid circular dependency
+interface IChatUpdateGateway {
+  emitChatUpdate(update: {
+    chatId: string;
+    unreadCount: number;
+    lastMessage?: string;
+    lastMessageTime?: Date;
+  }): void;
+}
+
+// Injection token for the gateway
+export const CHAT_UPDATE_GATEWAY = 'CHAT_UPDATE_GATEWAY';
 
 /**
  * Chats Service
@@ -17,6 +32,30 @@ import { UpdateChatDto } from './dto/update-chat.dto';
 @Injectable()
 export class ChatsService {
   private readonly logger = new Logger(ChatsService.name);
+
+  constructor(
+    @Optional()
+    @Inject(CHAT_UPDATE_GATEWAY)
+    private readonly chatUpdateGateway?: IChatUpdateGateway,
+  ) {}
+
+  /**
+   * Emit chat update if gateway is available
+   */
+  private emitChatUpdate(update: {
+    chatId: string;
+    unreadCount: number;
+    lastMessage?: string;
+    lastMessageTime?: Date;
+  }): void {
+    if (this.chatUpdateGateway) {
+      try {
+        this.chatUpdateGateway.emitChatUpdate(update);
+      } catch (error) {
+        this.logger.warn(`Failed to emit chat update: ${error.message}`);
+      }
+    }
+  }
 
   /**
    * Generate a unique chat ID from business phone and participant phone
@@ -416,6 +455,114 @@ export class ChatsService {
       return result;
     } catch (error) {
       this.logger.error(`Error fetching messages: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Increment unread count for a chat
+   * Called when a new inbound message arrives
+   *
+   * @param chatId - The chat ID to increment
+   * @returns Updated chat with new unread count
+   */
+  async incrementUnreadCount(chatId: string): Promise<Chat> {
+    try {
+      const [updated] = await db
+        .update(chats)
+        .set({
+          unreadCount: sql`${chats.unreadCount} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(eq(chats.chatId, chatId))
+        .returning();
+
+      if (!updated) {
+        throw new NotFoundException(`Chat ${chatId} not found`);
+      }
+
+      this.logger.log(
+        `Incremented unread count for chat ${chatId} to ${updated.unreadCount}`,
+      );
+
+      // Emit chat update via WebSocket for real-time UI updates
+      this.emitChatUpdate({
+        chatId,
+        unreadCount: updated.unreadCount,
+        lastMessage: updated.lastMessage || undefined,
+        lastMessageTime: updated.lastMessageTime || undefined,
+      });
+
+      return updated;
+    } catch (error) {
+      this.logger.error(
+        `Error incrementing unread count for chat ${chatId}: ${error.message}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Reset unread count for a chat to zero
+   * Called when user opens/reads a chat
+   *
+   * @param chatId - The chat ID to reset
+   * @returns Updated chat with zero unread count
+   */
+  async resetUnreadCount(chatId: string): Promise<Chat> {
+    try {
+      const [updated] = await db
+        .update(chats)
+        .set({
+          unreadCount: 0,
+          updatedAt: new Date(),
+        })
+        .where(eq(chats.chatId, chatId))
+        .returning();
+
+      if (!updated) {
+        throw new NotFoundException(`Chat ${chatId} not found`);
+      }
+
+      this.logger.log(`Reset unread count for chat ${chatId}`);
+
+      // Emit chat update via WebSocket for real-time UI updates
+      this.emitChatUpdate({
+        chatId,
+        unreadCount: 0,
+        lastMessage: updated.lastMessage || undefined,
+        lastMessageTime: updated.lastMessageTime || undefined,
+      });
+
+      return updated;
+    } catch (error) {
+      this.logger.error(
+        `Error resetting unread count for chat ${chatId}: ${error.message}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Get total unread count across all chats for a user
+   *
+   * @param userId - The user ID
+   * @returns Total unread count
+   */
+  async getTotalUnreadCount(userId: number): Promise<number> {
+    try {
+      const result = await db
+        .select({
+          total: sql<number>`COALESCE(SUM(${chats.unreadCount}), 0)`,
+        })
+        .from(chats)
+        .where(and(eq(chats.userId, userId), eq(chats.isActive, true)));
+
+      return Number(result[0]?.total) || 0;
+    } catch (error) {
+      this.logger.error(
+        `Error getting total unread count for user ${userId}: ${error.message}`,
+      );
       throw error;
     }
   }

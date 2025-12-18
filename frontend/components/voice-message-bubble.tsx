@@ -50,6 +50,8 @@ function WaveformSeekBar({
   progress = 0,
   duration,
   onSeek,
+  onSeekDrag,
+  onSeekCommit,
   onSeekStart,
   onSeekEnd,
   isPlaying,
@@ -58,7 +60,9 @@ function WaveformSeekBar({
   data: number[];
   progress: number;
   duration: number;
-  onSeek?: (time: number) => void;
+  onSeek?: (time: number) => void; // For single clicks - immediately seeks audio
+  onSeekDrag?: (time: number) => void; // For dragging - visual only, no audio stutter
+  onSeekCommit?: () => void; // Called when drag ends to apply the position
   onSeekStart?: () => void;
   onSeekEnd?: () => void;
   isPlaying?: boolean;
@@ -150,7 +154,7 @@ function WaveformSeekBar({
     [duration]
   );
 
-  // Handle click to seek
+  // Handle click to seek - immediate seek (not drag)
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       // Don't handle click if we were dragging
@@ -162,7 +166,7 @@ function WaveformSeekBar({
       const seekTime = getSeekTimeFromPosition(e.clientX);
       if (seekTime !== null) {
         onSeekStart?.();
-        onSeek(seekTime);
+        onSeek(seekTime); // Direct seek for clicks
         // Small delay to show the position briefly before reverting
         setTimeout(() => {
           onSeekEnd?.();
@@ -172,10 +176,11 @@ function WaveformSeekBar({
     [getSeekTimeFromPosition, onSeek, onSeekStart, onSeekEnd]
   );
 
-  // Handle drag start
+  // Handle drag start - uses visual-only seeking during drag
   const handleMouseDown = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      if (!onSeek) return;
+      const seekFn = onSeekDrag || onSeek;
+      if (!seekFn) return;
       e.preventDefault();
 
       // Notify seek started
@@ -184,20 +189,25 @@ function WaveformSeekBar({
 
       const seekTime = getSeekTimeFromPosition(e.clientX);
       if (seekTime !== null) {
-        onSeek(seekTime);
+        seekFn(seekTime);
       }
 
       const handleMouseMove = (moveEvent: MouseEvent) => {
         isDraggingRef.current = true;
         const time = getSeekTimeFromPosition(moveEvent.clientX);
         if (time !== null) {
-          onSeek(time);
+          seekFn(time); // Visual-only during drag
         }
       };
 
       const handleMouseUp = () => {
         document.removeEventListener("mousemove", handleMouseMove);
         document.removeEventListener("mouseup", handleMouseUp);
+
+        // Commit the seek position when drag ends
+        if (isDraggingRef.current) {
+          onSeekCommit?.();
+        }
 
         // Notify seek ended
         if (hasStartedSeekingRef.current) {
@@ -214,13 +224,21 @@ function WaveformSeekBar({
       document.addEventListener("mousemove", handleMouseMove);
       document.addEventListener("mouseup", handleMouseUp);
     },
-    [getSeekTimeFromPosition, onSeek, onSeekStart, onSeekEnd]
+    [
+      getSeekTimeFromPosition,
+      onSeek,
+      onSeekDrag,
+      onSeekCommit,
+      onSeekStart,
+      onSeekEnd,
+    ]
   );
 
-  // Handle touch drag
+  // Handle touch drag - uses visual-only seeking during drag
   const handleTouchStart = useCallback(
     (e: React.TouchEvent<HTMLDivElement>) => {
-      if (!onSeek) return;
+      const seekFn = onSeekDrag || onSeek;
+      if (!seekFn) return;
 
       // Notify seek started
       hasStartedSeekingRef.current = true;
@@ -229,7 +247,7 @@ function WaveformSeekBar({
       const touch = e.touches[0];
       const seekTime = getSeekTimeFromPosition(touch.clientX);
       if (seekTime !== null) {
-        onSeek(seekTime);
+        seekFn(seekTime);
       }
 
       const handleTouchMove = (moveEvent: TouchEvent) => {
@@ -237,13 +255,18 @@ function WaveformSeekBar({
         const t = moveEvent.touches[0];
         const time = getSeekTimeFromPosition(t.clientX);
         if (time !== null) {
-          onSeek(time);
+          seekFn(time); // Visual-only during drag
         }
       };
 
       const handleTouchEnd = () => {
         document.removeEventListener("touchmove", handleTouchMove);
         document.removeEventListener("touchend", handleTouchEnd);
+
+        // Commit the seek position when drag ends
+        if (isDraggingRef.current) {
+          onSeekCommit?.();
+        }
 
         // Notify seek ended
         if (hasStartedSeekingRef.current) {
@@ -259,7 +282,14 @@ function WaveformSeekBar({
       document.addEventListener("touchmove", handleTouchMove);
       document.addEventListener("touchend", handleTouchEnd);
     },
-    [getSeekTimeFromPosition, onSeek, onSeekStart, onSeekEnd]
+    [
+      getSeekTimeFromPosition,
+      onSeek,
+      onSeekDrag,
+      onSeekCommit,
+      onSeekStart,
+      onSeekEnd,
+    ]
   );
 
   return (
@@ -372,6 +402,8 @@ export function VoiceMessageBubble({
     playbackSpeed,
     toggle,
     seek,
+    seekVisualOnly,
+    commitSeek,
     cyclePlaybackSpeed,
     registerAudio,
   } = useAudioItem(audioId, audioUrl);
@@ -444,6 +476,8 @@ export function VoiceMessageBubble({
           progress={progress}
           duration={audioDuration}
           onSeek={seek}
+          onSeekDrag={seekVisualOnly}
+          onSeekCommit={commitSeek}
           onSeekStart={() => setIsSeeking(true)}
           onSeekEnd={() => setIsSeeking(false)}
           isPlaying={isPlaying}

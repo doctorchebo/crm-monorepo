@@ -45,6 +45,7 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}) {
   const waveformIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const waveformDataRef = useRef<number[]>([]);
   const pendingSendRef = useRef<boolean>(false); // Track pending send across async operations
+  const cancelledRef = useRef<boolean>(false); // Track if recording was cancelled
 
   // Cleanup function
   const cleanup = useCallback(() => {
@@ -161,6 +162,12 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}) {
       };
 
       mediaRecorder.onstop = () => {
+        // If recording was cancelled, don't set the blob - just cleanup
+        if (cancelledRef.current) {
+          cancelledRef.current = false;
+          return;
+        }
+
         const blob = new Blob(chunksRef.current, { type: mimeType });
         const url = URL.createObjectURL(blob);
         const shouldSend = pendingSendRef.current;
@@ -307,6 +314,8 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}) {
 
   // Cancel recording (discard)
   const cancelRecording = useCallback(() => {
+    // Set cancelled flag BEFORE stopping - this prevents onstop from setting audioBlob
+    cancelledRef.current = true;
     pendingSendRef.current = false;
     stopRecording();
     chunksRef.current = [];

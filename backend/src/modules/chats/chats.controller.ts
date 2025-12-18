@@ -78,6 +78,15 @@ export class ChatsController {
     return this.chatsService.close(id);
   }
 
+  /**
+   * Mark chat as read - resets unread count to zero
+   * POST /chats/:id/mark-read
+   */
+  @Post(':id/mark-read')
+  async markAsRead(@Param('id') id: string) {
+    return this.chatsService.resetUnreadCount(id);
+  }
+
   @Get(':id/messages')
   async getMessages(
     @Param('id') id: string,

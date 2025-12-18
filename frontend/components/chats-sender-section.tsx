@@ -2,13 +2,14 @@
  * ChatsSenderSection
  * Collapsible section for chats grouped by sender number
  * Each sender has its own inbox with ability to expand/collapse
+ * Shows unread message badges per chat item (WhatsApp-style)
  */
 
 "use client";
 
 import { cn } from "@/lib/utils";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 interface Chat {
   id?: number;
@@ -19,6 +20,7 @@ interface Chat {
   participantName?: string;
   lastMessage?: string;
   lastMessageTime?: string;
+  unreadCount?: number;
 }
 
 interface ChatsSenderSectionProps {
@@ -27,7 +29,6 @@ interface ChatsSenderSectionProps {
   chats: Chat[];
   selectedChatId?: string | null;
   onSelectChat: (chatId: string) => void;
-  unreadCount?: number;
 }
 
 export function ChatsSenderSection({
@@ -36,9 +37,13 @@ export function ChatsSenderSection({
   chats,
   selectedChatId,
   onSelectChat,
-  unreadCount = 0,
 }: ChatsSenderSectionProps) {
   const [isExpanded, setIsExpanded] = useState(true);
+
+  // Calculate total unread count for this sender section
+  const totalUnreadCount = useMemo(() => {
+    return chats.reduce((sum, chat) => sum + (chat.unreadCount || 0), 0);
+  }, [chats]);
 
   if (chats.length === 0) {
     return null;
@@ -69,9 +74,9 @@ export function ChatsSenderSection({
           </span>
         </div>
 
-        {unreadCount > 0 && (
-          <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
-            {unreadCount > 99 ? "99+" : unreadCount}
+        {totalUnreadCount > 0 && (
+          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[#25D366] px-1.5 text-xs font-bold text-white">
+            {totalUnreadCount > 99 ? "99+" : totalUnreadCount}
           </span>
         )}
 
@@ -82,37 +87,89 @@ export function ChatsSenderSection({
       {isExpanded && (
         <div className="space-y-1 pl-6">
           {chats.map((chat) => (
-            <button
+            <ChatListItem
               key={chat.chatId}
-              onClick={() => onSelectChat(chat.chatId)}
-              className={cn(
-                "w-full rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-muted",
-                selectedChatId === chat.chatId && "bg-primary/10 font-medium"
-              )}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex-1 truncate">
-                  <p className="font-medium">
-                    {chat.participantName || chat.participantPhone}
-                  </p>
-                  {chat.lastMessage && (
-                    <p className="truncate text-xs text-muted-foreground">
-                      {chat.lastMessage}
-                    </p>
-                  )}
-                </div>
-
-                {chat.lastMessageTime && (
-                  <span className="whitespace-nowrap text-xs text-muted-foreground">
-                    {formatTime(new Date(chat.lastMessageTime))}
-                  </span>
-                )}
-              </div>
-            </button>
+              chat={chat}
+              isSelected={selectedChatId === chat.chatId}
+              onSelect={() => onSelectChat(chat.chatId)}
+            />
           ))}
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Individual chat list item with unread badge
+ */
+interface ChatListItemProps {
+  chat: Chat;
+  isSelected: boolean;
+  onSelect: () => void;
+}
+
+function ChatListItem({ chat, isSelected, onSelect }: ChatListItemProps) {
+  const hasUnread = (chat.unreadCount || 0) > 0;
+
+  return (
+    <button
+      onClick={onSelect}
+      className={cn(
+        "w-full rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-muted",
+        isSelected && "bg-primary/10 font-medium",
+        hasUnread && !isSelected && "bg-muted/50"
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <p
+              className={cn(
+                "truncate",
+                hasUnread ? "font-semibold" : "font-medium"
+              )}
+            >
+              {chat.participantName || chat.participantPhone}
+            </p>
+          </div>
+          {chat.lastMessage && (
+            <p
+              className={cn(
+                "truncate text-xs",
+                hasUnread
+                  ? "text-foreground font-medium"
+                  : "text-muted-foreground"
+              )}
+            >
+              {chat.lastMessage}
+            </p>
+          )}
+        </div>
+
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+          {chat.lastMessageTime && (
+            <span
+              className={cn(
+                "whitespace-nowrap text-xs",
+                hasUnread
+                  ? "text-[#25D366] font-medium"
+                  : "text-muted-foreground"
+              )}
+            >
+              {formatTime(new Date(chat.lastMessageTime))}
+            </span>
+          )}
+
+          {/* Unread Badge - WhatsApp Style */}
+          {hasUnread && (
+            <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[#25D366] px-1.5 text-xs font-bold text-white">
+              {chat.unreadCount! > 99 ? "99+" : chat.unreadCount}
+            </span>
+          )}
+        </div>
+      </div>
+    </button>
   );
 }
 

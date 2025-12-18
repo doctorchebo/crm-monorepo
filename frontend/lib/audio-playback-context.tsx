@@ -30,6 +30,8 @@ interface AudioPlaybackContextValue {
   play: (audioId: string, audioUrl: string) => void;
   pause: () => void;
   seek: (time: number) => void;
+  seekVisualOnly: (time: number) => void; // Update visual without touching audio
+  commitSeek: () => void; // Apply the visual position to actual audio
   setPlaybackSpeed: (speed: PlaybackSpeed) => void;
   cyclePlaybackSpeed: () => void;
   registerAudio: (audioId: string, duration: number) => void;
@@ -39,6 +41,7 @@ interface AudioPlaybackContextValue {
   isAudioPlaying: (audioId: string) => boolean;
   subscribeToTime: (callback: () => void) => () => void;
   getCurrentTime: () => number;
+  getCurrentAudioId: () => string | null;
 }
 
 const PLAYBACK_SPEED_KEY = "audio_playback_speed";
@@ -57,6 +60,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
   });
 
   const [positions, setPositions] = useState<AudioPositionMap>({});
+  const positionsRef = useRef<AudioPositionMap>({});
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const currentAudioIdRef = useRef<string | null>(null);
   const animationFrameRef = useRef<number | null>(null);
@@ -64,6 +68,8 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
   // Time subscription system - only the current audio subscribes
   const timeListenersRef = useRef<Set<() => void>>(new Set());
   const currentTimeRef = useRef<number>(0);
+  // Track pending seek position for visual-only seeking during drag
+  const pendingSeekPositionRef = useRef<number | null>(null);
 
   // Load saved playback speed from localStorage
   useEffect(() => {
@@ -88,10 +94,11 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     const handleEnded = () => {
       if (currentAudioIdRef.current) {
         // Reset position to beginning when ended
-        setPositions((prev) => ({
-          ...prev,
-          [currentAudioIdRef.current!]: 0,
-        }));
+        setPositions((prev) => {
+          const updated = { ...prev, [currentAudioIdRef.current!]: 0 };
+          positionsRef.current = updated;
+          return updated;
+        });
       }
       currentTimeRef.current = 0;
       // Notify listeners of reset
@@ -147,10 +154,13 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     }
     // Save final position when stopping
     if (currentAudioIdRef.current && audioRef.current) {
-      setPositions((prev) => ({
-        ...prev,
-        [currentAudioIdRef.current!]: audioRef.current!.currentTime,
-      }));
+      const audioId = currentAudioIdRef.current;
+      const currentTime = audioRef.current.currentTime;
+      setPositions((prev) => {
+        const updated = { ...prev, [audioId]: currentTime };
+        positionsRef.current = updated;
+        return updated;
+      });
     }
   }, []);
 
@@ -171,23 +181,42 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
 
       // Save current position before switching
       if (currentAudioIdRef.current && audio.currentTime > 0) {
-        setPositions((prev) => ({
-          ...prev,
-          [currentAudioIdRef.current!]: audio.currentTime,
-        }));
+        const prevAudioId = currentAudioIdRef.current;
+        const prevTime = audio.currentTime;
+        // Update positionsRef immediately so the old audio shows correct position
+        positionsRef.current = {
+          ...positionsRef.current,
+          [prevAudioId]: prevTime,
+        };
+        setPositions((prev) => ({ ...prev, [prevAudioId]: prevTime }));
       }
 
       // Stop current playback
       audio.pause();
       stopTimeTracking();
 
-      // Load new audio
+      // Update current audio ID ref before loading new audio
+      const prevAudioId = currentAudioIdRef.current;
       currentAudioIdRef.current = audioId;
+
+      // Update state to reflect new current audio BEFORE notifying listeners
+      setState((prev) => ({
+        ...prev,
+        currentAudioId: audioId,
+        isPlaying: false, // Will be set to true after successful play
+      }));
+
+      // Now notify listeners - they will see the updated currentAudioId
+      if (prevAudioId) {
+        timeListenersRef.current.forEach((listener) => listener());
+      }
+
+      // Load new audio
       audio.src = audioUrl;
       audio.playbackRate = state.playbackSpeed;
 
-      // Resume from saved position if available
-      const savedPosition = positions[audioId] || 0;
+      // Resume from saved position if available - use ref for latest value
+      const savedPosition = positionsRef.current[audioId] || 0;
       audio.currentTime = savedPosition;
       currentTimeRef.current = savedPosition;
 
@@ -195,7 +224,6 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         await audio.play();
         setState((prev) => ({
           ...prev,
-          currentAudioId: audioId,
           isPlaying: true,
           duration: audio.duration || 0,
         }));
@@ -208,7 +236,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         }));
       }
     },
-    [positions, startTimeTracking, stopTimeTracking, state.playbackSpeed]
+    [startTimeTracking, stopTimeTracking, state.playbackSpeed]
   );
 
   // Pause audio
@@ -221,10 +249,12 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
 
     // Save current position
     if (currentAudioIdRef.current) {
-      setPositions((prev) => ({
-        ...prev,
-        [currentAudioIdRef.current!]: audio.currentTime,
-      }));
+      const audioId = currentAudioIdRef.current;
+      setPositions((prev) => {
+        const updated = { ...prev, [audioId]: audio.currentTime };
+        positionsRef.current = updated;
+        return updated;
+      });
     }
 
     setState((prev) => ({
@@ -233,23 +263,51 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     }));
   }, [stopTimeTracking]);
 
-  // Seek to position
+  // Seek to position - immediately updates both visual and audio
+  // Use this for single clicks, NOT for dragging
   const seek = useCallback((time: number) => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    audio.currentTime = time;
+    // Update visual position
     currentTimeRef.current = time;
+    pendingSeekPositionRef.current = null;
+    timeListenersRef.current.forEach((listener) => listener());
 
-    // Notify listeners of seek
+    // Update audio element
+    audio.currentTime = time;
+
+    if (currentAudioIdRef.current) {
+      const audioId = currentAudioIdRef.current;
+      positionsRef.current = { ...positionsRef.current, [audioId]: time };
+      setPositions((prev) => ({ ...prev, [audioId]: time }));
+    }
+  }, []);
+
+  // Seek visual only - updates the UI without touching the audio element
+  // Use this during drag operations to prevent stuttering
+  const seekVisualOnly = useCallback((time: number) => {
+    // Update visual position only - don't touch audio.currentTime
+    currentTimeRef.current = time;
+    pendingSeekPositionRef.current = time;
     timeListenersRef.current.forEach((listener) => listener());
 
     if (currentAudioIdRef.current) {
-      setPositions((prev) => ({
-        ...prev,
-        [currentAudioIdRef.current!]: time,
-      }));
+      const audioId = currentAudioIdRef.current;
+      positionsRef.current = { ...positionsRef.current, [audioId]: time };
+      setPositions((prev) => ({ ...prev, [audioId]: time }));
     }
+  }, []);
+
+  // Commit the pending seek - applies the visual position to the audio element
+  // Call this when drag ends
+  const commitSeek = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio || pendingSeekPositionRef.current === null) return;
+
+    // Apply the pending position to the audio element
+    audio.currentTime = pendingSeekPositionRef.current;
+    pendingSeekPositionRef.current = null;
   }, []);
 
   // Set playback speed
@@ -287,7 +345,9 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
   const registerAudio = useCallback((audioId: string, duration: number) => {
     setPositions((prev) => {
       if (!(audioId in prev)) {
-        return { ...prev, [audioId]: 0 };
+        const updated = { ...prev, [audioId]: 0 };
+        positionsRef.current = updated;
+        return updated;
       }
       return prev;
     });
@@ -300,19 +360,19 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Get saved position for an audio (does NOT trigger re-renders on time update)
-  const getSavedPosition = useCallback(
-    (audioId: string): number => {
-      return positions[audioId] || 0;
-    },
-    [positions]
-  );
+  // Uses positionsRef to always get the latest value without stale closures
+  const getSavedPosition = useCallback((audioId: string): number => {
+    return positionsRef.current[audioId] || 0;
+  }, []);
 
   // Set saved position for an audio (for seeking before play)
   const setSavedPosition = useCallback((audioId: string, time: number) => {
-    setPositions((prev) => ({
-      ...prev,
-      [audioId]: time,
-    }));
+    positionsRef.current = { ...positionsRef.current, [audioId]: time };
+    setPositions((prev) => {
+      return { ...prev, [audioId]: time };
+    });
+    // Notify listeners so the UI updates
+    timeListenersRef.current.forEach((listener) => listener());
   }, []);
 
   // Check if specific audio is playing
@@ -336,12 +396,19 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     return currentTimeRef.current;
   }, []);
 
+  // Get current audio ID (for useSyncExternalStore snapshot)
+  const getCurrentAudioId = useCallback(() => {
+    return currentAudioIdRef.current;
+  }, []);
+
   const value: AudioPlaybackContextValue = {
     state,
     positions,
     play,
     pause,
     seek,
+    seekVisualOnly,
+    commitSeek,
     setPlaybackSpeed,
     cyclePlaybackSpeed,
     registerAudio,
@@ -351,6 +418,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     isAudioPlaying,
     subscribeToTime,
     getCurrentTime,
+    getCurrentAudioId,
   };
 
   return (
@@ -377,6 +445,8 @@ export function useAudioItem(audioId: string, audioUrl: string) {
     play,
     pause,
     seek,
+    seekVisualOnly,
+    commitSeek,
     cyclePlaybackSpeed,
     getSavedPosition,
     setSavedPosition,
@@ -384,17 +454,29 @@ export function useAudioItem(audioId: string, audioUrl: string) {
     registerAudio,
     subscribeToTime,
     getCurrentTime,
+    getCurrentAudioId,
   } = useAudioPlayback();
 
   const isPlaying = isAudioPlaying(audioId);
   const isCurrentAudio = state.currentAudioId === audioId;
 
+  // Store audioId in ref for stable access in snapshot function
+  const audioIdRef = useRef(audioId);
+  audioIdRef.current = audioId;
+
   // Only subscribe to time updates if THIS is the current audio
   // This prevents other audio bubbles from re-rendering
   const currentTime = useSyncExternalStore(
     subscribeToTime,
-    // Only return actual time if this is the current audio, otherwise return saved position
-    () => (isCurrentAudio ? getCurrentTime() : getSavedPosition(audioId)),
+    // Check against currentAudioIdRef (via getCurrentAudioId) for real-time accuracy
+    // This ensures the snapshot always reflects the true current state
+    () => {
+      const currentAudioId = getCurrentAudioId();
+      if (currentAudioId === audioIdRef.current) {
+        return getCurrentTime();
+      }
+      return getSavedPosition(audioIdRef.current);
+    },
     // Server snapshot
     () => 0
   );
@@ -407,18 +489,36 @@ export function useAudioItem(audioId: string, audioUrl: string) {
     }
   }, [isPlaying, pause, play, audioId, audioUrl]);
 
+  // Immediate seek - for single clicks
   const seekTo = useCallback(
     (time: number) => {
       if (isCurrentAudio) {
-        // Audio is currently loaded - seek directly
         seek(time);
       } else {
-        // Audio not yet loaded - save position for when it plays
         setSavedPosition(audioId, time);
       }
     },
     [isCurrentAudio, seek, setSavedPosition, audioId]
   );
+
+  // Visual-only seek - for dragging (doesn't touch audio.currentTime)
+  const seekVisualOnlyTo = useCallback(
+    (time: number) => {
+      if (isCurrentAudio) {
+        seekVisualOnly(time);
+      } else {
+        setSavedPosition(audioId, time);
+      }
+    },
+    [isCurrentAudio, seekVisualOnly, setSavedPosition, audioId]
+  );
+
+  // Commit the seek - call when drag ends
+  const commitSeekPosition = useCallback(() => {
+    if (isCurrentAudio) {
+      commitSeek();
+    }
+  }, [isCurrentAudio, commitSeek]);
 
   return {
     isPlaying,
@@ -427,6 +527,8 @@ export function useAudioItem(audioId: string, audioUrl: string) {
     playbackSpeed: state.playbackSpeed,
     toggle,
     seek: seekTo,
+    seekVisualOnly: seekVisualOnlyTo,
+    commitSeek: commitSeekPosition,
     cyclePlaybackSpeed,
     registerAudio,
   };
