@@ -8,9 +8,9 @@ export default function NewSenderPage() {
 
   return (
     <SenderFormPage
-      params={{
+      params={Promise.resolve({
         locale: params.locale as string,
-      }}
+      })}
     />
   );
 }
