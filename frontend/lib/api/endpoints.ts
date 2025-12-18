@@ -1,6 +1,10 @@
 /**
  * API Endpoints for backend communication
  */
+import type {
+  NotificationSettings,
+  UpdateNotificationSettingsDto,
+} from "@/lib/types/settings.types";
 import { apiClient } from "./client";
 
 // DTOs
@@ -177,6 +181,14 @@ export const backendApi = {
     getAutomation: () => apiClient.get("/settings/automation"),
     updateAutomation: (data: any) =>
       apiClient.patch("/settings/automation", data),
+
+    // User notification settings
+    getNotifications: (): Promise<NotificationSettings> =>
+      apiClient.get("/settings/notifications"),
+    updateNotifications: (
+      data: UpdateNotificationSettingsDto
+    ): Promise<NotificationSettings> =>
+      apiClient.patch("/settings/notifications", data),
   },
 
   // WhatsApp endpoints

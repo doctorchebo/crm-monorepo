@@ -130,6 +130,7 @@ export function useChatState(): UseChatStateReturn {
   }, [selectedChatId, setActiveChatId]);
 
   // Listen for chat updates from WebSocket and update local state
+  // IMPORTANT: Skip unread count updates for the currently selected chat
   useEffect(() => {
     if (chatUpdates.size === 0) return;
 
@@ -139,9 +140,12 @@ export function useChatState(): UseChatStateReturn {
         const update = chatUpdates.get(chat.chatId);
         if (update) {
           hasUpdates = true;
+          // Skip unread count update for currently selected chat
+          // The selected chat should always show 0 unread
+          const isSelectedChat = chat.chatId === selectedChatId;
           return {
             ...chat,
-            unreadCount: update.unreadCount,
+            unreadCount: isSelectedChat ? 0 : update.unreadCount,
             lastMessage: update.lastMessage || chat.lastMessage,
             lastMessageTime: update.lastMessageTime || chat.lastMessageTime,
           };
@@ -151,7 +155,7 @@ export function useChatState(): UseChatStateReturn {
 
       return hasUpdates ? updatedChats : prevChats;
     });
-  }, [chatUpdates]);
+  }, [chatUpdates, selectedChatId]);
 
   // Handler to select chat and save scroll position before switching
   const handleSelectChat = useCallback(

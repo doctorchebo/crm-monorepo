@@ -339,9 +339,13 @@
     "description": "Configure your chat preferences and notifications",
     "messagesCategory": "Messages",
     "messageNotifications": "Message notifications",
-    "messageNotificationsDesc": "Show notifications for new messages",
+    "messageNotificationsDesc": "Show notifications for new messages when you're not in the chat",
+    "messageNotificationsDescDenied": "Notifications blocked by browser. Please enable in browser settings.",
     "notificationTonesCategory": "Notification Tones",
     "incomingSounds": "Incoming sounds",
-    "incomingSoundsDesc": "Play sounds for incoming messages"
+    "incomingSoundsDesc": "Play sounds for incoming messages",
+    "notificationsEnabled": "Notifications enabled",
+    "notificationsDisabled": "Notifications disabled",
+    "notificationsDeniedMessage": "Notifications were blocked. Please enable them in your browser settings to receive message alerts."
   }
 }

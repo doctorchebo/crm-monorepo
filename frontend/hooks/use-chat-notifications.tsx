@@ -7,24 +7,32 @@
  * Features:
  * - Listens for WebSocket chat:update events
  * - Tracks unread counts per chat
- * - Plays notification sounds for new messages
+ * - Plays notification sounds for new messages (based on settings)
+ * - Shows browser notifications (based on settings)
  * - Provides methods to update and reset unread counts
  * - Works even when user is not on the chats page
+ *
+ * Key Design Decisions:
+ * - Uses refs for settings/callbacks in WebSocket effect to avoid reconnections
+ * - Tracks active chat to prevent notifications/count updates for current chat
+ * - Settings are fetched via SWR and used reactively via refs
  */
 
 "use client";
 
 import {
   createContext,
+  ReactNode,
   useCallback,
   useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
-  ReactNode,
 } from "react";
 import { io, Socket } from "socket.io-client";
+import { useBrowserNotifications } from "./use-browser-notifications";
+import { useNotificationSettings } from "./use-notification-settings";
 import { useNotificationSound } from "./use-notification-sound";
 
 // Interface for chat update events from WebSocket
@@ -33,6 +41,17 @@ export interface ChatUpdateEvent {
   unreadCount: number;
   lastMessage?: string;
   lastMessageTime?: string;
+  participantName?: string;
+}
+
+// Interface for new message events
+interface NewMessageEvent {
+  chatId: string;
+  messageId: string;
+  sender: string;
+  text?: string;
+  type: string;
+  participantName?: string;
 }
 
 // Interface for the context value
@@ -59,16 +78,29 @@ interface ChatNotificationsContextValue {
 const ChatNotificationsContext =
   createContext<ChatNotificationsContextValue | null>(null);
 
+/**
+ * Get a human-readable label for message types
+ */
+function getMessageTypeLabel(type: string): string {
+  const labels: Record<string, string> = {
+    text: "Message",
+    image: "📷 Photo",
+    video: "🎬 Video",
+    audio: "🎵 Audio message",
+    document: "📄 Document",
+    contacts: "👤 Contact",
+    location: "📍 Location",
+    sticker: "Sticker",
+  };
+  return labels[type] || "Message";
+}
+
 interface ChatNotificationsProviderProps {
   children: ReactNode;
-  soundEnabled?: boolean;
-  soundVolume?: number;
 }
 
 export function ChatNotificationsProvider({
   children,
-  soundEnabled = true,
-  soundVolume = 0.5,
 }: ChatNotificationsProviderProps) {
   const [unreadCounts, setUnreadCounts] = useState<Map<string, number>>(
     new Map()
@@ -77,20 +109,49 @@ export function ChatNotificationsProvider({
     new Map()
   );
   const [isConnected, setIsConnected] = useState(false);
-  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [activeChatId, setActiveChatIdState] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
+
+  // Refs to track current values without causing effect re-runs
   const activeChatIdRef = useRef<string | null>(null);
 
-  // Keep ref in sync with state
-  useEffect(() => {
-    activeChatIdRef.current = activeChatId;
-  }, [activeChatId]);
+  // Get notification settings from user preferences
+  const { settings, isLoading: isLoadingSettings } = useNotificationSettings();
 
-  // Notification sound hook
+  // Refs for settings to use in WebSocket handlers without re-creating the effect
+  const settingsRef = useRef(settings);
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
+
+  // Notification sound hook - uses settings
   const { playSound } = useNotificationSound({
-    enabled: soundEnabled,
-    volume: soundVolume,
+    enabled: settings.soundEnabled,
+    volume: settings.soundVolume,
   });
+
+  // Ref for playSound to avoid effect dependencies
+  const playSoundRef = useRef(playSound);
+  useEffect(() => {
+    playSoundRef.current = playSound;
+  }, [playSound]);
+
+  // Browser notifications hook
+  const { showNotification, isGranted } = useBrowserNotifications();
+
+  // Refs for browser notification to avoid effect dependencies
+  const showNotificationRef = useRef(showNotification);
+  const isGrantedRef = useRef(isGranted);
+  useEffect(() => {
+    showNotificationRef.current = showNotification;
+    isGrantedRef.current = isGranted;
+  }, [showNotification, isGranted]);
+
+  // Wrapper for setActiveChatId that also updates the ref synchronously
+  const setActiveChatId = useCallback((chatId: string | null) => {
+    activeChatIdRef.current = chatId;
+    setActiveChatIdState(chatId);
+  }, []);
 
   // Calculate total unread count
   const totalUnreadCount = useMemo(() => {
@@ -124,7 +185,112 @@ export function ChatNotificationsProvider({
     setUnreadCounts(new Map(counts));
   }, []);
 
+  /**
+   * Handle incoming chat update from WebSocket
+   * This is extracted to keep the effect clean and testable
+   */
+  const handleChatUpdate = useCallback((update: ChatUpdateEvent) => {
+    const currentActiveChatId = activeChatIdRef.current;
+    const isActiveChat = update.chatId === currentActiveChatId;
+
+    console.log(
+      `[ChatNotifications] 📨 Chat update: ${update.chatId}, unread: ${update.unreadCount}, isActiveChat: ${isActiveChat}`
+    );
+
+    // Update unread count - but SKIP if this is the currently active chat
+    // The active chat should always show 0 unread since the user is viewing it
+    if (!isActiveChat) {
+      setUnreadCounts((prev) => {
+        const next = new Map(prev);
+        next.set(update.chatId, update.unreadCount);
+        return next;
+      });
+    }
+
+    // Store the update for UI consumption (always, for last message updates)
+    setChatUpdates((prev) => {
+      const next = new Map(prev);
+      next.set(update.chatId, update);
+      return next;
+    });
+
+    // Play notification sound and show browser notification if:
+    // 1. The unread count increased (new message)
+    // 2. This is NOT the currently active chat
+    if (update.unreadCount > 0 && !isActiveChat) {
+      // Get current settings from ref (always up-to-date)
+      const currentSettings = settingsRef.current;
+
+      // Play sound if enabled
+      if (currentSettings.soundEnabled) {
+        playSoundRef.current();
+      }
+
+      // Show browser notification if enabled and permission granted
+      if (currentSettings.browserNotificationsEnabled && isGrantedRef.current) {
+        const senderName = update.participantName || "New message";
+        const messagePreview = update.lastMessage || "You have a new message";
+
+        showNotificationRef.current({
+          title: senderName,
+          body: messagePreview,
+          tag: `chat-${update.chatId}`,
+          data: {
+            chatId: update.chatId,
+          },
+        });
+      }
+    }
+  }, []);
+
+  /**
+   * Handle incoming new message from WebSocket
+   */
+  const handleNewMessage = useCallback((message: NewMessageEvent) => {
+    const currentActiveChatId = activeChatIdRef.current;
+    const isActiveChat = message.chatId === currentActiveChatId;
+
+    // Skip notifications for the active chat
+    if (isActiveChat) {
+      return;
+    }
+
+    // Get current settings from ref
+    const currentSettings = settingsRef.current;
+
+    // Play sound if enabled
+    if (currentSettings.soundEnabled) {
+      playSoundRef.current();
+    }
+
+    // Show browser notification if enabled and permission granted
+    if (currentSettings.browserNotificationsEnabled && isGrantedRef.current) {
+      const senderName =
+        message.participantName || message.sender || "New message";
+      const messagePreview = message.text || getMessageTypeLabel(message.type);
+
+      showNotificationRef.current({
+        title: senderName,
+        body: messagePreview,
+        tag: `chat-${message.chatId}`,
+        data: {
+          chatId: message.chatId,
+          messageId: message.messageId,
+        },
+      });
+    }
+  }, []);
+
+  // Store handlers in refs for the WebSocket effect
+  const handleChatUpdateRef = useRef(handleChatUpdate);
+  const handleNewMessageRef = useRef(handleNewMessage);
+  useEffect(() => {
+    handleChatUpdateRef.current = handleChatUpdate;
+    handleNewMessageRef.current = handleNewMessage;
+  }, [handleChatUpdate, handleNewMessage]);
+
   // Connect to WebSocket and listen for chat updates
+  // This effect should only run once on mount and cleanup on unmount
   useEffect(() => {
     console.log("[ChatNotifications] Connecting to WebSocket...");
 
@@ -151,41 +317,14 @@ export function ChatNotificationsProvider({
       setIsConnected(false);
     });
 
-    // Listen for chat updates (unread count changes, last message updates)
+    // Listen for chat updates - use ref to always get latest handler
     socket.on("chat:update", (update: ChatUpdateEvent) => {
-      console.log(
-        `[ChatNotifications] 📨 Chat update: ${update.chatId}, unread: ${update.unreadCount}`
-      );
-
-      // Update unread count
-      setUnreadCounts((prev) => {
-        const next = new Map(prev);
-        next.set(update.chatId, update.unreadCount);
-        return next;
-      });
-
-      // Store the update for UI consumption
-      setChatUpdates((prev) => {
-        const next = new Map(prev);
-        next.set(update.chatId, update);
-        return next;
-      });
-
-      // Play notification sound if:
-      // 1. The unread count increased (new message)
-      // 2. This is not the currently active chat
-      const currentActiveChatId = activeChatIdRef.current;
-      if (update.unreadCount > 0 && update.chatId !== currentActiveChatId) {
-        playSound();
-      }
+      handleChatUpdateRef.current(update);
     });
 
-    // Also listen for new messages to trigger sound even if chat:update hasn't arrived yet
-    socket.on("message:new", (message: { chatId: string }) => {
-      const currentActiveChatId = activeChatIdRef.current;
-      if (message.chatId !== currentActiveChatId) {
-        playSound();
-      }
+    // Listen for new messages - use ref to always get latest handler
+    socket.on("message:new", (message: NewMessageEvent) => {
+      handleNewMessageRef.current(message);
     });
 
     return () => {
@@ -193,7 +332,7 @@ export function ChatNotificationsProvider({
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [playSound]);
+  }, []); // Empty deps - socket connection is stable
 
   const contextValue = useMemo<ChatNotificationsContextValue>(
     () => ({

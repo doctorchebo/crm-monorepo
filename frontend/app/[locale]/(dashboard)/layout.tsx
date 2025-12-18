@@ -139,7 +139,7 @@ function Header() {
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <ChatNotificationsProvider soundEnabled={true} soundVolume={0.5}>
+    <ChatNotificationsProvider>
       <section className="flex flex-col h-screen">
         <Header />
         <div className="flex-1 overflow-auto">{children}</div>

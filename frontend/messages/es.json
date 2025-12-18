@@ -362,9 +362,13 @@
     "description": "Configura tus preferencias de chat y notificaciones",
     "messagesCategory": "Mensajes",
     "messageNotifications": "Notificaciones de mensajes",
-    "messageNotificationsDesc": "Mostrar notificaciones para nuevos mensajes",
+    "messageNotificationsDesc": "Mostrar notificaciones para nuevos mensajes cuando no estés en el chat",
+    "messageNotificationsDescDenied": "Notificaciones bloqueadas por el navegador. Por favor habilítalas en la configuración del navegador.",
     "notificationTonesCategory": "Tonos de Notificación",
     "incomingSounds": "Sonidos entrantes",
-    "incomingSoundsDesc": "Reproducir sonidos para mensajes entrantes"
+    "incomingSoundsDesc": "Reproducir sonidos para mensajes entrantes",
+    "notificationsEnabled": "Notificaciones habilitadas",
+    "notificationsDisabled": "Notificaciones deshabilitadas",
+    "notificationsDeniedMessage": "Las notificaciones fueron bloqueadas. Por favor habilítalas en la configuración de tu navegador para recibir alertas de mensajes."
   }
 }

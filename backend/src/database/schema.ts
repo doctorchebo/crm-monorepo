@@ -37,6 +37,31 @@ export const users = pgTable('users', {
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 
+// User Settings table - stores user preferences with flexible JSONB values
+// Uses category/key pattern for extensibility (notifications, appearance, chat, etc.)
+export const userSettings = pgTable(
+  'user_settings',
+  {
+    id: serial('id').primaryKey(),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    category: varchar('category', { length: 50 }).notNull(), // 'notifications', 'appearance', 'chat', etc.
+    key: varchar('key', { length: 100 }).notNull(), // Setting key within category
+    value: jsonb('value').notNull().default({}), // Flexible value storage
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (table) => ({
+    userSettingUnique: unique().on(table.userId, table.category, table.key),
+    userIdIndex: index().on(table.userId),
+    categoryIndex: index().on(table.category),
+  }),
+);
+
+export type UserSetting = typeof userSettings.$inferSelect;
+export type NewUserSetting = typeof userSettings.$inferInsert;
+
 // Chats table - stores conversations with phone numbers
 export const chats = pgTable(
   'chats',
@@ -503,3 +528,16 @@ export const contactAttributesRelations = relations(
     }),
   }),
 );
+
+// User Settings relations
+export const userSettingsRelations = relations(userSettings, ({ one }) => ({
+  user: one(users, {
+    fields: [userSettings.userId],
+    references: [users.id],
+  }),
+}));
+
+// Users relations (settings and other user-related data)
+export const usersRelations = relations(users, ({ many }) => ({
+  settings: many(userSettings),
+}));
