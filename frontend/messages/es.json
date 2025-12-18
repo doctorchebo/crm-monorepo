@@ -31,7 +31,9 @@
     "general": "General",
     "activity": "Actividad",
     "security": "Seguridad",
-    "navigation": "Navegación"
+    "navigation": "Navegación",
+    "settings": "Configuración",
+    "settingsChats": "Chats"
   },
   "chats": {
     "title": "Chats",
@@ -354,5 +356,15 @@
     "autoResponseDesc": "Habilita respuestas automáticas para reglas coincidentes",
     "messageNotifications": "Notificaciones de Mensajes",
     "notificationsDesc": "Recibe notificaciones para nuevos mensajes"
+  },
+  "settingsChats": {
+    "title": "Configuración de Chats",
+    "description": "Configura tus preferencias de chat y notificaciones",
+    "messagesCategory": "Mensajes",
+    "messageNotifications": "Notificaciones de mensajes",
+    "messageNotificationsDesc": "Mostrar notificaciones para nuevos mensajes",
+    "notificationTonesCategory": "Tonos de Notificación",
+    "incomingSounds": "Sonidos entrantes",
+    "incomingSoundsDesc": "Reproducir sonidos para mensajes entrantes"
   }
 }

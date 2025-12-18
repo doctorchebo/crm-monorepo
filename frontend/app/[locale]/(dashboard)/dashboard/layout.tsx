@@ -1,49 +1,21 @@
 "use client";
 
+import { SidebarNav } from "@/components/sidebar-nav";
 import { Separator } from "@/components/ui/separator";
 import {
   Sidebar,
   SidebarContent,
   SidebarHeader,
   SidebarInset,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { AudioPlaybackProvider } from "@/lib/audio-playback-context";
-import {
-  Activity,
-  FileText,
-  Home,
-  LayoutGrid,
-  MessageSquare,
-  Send,
-  Settings,
-  Shield,
-  Users,
-} from "lucide-react";
+import { navigationConfig } from "@/lib/navigation";
 import { useTranslations } from "next-intl";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
 
 function DashboardSidebar() {
-  const pathname = usePathname();
   const t = useTranslations("dashboard");
-
-  const navItems = [
-    { href: "/dashboard", icon: Home, label: t("home") },
-    { href: "/dashboard/chats", icon: MessageSquare, label: t("chats") },
-    { href: "/dashboard/contacts", icon: Users, label: t("contacts") },
-    { href: "/dashboard/templates", icon: FileText, label: t("templates") },
-    { href: "/dashboard/senders", icon: Send, label: t("senders") },
-    { href: "/dashboard/kanban", icon: LayoutGrid, label: t("kanban") },
-    { href: "/dashboard/team", icon: Users, label: t("team") },
-    { href: "/dashboard/general", icon: Settings, label: t("general") },
-    { href: "/dashboard/activity", icon: Activity, label: t("activity") },
-    { href: "/dashboard/security", icon: Shield, label: t("security") },
-  ];
 
   return (
     <Sidebar collapsible="icon">
@@ -54,23 +26,7 @@ function DashboardSidebar() {
       </SidebarHeader>
       <Separator />
       <SidebarContent>
-        <SidebarMenu>
-          {navItems.map((item) => (
-            <SidebarMenuItem key={item.href}>
-              <SidebarMenuButton
-                asChild
-                isActive={pathname === item.href}
-                className="cursor-pointer"
-                tooltip={item.label}
-              >
-                <Link href={item.href}>
-                  <item.icon className="h-4 w-4" />
-                  <span>{item.label}</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          ))}
-        </SidebarMenu>
+        <SidebarNav items={navigationConfig} />
       </SidebarContent>
     </Sidebar>
   );

@@ -31,7 +31,9 @@
     "general": "General",
     "activity": "Activity",
     "security": "Security",
-    "navigation": "Navigation"
+    "navigation": "Navigation",
+    "settings": "Settings",
+    "settingsChats": "Chats"
   },
   "chats": {
     "title": "Chats",
@@ -331,5 +333,15 @@
     "autoResponseDesc": "Enable automatic responses for matched rules",
     "messageNotifications": "Message Notifications",
     "notificationsDesc": "Receive notifications for new messages"
+  },
+  "settingsChats": {
+    "title": "Chats Settings",
+    "description": "Configure your chat preferences and notifications",
+    "messagesCategory": "Messages",
+    "messageNotifications": "Message notifications",
+    "messageNotificationsDesc": "Show notifications for new messages",
+    "notificationTonesCategory": "Notification Tones",
+    "incomingSounds": "Incoming sounds",
+    "incomingSoundsDesc": "Play sounds for incoming messages"
   }
 }
