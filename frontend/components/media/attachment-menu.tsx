@@ -12,14 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ALLOWED_FILE_TYPES } from "@/lib/media/types";
-import {
-  Camera,
-  Contact,
-  FileText,
-  Image,
-  Paperclip,
-  Sticker,
-} from "lucide-react";
+import { Camera, Contact, FileText, Image, Paperclip } from "lucide-react";
 import React, { useRef } from "react";
 
 export type AttachmentType =
@@ -27,8 +20,7 @@ export type AttachmentType =
   | "document"
   | "camera"
   | "contact"
-  | "location"
-  | "sticker";
+  | "location";
 
 interface AttachmentMenuProps {
   onFilesSelected: (files: File[], type: AttachmentType) => void;
@@ -88,10 +80,6 @@ export function AttachmentMenu({
         // Location sharing - not supported in WhatsApp Cloud API
         console.log("Location sharing not supported");
         break;
-      case "sticker":
-        // Sticker picker - could be implemented later
-        console.log("Sticker picker not yet implemented");
-        break;
     }
   };
 
@@ -140,16 +128,14 @@ export function AttachmentMenu({
         <DropdownMenuContent
           side="top"
           align="start"
-          className="w-56 mb-2"
+          className="w-56 mb-2 bg-background dark:bg-zinc-900"
           sideOffset={8}
         >
           <DropdownMenuItem
             onClick={() => handleMenuItemClick("photos-videos")}
             className="cursor-pointer gap-3 py-2.5"
           >
-            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-purple-500 text-white">
-              <Image className="h-4 w-4" />
-            </div>
+            <Image className="h-5 w-5 text-foreground dark:text-white" />
             <span>Photos & Videos</span>
           </DropdownMenuItem>
 
@@ -157,9 +143,7 @@ export function AttachmentMenu({
             onClick={() => handleMenuItemClick("camera")}
             className="cursor-pointer gap-3 py-2.5"
           >
-            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-pink-500 text-white">
-              <Camera className="h-4 w-4" />
-            </div>
+            <Camera className="h-5 w-5 text-foreground dark:text-white" />
             <span>Camera</span>
           </DropdownMenuItem>
 
@@ -167,9 +151,7 @@ export function AttachmentMenu({
             onClick={() => handleMenuItemClick("document")}
             className="cursor-pointer gap-3 py-2.5"
           >
-            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-indigo-500 text-white">
-              <FileText className="h-4 w-4" />
-            </div>
+            <FileText className="h-5 w-5 text-foreground dark:text-white" />
             <span>Document</span>
           </DropdownMenuItem>
 
@@ -177,21 +159,8 @@ export function AttachmentMenu({
             onClick={() => handleMenuItemClick("contact")}
             className="cursor-pointer gap-3 py-2.5"
           >
-            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-500 text-white">
-              <Contact className="h-4 w-4" />
-            </div>
+            <Contact className="h-5 w-5 text-foreground dark:text-white" />
             <span>Contact</span>
-          </DropdownMenuItem>
-
-          <DropdownMenuItem
-            onClick={() => handleMenuItemClick("sticker")}
-            className="cursor-pointer gap-3 py-2.5 opacity-50"
-            disabled
-          >
-            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-teal-500 text-white">
-              <Sticker className="h-4 w-4" />
-            </div>
-            <span>Sticker</span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
