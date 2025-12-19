@@ -6,12 +6,13 @@ import { S3Service } from '@shared/services/s3.service';
 import { ThumbnailQueueService } from '../thumbnail/thumbnail-queue.service';
 import { ThumbnailModule } from '../thumbnail/thumbnail.module';
 import { MediaController } from './controllers/media.controller';
+import { AudioConverterService } from './services/audio-converter.service';
 import { MediaService } from './services/media.service';
 import { WhatsAppController } from './whatsapp.controller';
 import { WhatsAppGateway, setWhatsAppGateway } from './whatsapp.gateway';
 import { WhatsAppService } from './whatsapp.service';
 import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
-import { AudioConverterService } from './services/audio-converter.service';
+import { MediaAnalyzerService } from './services/media-analyzer.service';
 
 /**
  * WhatsApp Module
@@ -43,6 +44,7 @@ import { AudioConverterService } from './services/audio-converter.service';
   providers: [
     WhatsAppService,
     MediaService,
+    MediaAnalyzerService,
     AudioConverterService,
     S3Service,
     MetaCloudAPIConfigService,
@@ -51,6 +53,7 @@ import { AudioConverterService } from './services/audio-converter.service';
   exports: [
     WhatsAppService,
     MediaService,
+    MediaAnalyzerService,
     AudioConverterService,
     S3Service,
     MetaCloudAPIConfigService,
@@ -62,11 +65,18 @@ export class WhatsAppModule implements OnModuleInit {
     private gateway: WhatsAppGateway,
     private moduleRef: ModuleRef,
     private mediaService: MediaService,
+    private mediaAnalyzerService: MediaAnalyzerService,
   ) {
     setWhatsAppGateway(gateway);
   }
 
   async onModuleInit() {
+    // Inject MediaAnalyzerService into MediaService for GIF detection
+    this.mediaService.setMediaAnalyzerService(this.mediaAnalyzerService);
+    console.log(
+      '✅ MediaAnalyzerService injected into MediaService for GIF detection',
+    );
+
     // Inject ThumbnailQueueService into MediaService to avoid circular dependency
     try {
       const thumbnailQueueService = this.moduleRef.get(ThumbnailQueueService, {

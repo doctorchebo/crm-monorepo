@@ -21,7 +21,15 @@ export interface ReplyPreview {
   messageId: string; // Original message ID
   senderType: 'customer' | 'agent'; // Who sent the original message
   senderName: string; // Display name (e.g., "John Doe" or "You")
-  type: 'text' | 'image' | 'video' | 'audio' | 'document' | 'contacts';
+  type:
+    | 'text'
+    | 'image'
+    | 'video'
+    | 'audio'
+    | 'document'
+    | 'contacts'
+    | 'sticker'
+    | 'gif';
   text?: string; // Short text excerpt (1-2 lines, max ~100 chars)
   media?: ReplyMediaPreview;
   unavailable?: boolean; // True if original message is deleted/missing
@@ -141,6 +149,12 @@ export function generateReplyPreview(
             ? `📄 ${firstAttachment.fileName}`
             : '📄 Document';
           break;
+        case 'sticker':
+          preview.text = '🎭 Sticker';
+          break;
+        case 'gif':
+          preview.text = '🎞️ GIF';
+          break;
       }
     }
   }
@@ -164,6 +178,8 @@ export function canReplyToMessage(messageType: string): boolean {
     'audio',
     'document',
     'contacts',
+    'sticker',
+    'gif',
   ];
   return replyableTypes.includes(messageType);
 }

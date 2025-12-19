@@ -78,6 +78,10 @@ export const ReplyBanner = memo(function ReplyBanner({
             : `${icon} ${t("document")}`;
         case "contacts":
           return `${icon} ${t("contact")}`;
+        case "sticker":
+          return `${icon} Sticker`;
+        case "gif":
+          return `${icon} GIF`;
       }
     }
 

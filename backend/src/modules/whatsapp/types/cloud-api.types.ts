@@ -138,6 +138,7 @@ export interface CloudAPIInboundMessage {
     | 'video'
     | 'audio'
     | 'document'
+    | 'sticker'
     | 'button'
     | 'interactive'
     | 'location'
@@ -167,6 +168,13 @@ export interface CloudAPIInboundMessage {
     mime_type: string;
     sha256: string;
     id: string;
+    animated?: boolean; // True for GIFs sent via WhatsApp
+  };
+  sticker?: {
+    mime_type: string;
+    sha256: string;
+    id: string;
+    animated?: boolean; // True for animated stickers
   };
   audio?: {
     mime_type: string;
@@ -342,7 +350,7 @@ export interface CloudAPIWebhookSignatureVerification {
  * Extracted from inbound message
  */
 export interface MediaMetadata {
-  type: 'image' | 'video' | 'audio' | 'document';
+  type: 'image' | 'video' | 'audio' | 'document' | 'sticker' | 'gif';
   mimeType: string;
   sha256: string;
   mediaId: string;
@@ -351,6 +359,7 @@ export interface MediaMetadata {
   fileSize?: number;
   downloadUrl?: string; // Generated URL for secure download
   isVoiceNote?: boolean; // For audio: true if voice note (PTT) vs file upload
+  isAnimated?: boolean; // For stickers/gifs: true if animated
 }
 
 /**
@@ -399,7 +408,15 @@ export interface NormalizedCloudAPIMessage {
     messageId: string;
     senderType: 'customer' | 'agent';
     senderName: string;
-    type: 'text' | 'image' | 'video' | 'audio' | 'document' | 'contacts';
+    type:
+      | 'text'
+      | 'image'
+      | 'video'
+      | 'audio'
+      | 'document'
+      | 'contacts'
+      | 'sticker'
+      | 'gif';
     text?: string;
     media?: {
       url?: string;

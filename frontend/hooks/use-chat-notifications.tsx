@@ -40,6 +40,7 @@ export interface ChatUpdateEvent {
   chatId: string;
   unreadCount: number;
   lastMessage?: string;
+  lastMessageType?: string;
   lastMessageTime?: string;
   participantName?: string;
 }
@@ -90,7 +91,8 @@ function getMessageTypeLabel(type: string): string {
     document: "📄 Document",
     contacts: "👤 Contact",
     location: "📍 Location",
-    sticker: "Sticker",
+    sticker: "🎭 Sticker",
+    gif: "🎞️ GIF",
   };
   return labels[type] || "Message";
 }

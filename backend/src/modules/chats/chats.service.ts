@@ -18,6 +18,7 @@ interface IChatUpdateGateway {
     chatId: string;
     unreadCount: number;
     lastMessage?: string;
+    lastMessageType?: string;
     lastMessageTime?: Date;
   }): void;
 }
@@ -46,6 +47,7 @@ export class ChatsService {
     chatId: string;
     unreadCount: number;
     lastMessage?: string;
+    lastMessageType?: string;
     lastMessageTime?: Date;
   }): void {
     if (this.chatUpdateGateway) {

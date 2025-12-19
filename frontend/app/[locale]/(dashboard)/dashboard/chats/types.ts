@@ -22,6 +22,7 @@ export interface Chat {
   participantPhone: string;
   participantName?: string;
   lastMessage?: string;
+  lastMessageType?: string;
   lastMessageTime?: string;
   unreadCount: number;
   isActive: boolean;
@@ -33,7 +34,15 @@ export interface ReplyPreview {
   messageId: string;
   senderType: "customer" | "agent";
   senderName: string;
-  type: "text" | "image" | "video" | "audio" | "document" | "contacts";
+  type:
+    | "text"
+    | "image"
+    | "video"
+    | "audio"
+    | "document"
+    | "contacts"
+    | "sticker"
+    | "gif";
   text?: string;
   media?: {
     url?: string;

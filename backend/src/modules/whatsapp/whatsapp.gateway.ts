@@ -252,6 +252,7 @@ export class WhatsAppGateway
     chatId: string;
     unreadCount: number;
     lastMessage?: string;
+    lastMessageType?: string;
     lastMessageTime?: Date;
   }): void {
     if (this.connectedClients.size === 0) {
@@ -259,7 +260,7 @@ export class WhatsAppGateway
     }
 
     console.log(
-      `📡 Emitting chat:update for ${chatUpdate.chatId} (unread: ${chatUpdate.unreadCount}) to ${this.connectedClients.size} clients`,
+      `📡 Emitting chat:update for ${chatUpdate.chatId} (unread: ${chatUpdate.unreadCount}, type: ${chatUpdate.lastMessageType || 'text'}) to ${this.connectedClients.size} clients`,
     );
 
     // Emit to all connected clients

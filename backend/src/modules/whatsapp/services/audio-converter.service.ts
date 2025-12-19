@@ -4,6 +4,7 @@
  */
 
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { FFmpegConfig } from '@shared/services/ffmpeg.config';
 import * as ffmpegModule from 'fluent-ffmpeg';
 import * as fs from 'fs/promises';
 import * as os from 'os';
@@ -12,32 +13,17 @@ import * as path from 'path';
 // Handle default exports for ESM compatibility
 const ffmpeg = (ffmpegModule as any).default || ffmpegModule;
 
-// Try to get bundled ffmpeg paths
-let ffmpegPath: string | undefined;
-
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
-  ffmpegPath = ffmpegInstaller.path;
-} catch {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    ffmpegPath = require('ffmpeg-static');
-  } catch {
-    // Will use system ffmpeg
-  }
-}
-
 @Injectable()
 export class AudioConverterService implements OnModuleInit {
   private readonly logger = new Logger(AudioConverterService.name);
   private ffmpegAvailable = false;
 
   async onModuleInit() {
-    if (ffmpegPath) {
-      ffmpeg.setFfmpegPath(ffmpegPath);
-      this.logger.log(`Using bundled ffmpeg from: ${ffmpegPath}`);
-    }
+    // Configure ffmpeg with bundled binaries using shared configuration
+    FFmpegConfig.configureFluetFfmpeg(ffmpeg);
+    this.logger.log(
+      `FFmpeg path: ${FFmpegConfig.ffmpegPath || '(system PATH)'}`,
+    );
 
     // Test ffmpeg availability
     try {

@@ -21,7 +21,15 @@ export interface ReplyPreview {
   messageId: string;
   senderType: "customer" | "agent";
   senderName: string;
-  type: "text" | "image" | "video" | "audio" | "document" | "contacts";
+  type:
+    | "text"
+    | "image"
+    | "video"
+    | "audio"
+    | "document"
+    | "contacts"
+    | "sticker"
+    | "gif";
   text?: string;
   media?: ReplyMediaPreview;
   unavailable?: boolean;
@@ -70,6 +78,10 @@ export function getReplyMediaIcon(type: string): string {
       return "📄";
     case "contacts":
       return "👤";
+    case "sticker":
+      return "🎭";
+    case "gif":
+      return "🎞️";
     default:
       return "";
   }
@@ -98,6 +110,8 @@ export function canReplyToMessageType(type: string): boolean {
     "document",
     "contacts",
     "media",
+    "sticker",
+    "gif",
   ];
   return replyableTypes.includes(type);
 }

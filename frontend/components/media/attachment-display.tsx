@@ -28,6 +28,8 @@ import { useTranslations } from "next-intl";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { VoiceMessageBubble } from "../voice-message-bubble";
 import { ThumbnailSkeleton } from "./thumbnail-skeleton";
+import { GifAttachment } from "./gif-attachment";
+import { StickerAttachment } from "./sticker-attachment";
 
 interface AttachmentDisplayProps {
   attachment: Attachment;
@@ -794,6 +796,11 @@ interface AttachmentGalleryProps {
   isOutbound?: boolean;
   senderName?: string;
   senderAvatar?: string;
+  /**
+   * Auto-play GIFs in this gallery (3 loops)
+   * Used for recently received messages when opening a chat
+   */
+  autoPlayGifs?: boolean;
 }
 
 export const AttachmentGallery = memo(function AttachmentGallery({
@@ -806,6 +813,7 @@ export const AttachmentGallery = memo(function AttachmentGallery({
   isOutbound = false,
   senderName,
   senderAvatar,
+  autoPlayGifs = false,
 }: AttachmentGalleryProps) {
   const t = useTranslations("chats");
   const galleryRef = useRef<HTMLDivElement>(null);
@@ -814,10 +822,12 @@ export const AttachmentGallery = memo(function AttachmentGallery({
     return null;
   }
 
-  // Separate attachments by type - combine images and videos for visual grid
+  // Separate attachments by type
   const images = attachments.filter((a) => a.type === "image");
   const videos = attachments.filter((a) => a.type === "video");
-  const visualMedia = [...images, ...videos]; // Combined for grid display
+  const gifs = attachments.filter((a) => a.type === "gif");
+  const stickers = attachments.filter((a) => a.type === "sticker");
+  const visualMedia = [...images, ...videos]; // Combined for grid display (not gifs/stickers)
   const audios = attachments.filter((a) => a.type === "audio");
   const voiceNotes = audios.filter((a) => a.isVoiceNote);
   const audioFiles = audios.filter((a) => !a.isVoiceNote); // Non-voice audio treated as documents
@@ -849,6 +859,36 @@ export const AttachmentGallery = memo(function AttachmentGallery({
 
   return (
     <div className="space-y-3 relative group/gallery" ref={galleryRef}>
+      {/* GIFs - displayed inline with play/pause functionality */}
+      {gifs.length > 0 && (
+        <div className="space-y-2">
+          {gifs.map((attachment) => (
+            <GifAttachment
+              key={attachment.id}
+              attachment={attachment}
+              messageId={messageId}
+              isOutbound={isOutbound}
+              onDelete={onDelete}
+              autoPlay={autoPlayGifs}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Stickers - displayed without bubble background */}
+      {stickers.length > 0 && (
+        <div className="space-y-2">
+          {stickers.map((attachment) => (
+            <StickerAttachment
+              key={attachment.id}
+              attachment={attachment}
+              messageId={messageId}
+              isOutbound={isOutbound}
+            />
+          ))}
+        </div>
+      )}
+
       {/* Combined Visual Media Grid (Images + Videos) */}
       {visualMedia.length > 0 && (
         <div className={`gap-1 ${getGridClass()}`}>

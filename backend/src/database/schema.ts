@@ -74,6 +74,7 @@ export const chats = pgTable(
     businessPhone: varchar('business_phone').notNull(), // Twilio WhatsApp Business number
     participantName: varchar('participant_name'), // Name of the participant (from Twilio or custom)
     lastMessage: text('last_message'), // Preview of last message
+    lastMessageType: varchar('last_message_type'), // 'text', 'image', 'video', 'audio', 'gif', 'sticker', etc
     lastMessageTime: timestamp('last_message_time'),
     unreadCount: integer('unread_count').default(0).notNull(), // Count of unread inbound messages
     isActive: boolean('is_active').default(true),

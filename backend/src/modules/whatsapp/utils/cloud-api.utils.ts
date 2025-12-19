@@ -99,10 +99,21 @@ export function extractConversationId(waMessageId: string): string | undefined {
 
 /**
  * Map Cloud API message type to normalized type
+ *
+ * Note: GIFs come from WhatsApp as 'video' messages with `animated: true` flag
+ * They are handled separately in the message processing logic
  */
 export function mapCloudAPIMessageType(
   cloudAPIType: string,
-): 'text' | 'image' | 'video' | 'audio' | 'document' | 'contacts' | 'unknown' {
+):
+  | 'text'
+  | 'image'
+  | 'video'
+  | 'audio'
+  | 'document'
+  | 'contacts'
+  | 'sticker'
+  | 'unknown' {
   const typeMap: Record<string, any> = {
     text: 'text',
     image: 'image',
@@ -110,6 +121,7 @@ export function mapCloudAPIMessageType(
     audio: 'audio',
     document: 'document',
     contacts: 'contacts',
+    sticker: 'sticker',
     button: 'text',
     interactive: 'text',
     location: 'unknown',

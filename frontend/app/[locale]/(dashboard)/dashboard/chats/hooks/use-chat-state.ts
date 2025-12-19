@@ -131,8 +131,22 @@ export function useChatState(): UseChatStateReturn {
 
   // Listen for chat updates from WebSocket and update local state
   // IMPORTANT: Skip unread count updates for the currently selected chat
+  // Also: mark as read on the backend if new messages arrive for the active chat
   useEffect(() => {
     if (chatUpdates.size === 0) return;
+
+    // Check if any updates are for the currently selected chat
+    // If so, mark it as read on the backend to keep database in sync
+    if (selectedChatId) {
+      const selectedChatUpdate = chatUpdates.get(selectedChatId);
+      if (selectedChatUpdate && selectedChatUpdate.unreadCount > 0) {
+        // New message arrived for the active chat - mark as read on backend
+        // This keeps the database in sync so refresh shows correct count
+        backendApi.chats.markAsRead(selectedChatId).catch((error) => {
+          console.error("Failed to mark active chat as read:", error);
+        });
+      }
+    }
 
     setChats((prevChats) => {
       let hasUpdates = false;
@@ -147,6 +161,7 @@ export function useChatState(): UseChatStateReturn {
             ...chat,
             unreadCount: isSelectedChat ? 0 : update.unreadCount,
             lastMessage: update.lastMessage || chat.lastMessage,
+            lastMessageType: update.lastMessageType || chat.lastMessageType,
             lastMessageTime: update.lastMessageTime || chat.lastMessageTime,
           };
         }
@@ -277,16 +292,10 @@ export function useChatState(): UseChatStateReturn {
 
   // Handle scroll to bottom button click
   const handleScrollToBottom = useCallback(() => {
-    const container = messagesContainerRef.current;
-    if (container) {
-      container.scrollTo({
-        top: container.scrollHeight,
-        behavior: "smooth",
-      });
-      setHasNewMessages(false);
-      setShouldAutoScroll(true);
-    }
-  }, []);
+    scrollHelperToBottom(true); // smooth scroll
+    setHasNewMessages(false);
+    setShouldAutoScroll(true);
+  }, [scrollHelperToBottom]);
 
   // Handle scroll position tracking
   useEffect(() => {
@@ -360,6 +369,8 @@ export function useChatState(): UseChatStateReturn {
   }, [selectedChatId]);
 
   // Handle state transitions for first-time visit to chat
+  // This effect marks the initial load as complete once messages are present
+  // The scroll-to-bottom hook handles the actual scrolling and media waiting
   useEffect(() => {
     if (messages.length === 0 || !isInitialLoad) {
       return;
@@ -375,16 +386,12 @@ export function useChatState(): UseChatStateReturn {
       return;
     }
 
-    const timer = setTimeout(() => {
-      setIsInitialLoad(false);
-      setShouldAutoScroll(true);
-      allowScrollSaveRef.current = true;
-      console.log("Initial load complete, scroll saving enabled");
-    }, 2000);
-
-    return () => {
-      clearTimeout(timer);
-    };
+    // For first-time chat loads, we mark initial load complete immediately
+    // The scroll-to-bottom hook will wait for media to load before completing scroll
+    // This approach is event-driven rather than time-based
+    setIsInitialLoad(false);
+    setShouldAutoScroll(true);
+    allowScrollSaveRef.current = true;
   }, [selectedChatId, messages.length, isInitialLoad]);
 
   // Fetch chats on mount
@@ -416,6 +423,20 @@ export function useChatState(): UseChatStateReturn {
             );
             if (chatExists) {
               setSelectedChatId(querySelectedChatId);
+              // Mark the chat as read since we're auto-selecting it
+              try {
+                await backendApi.chats.markAsRead(querySelectedChatId);
+                // Update local chat state to show 0 unread
+                setChats((prev) =>
+                  prev.map((c) =>
+                    c.chatId === querySelectedChatId
+                      ? { ...c, unreadCount: 0 }
+                      : c
+                  )
+                );
+              } catch (error) {
+                console.error("Failed to mark chat as read:", error);
+              }
             } else {
               // Chat not found yet - might be newly created, retry after a short delay
               setTimeout(async () => {
@@ -428,6 +449,19 @@ export function useChatState(): UseChatStateReturn {
                     );
                     if (foundChat) {
                       setSelectedChatId(querySelectedChatId);
+                      // Mark the chat as read
+                      try {
+                        await backendApi.chats.markAsRead(querySelectedChatId);
+                        setChats((prev) =>
+                          prev.map((c) =>
+                            c.chatId === querySelectedChatId
+                              ? { ...c, unreadCount: 0 }
+                              : c
+                          )
+                        );
+                      } catch (error) {
+                        console.error("Failed to mark chat as read:", error);
+                      }
                     }
                     // If still not found, leave no chat selected
                   }
@@ -469,7 +503,9 @@ export function useChatState(): UseChatStateReturn {
       setHasMoreMessages(cachedData.hasMore);
       currentCursorRef.current = cachedData.cursor;
 
-      const restoreScrollWhenReady = () => {
+      // Restore scroll position using requestAnimationFrame for proper timing
+      // This runs after React has committed the DOM updates
+      requestAnimationFrame(() => {
         const container = messagesContainerRef.current;
         if (!container) {
           isTransitioningRef.current = false;
@@ -477,56 +513,28 @@ export function useChatState(): UseChatStateReturn {
           return;
         }
 
-        let scrollRestored = false;
-        let attempts = 0;
-        const maxAttempts = 50;
+        if (savedScrollPosition !== undefined && savedScrollPosition >= 0) {
+          // Restore the saved position
+          container.scrollTop = savedScrollPosition;
+          const isAtBottom =
+            container.scrollHeight -
+              savedScrollPosition -
+              container.clientHeight <
+            50;
+          setShouldAutoScroll(isAtBottom);
+        } else {
+          // No saved position - let the scroll hook handle scrolling to bottom
+          setShouldAutoScroll(true);
+        }
 
-        const tryRestoreScroll = () => {
-          if (scrollRestored) return;
-          attempts++;
-
-          const currentScrollHeight = container.scrollHeight;
-          const currentClientHeight = container.clientHeight;
-          const maxScrollTop = currentScrollHeight - currentClientHeight;
-
-          const isContentReady =
-            savedScrollPosition === undefined ||
-            savedScrollPosition <= maxScrollTop ||
-            attempts >= maxAttempts;
-
-          if (isContentReady) {
-            scrollRestored = true;
-
-            if (savedScrollPosition !== undefined && savedScrollPosition >= 0) {
-              container.scrollTop = savedScrollPosition;
-              const isAtBottom =
-                currentScrollHeight -
-                  savedScrollPosition -
-                  currentClientHeight <
-                50;
-              setShouldAutoScroll(isAtBottom);
-            } else {
-              container.scrollTop = container.scrollHeight;
-              setShouldAutoScroll(true);
-            }
-
-            setTimeout(() => {
-              isTransitioningRef.current = false;
-              setIsScrollRestoring(false);
-              setIsInitialLoad(false);
-              allowScrollSaveRef.current = true;
-            }, 50);
-          } else {
-            setTimeout(tryRestoreScroll, 20);
-          }
-        };
-
+        // Use another RAF to ensure the scroll has been applied
         requestAnimationFrame(() => {
-          tryRestoreScroll();
+          isTransitioningRef.current = false;
+          setIsScrollRestoring(false);
+          setIsInitialLoad(false);
+          allowScrollSaveRef.current = true;
         });
-      };
-
-      restoreScrollWhenReady();
+      });
 
       // Fetch fresh data in background
       backendApi.whatsapp
@@ -591,7 +599,8 @@ export function useChatState(): UseChatStateReturn {
           });
 
           setShouldAutoScroll(true);
-          scrollHelperRequestScroll(false);
+          // The scroll hook will automatically scroll to bottom when messages arrive
+          // No need to call scrollHelperRequestScroll here - the hook effect handles it
 
           requestAnimationFrame(() => {
             requestAnimationFrame(() => {
@@ -608,7 +617,7 @@ export function useChatState(): UseChatStateReturn {
       }
     };
     fetchMessages();
-  }, [selectedChatId, scrollHelperRequestScroll]);
+  }, [selectedChatId]);
 
   return {
     chats,

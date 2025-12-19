@@ -1053,17 +1053,49 @@ export class WhatsAppService {
             mediaId: message.image?.id || '',
             caption: message.image?.caption,
           };
-          textContent = message.image?.caption || '[Image]';
+          // Only show caption text, images are self-explanatory
+          textContent = message.image?.caption || '';
           break;
-        case 'video':
+        case 'video': {
+          // Log FULL video message payload to debug GIF detection
+          // WhatsApp Cloud API sends GIFs as video messages with animated=true flag
+          this.logger.log(
+            `[Inbound Video] FULL PAYLOAD: ${JSON.stringify(message.video, null, 2)}`,
+          );
+          this.logger.log(
+            `[Inbound Video] message.type=${message.type}, animated=${message.video?.animated}, mime_type=${message.video?.mime_type}, id=${message.video?.id}`,
+          );
+          // Also log the entire message object to see all available fields
+          this.logger.log(
+            `[Inbound Video] FULL MESSAGE: ${JSON.stringify(message, null, 2)}`,
+          );
+          const isGif = message.video?.animated === true;
           mediaMetadata = {
-            type: 'video',
+            type: isGif ? 'gif' : 'video',
             mimeType: message.video?.mime_type || 'video/mp4',
             sha256: message.video?.sha256 || '',
             mediaId: message.video?.id || '',
             caption: message.video?.caption,
+            isAnimated: isGif,
           };
-          textContent = message.video?.caption || '[Video]';
+          // Only show caption text, videos and GIFs are self-explanatory
+          textContent = message.video?.caption || '';
+          break;
+        }
+        case 'sticker':
+          // Handle sticker messages (static or animated webp)
+          this.logger.log(
+            `[Inbound Sticker] animated=${message.sticker?.animated}, mime_type=${message.sticker?.mime_type}, id=${message.sticker?.id}`,
+          );
+          mediaMetadata = {
+            type: 'sticker',
+            mimeType: message.sticker?.mime_type || 'image/webp',
+            sha256: message.sticker?.sha256 || '',
+            mediaId: message.sticker?.id || '',
+            isAnimated: message.sticker?.animated === true,
+          };
+          // Stickers don't have caption text
+          textContent = '';
           break;
         case 'audio':
           // Log audio message details to debug voice note detection
@@ -1196,13 +1228,17 @@ export class WhatsAppService {
         }
       }
 
+      // For media messages, use the media type (gif, sticker, video, etc.)
+      // Otherwise use the mapped message type
+      const finalMessageType = mediaMetadata?.type || messageType;
+
       // Store inbound message
       await this.storeInboundMessage({
         waMessageId: messageId,
         chatId,
         source: 'whatsapp',
         sender: senderPhone,
-        type: messageType,
+        type: finalMessageType,
         text: textContent,
         mediaMetadata,
         contactsData,
@@ -1219,8 +1255,8 @@ export class WhatsAppService {
         chatId,
       });
 
-      // Update chat with last message preview
-      await this.updateChatLastMessage(chatId, textContent);
+      // Update chat with last message preview and type
+      await this.updateChatLastMessage(chatId, textContent, finalMessageType);
       console.log('Chat updated with last message');
 
       this.logger.log(
@@ -1489,6 +1525,7 @@ export class WhatsAppService {
 
       // Convert media metadata to attachment object if present
       let s3Key = '';
+      let detectedAsGif = false;
 
       // If there's media, download and cache it to S3 immediately
       // Meta's URLs expire after 5 minutes, so we must cache now
@@ -1497,12 +1534,17 @@ export class WhatsAppService {
           this.logger.log(
             `[Inbound Media] Starting to cache media: ${messageData.mediaMetadata.mediaId} (${messageData.mediaMetadata.mimeType})`,
           );
-          s3Key = await this.mediaService.downloadAndCacheCloudAPIMedia(
-            messageData.mediaMetadata.mediaId,
-            messageData.mediaMetadata.mimeType || 'application/octet-stream',
-            messageData.chatId, // Use chatId as the organization key
-            messageData.mediaMetadata.filename,
-          );
+          const cacheResult =
+            await this.mediaService.downloadAndCacheCloudAPIMedia(
+              messageData.mediaMetadata.mediaId,
+              messageData.mediaMetadata.mimeType || 'application/octet-stream',
+              messageData.chatId, // Use chatId as the organization key
+              messageData.mediaMetadata.filename,
+            );
+
+          s3Key = cacheResult.s3Key;
+          detectedAsGif = cacheResult.isGif || false;
+
           if (s3Key) {
             this.logger.log(
               `[Inbound Media] ✅ Successfully cached media to S3: ${s3Key}`,
@@ -1511,6 +1553,15 @@ export class WhatsAppService {
             this.logger.warn(
               `[Inbound Media] ⚠️ Failed to cache media (will use cloud-api:// fallback): ${messageData.mediaMetadata.mediaId}`,
             );
+          }
+
+          // If video was detected as GIF, update the media type
+          if (detectedAsGif && messageData.mediaMetadata.type === 'video') {
+            this.logger.log(
+              `[Inbound Media] 🎬→🖼️ Video detected as GIF based on media analysis (no audio, short duration)`,
+            );
+            messageData.mediaMetadata.type = 'gif';
+            messageData.type = 'gif';
           }
         } catch (error) {
           this.logger.error(
@@ -1522,24 +1573,29 @@ export class WhatsAppService {
       }
 
       // Determine thumbnail status based on media type
-      const mediaType = messageData.type as
+      // GIFs and stickers don't need thumbnails - they play/display inline
+      const mediaType = messageData.mediaMetadata?.type as
         | 'image'
         | 'video'
         | 'audio'
-        | 'document';
+        | 'document'
+        | 'sticker'
+        | 'gif';
       const mimeType = messageData.mediaMetadata?.mimeType || '';
-      const thumbnailStatus = supportsThumbnail(mediaType, mimeType)
-        ? 'pending'
-        : 'not-applicable';
+      const needsThumbnail =
+        mediaType &&
+        !['sticker', 'gif'].includes(mediaType) &&
+        supportsThumbnail(mediaType as any, mimeType);
+      const thumbnailStatus = needsThumbnail ? 'pending' : 'not-applicable';
 
       const attachments = messageData.mediaMetadata
         ? [
             {
               id: messageData.mediaMetadata.mediaId,
-              type: messageData.type, // The type field contains 'image', 'video', etc.
+              type: messageData.mediaMetadata.type, // Use the actual media type (gif, sticker, video, etc.)
               fileName:
                 messageData.mediaMetadata.filename ||
-                `${messageData.type}_${messageData.mediaMetadata.mediaId}`,
+                `${messageData.mediaMetadata.type}_${messageData.mediaMetadata.mediaId}`,
               mimeType: messageData.mediaMetadata.mimeType || '',
               size: messageData.mediaMetadata.fileSize || 0,
               s3Key: s3Key, // Will be empty string if caching failed, that's ok
@@ -1552,6 +1608,8 @@ export class WhatsAppService {
                 : `cloud-api://${messageData.mediaMetadata.mediaId}`,
               // Voice note flag for audio messages
               isVoiceNote: messageData.mediaMetadata.isVoiceNote || false,
+              // Animated flag for stickers and gifs
+              isAnimated: messageData.mediaMetadata.isAnimated || false,
             },
           ]
         : messageData.contactsData
@@ -1576,17 +1634,14 @@ export class WhatsAppService {
       });
 
       // Queue thumbnail generation if media was cached to S3 and supports thumbnails
-      if (
-        s3Key &&
-        messageData.mediaMetadata &&
-        supportsThumbnail(mediaType, mimeType)
-      ) {
+      // GIFs and stickers don't need thumbnails - they display directly
+      if (s3Key && messageData.mediaMetadata && needsThumbnail) {
         try {
           const thumbnailJobData: ThumbnailJobData = {
             messageId: messageData.waMessageId,
             attachmentId: messageData.mediaMetadata.mediaId,
             s3Key: s3Key,
-            mediaType: mediaType,
+            mediaType: mediaType as 'image' | 'video' | 'audio' | 'document',
             mimeType: mimeType,
             chatId: messageData.chatId,
             pathPrefix: 'inbound',
@@ -1701,11 +1756,13 @@ export class WhatsAppService {
   private async updateChatLastMessage(
     chatId: string,
     lastMessage: string,
+    lastMessageType?: string,
     isInbound: boolean = true,
   ): Promise<void> {
     try {
       const updateData: any = {
         lastMessage,
+        lastMessageType: lastMessageType || 'text',
         lastMessageTime: new Date(),
         updatedAt: new Date(),
       };
@@ -1727,6 +1784,7 @@ export class WhatsAppService {
           chatId,
           unreadCount: updatedChat.unreadCount,
           lastMessage: updatedChat.lastMessage || undefined,
+          lastMessageType: updatedChat.lastMessageType || undefined,
           lastMessageTime: updatedChat.lastMessageTime || undefined,
         });
       }

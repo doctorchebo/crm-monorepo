@@ -81,6 +81,10 @@ export const QuotedMessage = memo(function QuotedMessage({
             : `${icon} ${t("document")}`;
         case "contacts":
           return `${icon} ${t("contact")}`;
+        case "sticker":
+          return `${icon} Sticker`;
+        case "gif":
+          return `${icon} GIF`;
       }
     }
 

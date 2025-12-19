@@ -5,8 +5,16 @@
 
 /**
  * Media types
+ * - 'gif': Animated GIF (comes from WhatsApp as video with animated=true)
+ * - 'sticker': WhatsApp sticker (static or animated webp)
  */
-export type MediaType = "image" | "video" | "audio" | "document";
+export type MediaType =
+  | "image"
+  | "video"
+  | "audio"
+  | "document"
+  | "gif"
+  | "sticker";
 
 /**
  * Thumbnail generation status
@@ -16,7 +24,7 @@ export type ThumbnailStatus =
   | "processing" // Currently being generated
   | "ready" // Thumbnail available
   | "failed" // Generation failed
-  | "not-applicable"; // Documents, audio (icon only)
+  | "not-applicable"; // Documents, audio, stickers, gifs (icon only or display directly)
 
 /**
  * Attachment metadata (mirrors backend)
@@ -42,6 +50,7 @@ export interface Attachment {
   mediaUrl?: string; // For Cloud API media (inbound from Meta), format: "cloud-api://mediaId"
   isVoiceNote?: boolean; // For audio: true if recorded voice note (vs file upload)
   waveformData?: number[]; // For voice notes: amplitude samples for waveform display
+  isAnimated?: boolean; // For stickers/gifs: true if animated
 }
 
 /**
@@ -107,6 +116,7 @@ export interface DownloadUrlResponse {
 
 /**
  * File size limits and allowed types
+ * Note: GIFs and stickers are received from WhatsApp, not uploaded
  */
 export const ALLOWED_FILE_TYPES = {
   image: ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"],
@@ -120,6 +130,10 @@ export const ALLOWED_FILE_TYPES = {
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "text/plain",
   ],
+  // GIFs come as video/mp4 from WhatsApp with animated=true flag
+  gif: ["video/mp4", "image/gif"],
+  // Stickers are webp images (static or animated)
+  sticker: ["image/webp"],
 };
 
 export const FILE_SIZE_LIMITS = {
@@ -127,13 +141,19 @@ export const FILE_SIZE_LIMITS = {
   video: 300 * 1024 * 1024, // 300MB
   audio: 50 * 1024 * 1024, // 50MB
   document: 100 * 1024 * 1024, // 100MB
+  gif: 50 * 1024 * 1024, // 50MB
+  sticker: 10 * 1024 * 1024, // 10MB
 };
 
 /**
  * Get media type from MIME type
+ * Note: This is for file uploads - GIFs and stickers are detected by backend metadata
  */
 export function getMediaTypeFromMime(mimeType: string): MediaType | null {
+  // Check standard upload types first
   for (const [mediaType, mimes] of Object.entries(ALLOWED_FILE_TYPES)) {
+    // Skip gif and sticker for upload detection - they come from WhatsApp
+    if (mediaType === "gif" || mediaType === "sticker") continue;
     if (mimes.includes(mimeType)) {
       return mediaType as MediaType;
     }

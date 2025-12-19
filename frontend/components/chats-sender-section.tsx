@@ -8,7 +8,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, FileIcon, ImageIcon, Mic, Sticker, Video } from "lucide-react";
 import { useMemo, useState } from "react";
 
 interface Chat {
@@ -19,6 +19,7 @@ interface Chat {
   participantPhone: string;
   participantName?: string;
   lastMessage?: string;
+  lastMessageType?: string;
   lastMessageTime?: string;
   unreadCount?: number;
 }
@@ -109,8 +110,72 @@ interface ChatListItemProps {
   onSelect: () => void;
 }
 
+/**
+ * Get the icon component for a message type
+ */
+function getMessageTypeIcon(type: string | undefined) {
+  switch (type) {
+    case "gif":
+      return (
+        <span className="mr-1 text-xs opacity-70" title="GIF">
+          GIF
+        </span>
+      );
+    case "sticker":
+      return <Sticker className="mr-1 h-3 w-3 flex-shrink-0" />;
+    case "image":
+      return <ImageIcon className="mr-1 h-3 w-3 flex-shrink-0" />;
+    case "video":
+      return <Video className="mr-1 h-3 w-3 flex-shrink-0" />;
+    case "audio":
+    case "voice":
+      return <Mic className="mr-1 h-3 w-3 flex-shrink-0" />;
+    case "document":
+      return <FileIcon className="mr-1 h-3 w-3 flex-shrink-0" />;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Get the preview text for a message type
+ */
+function getMessageTypePreview(
+  type: string | undefined,
+  textContent: string | undefined
+): string {
+  // If there's text content, use it
+  if (textContent && textContent.trim()) {
+    return textContent;
+  }
+
+  // Otherwise, show type-based placeholder
+  switch (type) {
+    case "gif":
+      return "GIF";
+    case "sticker":
+      return "Sticker";
+    case "image":
+      return "Photo";
+    case "video":
+      return "Video";
+    case "audio":
+    case "voice":
+      return "Voice message";
+    case "document":
+      return "Document";
+    default:
+      return "";
+  }
+}
+
 function ChatListItem({ chat, isSelected, onSelect }: ChatListItemProps) {
   const hasUnread = (chat.unreadCount || 0) > 0;
+  const icon = getMessageTypeIcon(chat.lastMessageType);
+  const previewText = getMessageTypePreview(
+    chat.lastMessageType,
+    chat.lastMessage
+  );
 
   return (
     <button
@@ -133,16 +198,17 @@ function ChatListItem({ chat, isSelected, onSelect }: ChatListItemProps) {
               {chat.participantName || chat.participantPhone}
             </p>
           </div>
-          {chat.lastMessage && (
+          {previewText && (
             <p
               className={cn(
-                "truncate text-xs",
+                "flex items-center truncate text-xs",
                 hasUnread
                   ? "text-foreground font-medium"
                   : "text-muted-foreground"
               )}
             >
-              {chat.lastMessage}
+              {icon}
+              <span className="truncate">{previewText}</span>
             </p>
           )}
         </div>

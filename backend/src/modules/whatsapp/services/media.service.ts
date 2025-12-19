@@ -27,11 +27,30 @@ import {
   getMediaTypeFromMimeType,
   validateFileUpload,
 } from '../types/media.types';
+import {
+  MediaAnalysisResult,
+  MediaAnalyzerService,
+} from './media-analyzer.service';
+
+/**
+ * Result of downloading and caching media with optional analysis
+ */
+export interface MediaCacheResult {
+  /** S3 key where the media was cached (empty string if caching failed) */
+  s3Key: string;
+
+  /** Media analysis result (only for video content) */
+  analysis?: MediaAnalysisResult;
+
+  /** Whether the video was detected as a GIF */
+  isGif?: boolean;
+}
 
 @Injectable()
 export class MediaService {
   private readonly logger = new Logger(MediaService.name);
   private thumbnailQueueService: ThumbnailQueueService | null = null;
+  private mediaAnalyzerService: MediaAnalyzerService | null = null;
 
   constructor(
     private s3Service: S3Service,
@@ -45,6 +64,15 @@ export class MediaService {
    */
   setThumbnailQueueService(service: ThumbnailQueueService): void {
     this.thumbnailQueueService = service;
+  }
+
+  /**
+   * Set the media analyzer service (called during module initialization)
+   * This avoids circular dependency issues
+   */
+  setMediaAnalyzerService(service: MediaAnalyzerService): void {
+    this.mediaAnalyzerService = service;
+    this.logger.log('MediaAnalyzerService injected into MediaService');
   }
 
   /**
@@ -167,18 +195,21 @@ export class MediaService {
    * Meta's media URLs expire after 5 minutes, so we must download and cache immediately
    * upon receipt to ensure the media is always accessible
    *
+   * For video content, this method also analyzes the media to detect GIFs
+   * (which WhatsApp converts to MP4 videos)
+   *
    * @param mediaId - The media ID from Meta
    * @param mimeType - The MIME type of the media
    * @param contactId - The contact ID for organizing in S3
    * @param fileName - Optional file name (fallback to mediaId)
-   * @returns S3 key where the media was cached
+   * @returns MediaCacheResult with S3 key and optional analysis for video content
    */
   async downloadAndCacheCloudAPIMedia(
     mediaId: string,
     mimeType: string,
     contactId: string,
     fileName?: string,
-  ): Promise<string> {
+  ): Promise<MediaCacheResult> {
     try {
       this.logger.log(
         `[Cache Media] Starting to download and cache Cloud API media: ${mediaId}`,
@@ -212,7 +243,41 @@ export class MediaService {
         `[Cache Media] Successfully cached media to S3: ${result.key}`,
       );
 
-      return result.key;
+      // Step 4: For video content, analyze to detect GIFs
+      // WhatsApp converts GIFs to MP4 videos, so we need to detect them by characteristics
+      let analysis: MediaAnalysisResult | undefined;
+      let isGif = false;
+
+      if (mimeType.startsWith('video/') && this.mediaAnalyzerService) {
+        this.logger.log(
+          `[Cache Media] Analyzing video content for GIF detection...`,
+        );
+        try {
+          analysis = await this.mediaAnalyzerService.analyzeBuffer(
+            mediaBuffer,
+            mimeType,
+          );
+          isGif = analysis.isLikelyGif;
+          this.logger.log(
+            `[Cache Media] Video analysis complete: ` +
+              `duration=${analysis.duration?.toFixed(2)}s, ` +
+              `hasAudio=${analysis.hasAudio}, ` +
+              `gifConfidence=${(analysis.gifConfidence * 100).toFixed(1)}%, ` +
+              `isGif=${isGif}`,
+          );
+        } catch (analysisError) {
+          this.logger.warn(
+            `[Cache Media] Video analysis failed (non-blocking): ${analysisError.message}`,
+          );
+          // Continue without analysis - better to have the media than fail completely
+        }
+      }
+
+      return {
+        s3Key: result.key,
+        analysis,
+        isGif,
+      };
     } catch (error) {
       this.logger.error(
         `[Cache Media] FAILED to cache Cloud API media ${mediaId}: ${error.message}`,
@@ -222,7 +287,7 @@ export class MediaService {
       this.logger.warn(
         `[Cache Media] Falling back to cloud-api:// reference for media ${mediaId}`,
       );
-      return '';
+      return { s3Key: '', isGif: false };
     }
   }
 

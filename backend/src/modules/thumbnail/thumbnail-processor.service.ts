@@ -5,6 +5,7 @@
 
 import { getThumbnailConfig } from '@config/thumbnail.config';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { FFmpegConfig } from '@shared/services/ffmpeg.config';
 import { encode } from 'blurhash';
 import * as ffmpegModule from 'fluent-ffmpeg';
 import * as fs from 'fs/promises';
@@ -21,32 +22,6 @@ const ffmpeg = (ffmpegModule as any).default || ffmpegModule;
 let mupdf: any;
 let PDFDocument: any;
 
-// Try to get bundled ffmpeg paths
-let ffmpegPath: string | undefined;
-let ffprobePath: string | undefined;
-
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
-  ffmpegPath = ffmpegInstaller.path;
-} catch {
-  // Try ffmpeg-static as fallback
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    ffmpegPath = require('ffmpeg-static');
-  } catch {
-    // Neither package found, will check system path
-  }
-}
-
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const ffprobeInstaller = require('@ffprobe-installer/ffprobe');
-  ffprobePath = ffprobeInstaller.path;
-} catch {
-  // ffprobe installer not found, will try system path
-}
-
 @Injectable()
 export class ThumbnailProcessorService implements OnModuleInit {
   private readonly logger = new Logger(ThumbnailProcessorService.name);
@@ -55,14 +30,14 @@ export class ThumbnailProcessorService implements OnModuleInit {
   private pdfAvailable = false;
 
   async onModuleInit() {
-    // Configure ffmpeg with bundled binary if available
-    if (ffmpegPath) {
-      ffmpeg.setFfmpegPath(ffmpegPath);
-      this.logger.log(`Using bundled ffmpeg: ${ffmpegPath}`);
-    }
-    if (ffprobePath) {
-      ffmpeg.setFfprobePath(ffprobePath);
-    }
+    // Configure ffmpeg with bundled binaries using shared configuration
+    FFmpegConfig.configureFluetFfmpeg(ffmpeg);
+    this.logger.log(
+      `FFmpeg path: ${FFmpegConfig.ffmpegPath || '(system PATH)'}`,
+    );
+    this.logger.log(
+      `FFprobe path: ${FFmpegConfig.ffprobePath || '(system PATH)'}`,
+    );
 
     // Check if ffmpeg is available on the system
     try {
