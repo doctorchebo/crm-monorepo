@@ -70,6 +70,7 @@ export default function ChatsPage() {
   const messageHandlers = useMessageHandlers({
     selectedChatId: chatState.selectedChatId,
     selectedChat: chatState.selectedChat,
+    selectedContactId,
     messages: chatState.messages,
     setMessages: chatState.setMessages,
     setMessageCount: chatState.setMessageCount,

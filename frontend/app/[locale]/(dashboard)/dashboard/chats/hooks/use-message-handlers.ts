@@ -22,6 +22,7 @@ import type {
 interface UseMessageHandlersProps {
   selectedChatId: string | null;
   selectedChat: Chat | null;
+  selectedContactId: string | null;
   messages: Message[];
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   setMessageCount: React.Dispatch<React.SetStateAction<number>>;
@@ -76,6 +77,7 @@ export function useMessageHandlers(
   const {
     selectedChatId,
     selectedChat,
+    selectedContactId,
     messages,
     setMessages,
     setMessageCount,
@@ -268,30 +270,57 @@ export function useMessageHandlers(
     [selectedChatId, setMessages, setError]
   );
 
-  // Apply template
+  // Apply template - resolves variables against actual contact data via backend API
   const handleApplyTemplate = useCallback(
     async (template: any) => {
-      if (template.locales && template.locales.length > 0) {
-        const locale = template.locales[0];
-        const chat = chats.find((c) => c.chatId === selectedChatId);
-
-        // If we have a contact, resolve variables against actual contact data
-        // Note: selectedContactId would need to be passed in for full functionality
-        // For now, we use template body with example vars
-
-        let body = locale.body;
-        if (locale.exampleVars) {
-          Object.entries(locale.exampleVars).forEach(([key, value]) => {
-            body = body.replace(
-              new RegExp(`\\{\\{${key}\\}\\}`, "g"),
-              String(value || "")
-            );
-          });
-        }
-        setTemplateInput(body);
+      if (!template.locales || template.locales.length === 0) {
+        return;
       }
+
+      const locale = template.locales[0];
+      const chat = chats.find((c) => c.chatId === selectedChatId);
+
+      // If we have a contact, resolve variables via the backend API
+      if (selectedContactId && template.id && locale.locale) {
+        try {
+          const resolved = await backendApi.templates.resolve(template.id, {
+            locale: locale.locale,
+            contactId: selectedContactId,
+            senderId: chat?.senderId,
+            chatId: selectedChatId || undefined,
+          });
+
+          if (resolved.success || resolved.body) {
+            // Use the resolved body from the backend
+            setTemplateInput(resolved.body);
+            return;
+          }
+
+          // If resolution partially failed but we have some resolved variables,
+          // still use the resolved body (may have some unresolved placeholders)
+          if (resolved.body && resolved.body !== locale.body) {
+            setTemplateInput(resolved.body);
+            return;
+          }
+        } catch (error) {
+          console.error("Failed to resolve template variables:", error);
+          // Fall through to fallback logic below
+        }
+      }
+
+      // Fallback: Use example vars if available, otherwise use raw template body
+      let body = locale.body;
+      if (locale.exampleVars && Object.keys(locale.exampleVars).length > 0) {
+        Object.entries(locale.exampleVars).forEach(([key, value]) => {
+          body = body.replace(
+            new RegExp(`\\{\\{${key}\\}\\}`, "g"),
+            String(value || "")
+          );
+        });
+      }
+      setTemplateInput(body);
     },
-    [chats, selectedChatId]
+    [chats, selectedChatId, selectedContactId]
   );
 
   // Merge inbound WebSocket messages into the message list
