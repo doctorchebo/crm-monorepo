@@ -82,6 +82,31 @@
     "contact": "Contacto",
     "replyingTo": "Respondiendo a"
   },
+  "emojiPicker": {
+    "search": "Buscar emoji",
+    "noResults": "No se encontraron emojis",
+    "categories": {
+      "search": "Resultados de búsqueda",
+      "frequent": "Usados recientemente",
+      "people": "Emoticonos y personas",
+      "nature": "Animales y naturaleza",
+      "foods": "Comida y bebida",
+      "activity": "Actividad",
+      "places": "Viajes y lugares",
+      "objects": "Objetos",
+      "symbols": "Símbolos",
+      "flags": "Banderas"
+    },
+    "skinTone": {
+      "choose": "Elegir tono de piel",
+      "default": "Predeterminado",
+      "light": "Claro",
+      "mediumLight": "Medio claro",
+      "medium": "Medio",
+      "mediumDark": "Medio oscuro",
+      "dark": "Oscuro"
+    }
+  },
   "contacts": {
     "title": "Contactos",
     "description": "Gestiona tus contactos y comienza nuevas conversaciones",

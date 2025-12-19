@@ -30,6 +30,8 @@ interface MessageInputProps {
 
 export interface MessageInputRef {
   focus: () => void;
+  getCursorPosition: () => number;
+  setCursorPosition: (position: number) => void;
 }
 
 export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
@@ -50,10 +52,19 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
   ) {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-    // Expose focus method to parent
+    // Expose methods to parent
     useImperativeHandle(ref, () => ({
       focus: () => {
         textareaRef.current?.focus();
+      },
+      getCursorPosition: () => {
+        return textareaRef.current?.selectionStart ?? 0;
+      },
+      setCursorPosition: (position: number) => {
+        if (textareaRef.current) {
+          textareaRef.current.selectionStart = position;
+          textareaRef.current.selectionEnd = position;
+        }
       },
     }));
 

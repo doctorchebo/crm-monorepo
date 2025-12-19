@@ -7,17 +7,20 @@
  * Includes voice recording capability with inline UI.
  */
 
+import { Emoji, EmojiPickerButton, EmojiPickerI18n } from "@/components/emoji-picker";
 import { Button } from "@/components/ui/button";
-import { MessageInput } from "@/components/ui/message-input";
+import { MessageInput, MessageInputRef } from "@/components/ui/message-input";
 import { VoiceRecorderUI } from "@/components/voice-recorder-ui";
 import { useAudioRecorder } from "@/hooks/use-audio-recorder";
 import { Mic, Send } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 import React, {
   forwardRef,
   memo,
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -27,6 +30,7 @@ export interface ChatMessageInputRef {
   clear: () => void;
   setValue: (value: string) => void;
   getValue: () => string;
+  insertText: (text: string) => void;
 }
 
 interface ChatMessageInputProps {
@@ -41,6 +45,8 @@ interface ChatMessageInputProps {
   leftElement?: React.ReactNode;
   templateValue?: string;
   onTemplateUsed?: () => void;
+  /** Show emoji picker button - defaults to true */
+  showEmojiPicker?: boolean;
 }
 
 export const ChatMessageInput = memo(
@@ -54,11 +60,46 @@ export const ChatMessageInput = memo(
         leftElement,
         templateValue,
         onTemplateUsed,
+        showEmojiPicker = true,
       },
       ref
     ) {
       const [localValue, setLocalValue] = useState("");
-      const inputRef = useRef<{ focus: () => void }>(null);
+      const inputRef = useRef<MessageInputRef>(null);
+      const locale = useLocale();
+      const t = useTranslations("emojiPicker");
+
+      // Build emoji picker i18n from translations
+      const emojiPickerI18n = useMemo<EmojiPickerI18n>(
+        () => ({
+          search: t("search"),
+          search_no_results_1: t("noResults"),
+          search_no_results_2: "",
+          pick: "",
+          categories: {
+            search: t("categories.search"),
+            frequent: t("categories.frequent"),
+            people: t("categories.people"),
+            nature: t("categories.nature"),
+            foods: t("categories.foods"),
+            activity: t("categories.activity"),
+            places: t("categories.places"),
+            objects: t("categories.objects"),
+            symbols: t("categories.symbols"),
+            flags: t("categories.flags"),
+          },
+          skins: {
+            choose: t("skinTone.choose"),
+            1: t("skinTone.default"),
+            2: t("skinTone.light"),
+            3: t("skinTone.mediumLight"),
+            4: t("skinTone.medium"),
+            5: t("skinTone.mediumDark"),
+            6: t("skinTone.dark"),
+          },
+        }),
+        [t]
+      );
 
       // Voice recording state
       const recorder = useAudioRecorder();
@@ -77,7 +118,46 @@ export const ChatMessageInput = memo(
           setLocalValue(value);
         },
         getValue: () => localValue,
+        insertText: (text: string) => {
+          // Get cursor position from the input and insert text there
+          const cursorPos =
+            inputRef.current?.getCursorPosition() ?? localValue.length;
+          const newValue =
+            localValue.slice(0, cursorPos) + text + localValue.slice(cursorPos);
+          setLocalValue(newValue);
+          // Focus and set cursor position after the inserted text
+          setTimeout(() => {
+            inputRef.current?.focus();
+            inputRef.current?.setCursorPosition(cursorPos + text.length);
+          }, 0);
+        },
       }));
+
+      // Handle emoji selection - insert at cursor position
+      const handleEmojiSelect = useCallback(
+        (emoji: Emoji) => {
+          // If we're using a template, clear it first
+          if (templateValue && onTemplateUsed) {
+            onTemplateUsed();
+          }
+          // Get cursor position from the input and insert emoji there
+          const cursorPos =
+            inputRef.current?.getCursorPosition() ?? localValue.length;
+          const newValue =
+            localValue.slice(0, cursorPos) +
+            emoji.native +
+            localValue.slice(cursorPos);
+          setLocalValue(newValue);
+          // Focus and set cursor position after the inserted emoji
+          setTimeout(() => {
+            inputRef.current?.focus();
+            inputRef.current?.setCursorPosition(
+              cursorPos + emoji.native.length
+            );
+          }, 0);
+        },
+        [localValue, templateValue, onTemplateUsed]
+      );
 
       const handleChange = useCallback(
         (value: string) => {
@@ -179,6 +259,22 @@ export const ChatMessageInput = memo(
         );
       }
 
+      // Build the combined left element (attachment + emoji)
+      const combinedLeftElement = (
+        <div className="flex items-center">
+          {leftElement}
+          {showEmojiPicker && (
+            <EmojiPickerButton
+              onEmojiSelect={handleEmojiSelect}
+              disabled={disabled}
+              placement="top"
+              locale={locale}
+              i18n={emojiPickerI18n}
+            />
+          )}
+        </div>
+      );
+
       return (
         <MessageInput
           ref={inputRef}
@@ -188,7 +284,7 @@ export const ChatMessageInput = memo(
           placeholder={placeholder}
           disabled={disabled}
           maxRows={5}
-          leftElement={leftElement}
+          leftElement={combinedLeftElement}
           rightElement={
             canSend ? (
               <Button
