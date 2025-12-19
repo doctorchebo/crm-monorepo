@@ -78,6 +78,61 @@ export interface VariableDefinitionsResponse {
   categories: string[];
 }
 
+// Template Approval Types
+export type TemplateApprovalStatusValue =
+  | "draft"
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "paused"
+  | "disabled"
+  | "appeal_requested";
+
+export type TemplateQualityRating = "pending" | "high" | "medium" | "low";
+
+export type TemplateCategory = "authentication" | "marketing" | "utility";
+
+export interface ValidationError {
+  field: string;
+  message: string;
+  severity: "error" | "warning";
+  code?: string;
+}
+
+export interface TemplateValidationResult {
+  isValid: boolean;
+  canSubmit: boolean;
+  errors: ValidationError[];
+  warnings: ValidationError[];
+  summary: {
+    errorCount: number;
+    warningCount: number;
+  };
+}
+
+export interface TemplateApprovalResult {
+  success: boolean;
+  status: TemplateApprovalStatusValue;
+  metaTemplateId?: string;
+  message: string;
+  validationErrors?: ValidationError[];
+  providerResponse?: Record<string, any>;
+}
+
+export interface TemplateApprovalStatus {
+  templateId: string;
+  localeId: string;
+  locale: string;
+  status: TemplateApprovalStatusValue;
+  qualityRating: TemplateQualityRating;
+  metaTemplateId?: string | null;
+  rejectionReason?: string | null;
+  submittedAt?: string | null;
+  reviewedAt?: string | null;
+  canSubmit: boolean;
+  canResubmit: boolean;
+}
+
 export interface UserProfileDto {
   id: number;
   email: string;
@@ -374,6 +429,31 @@ export const backendApi = {
     ) => apiClient.post(`/templates/${templateId}/autofill`, data),
     validateVariables: (variables: string[]) =>
       apiClient.post("/templates/validate-variables", { variables }),
+    // Template approval endpoints
+    validateForApproval: (
+      templateId: string,
+      data: { locale: string }
+    ): Promise<TemplateValidationResult> =>
+      apiClient.post(`/templates/${templateId}/validate-for-approval`, data),
+    requestApproval: (
+      templateId: string,
+      data: { locale: string; provider?: string }
+    ): Promise<TemplateApprovalResult> =>
+      apiClient.post(`/templates/${templateId}/request-approval`, data),
+    getApprovalStatus: (
+      templateId: string,
+      locale: string
+    ): Promise<TemplateApprovalStatus> =>
+      apiClient.get(
+        `/templates/${templateId}/approval-status?locale=${encodeURIComponent(
+          locale
+        )}`
+      ),
+    syncStatus: (
+      templateId: string,
+      data: { locale: string }
+    ): Promise<TemplateApprovalStatus> =>
+      apiClient.post(`/templates/${templateId}/sync-status`, data),
   },
 
   // Notes endpoints

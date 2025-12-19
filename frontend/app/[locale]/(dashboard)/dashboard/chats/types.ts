@@ -3,6 +3,7 @@ import { Attachment } from "@/lib/media/types";
 export interface Template {
   id: string;
   name: string;
+  displayName?: string;
   description?: string;
   isVisible: boolean;
   locales?: Array<{

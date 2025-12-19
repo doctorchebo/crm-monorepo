@@ -16,6 +16,10 @@ import {
   CreateTemplateLocaleDto,
   UpdateTemplateDto,
 } from '../dto';
+import {
+  toMetaTemplateName,
+  validateMetaTemplateName,
+} from '../utils/template-name.utils';
 import { TemplateParserService } from './template-parser.service';
 import { TemplateRenderService } from './template-render.service';
 import { TemplateValidatorService } from './template-validator.service';
@@ -34,14 +38,25 @@ export class TemplatesService {
 
   /**
    * Create a new template
+   * Auto-generates Meta-compliant name from displayName if not provided
    */
   async createTemplate(userId: number, dto: CreateTemplateDto) {
     const templateId = crypto.randomUUID();
 
+    // Generate Meta-compliant name from displayName if not provided
+    const metaName = dto.name || toMetaTemplateName(dto.displayName);
+
+    // Validate the name
+    const validation = validateMetaTemplateName(metaName);
+    if (!validation.isValid) {
+      throw new BadRequestException(validation.error);
+    }
+
     const result = await db.insert(templates).values({
       id: templateId,
       ownerId: userId,
-      name: dto.name,
+      name: metaName,
+      displayName: dto.displayName,
       description: dto.description,
       isVisible: true,
       isActive: true,
@@ -104,16 +119,41 @@ export class TemplatesService {
 
   /**
    * Update template metadata
+   * If displayName is updated and name is not provided, auto-regenerates the name
    */
   async updateTemplate(templateId: string, dto: UpdateTemplateDto) {
     const template = await this.getTemplate(templateId);
 
+    // Build update object
+    const updateData: Record<string, any> = {
+      updatedAt: new Date(),
+    };
+
+    // Handle displayName and name updates
+    if (dto.displayName !== undefined) {
+      updateData.displayName = dto.displayName;
+      // If displayName is updated but name is not provided, regenerate name
+      if (dto.name === undefined) {
+        updateData.name = toMetaTemplateName(dto.displayName);
+      }
+    }
+
+    if (dto.name !== undefined) {
+      const validation = validateMetaTemplateName(dto.name);
+      if (!validation.isValid) {
+        throw new BadRequestException(validation.error);
+      }
+      updateData.name = dto.name;
+    }
+
+    // Copy other optional fields
+    if (dto.description !== undefined) updateData.description = dto.description;
+    if (dto.isVisible !== undefined) updateData.isVisible = dto.isVisible;
+    if (dto.isActive !== undefined) updateData.isActive = dto.isActive;
+
     await db
       .update(templates)
-      .set({
-        ...dto,
-        updatedAt: new Date(),
-      })
+      .set(updateData)
       .where(eq(templates.id, templateId));
 
     return this.getTemplate(templateId);

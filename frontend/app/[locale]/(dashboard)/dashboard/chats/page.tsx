@@ -26,6 +26,7 @@ import {
 import {
   useChatState,
   useContactHandlers,
+  useInputFocus,
   useMediaHandlers,
   useMessageHandlers,
 } from "./hooks";
@@ -66,6 +67,14 @@ export default function ChatsPage() {
   // Chat state hook - manages chats, messages, pagination, scroll
   const chatState = useChatState();
 
+  // Input focus hook - manages reliable input focusing on chat selection
+  // isChatReady: true when initial load is complete (isInitialLoad becomes false after messages are loaded)
+  const { inputRef: messageInputRef, triggerFocus } = useInputFocus({
+    selectedChatId: chatState.selectedChatId,
+    isChatReady: !chatState.isInitialLoad,
+    isLoading: chatState.loading,
+  });
+
   // Message handlers hook - manages sending, replying, deleting messages
   const messageHandlers = useMessageHandlers({
     selectedChatId: chatState.selectedChatId,
@@ -82,6 +91,7 @@ export default function ChatsPage() {
     setHasNewMessages: chatState.setHasNewMessages,
     scrollHelperRequestScroll: chatState.scrollHelperRequestScroll,
     chats: chatState.chats,
+    onFocusInput: triggerFocus,
   });
 
   // Media handlers hook - manages media staging, uploads, previews, downloads
@@ -405,15 +415,13 @@ export default function ChatsPage() {
                   <TemplatesPanel
                     templates={templates as Template[]}
                     templatesLoading={templatesLoading}
-                    templateSearch={messageHandlers.templateSearch}
-                    setTemplateSearch={messageHandlers.setTemplateSearch}
                     onApplyTemplate={messageHandlers.handleApplyTemplate}
                     t={t}
                   />
 
                   {/* Input Area */}
                   <MessageInputArea
-                    messageInputRef={messageHandlers.messageInputRef}
+                    messageInputRef={messageInputRef}
                     addMoreInputRef={mediaHandlers.addMoreInputRef}
                     replyingToMessage={messageHandlers.replyingToMessage}
                     selectedChat={chatState.selectedChat}
@@ -568,12 +576,22 @@ export default function ChatsPage() {
               </div>
             </>
           ) : (
-            <div className="flex-1 flex items-center justify-center">
-              <div className="text-center">
-                <MessageSquare className="h-16 w-16 text-muted-foreground mx-auto mb-4 opacity-30" />
-                <p className="text-muted-foreground text-lg">
-                  {chatState.loading ? "Loading chat..." : t("selectChat")}
-                </p>
+            <div className="flex-1 flex items-center justify-center bg-muted/10">
+              <div className="text-center max-w-sm px-4">
+                <div className="w-20 h-20 rounded-full bg-muted/30 flex items-center justify-center mx-auto mb-6">
+                  <MessageSquare className="h-10 w-10 text-muted-foreground/50" />
+                </div>
+                <h3 className="text-lg font-medium text-foreground mb-2">
+                  {chatState.loading
+                    ? t("loading") || "Loading..."
+                    : t("selectChat")}
+                </h3>
+                {!chatState.loading && chatState.chats.length > 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    {t("selectChatHint") ||
+                      "Choose a conversation from the list to start messaging"}
+                  </p>
+                )}
               </div>
             </div>
           )}

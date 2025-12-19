@@ -1,26 +1,46 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { TwilioProviderAdapter } from './providers/twilio.provider';
 import {
+  MessagingProviderFactory,
+  MetaCloudApiProvider,
+  TwilioProviderAdapter,
+} from './providers';
+import {
+  TemplateApprovalService,
   TemplateParserService,
   TemplateRenderService,
   TemplatesService,
   TemplateValidatorService,
   VariableResolutionService,
 } from './services';
+import { TemplateWebhookController } from './template.webhook.controller';
+import { TemplateWebhookGateway } from './template.webhook.gateway';
 import { TemplatesController } from './templates.controller';
 
 @Module({
   imports: [ConfigModule],
-  controllers: [TemplatesController],
+  controllers: [TemplatesController, TemplateWebhookController],
   providers: [
+    // Services
     TemplatesService,
     TemplateParserService,
     TemplateValidatorService,
     TemplateRenderService,
     VariableResolutionService,
+    TemplateApprovalService,
+    // Providers (for different messaging platforms)
+    MetaCloudApiProvider,
     TwilioProviderAdapter,
+    MessagingProviderFactory,
+    // WebSocket Gateway
+    TemplateWebhookGateway,
   ],
-  exports: [TemplatesService, VariableResolutionService],
+  exports: [
+    TemplatesService,
+    VariableResolutionService,
+    TemplateApprovalService,
+    MessagingProviderFactory,
+    TemplateWebhookGateway,
+  ],
 })
 export class TemplatesModule {}

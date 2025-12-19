@@ -15,7 +15,9 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useNotification } from "@/hooks/use-notification";
+import { ApiError } from "@/lib/api/client";
 import { backendApi } from "@/lib/api/endpoints";
+import { toMetaTemplateName } from "@/lib/utils/template-name";
 import { AlertCircle, Eye, Loader, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useParams, useRouter } from "next/navigation";
@@ -42,6 +44,7 @@ interface ValidationError {
 interface Template {
   id: string;
   name: string;
+  displayName?: string;
   description?: string;
   isVisible: boolean;
   isActive: boolean;
@@ -66,7 +69,7 @@ interface Template {
 }
 
 interface FormData {
-  name: string;
+  displayName: string;
   description: string;
   selectedLocale: string;
   header: string;
@@ -86,7 +89,7 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
   const { addNotification } = useNotification();
 
   const [formData, setFormData] = useState<FormData>({
-    name: "",
+    displayName: "",
     description: "",
     selectedLocale: "en",
     header: "",
@@ -96,6 +99,12 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
     enabledPlatforms: ["whatsapp"],
     isVisible: true,
   });
+
+  // Auto-generated Meta-compliant template name
+  const generatedName = useMemo(
+    () => toMetaTemplateName(formData.displayName),
+    [formData.displayName]
+  );
 
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>(
     []
@@ -120,7 +129,8 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
     if (existingTemplate) {
       setFormData((prev) => ({
         ...prev,
-        name: existingTemplate.name,
+        // Use displayName if available, otherwise fall back to name
+        displayName: existingTemplate.displayName || existingTemplate.name,
         description: existingTemplate.description || "",
         enabledPlatforms: existingTemplate.platforms
           ?.filter((p: any) => p.isEnabled)
@@ -185,11 +195,12 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
   // Validate template
   const validate = async () => {
     try {
-      if (!formData.name.trim()) {
+      if (!formData.displayName.trim()) {
         setValidationErrors([
           {
-            field: "name",
-            message: "Template name is required",
+            field: "displayName",
+            message:
+              t("validation.displayNameRequired") || "Display name is required",
             severity: "error",
           },
         ]);
@@ -211,15 +222,32 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
       if (templateId) {
         const result = (await backendApi.templates.validate(templateId, {
           locale: formData.selectedLocale,
-        })) as any;
+        })) as { errors?: ValidationError[]; hasCriticalErrors?: boolean };
         setValidationErrors(result.errors || []);
         return !(result.hasCriticalErrors || false);
       }
 
       return true;
-    } catch (error: any) {
-      const errors = error.response?.data?.errors || [];
-      setValidationErrors(errors);
+    } catch (error: unknown) {
+      // Handle API validation errors
+      if (error instanceof ApiError && error.errors) {
+        const backendErrors: ValidationError[] = error.errors.map((e) => ({
+          field: e.field || "body",
+          message: e.message,
+          severity: (e.severity as "error" | "warning") || "error",
+        }));
+        setValidationErrors(backendErrors);
+      } else {
+        // Fallback for unexpected errors
+        setValidationErrors([
+          {
+            field: "body",
+            message:
+              error instanceof Error ? error.message : "Validation failed",
+            severity: "error",
+          },
+        ]);
+      }
       return false;
     }
   };
@@ -260,7 +288,7 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
       if (templateId) {
         // Update existing template
         await backendApi.templates.update(templateId, {
-          name: formData.name,
+          displayName: formData.displayName,
           description: formData.description,
           isVisible: formData.isVisible,
         });
@@ -284,7 +312,7 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
       } else {
         // Create new template
         const templateRes = (await backendApi.templates.create({
-          name: formData.name,
+          displayName: formData.displayName,
           description: formData.description,
           platforms: formData.enabledPlatforms,
         })) as Template;
@@ -306,13 +334,37 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
 
         router.push(`/${locale}/dashboard/templates`);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error saving template:", error);
-      addNotification(
-        error.message || t("saveFailed") || "Failed to save template",
-        "error",
-        3000
-      );
+
+      // Handle API validation errors
+      if (
+        error instanceof ApiError &&
+        error.isValidationError() &&
+        error.errors
+      ) {
+        // Map backend validation errors to frontend format
+        const backendErrors: ValidationError[] = error.errors.map((e) => ({
+          field: e.field || "body",
+          message: e.message,
+          severity: (e.severity as "error" | "warning") || "error",
+        }));
+
+        // Add backend errors to validation state
+        setValidationErrors((prev) => [...prev, ...backendErrors]);
+
+        // Show notification with detailed error message
+        addNotification(error.getDetailedMessage(), "error", 5000);
+      } else {
+        // Generic error handling
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        addNotification(
+          errorMessage || t("saveFailed") || "Failed to save template",
+          "error",
+          3000
+        );
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -331,19 +383,47 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
           </h2>
 
           <div className="space-y-4">
+            {/* Display Name - User-friendly name */}
             <div>
-              <Label htmlFor="name">
-                {t("templateName") || "Template Name"}
+              <Label htmlFor="displayName">
+                {t("displayName") || "Display Name"}
               </Label>
               <Input
-                id="name"
-                value={formData.name}
+                id="displayName"
+                value={formData.displayName}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  setFormData({ ...formData, name: e.target.value })
+                  setFormData({ ...formData, displayName: e.target.value })
                 }
-                placeholder="e.g., Order Confirmation"
+                placeholder={
+                  t("displayNamePlaceholder") || "e.g., Order Confirmation"
+                }
               />
+              <p className="text-xs text-muted-foreground mt-1">
+                {t("displayNameHint") ||
+                  "This is the name shown to users in the template selector"}
+              </p>
             </div>
+
+            {/* Generated Meta Name - Read-only preview */}
+            {formData.displayName && (
+              <div className="p-3 bg-muted rounded-md">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {t("metaTemplateName") || "Meta Template Name"}
+                    </span>
+                    <p className="font-mono text-sm">{generatedName}</p>
+                  </div>
+                  <span className="text-xs text-muted-foreground bg-background px-2 py-1 rounded">
+                    {t("autoGenerated") || "Auto-generated"}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {t("metaTemplateNameHint") ||
+                    "This name is used by Meta's API and follows their naming rules"}
+                </p>
+              </div>
+            )}
 
             <div>
               <Label htmlFor="description">

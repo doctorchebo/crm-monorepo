@@ -12,6 +12,50 @@
 
 import { TokenManager } from "@/lib/auth/token-manager";
 
+/**
+ * Custom API Error class that preserves backend validation errors
+ */
+export class ApiError extends Error {
+  public readonly statusCode: number;
+  public readonly errors?: Array<{
+    message: string;
+    field?: string;
+    severity?: string;
+  }>;
+  public readonly originalError?: unknown;
+
+  constructor(
+    message: string,
+    statusCode: number,
+    errors?: Array<{ message: string; field?: string; severity?: string }>,
+    originalError?: unknown
+  ) {
+    super(message);
+    this.name = "ApiError";
+    this.statusCode = statusCode;
+    this.errors = errors;
+    this.originalError = originalError;
+  }
+
+  /**
+   * Check if this is a validation error (400 Bad Request)
+   */
+  isValidationError(): boolean {
+    return this.statusCode === 400 && Array.isArray(this.errors);
+  }
+
+  /**
+   * Get a user-friendly error message including validation details
+   */
+  getDetailedMessage(): string {
+    if (this.errors && this.errors.length > 0) {
+      const errorMessages = this.errors.map((e) => e.message).join("; ");
+      return `${this.message}: ${errorMessages}`;
+    }
+    return this.message;
+  }
+}
+
 interface ApiRequestOptions extends RequestInit {
   headers?: Record<string, string>;
 }
@@ -101,10 +145,13 @@ class ApiClient {
     }
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(
-        error.message || `API Error: ${response.status} ${response.statusText}`
-      );
+      const errorData = await response.json().catch(() => ({}));
+      const message =
+        errorData.message ||
+        `API Error: ${response.status} ${response.statusText}`;
+
+      // Create ApiError with validation errors if present
+      throw new ApiError(message, response.status, errorData.errors, errorData);
     }
 
     // Handle 204 No Content or empty responses

@@ -255,7 +255,8 @@ export const templates = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     ownerId: integer('owner_id').notNull(), // Foreign key to users or teams (for now, user ID)
-    name: varchar('name').notNull(), // Internal name (e.g., 'invoice_ready')
+    name: varchar('name').notNull(), // Meta-compliant name (lowercase, underscores, e.g., 'invoice_ready')
+    displayName: varchar('display_name').notNull(), // User-friendly display name (e.g., 'Invoice Ready')
     description: text('description'), // Template description
     isVisible: boolean('is_visible').default(true), // Whether template is visible in UI
     isActive: boolean('is_active').default(true), // Soft delete flag
@@ -285,12 +286,23 @@ export const templateLocales = pgTable(
     footer: text('footer'), // Optional footer text
     exampleVars: jsonb('example_vars').default({}), // Example values for preview: {"customer_name": "John", ...}
     activeVersion: integer('active_version').default(1), // Current approved version
+    // Meta Cloud API approval fields
+    category: varchar('category', { length: 50 }).default('utility'), // 'authentication', 'marketing', 'utility'
+    approvalStatus: varchar('approval_status', { length: 20 }).default('draft'), // 'draft', 'pending', 'approved', 'rejected', 'paused', 'disabled', 'appeal_requested'
+    metaTemplateId: varchar('meta_template_id', { length: 100 }), // Template ID from Meta after submission
+    rejectionReason: text('rejection_reason'), // Reason if rejected
+    qualityRating: varchar('quality_rating', { length: 20 }).default('pending'), // 'pending', 'high', 'medium', 'low'
+    submittedAt: timestamp('submitted_at'), // When submitted for approval
+    reviewedAt: timestamp('reviewed_at'), // When Meta reviewed
+    metaResponse: jsonb('meta_response'), // Full Meta API response
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
   },
   (table) => ({
     templateIdIndex: index().on(table.templateId),
     templateLocaleUnique: unique().on(table.templateId, table.locale),
+    approvalStatusIndex: index().on(table.approvalStatus),
+    metaTemplateIdIndex: index().on(table.metaTemplateId),
   }),
 );
 

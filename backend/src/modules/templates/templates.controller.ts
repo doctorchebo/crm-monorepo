@@ -26,7 +26,8 @@ import {
   TestTemplateDto,
   UpdateTemplateDto,
 } from './dto';
-import { TwilioProviderAdapter } from './providers/twilio.provider';
+import { MessagingProviderFactory } from './providers';
+import { TemplateApprovalService } from './services/template-approval.service';
 import { TemplatesService } from './services/templates.service';
 import { VariableResolutionService } from './services/variable-resolution.service';
 
@@ -35,8 +36,9 @@ import { VariableResolutionService } from './services/variable-resolution.servic
 export class TemplatesController {
   constructor(
     private templatesService: TemplatesService,
-    private twilioProvider: TwilioProviderAdapter,
     private variableResolutionService: VariableResolutionService,
+    private approvalService: TemplateApprovalService,
+    private providerFactory: MessagingProviderFactory,
   ) {}
 
   // ==================== Variable Definitions (must be before :id routes) ====================
@@ -195,54 +197,80 @@ export class TemplatesController {
     );
   }
 
+  // ==================== Template Approval Endpoints ====================
+
   /**
-   * POST /templates/:id/submit - Submit template to provider
+   * POST /templates/:id/validate-for-approval - Validate template for Meta approval
+   * Returns validation errors and warnings before showing confirmation modal
+   */
+  @Post(':id/validate-for-approval')
+  async validateForApproval(
+    @Param('id') templateId: string,
+    @Body() body: { locale: string },
+  ) {
+    return await this.approvalService.validateForApproval(
+      templateId,
+      body.locale,
+    );
+  }
+
+  /**
+   * POST /templates/:id/request-approval - Request template approval from Meta
+   * Validates template and submits to Meta Cloud API for review
+   */
+  @Post(':id/request-approval')
+  async requestApproval(
+    @Param('id') templateId: string,
+    @Body() body: { locale: string; provider?: string },
+  ) {
+    return await this.approvalService.requestApproval(
+      templateId,
+      body.locale,
+      body.provider || 'meta',
+    );
+  }
+
+  /**
+   * GET /templates/:id/approval-status - Get template approval status
+   */
+  @Get(':id/approval-status')
+  async getApprovalStatus(
+    @Param('id') templateId: string,
+    @Query('locale') locale: string,
+  ) {
+    if (!locale) {
+      throw new BadRequestException('Locale query parameter is required');
+    }
+    return await this.approvalService.getApprovalStatus(templateId, locale);
+  }
+
+  /**
+   * POST /templates/:id/sync-status - Sync template status with provider
+   */
+  @Post(':id/sync-status')
+  async syncStatus(
+    @Param('id') templateId: string,
+    @Body() body: { locale: string },
+  ) {
+    return await this.approvalService.syncStatus(templateId, body.locale);
+  }
+
+  /**
+   * POST /templates/:id/submit - Submit template to provider (legacy)
+   * @deprecated Use POST /templates/:id/request-approval instead
    */
   @Post(':id/submit')
   async submitTemplate(
     @Param('id') templateId: string,
     @Body() dto: SubmitTemplateDto,
-    @Query('provider') provider: string = 'twilio',
+    @Query('provider') provider: string = 'meta',
   ) {
-    const template = await this.templatesService.getTemplate(templateId);
-    const locale = template.locales?.find((l) => l.locale === dto.locale);
-
-    if (!locale) {
-      throw new BadRequestException(`Locale ${dto.locale} not found`);
-    }
-
-    let submitResult;
-
-    if (provider === 'twilio') {
-      submitResult = await this.twilioProvider.submitTemplate(
-        template.name,
-        locale,
-        '+14155238886', // Placeholder business phone
-      );
-    } else {
-      throw new BadRequestException(`Provider ${provider} not supported`);
-    }
-
-    // Create template version record
-    const versionNumber = (locale.activeVersion || 0) + 1;
-
-    const version = await db.insert(templateVersions).values({
-      id: crypto.randomUUID(),
+    // Redirect to the new approval flow
+    return await this.approvalService.requestApproval(
       templateId,
-      localeId: locale.id,
-      versionNumber,
-      content: JSON.stringify(submitResult),
-      status: submitResult.status,
-      providerId: submitResult.providerId,
-      providerName: provider,
-      platforms: dto.platforms || ['whatsapp'],
-    });
-
-    return {
-      success: true,
-      templateVersion: submitResult,
-      message: `Template submitted to ${provider} for approval`,
-    };
+      dto.locale,
+      provider,
+    );
   }
 
   /**
@@ -268,13 +296,17 @@ export class TemplatesController {
       );
     }
 
-    // Send test
-    const testResult = await this.twilioProvider.sendTestMessage(
-      dto.to,
-      '', // Template name - would get from template
-      dto.vars,
-      version.locale,
-    );
+    // Get provider and send test
+    const provider = this.providerFactory.getDefaultProvider();
+    const template = await this.templatesService.getTemplate(templateId);
+
+    const testResult = await provider.sendTemplateMessage({
+      to: dto.to,
+      templateName: template.name,
+      language: version.locale.locale,
+      variables: dto.vars,
+      locale: version.locale,
+    });
 
     // Record test
     await db.insert(templateTests).values({
@@ -283,7 +315,7 @@ export class TemplatesController {
       testerUserId: req.user?.userId || req.user?.id,
       testPhoneNumber: this.maskPhoneNumber(dto.to),
       testPayload: dto.vars,
-      testResult: testResult.response,
+      testResult: testResult.providerResponse,
       deliveryStatus: testResult.status,
     });
 

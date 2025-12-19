@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
+import { closeDbPool } from './database/db.connection';
 declare const module: any;
 
 async function bootstrap() {
@@ -98,9 +99,31 @@ async function bootstrap() {
     `✅ CORS enabled for: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`,
   );
 
+  // Graceful shutdown handlers
+  const gracefulShutdown = async (signal: string) => {
+    console.log(`\n🛑 Received ${signal}. Starting graceful shutdown...`);
+    try {
+      await app.close();
+      console.log('✅ Nest application closed');
+      await closeDbPool();
+      console.log('✅ Database pool closed');
+      process.exit(0);
+    } catch (error) {
+      console.error('❌ Error during shutdown:', error);
+      process.exit(1);
+    }
+  };
+
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
   if (module.hot) {
     module.hot.accept();
-    module.hot.dispose(() => app.close());
+    module.hot.dispose(async () => {
+      console.log('🔄 HMR dispose - closing app and pool...');
+      await closeDbPool();
+      await app.close();
+    });
   }
 }
 bootstrap();

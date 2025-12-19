@@ -14,13 +14,67 @@ export interface ValidationError {
   field: string;
   message: string;
   severity: 'error' | 'warning';
+  code?: string; // Error code for programmatic handling
 }
+
+/**
+ * Meta-specific validation rules and constraints
+ * Reference: https://developers.facebook.com/docs/whatsapp/message-templates/guidelines/
+ */
+export const META_TEMPLATE_RULES = {
+  // Name constraints
+  NAME_MAX_LENGTH: 512,
+  NAME_PATTERN: /^[a-z][a-z0-9_]*$/, // lowercase alphanumeric and underscores, must start with letter
+
+  // Body constraints
+  BODY_MAX_LENGTH: 1024,
+  BODY_MIN_LENGTH: 1,
+
+  // Header constraints
+  HEADER_TEXT_MAX_LENGTH: 60,
+  HEADER_NO_VARIABLES: true, // Text headers cannot have variables (media can)
+
+  // Footer constraints
+  FOOTER_MAX_LENGTH: 60,
+  FOOTER_NO_VARIABLES: true,
+
+  // Variable constraints
+  MAX_VARIABLES: 10,
+  VARIABLE_PATTERN: /^\{\{[a-z_][a-z0-9_.]*\}\}$/i, // Named format
+  POSITIONAL_VARIABLE_PATTERN: /^\{\{[1-9][0-9]*\}\}$/, // Positional format
+
+  // Categories
+  VALID_CATEGORIES: ['authentication', 'marketing', 'utility'] as const,
+
+  // Content restrictions
+  PROHIBITED_CONTENT: [
+    // Spam indicators
+    /free\s+money/i,
+    /winner/i,
+    /congratulations.*won/i,
+    // Adult content indicators
+    /18\+/i,
+    // Illegal content indicators
+    /buy\s+now.*limited/i,
+  ],
+
+  // URL restrictions
+  URL_SHORTENERS_BLOCKED: [
+    'bit.ly',
+    'tinyurl',
+    't.co',
+    'goo.gl',
+    'ow.ly',
+    'is.gd',
+    'buff.ly',
+  ],
+};
 
 /**
  * Template validator service
  * Enforces WhatsApp/Meta Business template rules and constraints
  *
- * Reference: https://www.twilio.com/docs/whatsapp/tutorial/message-template-approvals-statuses
+ * Reference: https://developers.facebook.com/docs/whatsapp/message-templates/guidelines/
  */
 @Injectable()
 export class TemplateValidatorService {
@@ -345,5 +399,224 @@ export class TemplateValidatorService {
    */
   getWarningsOnly(errors: ValidationError[]): ValidationError[] {
     return errors.filter((e) => e.severity === 'warning');
+  }
+
+  // ==================== Meta-Specific Validation ====================
+
+  /**
+   * Validate template name against Meta's requirements
+   * - Max 512 characters
+   * - Lowercase alphanumeric and underscores only
+   * - Must start with a letter
+   */
+  validateTemplateName(name: string): ValidationError[] {
+    const errors: ValidationError[] = [];
+
+    if (!name || name.trim().length === 0) {
+      errors.push({
+        field: 'name',
+        message: 'Template name is required',
+        severity: 'error',
+        code: 'NAME_REQUIRED',
+      });
+      return errors;
+    }
+
+    if (name.length > META_TEMPLATE_RULES.NAME_MAX_LENGTH) {
+      errors.push({
+        field: 'name',
+        message: `Template name exceeds maximum length of ${META_TEMPLATE_RULES.NAME_MAX_LENGTH} characters`,
+        severity: 'error',
+        code: 'NAME_TOO_LONG',
+      });
+    }
+
+    if (!META_TEMPLATE_RULES.NAME_PATTERN.test(name)) {
+      errors.push({
+        field: 'name',
+        message:
+          'Template name must contain only lowercase letters, numbers, and underscores, and must start with a letter',
+        severity: 'error',
+        code: 'NAME_INVALID_FORMAT',
+      });
+    }
+
+    return errors;
+  }
+
+  /**
+   * Validate template category
+   */
+  validateCategory(category: string): ValidationError[] {
+    const errors: ValidationError[] = [];
+
+    if (!category) {
+      errors.push({
+        field: 'category',
+        message: 'Template category is required',
+        severity: 'error',
+        code: 'CATEGORY_REQUIRED',
+      });
+      return errors;
+    }
+
+    const validCategories =
+      META_TEMPLATE_RULES.VALID_CATEGORIES as readonly string[];
+    if (!validCategories.includes(category.toLowerCase())) {
+      errors.push({
+        field: 'category',
+        message: `Invalid category "${category}". Must be one of: ${validCategories.join(', ')}`,
+        severity: 'error',
+        code: 'CATEGORY_INVALID',
+      });
+    }
+
+    return errors;
+  }
+
+  /**
+   * Validate template content for prohibited patterns
+   * (spam, adult content, etc.)
+   */
+  validateProhibitedContent(
+    body: string,
+    header?: string,
+    footer?: string,
+  ): ValidationError[] {
+    const errors: ValidationError[] = [];
+    const fullContent = [body, header, footer].filter(Boolean).join(' ');
+
+    // Check for prohibited content patterns
+    for (const pattern of META_TEMPLATE_RULES.PROHIBITED_CONTENT) {
+      if (pattern.test(fullContent)) {
+        errors.push({
+          field: 'body',
+          message:
+            "Template contains content that may violate Meta's guidelines and could be rejected",
+          severity: 'warning',
+          code: 'PROHIBITED_CONTENT',
+        });
+        break; // Only show one warning
+      }
+    }
+
+    // Check for URL shorteners
+    for (const shortener of META_TEMPLATE_RULES.URL_SHORTENERS_BLOCKED) {
+      if (fullContent.toLowerCase().includes(shortener)) {
+        errors.push({
+          field: 'body',
+          message: `URL shorteners like ${shortener} are not allowed in templates. Use full URLs instead.`,
+          severity: 'error',
+          code: 'URL_SHORTENER_BLOCKED',
+        });
+      }
+    }
+
+    return errors;
+  }
+
+  /**
+   * Validate example variables are provided for all placeholders
+   * Required by Meta for template approval
+   */
+  validateExampleVariables(
+    body: string,
+    exampleVars: Record<string, string> | null | undefined,
+  ): ValidationError[] {
+    const errors: ValidationError[] = [];
+    const variables = this.parserService.extractVariables(body);
+
+    if (variables.length === 0) {
+      return errors; // No variables, no examples needed
+    }
+
+    if (!exampleVars || Object.keys(exampleVars).length === 0) {
+      errors.push({
+        field: 'exampleVars',
+        message:
+          'Example values are required for all template variables for Meta approval',
+        severity: 'error',
+        code: 'EXAMPLES_REQUIRED',
+      });
+      return errors;
+    }
+
+    // Check each variable has an example
+    for (const varName of variables) {
+      if (!exampleVars[varName] || exampleVars[varName].trim().length === 0) {
+        errors.push({
+          field: 'exampleVars',
+          message: `Missing example value for variable "{{${varName}}}"`,
+          severity: 'error',
+          code: 'EXAMPLE_MISSING',
+        });
+      }
+    }
+
+    return errors;
+  }
+
+  /**
+   * Full Meta approval validation
+   * Combines all Meta-specific validations
+   */
+  validateForMetaApproval(
+    templateName: string,
+    body: string,
+    category: string,
+    exampleVars: Record<string, string> | null | undefined,
+    header?: string,
+    footer?: string,
+  ): ValidationError[] {
+    const errors: ValidationError[] = [];
+
+    // Validate template name
+    errors.push(...this.validateTemplateName(templateName));
+
+    // Validate category
+    errors.push(...this.validateCategory(category));
+
+    // Validate body, header, footer (existing validation)
+    errors.push(...this.validate(body, header, footer));
+
+    // Validate prohibited content
+    errors.push(...this.validateProhibitedContent(body, header, footer));
+
+    // Validate example variables
+    errors.push(...this.validateExampleVariables(body, exampleVars));
+
+    return errors;
+  }
+
+  /**
+   * Check if template is ready for Meta approval submission
+   */
+  isReadyForApproval(errors: ValidationError[]): boolean {
+    // Template is ready if there are no errors (warnings are OK)
+    return !this.hasCriticalErrors(errors);
+  }
+
+  /**
+   * Get a summary of validation results
+   */
+  getValidationSummary(errors: ValidationError[]): {
+    isValid: boolean;
+    errorCount: number;
+    warningCount: number;
+    errors: ValidationError[];
+    warnings: ValidationError[];
+    canSubmit: boolean;
+  } {
+    const criticalErrors = this.getErrorsOnly(errors);
+    const warnings = this.getWarningsOnly(errors);
+
+    return {
+      isValid: criticalErrors.length === 0,
+      errorCount: criticalErrors.length,
+      warningCount: warnings.length,
+      errors: criticalErrors,
+      warnings,
+      canSubmit: criticalErrors.length === 0,
+    };
   }
 }

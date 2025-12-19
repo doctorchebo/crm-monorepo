@@ -34,6 +34,11 @@ interface UseMessageHandlersProps {
   setHasNewMessages: React.Dispatch<React.SetStateAction<boolean>>;
   scrollHelperRequestScroll: (smooth?: boolean) => (() => void) | undefined;
   chats: Chat[];
+  /**
+   * Callback to trigger input focus
+   * Centralizes focus logic outside of this hook
+   */
+  onFocusInput?: () => void;
 }
 
 interface UseMessageHandlersReturn {
@@ -45,8 +50,6 @@ interface UseMessageHandlersReturn {
   // Template state
   templateInput: string;
   setTemplateInput: React.Dispatch<React.SetStateAction<string>>;
-  templateSearch: string;
-  setTemplateSearch: React.Dispatch<React.SetStateAction<string>>;
 
   // Socket state
   isSocketConnected: boolean;
@@ -66,9 +69,6 @@ interface UseMessageHandlersReturn {
   setDeleteDialogOpen: React.Dispatch<React.SetStateAction<boolean>>;
   deletingMessageId: string;
   setDeletingMessageId: React.Dispatch<React.SetStateAction<string>>;
-
-  // Refs
-  messageInputRef: React.RefObject<any>;
 }
 
 export function useMessageHandlers(
@@ -89,6 +89,7 @@ export function useMessageHandlers(
     setHasNewMessages,
     scrollHelperRequestScroll,
     chats,
+    onFocusInput,
   } = props;
 
   // Reply state
@@ -96,11 +97,9 @@ export function useMessageHandlers(
     null
   );
   const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-  const messageInputRef = useRef<any>(null);
 
   // Template state
   const [templateInput, setTemplateInput] = useState("");
-  const [templateSearch, setTemplateSearch] = useState("");
 
   // Delete dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -123,19 +122,18 @@ export function useMessageHandlers(
         setReplyingToMessage(message);
       });
 
-      setTimeout(() => {
-        messageInputRef.current?.focus();
-      }, 0);
+      // Trigger focus via centralized callback
+      onFocusInput?.();
     },
-    [messages]
+    [messages, onFocusInput]
   );
 
   // Focus the message input when reply is set
   useEffect(() => {
     if (replyingToMessage) {
-      messageInputRef.current?.focus();
+      onFocusInput?.();
     }
-  }, [replyingToMessage]);
+  }, [replyingToMessage, onFocusInput]);
 
   // Handler for canceling reply
   const handleCancelReply = useCallback(() => {
@@ -499,8 +497,6 @@ export function useMessageHandlers(
     messageRefs,
     templateInput,
     setTemplateInput,
-    templateSearch,
-    setTemplateSearch,
     isSocketConnected,
     handleReplyById,
     handleCancelReply,
@@ -514,6 +510,5 @@ export function useMessageHandlers(
     setDeleteDialogOpen,
     deletingMessageId,
     setDeletingMessageId,
-    messageInputRef,
   };
 }

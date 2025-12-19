@@ -1,49 +1,73 @@
 import { TemplateLocale } from '@database/schema';
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Twilio } from 'twilio';
 import { TemplateParserService } from '../services/template-parser.service';
-
-export interface ConvertedTemplate {
-  body: string;
-  variableMapping: Array<{ name: string; index: number }>;
-  providerPayload: Record<string, any>;
-}
+import {
+  ConvertedTemplate,
+  IMessagingProvider,
+  TemplateApprovalStatus,
+  TemplateCategory,
+  TemplateComponent,
+  TemplateQualityRating,
+  TemplateSendRequest,
+  TemplateSendResult,
+  TemplateStatusResult,
+  TemplateSubmissionResult,
+} from './provider.interface';
 
 /**
  * Twilio WhatsApp provider adapter
  * Converts business templates to provider format and handles submission/testing
+ * Implements IMessagingProvider for provider abstraction
  */
 @Injectable()
-export class TwilioProviderAdapter {
-  private twilioClient: Twilio;
+export class TwilioProviderAdapter implements IMessagingProvider {
+  readonly providerName = 'twilio';
+  private readonly logger = new Logger(TwilioProviderAdapter.name);
+  private twilioClient: Twilio | null = null;
 
   constructor(
     private configService: ConfigService,
     private parserService: TemplateParserService,
   ) {
+    this.initializeClient();
+  }
+
+  private initializeClient(): void {
     const accountSid = this.configService.get('TWILIO_ACCOUNT_SID');
     const authToken = this.configService.get('TWILIO_AUTH_TOKEN');
-    this.twilioClient = new Twilio(accountSid, authToken);
+    if (accountSid && authToken) {
+      this.twilioClient = new Twilio(accountSid, authToken);
+    }
+  }
+
+  /**
+   * Check if Twilio is properly configured
+   */
+  isConfigured(): boolean {
+    const accountSid = this.configService.get('TWILIO_ACCOUNT_SID');
+    const authToken = this.configService.get('TWILIO_AUTH_TOKEN');
+    return !!(accountSid && authToken);
   }
 
   /**
    * Convert business template to Twilio provider format
    * Replaces friendly placeholders with numbered ones
    */
-  convertTemplate(locale: TemplateLocale): ConvertedTemplate {
+  convertTemplate(
+    templateName: string,
+    locale: TemplateLocale,
+    category: TemplateCategory,
+  ): ConvertedTemplate {
     const { providerBody, variableMapping } =
       this.parserService.convertToProviderFormat(locale.body);
 
-    // Build Twilio-specific payload
-    const providerPayload: Record<string, any> = {
-      friendly_name: '', // Will be set by caller
-      language: this.mapLocaleToTwilioLanguage(locale.locale),
-      variables: variableMapping, // Store mapping for later substitution
-    };
-
-    // Add components (header, body, footer)
-    const components: Record<string, any>[] = [];
+    const components: TemplateComponent[] = [];
 
     // Body component
     components.push({
@@ -56,7 +80,7 @@ export class TwilioProviderAdapter {
       components.push({
         type: 'HEADER',
         format: this.detectHeaderFormat(locale.header),
-        text: locale.header, // For now, just text headers
+        text: locale.header,
       });
     }
 
@@ -68,10 +92,20 @@ export class TwilioProviderAdapter {
       });
     }
 
-    providerPayload.components = components;
+    // Build Twilio-specific payload
+    const providerPayload: Record<string, any> = {
+      friendly_name: templateName,
+      language: this.mapLocaleToTwilioLanguage(locale.locale),
+      category: category.toUpperCase(),
+      variables: variableMapping,
+      components,
+    };
 
     return {
-      body: providerBody,
+      name: templateName,
+      language: this.mapLocaleToTwilioLanguage(locale.locale),
+      category,
+      components,
       variableMapping,
       providerPayload,
     };
@@ -83,43 +117,119 @@ export class TwilioProviderAdapter {
   async submitTemplate(
     templateName: string,
     locale: TemplateLocale,
-    businessPhoneNumber: string,
-  ): Promise<{
-    providerId: string;
-    status: string;
-    response: Record<string, any>;
-  }> {
+    category: TemplateCategory,
+  ): Promise<TemplateSubmissionResult> {
     try {
-      const converted = this.convertTemplate(locale);
-      converted.providerPayload.friendly_name = templateName;
+      const converted = this.convertTemplate(templateName, locale, category);
 
-      // Submit via Twilio API
-      // For now, using WhatsApp Business Account template submission
-      // This would typically go through Twilio Conversations or Content API
+      // Placeholder implementation - actual Twilio Content API call would go here
+      // Twilio's WhatsApp template submission happens through their Content API
 
-      // Placeholder implementation - actual Twilio API call would go here
-      // Twilio's WhatsApp template submission happens through their API
+      this.logger.log(`Submitting template '${templateName}' to Twilio`);
 
       const submitResponse = {
-        template_id: `TEMPLATE_${Date.now()}`, // Would be Twilio-assigned
+        template_id: `TWILIO_TEMPLATE_${Date.now()}`,
         status: 'submitted',
         locale: locale.locale,
       };
 
       return {
+        success: true,
         providerId: submitResponse.template_id,
-        status: 'submitted',
-        response: submitResponse,
+        status: TemplateApprovalStatus.PENDING,
+        message: 'Template submitted to Twilio for approval',
+        providerResponse: submitResponse,
       };
     } catch (error) {
-      throw new InternalServerErrorException(
+      this.logger.error(
         `Failed to submit template to Twilio: ${error.message}`,
       );
+      return {
+        success: false,
+        status: TemplateApprovalStatus.DRAFT,
+        error: error.message,
+      };
     }
   }
 
   /**
-   * Send test message via Twilio sandbox
+   * Get template status from Twilio
+   */
+  async getTemplateStatus(templateId: string): Promise<TemplateStatusResult> {
+    // Placeholder - would query Twilio's Content API
+    return {
+      status: TemplateApprovalStatus.PENDING,
+      qualityRating: TemplateQualityRating.PENDING,
+      providerResponse: { templateId },
+    };
+  }
+
+  /**
+   * Delete template from Twilio
+   */
+  async deleteTemplate(
+    templateId: string,
+    templateName: string,
+  ): Promise<{ success: boolean; error?: string }> {
+    // Placeholder - would call Twilio's API to delete
+    this.logger.log(`Deleting template ${templateId} from Twilio`);
+    return { success: true };
+  }
+
+  /**
+   * Send a template message via Twilio
+   */
+  async sendTemplateMessage(
+    request: TemplateSendRequest,
+  ): Promise<TemplateSendResult> {
+    if (!this.twilioClient) {
+      return {
+        success: false,
+        status: 'failed',
+        error: 'Twilio client not configured',
+      };
+    }
+
+    try {
+      // Render template with variables
+      const rendered = this.parserService.renderTemplate(
+        request.locale.body,
+        request.variables,
+      );
+
+      // Send via Twilio WhatsApp
+      const message = await this.twilioClient.messages.create({
+        from:
+          this.configService.get('TWILIO_WHATSAPP_SANDBOX_NUMBER') ||
+          'whatsapp:+14155238886',
+        to: `whatsapp:${request.to}`,
+        body: rendered,
+      });
+
+      return {
+        success: true,
+        messageId: message.sid,
+        status: message.status,
+        providerResponse: {
+          sid: message.sid,
+          status: message.status,
+          dateCreated: message.dateCreated,
+          dateSent: message.dateSent,
+        },
+      };
+    } catch (error) {
+      this.logger.error(`Failed to send template message: ${error.message}`);
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  /**
+   * Legacy method: Send test message via Twilio sandbox
+   * @deprecated Use sendTemplateMessage instead
    */
   async sendTestMessage(
     to: string,
@@ -131,39 +241,25 @@ export class TwilioProviderAdapter {
     status: string;
     response: Record<string, any>;
   }> {
-    try {
-      const converted = this.convertTemplate(locale);
+    const result = await this.sendTemplateMessage({
+      to,
+      templateName,
+      language: locale.locale,
+      variables,
+      locale,
+    });
 
-      // Render template with variables
-      const rendered = this.parserService.renderTemplate(
-        locale.body,
-        variables,
-      );
-
-      // Send via Twilio WhatsApp sandbox
-      const message = await this.twilioClient.messages.create({
-        from:
-          this.configService.get('TWILIO_WHATSAPP_SANDBOX_NUMBER') ||
-          'whatsapp:+14155238886',
-        to: `whatsapp:${to}`,
-        body: rendered,
-      });
-
-      return {
-        messageSid: message.sid,
-        status: message.status,
-        response: {
-          sid: message.sid,
-          status: message.status,
-          dateCreated: message.dateCreated,
-          dateSent: message.dateSent,
-        },
-      };
-    } catch (error) {
+    if (!result.success) {
       throw new InternalServerErrorException(
-        `Failed to send test message: ${error.message}`,
+        result.error || 'Failed to send test message',
       );
     }
+
+    return {
+      messageSid: result.messageId || '',
+      status: result.status,
+      response: result.providerResponse || {},
+    };
   }
 
   /**

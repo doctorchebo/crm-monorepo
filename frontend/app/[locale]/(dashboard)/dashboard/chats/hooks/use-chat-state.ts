@@ -394,6 +394,7 @@ export function useChatState(): UseChatStateReturn {
         setLoading(true);
         setError(null);
 
+        // Check for selectedChatId query parameter - only auto-select if explicitly provided
         const urlParams = new URLSearchParams(window.location.search);
         const querySelectedChatId = urlParams.get("selectedChatId");
 
@@ -407,15 +408,16 @@ export function useChatState(): UseChatStateReturn {
         if (Array.isArray(data) && data.length > 0) {
           setChats(data);
 
-          let chatToSelect: string | null = null;
-
+          // Only auto-select a chat when navigating with a specific chat ID (e.g., from contacts page)
+          // Otherwise, leave no chat selected - user must explicitly select one
           if (querySelectedChatId) {
             const chatExists = data.some(
               (c) => c.chatId === querySelectedChatId
             );
             if (chatExists) {
-              chatToSelect = querySelectedChatId;
+              setSelectedChatId(querySelectedChatId);
             } else {
+              // Chat not found yet - might be newly created, retry after a short delay
               setTimeout(async () => {
                 try {
                   const retryData = await backendApi.whatsapp.getChats(0, 50);
@@ -426,21 +428,17 @@ export function useChatState(): UseChatStateReturn {
                     );
                     if (foundChat) {
                       setSelectedChatId(querySelectedChatId);
-                    } else {
-                      setSelectedChatId(retryData[0].chatId);
                     }
+                    // If still not found, leave no chat selected
                   }
                 } catch (retryErr) {
                   console.error("Retry fetch failed:", retryErr);
                 }
               }, 300);
-              chatToSelect = data[0].chatId;
             }
-          } else {
-            chatToSelect = data[0].chatId;
           }
-
-          setSelectedChatId(chatToSelect);
+          // When no querySelectedChatId is provided, leave selectedChatId as null
+          // User will see the empty state and can manually select a chat
         } else {
           setChats([]);
           setSelectedChatId(null);
