@@ -34,6 +34,7 @@ interface ContactMessageBubbleProps {
   onDelete?: (messageId: string) => void;
   deliveredAt?: string;
   readAt?: string;
+  isHighlighted?: boolean;
 }
 
 function getInitials(contact: ReceivedContact): string {
@@ -73,6 +74,7 @@ export const ContactMessageBubble = memo(function ContactMessageBubble({
   onDelete,
   deliveredAt,
   readAt,
+  isHighlighted,
 }: ContactMessageBubbleProps) {
   const isSingleContact = contacts.length === 1;
   const firstContact = contacts[0];
@@ -87,7 +89,13 @@ export const ContactMessageBubble = memo(function ContactMessageBubble({
   if (isSingleContact && firstContact) {
     // Single contact layout
     return (
-      <div className={cn("flex", isOutbound ? "justify-end" : "justify-start")}>
+      <div
+        className={cn(
+          "flex -mx-2 px-2 rounded transition-colors duration-500",
+          isOutbound ? "justify-end" : "justify-start",
+          isHighlighted && "bg-yellow-100 dark:bg-yellow-900/30 animate-pulse"
+        )}
+      >
         <div
           className={cn(
             "group relative rounded-lg overflow-hidden max-w-xs",
@@ -181,7 +189,13 @@ export const ContactMessageBubble = memo(function ContactMessageBubble({
 
   // Multiple contacts layout
   return (
-    <div className={cn("flex", isOutbound ? "justify-end" : "justify-start")}>
+    <div
+      className={cn(
+        "flex -mx-2 px-2 rounded transition-colors duration-500",
+        isOutbound ? "justify-end" : "justify-start",
+        isHighlighted && "bg-yellow-100 dark:bg-yellow-900/30 animate-pulse"
+      )}
+    >
       <div
         className={cn(
           "group relative rounded-lg overflow-hidden max-w-xs",

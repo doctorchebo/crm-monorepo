@@ -12,6 +12,7 @@ import {
 import { JwtAuthGuard } from '../auth/auth.guard';
 import { ChatsService } from './chats.service';
 import { CreateChatDto } from './dto/create-chat.dto';
+import { SearchMessagesDto } from './dto/search-messages.dto';
 import { UpdateChatDto } from './dto/update-chat.dto';
 
 @Controller('chats')
@@ -94,5 +95,35 @@ export class ChatsController {
     @Query('take') take: number = 50,
   ) {
     return this.chatsService.getMessages(id, skip, take);
+  }
+
+  /**
+   * Search messages within a chat
+   * GET /chats/:id/messages/search?query=text&startDate=2024-01-01&endDate=2024-12-31&skip=0&take=20
+   *
+   * Supports:
+   * - Text search (case-insensitive, partial match)
+   * - Date range filtering
+   * - Pagination
+   */
+  @Get(':id/messages/search')
+  async searchMessages(
+    @Param('id') id: string,
+    @Query() searchDto: SearchMessagesDto,
+  ) {
+    return this.chatsService.searchMessages(id, searchDto);
+  }
+
+  /**
+   * Get message position within a chat
+   * Used for scroll-to-message functionality
+   * GET /chats/:id/messages/:messageId/position
+   */
+  @Get(':id/messages/:messageId/position')
+  async getMessagePosition(
+    @Param('id') chatId: string,
+    @Param('messageId') messageId: string,
+  ) {
+    return this.chatsService.getMessagePosition(chatId, messageId);
   }
 }

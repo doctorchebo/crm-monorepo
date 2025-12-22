@@ -163,6 +163,7 @@ interface MessagesListProps {
     position: { x: number; y: number }
   ) => void;
   handleVideoPlay: (videoId: string, url: string) => void;
+  highlightedMessageId?: string | null;
 }
 
 export function MessagesList({
@@ -188,6 +189,7 @@ export function MessagesList({
   handleImageClick,
   handleShowDownloadMenu,
   handleVideoPlay,
+  highlightedMessageId,
 }: MessagesListProps) {
   // Track previous chat ID to detect chat switches (for GIF auto-play on chat open)
   const previousChatIdRef = useRef<string | undefined>(undefined);
@@ -420,6 +422,7 @@ export function MessagesList({
                       onStartChat={handleStartChatWithContact}
                       onReply={handleReplyById}
                       onDelete={isOutbound ? handleDeleteMessage : undefined}
+                      isHighlighted={highlightedMessageId === message.messageId}
                     />
                   </React.Fragment>
                 );
@@ -432,6 +435,8 @@ export function MessagesList({
                 (a) => a.type === "sticker"
               );
               if (stickerAttachment) {
+                const isHighlighted =
+                  highlightedMessageId === message.messageId;
                 return (
                   <React.Fragment key={message.messageId || message.id}>
                     {separatorDate && <DateSeparator date={separatorDate} />}
@@ -443,7 +448,11 @@ export function MessagesList({
                       }}
                       className={`flex ${
                         isOutbound ? "justify-end" : "justify-start"
-                      }`}
+                      } ${
+                        isHighlighted
+                          ? "bg-yellow-100 dark:bg-yellow-900/30 animate-pulse"
+                          : ""
+                      } transition-colors duration-500 -mx-2 px-2 rounded`}
                     >
                       <StickerMessageBubble
                         attachment={stickerAttachment}
@@ -463,6 +472,7 @@ export function MessagesList({
               }
             }
 
+            const isHighlighted = highlightedMessageId === message.messageId;
             return (
               <React.Fragment key={message.messageId || message.id}>
                 {separatorDate && <DateSeparator date={separatorDate} />}
@@ -475,7 +485,11 @@ export function MessagesList({
                   }}
                   className={`flex ${
                     isOutbound ? "justify-end" : "justify-start"
-                  }`}
+                  } ${
+                    isHighlighted
+                      ? "bg-yellow-100 dark:bg-yellow-900/30 animate-pulse"
+                      : ""
+                  } transition-colors duration-500 -mx-2 px-2 rounded`}
                 >
                   <div
                     className={`group px-3 py-1 rounded-lg text-xs relative ${

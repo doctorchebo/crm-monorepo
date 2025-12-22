@@ -201,6 +201,65 @@ export const backendApi = {
       participantName?: string;
       senderId?: number;
     }) => apiClient.post("/chats/contact/start", data),
+    /**
+     * Search messages within a chat
+     * @param chatId - The chat ID to search within
+     * @param query - Search query string (min 2 characters)
+     * @param options - Optional date range and pagination
+     */
+    searchMessages: (
+      chatId: string,
+      query: string,
+      options?: {
+        startDate?: string;
+        endDate?: string;
+        skip?: number;
+        take?: number;
+      }
+    ): Promise<{
+      results: Array<{
+        messageId: string;
+        chatId: string;
+        text: string;
+        type: string;
+        direction: "inbound" | "outbound";
+        status: string;
+        timestamp: string;
+        sender: string;
+        sentAt?: string | null;
+        deliveredAt?: string | null;
+        readAt?: string | null;
+        attachments?: any[];
+        matchedText?: string;
+        matchStartIndex?: number;
+        matchEndIndex?: number;
+      }>;
+      total: number;
+      hasMore: boolean;
+      query: string;
+    }> => {
+      const params = new URLSearchParams({ query });
+      if (options?.startDate) params.append("startDate", options.startDate);
+      if (options?.endDate) params.append("endDate", options.endDate);
+      if (options?.skip !== undefined)
+        params.append("skip", options.skip.toString());
+      if (options?.take !== undefined)
+        params.append("take", options.take.toString());
+      return apiClient.get(`/chats/${chatId}/messages/search?${params}`);
+    },
+    /**
+     * Get message position within a chat for scroll-to-message
+     */
+    getMessagePosition: (
+      chatId: string,
+      messageId: string
+    ): Promise<{
+      found: boolean;
+      position: number;
+      message: any;
+      surroundingMessages: any[];
+      totalCount: number;
+    }> => apiClient.get(`/chats/${chatId}/messages/${messageId}/position`),
   },
 
   // Kanban endpoints

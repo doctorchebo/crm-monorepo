@@ -93,6 +93,22 @@
       "friday": "Viernes",
       "saturday": "Sábado",
       "sunday": "Domingo"
+    },
+    "search": {
+      "title": "Buscar mensajes",
+      "placeholder": "Buscar mensajes...",
+      "closeSearch": "Cerrar búsqueda",
+      "filterByDate": "Filtrar por fecha",
+      "filteringUpTo": "Filtrando hasta {date}",
+      "clearDateFilter": "Limpiar filtro de fecha",
+      "showingResultsUpTo": "Mostrando resultados hasta {date}",
+      "typeAtLeastChars": "Escribe al menos 2 caracteres para buscar",
+      "noResultsFor": "No se encontraron mensajes para \"{query}\"",
+      "noResultsUpTo": "hasta {date}",
+      "messagesFound": "{count} {count, plural, =1 {mensaje} other {mensajes}} encontrado(s)",
+      "loadMore": "Cargar más resultados",
+      "searchError": "Error al buscar mensajes. Inténtalo de nuevo.",
+      "yesterday": "Ayer"
     }
   },
   "emojiPicker": {

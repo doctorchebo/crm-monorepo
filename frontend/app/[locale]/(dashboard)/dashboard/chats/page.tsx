@@ -3,7 +3,13 @@
 import { ArrowDown, MessageSquare } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import useSWR from "swr";
 
 import { ChatsSenderSection } from "@/components/chats-sender-section";
@@ -20,6 +26,7 @@ import {
   ChatHeader,
   ChatsModals,
   MessageInputArea,
+  MessageSearchPanel,
   MessagesList,
   TemplatesPanel,
 } from "./components";
@@ -29,6 +36,7 @@ import {
   useInputFocus,
   useMediaHandlers,
   useMessageHandlers,
+  useMessageSearch,
 } from "./hooks";
 import type { Template } from "./types";
 import { groupMessages } from "./utils";
@@ -66,6 +74,9 @@ export default function ChatsPage() {
 
   // Chat state hook - manages chats, messages, pagination, scroll
   const chatState = useChatState();
+
+  // Message search hook - manages search panel, scroll-to-message, highlighting
+  const messageSearch = useMessageSearch();
 
   // Input focus hook - manages reliable input focusing on chat selection
   // isChatReady: true when initial load is complete (isInitialLoad becomes false after messages are loaded)
@@ -245,6 +256,34 @@ export default function ChatsPage() {
     }
   };
 
+  // Handle search result message selection
+  const handleSearchSelectMessage = useCallback(
+    async (messageId: string) => {
+      if (!chatState.selectedChatId) return;
+
+      await messageSearch.scrollToMessage(
+        messageId,
+        chatState.messages,
+        chatState.setMessages,
+        chatState.messagesCacheRef,
+        chatState.currentMessagesChatIdRef,
+        chatState.selectedChatId,
+        messageHandlers.messageRefs,
+        chatState.messagesContainerRef
+      );
+    },
+    [
+      chatState.selectedChatId,
+      chatState.messages,
+      chatState.setMessages,
+      chatState.messagesCacheRef,
+      chatState.currentMessagesChatIdRef,
+      chatState.messagesContainerRef,
+      messageHandlers.messageRefs,
+      messageSearch,
+    ]
+  );
+
   // Handle separator drag to resize notes panel
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -352,13 +391,17 @@ export default function ChatsPage() {
           </div>
         </div>
 
-        {/* Right Panel: Chat Detail + Notes */}
+        {/* Right Panel: Chat Detail + Notes/Search */}
         <div className="hidden lg:flex flex-1 flex-col bg-background overflow-hidden min-h-0">
           {chatState.selectedChat ? (
             <>
-              <ChatHeader chat={chatState.selectedChat} />
+              <ChatHeader
+                chat={chatState.selectedChat}
+                onSearchClick={messageSearch.toggleSearch}
+                isSearchOpen={messageSearch.isSearchOpen}
+              />
 
-              {/* Messages + Notes Container */}
+              {/* Messages + Notes/Search Container */}
               <div className="flex flex-1 overflow-hidden" ref={containerRef}>
                 {/* Messages Area */}
                 <div className="flex-1 flex flex-col overflow-hidden min-h-0 relative">
@@ -398,6 +441,7 @@ export default function ChatsPage() {
                         mediaHandlers.handleShowDownloadMenu
                       }
                       handleVideoPlay={mediaHandlers.handleVideoPlay}
+                      highlightedMessageId={messageSearch.highlightedMessageId}
                     />
 
                     {/* Scroll to Bottom Button */}
@@ -550,31 +594,46 @@ export default function ChatsPage() {
                   />
                 </div>
 
-                {/* Resizable Separator */}
-                <div
-                  ref={separatorRef}
-                  onMouseDown={handleMouseDown}
-                  className="w-1 bg-border hover:bg-primary/50 cursor-col-resize transition-colors"
-                  title="Drag to resize"
-                />
+                {/* Resizable Separator - only show when search is not open */}
+                {!messageSearch.isSearchOpen && (
+                  <div
+                    ref={separatorRef}
+                    onMouseDown={handleMouseDown}
+                    className="w-1 bg-border hover:bg-primary/50 cursor-col-resize transition-colors"
+                    title="Drag to resize"
+                  />
+                )}
 
-                {/* Notes Panel */}
+                {/* Notes Panel or Search Panel */}
                 <div
                   ref={notesPanelRef}
                   className="hidden xl:flex flex-col overflow-hidden"
                   style={{ width: `${notesPanelWidth}px` }}
                 >
-                  {chatState.selectedChatId && currentUserId && (
-                    <ChatSidebar
-                      chatId={chatState.selectedChatId}
-                      contactId={selectedContactId}
-                      currentUserId={currentUserId}
-                      notes={notes}
-                      notesLoading={notesLoading}
-                      onAddNote={handleAddNote}
-                      onDeleteNote={handleDeleteNote}
-                      onProfileUpdate={() => {}}
+                  {messageSearch.isSearchOpen ? (
+                    // Search Panel - slides in from right
+                    <MessageSearchPanel
+                      chatId={chatState.selectedChatId!}
+                      participantName={chatState.selectedChat?.participantName}
+                      isOpen={messageSearch.isSearchOpen}
+                      onClose={messageSearch.closeSearch}
+                      onSelectMessage={handleSearchSelectMessage}
                     />
+                  ) : (
+                    // Notes/Profile Panel
+                    chatState.selectedChatId &&
+                    currentUserId && (
+                      <ChatSidebar
+                        chatId={chatState.selectedChatId}
+                        contactId={selectedContactId}
+                        currentUserId={currentUserId}
+                        notes={notes}
+                        notesLoading={notesLoading}
+                        onAddNote={handleAddNote}
+                        onDeleteNote={handleDeleteNote}
+                        onProfileUpdate={() => {}}
+                      />
+                    )
                   )}
                 </div>
               </div>

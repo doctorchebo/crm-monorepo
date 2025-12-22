@@ -8,9 +8,10 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, ilike, lte, sql } from 'drizzle-orm';
 import { CreateChatDto } from './dto/create-chat.dto';
 import { UpdateChatDto } from './dto/update-chat.dto';
+import { MessageSearchResult, SearchMessagesDto, SearchMessagesResponse } from './dto/search-messages.dto';
 
 // Interface for the gateway to avoid circular dependency
 interface IChatUpdateGateway {
@@ -457,6 +458,201 @@ export class ChatsService {
       return result;
     } catch (error) {
       this.logger.error(`Error fetching messages: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Search messages within a chat
+   * Performs efficient full-text search with optional date filtering
+   *
+   * @param chatId - The chat ID to search within
+   * @param searchDto - Search parameters including query, date range, and pagination
+   * @returns Search results with matched text highlighting info
+   */
+  async searchMessages(
+    chatId: string,
+    searchDto: SearchMessagesDto,
+  ): Promise<SearchMessagesResponse> {
+    try {
+      const { query, startDate, endDate, skip = 0, take = 20 } = searchDto;
+
+      // Validate chat exists
+      await this.findOne(chatId);
+
+      // Build query conditions
+      const conditions: any[] = [
+        eq(messages.chatId, chatId),
+        eq(messages.isDeleted, false),
+        ilike(messages.text, `%${query}%`),
+      ];
+
+      // Add date filters if provided
+      if (startDate) {
+        conditions.push(gte(messages.timestamp, new Date(startDate)));
+      }
+      if (endDate) {
+        // Include the entire end date day
+        const endOfDay = new Date(endDate);
+        endOfDay.setHours(23, 59, 59, 999);
+        conditions.push(lte(messages.timestamp, endOfDay));
+      }
+
+      // Get total count for pagination
+      const [countResult] = await db
+        .select({ count: count() })
+        .from(messages)
+        .where(and(...conditions));
+
+      const total = countResult?.count || 0;
+
+      // Fetch matching messages with pagination
+      // Order by timestamp ascending to show oldest matches first (chronological)
+      const matchingMessages = await db
+        .select({
+          messageId: messages.messageId,
+          chatId: messages.chatId,
+          text: messages.text,
+          type: messages.type,
+          direction: messages.direction,
+          status: messages.status,
+          timestamp: messages.timestamp,
+          sender: messages.sender,
+          sentAt: messages.sentAt,
+          deliveredAt: messages.deliveredAt,
+          readAt: messages.readAt,
+          attachments: messages.attachments,
+        })
+        .from(messages)
+        .where(and(...conditions))
+        .orderBy(desc(messages.timestamp))
+        .limit(take)
+        .offset(skip);
+
+      // Process results to add highlighting information
+      const results: MessageSearchResult[] = matchingMessages.map((msg) => {
+        const text = msg.text || '';
+        const lowerText = text.toLowerCase();
+        const lowerQuery = query.toLowerCase();
+        const matchStartIndex = lowerText.indexOf(lowerQuery);
+        const matchEndIndex =
+          matchStartIndex !== -1 ? matchStartIndex + query.length : -1;
+
+        return {
+          messageId: msg.messageId,
+          chatId: msg.chatId,
+          text: text,
+          type: msg.type,
+          direction: msg.direction as 'inbound' | 'outbound',
+          status: msg.status || 'sent',
+          timestamp: msg.timestamp,
+          sender: msg.sender,
+          sentAt: msg.sentAt,
+          deliveredAt: msg.deliveredAt,
+          readAt: msg.readAt,
+          attachments: msg.attachments as any[],
+          matchedText: matchStartIndex !== -1 ? query : undefined,
+          matchStartIndex: matchStartIndex !== -1 ? matchStartIndex : undefined,
+          matchEndIndex: matchEndIndex !== -1 ? matchEndIndex : undefined,
+        };
+      });
+
+      this.logger.log(
+        `Search in chat ${chatId} for "${query}": found ${total} results`,
+      );
+
+      return {
+        results,
+        total,
+        hasMore: skip + take < total,
+        query,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error searching messages in chat ${chatId}: ${error.message}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Find a specific message by ID within a chat
+   * Used for scroll-to-message functionality
+   *
+   * @param chatId - The chat ID
+   * @param messageId - The message ID to find
+   * @returns The message position info including surrounding context
+   */
+  async getMessagePosition(
+    chatId: string,
+    messageId: string,
+  ): Promise<{
+    found: boolean;
+    position: number;
+    message: any;
+    surroundingMessages: any[];
+    totalCount: number;
+  }> {
+    try {
+      await this.findOne(chatId);
+
+      // Get total message count
+      const [countResult] = await db
+        .select({ count: count() })
+        .from(messages)
+        .where(and(eq(messages.chatId, chatId), eq(messages.isDeleted, false)));
+      const totalCount = countResult?.count || 0;
+
+      // Find the target message
+      const targetMessage = await db.query.messages.findFirst({
+        where: and(
+          eq(messages.chatId, chatId),
+          eq(messages.messageId, messageId),
+        ),
+      });
+
+      if (!targetMessage) {
+        return {
+          found: false,
+          position: -1,
+          message: null,
+          surroundingMessages: [],
+          totalCount,
+        };
+      }
+
+      // Get the position of the message (how many messages are older)
+      const [positionResult] = await db
+        .select({ count: count() })
+        .from(messages)
+        .where(
+          and(
+            eq(messages.chatId, chatId),
+            eq(messages.isDeleted, false),
+            lte(messages.timestamp, targetMessage.timestamp),
+          ),
+        );
+      const position = positionResult?.count || 0;
+
+      // Fetch surrounding messages (20 before and 20 after)
+      const surroundingMessages = await db.query.messages.findMany({
+        where: and(eq(messages.chatId, chatId), eq(messages.isDeleted, false)),
+        orderBy: [asc(messages.timestamp)],
+        limit: 41,
+        offset: Math.max(0, position - 21),
+      });
+
+      return {
+        found: true,
+        position,
+        message: targetMessage,
+        surroundingMessages,
+        totalCount,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error getting message position in chat ${chatId}: ${error.message}`,
+      );
       throw error;
     }
   }
