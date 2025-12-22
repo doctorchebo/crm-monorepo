@@ -1,10 +1,16 @@
+"use client";
+
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Plus, Trash2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 
 // Helper function to format relative time
-function formatRelativeTime(date: Date | string): string {
+function formatRelativeTime(
+  date: Date | string,
+  t: (key: string, params?: { count: number }) => string
+): string {
   const now = new Date();
   const notesDate = new Date(date);
   const diff = now.getTime() - notesDate.getTime();
@@ -14,10 +20,10 @@ function formatRelativeTime(date: Date | string): string {
   const hours = Math.floor(minutes / 60);
   const days = Math.floor(hours / 24);
 
-  if (seconds < 60) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  if (days < 7) return `${days}d ago`;
+  if (seconds < 60) return t("relativeTime.justNow");
+  if (minutes < 60) return t("relativeTime.minutesAgo", { count: minutes });
+  if (hours < 24) return t("relativeTime.hoursAgo", { count: hours });
+  if (days < 7) return t("relativeTime.daysAgo", { count: days });
 
   return notesDate.toLocaleDateString();
 }
@@ -59,6 +65,7 @@ export function NotesPanel({
   onAddNote,
   onDeleteNote,
 }: NotesPanel) {
+  const t = useTranslations("notes");
   const [newNoteText, setNewNoteText] = useState("");
   const [isAddingNote, setIsAddingNote] = useState(false);
 
@@ -80,21 +87,21 @@ export function NotesPanel({
     <div className="flex flex-col h-full border-l bg-background">
       {/* Header */}
       <div className="border-b px-4 py-3">
-        <h3 className="font-semibold text-sm">Notes</h3>
+        <h3 className="font-semibold text-sm">{t("title")}</h3>
       </div>
 
       {/* Notes List */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {loading ? (
           <div className="flex items-center justify-center h-full">
-            <p className="text-xs text-muted-foreground">Loading notes...</p>
+            <p className="text-xs text-muted-foreground">{t("loadingNotes")}</p>
           </div>
         ) : notes && notes.generalNotes.length > 0 ? (
           <>
             {/* General Notes Section */}
             <div>
               <h4 className="text-xs font-semibold text-muted-foreground mb-2">
-                General Notes
+                {t("generalNotes")}
               </h4>
               <div className="space-y-2">
                 {notes.generalNotes.map((note) => (
@@ -105,17 +112,17 @@ export function NotesPanel({
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1">
                         <p className="font-medium text-xs">
-                          {note.user?.name || "Unknown"}
+                          {note.user?.name || t("unknown")}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {formatRelativeTime(note.createdAt)}
+                          {formatRelativeTime(note.createdAt, t)}
                         </p>
                       </div>
                       {note.userId === currentUserId && (
                         <button
                           onClick={() => onDeleteNote(note.id)}
                           className="text-muted-foreground hover:text-destructive transition-colors"
-                          title="Delete note"
+                          title={t("deleteNote")}
                         >
                           <Trash2 className="h-3 w-3" />
                         </button>
@@ -131,7 +138,7 @@ export function NotesPanel({
             {Object.keys(notes.messageNotes).length > 0 && (
               <div>
                 <h4 className="text-xs font-semibold text-muted-foreground mb-2">
-                  Message Notes
+                  {t("messageNotes")}
                 </h4>
                 <div className="space-y-2">
                   {Object.entries(notes.messageNotes).map(
@@ -145,17 +152,17 @@ export function NotesPanel({
                             <div className="flex items-start justify-between gap-2">
                               <div className="flex-1">
                                 <p className="font-medium text-xs">
-                                  {note.user?.name || "Unknown"}
+                                  {note.user?.name || t("unknown")}
                                 </p>
                                 <p className="text-xs text-muted-foreground">
-                                  {formatRelativeTime(note.createdAt)}
+                                  {formatRelativeTime(note.createdAt, t)}
                                 </p>
                               </div>
                               {note.userId === currentUserId && (
                                 <button
                                   onClick={() => onDeleteNote(note.id)}
                                   className="text-muted-foreground hover:text-destructive transition-colors"
-                                  title="Delete note"
+                                  title={t("deleteNote")}
                                 >
                                   <Trash2 className="h-3 w-3" />
                                 </button>
@@ -173,9 +180,7 @@ export function NotesPanel({
           </>
         ) : (
           <div className="flex items-center justify-center h-full">
-            <p className="text-xs text-muted-foreground">
-              No notes yet. Add one below.
-            </p>
+            <p className="text-xs text-muted-foreground">{t("noNotesYet")}</p>
           </div>
         )}
       </div>
@@ -183,7 +188,7 @@ export function NotesPanel({
       {/* Add Note Input */}
       <div className="border-t p-4 space-y-2">
         <Textarea
-          placeholder="Add a note..."
+          placeholder={t("addNotePlaceholder")}
           value={newNoteText}
           onChange={(e) => setNewNoteText(e.target.value)}
           className="min-h-[80px] resize-none text-xs"
@@ -196,7 +201,7 @@ export function NotesPanel({
           className="w-full"
         >
           <Plus className="h-3 w-3 mr-1" />
-          Add Note
+          {t("addNote")}
         </Button>
       </div>
     </div>

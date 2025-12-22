@@ -109,6 +109,76 @@
       "loadMore": "Cargar más resultados",
       "searchError": "Error al buscar mensajes. Inténtalo de nuevo.",
       "yesterday": "Ayer"
+    },
+    "chatList": {
+      "noResults": "No se encontraron chats",
+      "noResultsFor": "No se encontraron chats para \"{query}\"",
+      "resultsCount": "{count, plural, one {# chat encontrado} other {# chats encontrados}}",
+      "loadingChats": "Cargando chats...",
+      "loadMore": "Cargar más",
+      "dates": {
+        "now": "ahora",
+        "minutesAgo": "hace {count}m",
+        "hoursAgo": "hace {count}h",
+        "yesterday": "ayer",
+        "daysAgo": "hace {count}d"
+      },
+      "mediaTypes": {
+        "gif": "GIF",
+        "sticker": "Sticker",
+        "photo": "Foto",
+        "video": "Video",
+        "voiceMessage": "Mensaje de voz",
+        "document": "Documento"
+      }
+    }
+  },
+  "customerProfile": {
+    "title": "Perfil del Cliente",
+    "contactInfo": "Información de Contacto",
+    "firstName": "Nombre",
+    "lastName": "Apellido",
+    "email": "Correo electrónico",
+    "phone": "Teléfono",
+    "addLastName": "Agregar apellido",
+    "addEmail": "Agregar correo",
+    "addValue": "Agregar valor",
+    "customAttributes": "Atributos Personalizados",
+    "add": "Agregar",
+    "key": "Clave",
+    "type": "Tipo",
+    "value": "Valor",
+    "enterValue": "Ingrese valor",
+    "cancel": "Cancelar",
+    "noCustomAttributes": "Sin atributos personalizados aún",
+    "templateVariables": "Variables de Plantilla",
+    "useInTemplates": "Usa estas en tus plantillas de mensaje:",
+    "noContactData": "No hay datos de contacto disponibles",
+    "empty": "Vacío",
+    "valueTypes": {
+      "string": "Texto",
+      "number": "Número",
+      "date": "Fecha",
+      "phone": "Teléfono",
+      "email": "Correo"
+    }
+  },
+  "notes": {
+    "title": "Notas",
+    "profile": "Perfil",
+    "loadingNotes": "Cargando notas...",
+    "generalNotes": "Notas Generales",
+    "messageNotes": "Notas de Mensajes",
+    "noNotesYet": "Sin notas aún. Agrega una abajo.",
+    "addNotePlaceholder": "Agregar una nota...",
+    "addNote": "Agregar Nota",
+    "deleteNote": "Eliminar nota",
+    "unknown": "Desconocido",
+    "relativeTime": {
+      "justNow": "ahora mismo",
+      "minutesAgo": "hace {count}m",
+      "hoursAgo": "hace {count}h",
+      "daysAgo": "hace {count}d"
     }
   },
   "emojiPicker": {

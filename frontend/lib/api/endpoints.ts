@@ -186,6 +186,41 @@ export const backendApi = {
   chats: {
     list: (skip?: number, take?: number) =>
       apiClient.get(`/chats?skip=${skip || 0}&take=${take || 20}`),
+    /**
+     * Search chats by participant name or phone number
+     * @param query - Search query string (searches name and phone)
+     * @param options - Optional pagination
+     */
+    search: (
+      query: string,
+      options?: {
+        skip?: number;
+        take?: number;
+      }
+    ): Promise<{
+      results: Array<{
+        chatId: string;
+        senderId: number;
+        businessPhone?: string;
+        participantPhone: string;
+        participantName?: string;
+        lastMessage?: string;
+        lastMessageType?: string;
+        lastMessageTime?: string;
+        unreadCount: number;
+        matchedField?: "name" | "phone";
+      }>;
+      total: number;
+      hasMore: boolean;
+      query?: string;
+    }> => {
+      const params = new URLSearchParams({ query });
+      if (options?.skip !== undefined)
+        params.append("skip", options.skip.toString());
+      if (options?.take !== undefined)
+        params.append("take", options.take.toString());
+      return apiClient.get(`/chats/search?${params}`);
+    },
     get: (id: string) => apiClient.get(`/chats/${id}`),
     create: (data: any) => apiClient.post("/chats", data),
     update: (id: string, data: any) => apiClient.patch(`/chats/${id}`, data),

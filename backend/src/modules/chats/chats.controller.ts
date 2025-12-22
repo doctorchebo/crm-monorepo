@@ -12,6 +12,7 @@ import {
 import { JwtAuthGuard } from '../auth/auth.guard';
 import { ChatsService } from './chats.service';
 import { CreateChatDto } from './dto/create-chat.dto';
+import { SearchChatsDto } from './dto/search-chats.dto';
 import { SearchMessagesDto } from './dto/search-messages.dto';
 import { UpdateChatDto } from './dto/update-chat.dto';
 
@@ -62,6 +63,21 @@ export class ChatsController {
     const userId = req.user.userId;
     // TODO: Get teamId from request context
     return this.chatsService.findByTeam(userId, 'teamId', skip, take);
+  }
+
+  /**
+   * Search chats by participant name or phone number
+   * GET /chats/search?query=text&skip=0&take=50
+   *
+   * Supports:
+   * - Case-insensitive partial matching on name and phone
+   * - Relevance-based ordering (exact matches first)
+   * - Pagination
+   */
+  @Get('search')
+  async searchChats(@Req() req: any, @Query() searchDto: SearchChatsDto) {
+    const userId = req.user.userId;
+    return this.chatsService.searchChats(userId, searchDto);
   }
 
   @Get(':id')

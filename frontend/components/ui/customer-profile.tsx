@@ -27,6 +27,7 @@ import {
   User,
   X,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 
@@ -129,6 +130,7 @@ export function CustomerProfile({
   contactId,
   onProfileUpdate,
 }: CustomerProfileProps) {
+  const t = useTranslations("customerProfile");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [contact, setContact] = useState<ContactData | null>(null);
@@ -333,7 +335,7 @@ export function CustomerProfile({
   if (!contact) {
     return (
       <div className="p-4 text-center text-sm text-muted-foreground">
-        No contact data available
+        {t("noContactData")}
       </div>
     );
   }
@@ -344,7 +346,7 @@ export function CustomerProfile({
       <div className="border-b px-4 py-3 flex items-center justify-between">
         <h3 className="font-semibold text-sm flex items-center gap-2">
           <User className="h-4 w-4" />
-          Customer Profile
+          {t("title")}
         </h3>
         {saving && <Loader2 className="h-3 w-3 animate-spin" />}
       </div>
@@ -354,12 +356,12 @@ export function CustomerProfile({
         {/* Core Fields Section */}
         <div className="space-y-3">
           <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-            Contact Info
+            {t("contactInfo")}
           </h4>
 
           {/* First Name */}
           <EditableField
-            label="First Name"
+            label={t("firstName")}
             value={contact.firstName}
             fieldId="firstName"
             icon={<User className="h-3 w-3" />}
@@ -373,7 +375,7 @@ export function CustomerProfile({
 
           {/* Last Name */}
           <EditableField
-            label="Last Name"
+            label={t("lastName")}
             value={contact.lastName || ""}
             fieldId="lastName"
             icon={<User className="h-3 w-3" />}
@@ -383,12 +385,12 @@ export function CustomerProfile({
             onCancel={cancelEditing}
             onSave={(value) => saveContactField("lastName", value)}
             onEditValueChange={setEditValue}
-            placeholder="Add last name"
+            placeholder={t("addLastName")}
           />
 
           {/* Email */}
           <EditableField
-            label="Email"
+            label={t("email")}
             value={contact.email || ""}
             fieldId="email"
             icon={<Mail className="h-3 w-3" />}
@@ -398,7 +400,7 @@ export function CustomerProfile({
             onCancel={cancelEditing}
             onSave={(value) => saveContactField("email", value)}
             onEditValueChange={setEditValue}
-            placeholder="Add email"
+            placeholder={t("addEmail")}
             type="email"
           />
 
@@ -406,7 +408,7 @@ export function CustomerProfile({
           <div className="space-y-1">
             <Label className="text-xs text-muted-foreground flex items-center gap-1">
               <Phone className="h-3 w-3" />
-              Phone
+              {t("phone")}
             </Label>
             <p className="text-sm px-2 py-1 bg-muted/50 rounded">
               {contact.phoneNumber}
@@ -418,7 +420,7 @@ export function CustomerProfile({
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-              Custom Attributes
+              {t("customAttributes")}
             </h4>
             <Button
               variant="ghost"
@@ -427,7 +429,7 @@ export function CustomerProfile({
               onClick={() => setNewAttributeMode(true)}
             >
               <Plus className="h-3 w-3 mr-1" />
-              Add
+              {t("add")}
             </Button>
           </div>
 
@@ -436,7 +438,7 @@ export function CustomerProfile({
             <div className="p-3 border rounded-lg space-y-2 bg-muted/30">
               <div className="grid grid-cols-2 gap-2">
                 <div className="relative">
-                  <Label className="text-xs">Key</Label>
+                  <Label className="text-xs">{t("key")}</Label>
                   <Input
                     ref={keyInputRef}
                     value={newAttribute.key}
@@ -492,7 +494,7 @@ export function CustomerProfile({
                     )}
                 </div>
                 <div>
-                  <Label className="text-xs">Type</Label>
+                  <Label className="text-xs">{t("type")}</Label>
                   <Select
                     value={newAttribute.valueType}
                     onValueChange={(value: ValueType) =>
@@ -503,17 +505,27 @@ export function CustomerProfile({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="string">Text</SelectItem>
-                      <SelectItem value="number">Number</SelectItem>
-                      <SelectItem value="date">Date</SelectItem>
-                      <SelectItem value="phone">Phone</SelectItem>
-                      <SelectItem value="email">Email</SelectItem>
+                      <SelectItem value="string">
+                        {t("valueTypes.string")}
+                      </SelectItem>
+                      <SelectItem value="number">
+                        {t("valueTypes.number")}
+                      </SelectItem>
+                      <SelectItem value="date">
+                        {t("valueTypes.date")}
+                      </SelectItem>
+                      <SelectItem value="phone">
+                        {t("valueTypes.phone")}
+                      </SelectItem>
+                      <SelectItem value="email">
+                        {t("valueTypes.email")}
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
               </div>
               <div>
-                <Label className="text-xs">Value</Label>
+                <Label className="text-xs">{t("value")}</Label>
                 <Input
                   value={newAttribute.value}
                   onChange={(e) =>
@@ -522,7 +534,7 @@ export function CustomerProfile({
                       value: e.target.value,
                     }))
                   }
-                  placeholder="Enter value"
+                  placeholder={t("enterValue")}
                   className="h-8 text-xs"
                 />
               </div>
@@ -541,7 +553,7 @@ export function CustomerProfile({
                     });
                   }}
                 >
-                  Cancel
+                  {t("cancel")}
                 </Button>
                 <Button
                   size="sm"
@@ -552,7 +564,7 @@ export function CustomerProfile({
                   {saving ? (
                     <Loader2 className="h-3 w-3 animate-spin" />
                   ) : (
-                    "Add"
+                    t("add")
                   )}
                 </Button>
               </div>
@@ -569,6 +581,7 @@ export function CustomerProfile({
                   editing={editingField === `attr_${attr.key}`}
                   editValue={editValue}
                   editKey={editKey}
+                  emptyLabel={t("empty")}
                   onStartEdit={() =>
                     startEditing(`attr_${attr.key}`, attr.value || "", attr.key)
                   }
@@ -585,7 +598,7 @@ export function CustomerProfile({
           ) : (
             !newAttributeMode && (
               <p className="text-xs text-muted-foreground text-center py-2">
-                No custom attributes yet
+                {t("noCustomAttributes")}
               </p>
             )
           )}
@@ -608,6 +621,8 @@ function TemplateVariablesSection({
   contact,
   attributes,
 }: TemplateVariablesSectionProps) {
+  const t = useTranslations("customerProfile");
+
   // Compute resolved variables using the utility
   const resolvedVariables = useMemo(
     () =>
@@ -627,10 +642,10 @@ function TemplateVariablesSection({
   return (
     <div className="p-3 bg-muted/30 rounded-lg space-y-2">
       <h4 className="text-xs font-semibold text-muted-foreground">
-        Template Variables
+        {t("templateVariables")}
       </h4>
       <p className="text-[10px] text-muted-foreground mb-2">
-        Use these in your message templates:
+        {t("useInTemplates")}
       </p>
       <div className="text-xs space-y-1">
         {resolvedVariables.map((variable) => (
@@ -754,6 +769,7 @@ interface AttributeRowProps {
   editing: boolean;
   editValue: string;
   editKey: string;
+  emptyLabel: string;
   onStartEdit: () => void;
   onCancel: () => void;
   onSave: (newKey: string, value: string) => void;
@@ -767,6 +783,7 @@ function AttributeRow({
   editing,
   editValue,
   editKey,
+  emptyLabel,
   onStartEdit,
   onCancel,
   onSave,
@@ -873,7 +890,9 @@ function AttributeRow({
           onClick={onStartEdit}
         >
           {attribute.value || (
-            <span className="italic text-muted-foreground/50">Empty</span>
+            <span className="italic text-muted-foreground/50">
+              {emptyLabel}
+            </span>
           )}
         </div>
       )}

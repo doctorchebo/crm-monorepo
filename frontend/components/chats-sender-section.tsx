@@ -8,7 +8,16 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { ChevronDown, ChevronRight, FileIcon, ImageIcon, Mic, Sticker, Video } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  FileIcon,
+  ImageIcon,
+  Mic,
+  Sticker,
+  Video,
+} from "lucide-react";
+import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 
 interface Chat {
@@ -40,6 +49,7 @@ export function ChatsSenderSection({
   onSelectChat,
 }: ChatsSenderSectionProps) {
   const [isExpanded, setIsExpanded] = useState(true);
+  const t = useTranslations("chats.chatList");
 
   // Calculate total unread count for this sender section
   const totalUnreadCount = useMemo(() => {
@@ -93,6 +103,7 @@ export function ChatsSenderSection({
               chat={chat}
               isSelected={selectedChatId === chat.chatId}
               onSelect={() => onSelectChat(chat.chatId)}
+              t={t}
             />
           ))}
         </div>
@@ -108,6 +119,7 @@ interface ChatListItemProps {
   chat: Chat;
   isSelected: boolean;
   onSelect: () => void;
+  t: ReturnType<typeof useTranslations>;
 }
 
 /**
@@ -138,43 +150,45 @@ function getMessageTypeIcon(type: string | undefined) {
 }
 
 /**
- * Get the preview text for a message type
+ * Get the preview text for a message type with translations
  */
 function getMessageTypePreview(
   type: string | undefined,
-  textContent: string | undefined
+  textContent: string | undefined,
+  t: ReturnType<typeof useTranslations>
 ): string {
   // If there's text content, use it
   if (textContent && textContent.trim()) {
     return textContent;
   }
 
-  // Otherwise, show type-based placeholder
+  // Otherwise, show type-based placeholder with translations
   switch (type) {
     case "gif":
-      return "GIF";
+      return t("mediaTypes.gif");
     case "sticker":
-      return "Sticker";
+      return t("mediaTypes.sticker");
     case "image":
-      return "Photo";
+      return t("mediaTypes.photo");
     case "video":
-      return "Video";
+      return t("mediaTypes.video");
     case "audio":
     case "voice":
-      return "Voice message";
+      return t("mediaTypes.voiceMessage");
     case "document":
-      return "Document";
+      return t("mediaTypes.document");
     default:
       return "";
   }
 }
 
-function ChatListItem({ chat, isSelected, onSelect }: ChatListItemProps) {
+function ChatListItem({ chat, isSelected, onSelect, t }: ChatListItemProps) {
   const hasUnread = (chat.unreadCount || 0) > 0;
   const icon = getMessageTypeIcon(chat.lastMessageType);
   const previewText = getMessageTypePreview(
     chat.lastMessageType,
-    chat.lastMessage
+    chat.lastMessage,
+    t
   );
 
   return (
@@ -223,7 +237,7 @@ function ChatListItem({ chat, isSelected, onSelect }: ChatListItemProps) {
                   : "text-muted-foreground"
               )}
             >
-              {formatTime(new Date(chat.lastMessageTime))}
+              {formatTime(new Date(chat.lastMessageTime), t)}
             </span>
           )}
 
@@ -240,22 +254,25 @@ function ChatListItem({ chat, isSelected, onSelect }: ChatListItemProps) {
 }
 
 /**
- * Formats a date to a relative time string (e.g., "2 hours ago", "Yesterday", "Dec 25")
+ * Formats a date to a relative time string with translations
+ * Uses short format for recent times (now, minutes, hours) and days for older
+ * Falls back to formatted date for messages older than a week
  */
-function formatTime(date: Date): string {
+function formatTime(date: Date, t: ReturnType<typeof useTranslations>): string {
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / (1000 * 60));
   const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
-  if (diffMins < 1) return "now";
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays === 1) return "yesterday";
-  if (diffDays < 7) return `${diffDays}d ago`;
+  if (diffMins < 1) return t("dates.now");
+  if (diffMins < 60) return t("dates.minutesAgo", { count: diffMins });
+  if (diffHours < 24) return t("dates.hoursAgo", { count: diffHours });
+  if (diffDays === 1) return t("dates.yesterday");
+  if (diffDays < 7) return t("dates.daysAgo", { count: diffDays });
 
-  return date.toLocaleDateString("en-US", {
+  // For older dates, use locale-aware date formatting
+  return date.toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
     year: date.getFullYear() !== now.getFullYear() ? "numeric" : undefined,

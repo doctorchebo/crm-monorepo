@@ -109,6 +109,76 @@
       "loadMore": "Load more results",
       "searchError": "Failed to search messages. Please try again.",
       "yesterday": "Yesterday"
+    },
+    "chatList": {
+      "noResults": "No chats found",
+      "noResultsFor": "No chats found for \"{query}\"",
+      "resultsCount": "{count, plural, one {# chat found} other {# chats found}}",
+      "loadingChats": "Loading chats...",
+      "loadMore": "Load more",
+      "dates": {
+        "now": "now",
+        "minutesAgo": "{count}m ago",
+        "hoursAgo": "{count}h ago",
+        "yesterday": "yesterday",
+        "daysAgo": "{count}d ago"
+      },
+      "mediaTypes": {
+        "gif": "GIF",
+        "sticker": "Sticker",
+        "photo": "Photo",
+        "video": "Video",
+        "voiceMessage": "Voice message",
+        "document": "Document"
+      }
+    }
+  },
+  "customerProfile": {
+    "title": "Customer Profile",
+    "contactInfo": "Contact Info",
+    "firstName": "First Name",
+    "lastName": "Last Name",
+    "email": "Email",
+    "phone": "Phone",
+    "addLastName": "Add last name",
+    "addEmail": "Add email",
+    "addValue": "Add value",
+    "customAttributes": "Custom Attributes",
+    "add": "Add",
+    "key": "Key",
+    "type": "Type",
+    "value": "Value",
+    "enterValue": "Enter value",
+    "cancel": "Cancel",
+    "noCustomAttributes": "No custom attributes yet",
+    "templateVariables": "Template Variables",
+    "useInTemplates": "Use these in your message templates:",
+    "noContactData": "No contact data available",
+    "empty": "Empty",
+    "valueTypes": {
+      "string": "Text",
+      "number": "Number",
+      "date": "Date",
+      "phone": "Phone",
+      "email": "Email"
+    }
+  },
+  "notes": {
+    "title": "Notes",
+    "profile": "Profile",
+    "loadingNotes": "Loading notes...",
+    "generalNotes": "General Notes",
+    "messageNotes": "Message Notes",
+    "noNotesYet": "No notes yet. Add one below.",
+    "addNotePlaceholder": "Add a note...",
+    "addNote": "Add Note",
+    "deleteNote": "Delete note",
+    "unknown": "Unknown",
+    "relativeTime": {
+      "justNow": "just now",
+      "minutesAgo": "{count}m ago",
+      "hoursAgo": "{count}h ago",
+      "daysAgo": "{count}d ago"
     }
   },
   "emojiPicker": {

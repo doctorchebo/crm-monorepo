@@ -1,3 +1,4 @@
+export { useChatSearch } from "./use-chat-search";
 export { useChatState } from "./use-chat-state";
 export { useContactHandlers } from "./use-contact-handlers";
 export {

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { CustomerProfile } from "@/components/ui/customer-profile";
 import { NotesPanel } from "@/components/ui/notes-panel";
 import { FileText, User } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 
 interface NotesGeneralAndMessage {
@@ -45,6 +46,7 @@ export function ChatSidebar({
   onDeleteNote,
   onProfileUpdate,
 }: ChatSidebarProps) {
+  const t = useTranslations("notes");
   const [activeTab, setActiveTab] = useState<"profile" | "notes">("profile");
 
   // If no contactId, show only notes
@@ -75,7 +77,7 @@ export function ChatSidebar({
             onClick={() => setActiveTab("profile")}
           >
             <User className="h-3 w-3" />
-            Profile
+            {t("profile")}
           </Button>
           <Button
             variant={activeTab === "notes" ? "default" : "ghost"}
@@ -84,7 +86,7 @@ export function ChatSidebar({
             onClick={() => setActiveTab("notes")}
           >
             <FileText className="h-3 w-3" />
-            Notes
+            {t("title")}
           </Button>
         </div>
       </div>

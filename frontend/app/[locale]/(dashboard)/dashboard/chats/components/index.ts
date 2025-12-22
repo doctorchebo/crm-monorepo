@@ -1,4 +1,5 @@
 export { ChatHeader } from "./chat-header";
+export { ChatSearchResults } from "./chat-search-results";
 export { ChatsModals } from "./chats-modals";
 export { DateSeparator } from "./date-separator";
 export { MessageInputArea } from "./message-input-area";

@@ -8,10 +8,30 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common';
-import { and, asc, count, desc, eq, gte, ilike, lte, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gte,
+  ilike,
+  lte,
+  or,
+  sql,
+} from 'drizzle-orm';
 import { CreateChatDto } from './dto/create-chat.dto';
+import {
+  SearchChatsDto,
+  SearchChatsResponse,
+  SearchChatsResult,
+} from './dto/search-chats.dto';
+import {
+  MessageSearchResult,
+  SearchMessagesDto,
+  SearchMessagesResponse,
+} from './dto/search-messages.dto';
 import { UpdateChatDto } from './dto/update-chat.dto';
-import { MessageSearchResult, SearchMessagesDto, SearchMessagesResponse } from './dto/search-messages.dto';
 
 // Interface for the gateway to avoid circular dependency
 interface IChatUpdateGateway {
@@ -763,5 +783,180 @@ export class ChatsService {
       );
       throw error;
     }
+  }
+
+  /**
+   * Search chats by participant name or phone number
+   * Uses PostgreSQL ILIKE for case-insensitive partial matching
+   * Optimized with indexes on participantName and participantPhone
+   *
+   * @param userId - The user ID
+   * @param searchDto - Search parameters
+   * @returns Paginated search results
+   */
+  async searchChats(
+    userId: number,
+    searchDto: SearchChatsDto,
+  ): Promise<SearchChatsResponse> {
+    try {
+      const { query, skip = 0, take = 50 } = searchDto;
+
+      // Base conditions: user's active chats
+      const baseConditions = [
+        eq(chats.userId, userId),
+        eq(chats.isActive, true),
+      ];
+
+      // If no query, return all chats with pagination
+      if (!query || query.trim().length === 0) {
+        const [countResult] = await db
+          .select({ count: count() })
+          .from(chats)
+          .where(and(...baseConditions));
+
+        const total = Number(countResult?.count) || 0;
+
+        const results = await db.query.chats.findMany({
+          where: and(...baseConditions),
+          orderBy: [
+            desc(sql`${chats.lastMessageTime} IS NULL`),
+            desc(chats.lastMessageTime),
+          ],
+          limit: take,
+          offset: skip,
+        });
+
+        // Enrich with contact names
+        const enrichedResults = await this.enrichChatsWithContactNames(results);
+
+        return {
+          results: enrichedResults.map((chat) => ({
+            chatId: chat.chatId,
+            senderId: chat.senderId,
+            businessPhone: chat.businessPhone || undefined,
+            participantPhone: chat.participantPhone,
+            participantName: chat.participantName || undefined,
+            lastMessage: chat.lastMessage || undefined,
+            lastMessageType: chat.lastMessageType || undefined,
+            lastMessageTime: chat.lastMessageTime || undefined,
+            unreadCount: chat.unreadCount || 0,
+          })),
+          total,
+          hasMore: skip + take < total,
+        };
+      }
+
+      // Normalize query for search
+      const searchPattern = `%${query.trim()}%`;
+
+      // Build search conditions: match name OR phone
+      const searchConditions = [
+        ...baseConditions,
+        or(
+          ilike(chats.participantName, searchPattern),
+          ilike(chats.participantPhone, searchPattern),
+        ),
+      ];
+
+      // Get total count for pagination
+      const [countResult] = await db
+        .select({ count: count() })
+        .from(chats)
+        .where(and(...searchConditions));
+
+      const total = Number(countResult?.count) || 0;
+
+      // Get matching chats with pagination
+      // Order: exact name matches first, then partial matches, then by last message time
+      const results = await db
+        .select()
+        .from(chats)
+        .where(and(...searchConditions))
+        .orderBy(
+          // Prioritize exact name matches
+          desc(
+            sql`CASE WHEN LOWER(${chats.participantName}) = LOWER(${query.trim()}) THEN 1 ELSE 0 END`,
+          ),
+          // Then name starts with query
+          desc(
+            sql`CASE WHEN LOWER(${chats.participantName}) LIKE LOWER(${query.trim() + '%'}) THEN 1 ELSE 0 END`,
+          ),
+          // Then exact phone matches
+          desc(
+            sql`CASE WHEN ${chats.participantPhone} = ${query.trim()} THEN 1 ELSE 0 END`,
+          ),
+          // Finally by last message time
+          desc(sql`${chats.lastMessageTime} IS NULL`),
+          desc(chats.lastMessageTime),
+        )
+        .limit(take)
+        .offset(skip);
+
+      // Enrich with contact names and determine match field
+      const enrichedResults = await this.enrichChatsWithContactNames(results);
+
+      const searchResults: SearchChatsResult[] = enrichedResults.map((chat) => {
+        // Determine which field matched
+        const nameLower = (chat.participantName || '').toLowerCase();
+        const phoneLower = chat.participantPhone.toLowerCase();
+        const queryLower = query.trim().toLowerCase();
+
+        let matchedField: 'name' | 'phone' = 'phone';
+        if (nameLower.includes(queryLower)) {
+          matchedField = 'name';
+        }
+
+        return {
+          chatId: chat.chatId,
+          senderId: chat.senderId,
+          businessPhone: chat.businessPhone || undefined,
+          participantPhone: chat.participantPhone,
+          participantName: chat.participantName || undefined,
+          lastMessage: chat.lastMessage || undefined,
+          lastMessageType: chat.lastMessageType || undefined,
+          lastMessageTime: chat.lastMessageTime || undefined,
+          unreadCount: chat.unreadCount || 0,
+          matchedField,
+        };
+      });
+
+      this.logger.log(
+        `Search chats for user ${userId}: query="${query}", found ${total} results`,
+      );
+
+      return {
+        results: searchResults,
+        total,
+        hasMore: skip + take < total,
+        query,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error searching chats for user ${userId}: ${error.message}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Helper method to enrich chats with contact names from the contacts table
+   */
+  private async enrichChatsWithContactNames(chatList: Chat[]): Promise<Chat[]> {
+    return Promise.all(
+      chatList.map(async (chat) => {
+        if (!chat.participantName) {
+          const contactName = await this.getContactNameByPhone(
+            chat.participantPhone,
+          );
+          if (contactName) {
+            return {
+              ...chat,
+              participantName: contactName,
+            };
+          }
+        }
+        return chat;
+      }),
+    );
   }
 }

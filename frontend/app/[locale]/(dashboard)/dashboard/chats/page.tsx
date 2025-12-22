@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, MessageSquare } from "lucide-react";
+import { ArrowDown, Loader2, MessageSquare, Search, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import React, {
@@ -24,6 +24,7 @@ import { PendingUpload } from "@/lib/media/types";
 // Local imports
 import {
   ChatHeader,
+  ChatSearchResults,
   ChatsModals,
   MessageInputArea,
   MessageSearchPanel,
@@ -31,6 +32,7 @@ import {
   TemplatesPanel,
 } from "./components";
 import {
+  useChatSearch,
   useChatState,
   useContactHandlers,
   useInputFocus,
@@ -74,6 +76,9 @@ export default function ChatsPage() {
 
   // Chat state hook - manages chats, messages, pagination, scroll
   const chatState = useChatState();
+
+  // Chat search hook - manages searching through chat list
+  const chatSearch = useChatSearch({ debounceMs: 200, minChars: 1 });
 
   // Message search hook - manages search panel, scroll-to-message, highlighting
   const messageSearch = useMessageSearch();
@@ -358,20 +363,83 @@ export default function ChatsPage() {
       <div className="flex-1 flex overflow-hidden">
         {/* Left Panel: Chat List */}
         <div className="w-full lg:w-80 border-r flex flex-col bg-muted/30">
+          {/* Search Input */}
           <div className="p-4 border-b">
-            <Input placeholder={t("searchChats")} className="w-full" />
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder={t("searchChats")}
+                value={chatSearch.searchQuery}
+                onChange={(e) => chatSearch.handleSearchChange(e.target.value)}
+                className="w-full pl-9 pr-9"
+              />
+              {chatSearch.searchQuery && (
+                <button
+                  onClick={chatSearch.clearSearch}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground hover:text-foreground transition-colors"
+                  aria-label="Clear search"
+                >
+                  {chatSearch.isSearching ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <X className="h-4 w-4" />
+                  )}
+                </button>
+              )}
+            </div>
+            {/* Search results count */}
+            {chatSearch.isSearchMode && !chatSearch.isSearching && (
+              <p className="text-xs text-muted-foreground mt-2">
+                {chatSearch.totalResults === 0
+                  ? t("chatList.noResultsFor", {
+                      query: chatSearch.searchQuery,
+                    })
+                  : t("chatList.resultsCount", {
+                      count: chatSearch.totalResults,
+                    })}
+              </p>
+            )}
           </div>
           <div className="flex-1 overflow-y-auto">
-            {chatState.loading ? (
+            {chatState.loading && !chatSearch.isSearchMode ? (
               <div className="p-4 text-center text-muted-foreground">
-                Loading chats...
+                {t("chatList.loadingChats")}
               </div>
+            ) : chatSearch.isSearchMode ? (
+              /* Search Results Mode */
+              chatSearch.searchResults.length === 0 &&
+              !chatSearch.isSearching ? (
+                <div className="flex flex-col items-center justify-center h-full p-4 text-center">
+                  <Search className="h-12 w-12 text-muted-foreground mb-3 opacity-40" />
+                  <p className="text-muted-foreground">
+                    {t("chatList.noResultsFor", {
+                      query: chatSearch.searchQuery,
+                    })}
+                  </p>
+                </div>
+              ) : (
+                <ChatSearchResults
+                  results={chatSearch.searchResults}
+                  senders={chatState.senders}
+                  selectedChatId={chatState.selectedChatId}
+                  onSelectChat={(chatId) => {
+                    chatState.handleSelectChat(chatId);
+                    // Optionally clear search after selection
+                    // chatSearch.clearSearch();
+                  }}
+                  searchQuery={chatSearch.searchQuery}
+                  hasMore={chatSearch.hasMore}
+                  onLoadMore={chatSearch.loadMore}
+                  isLoading={chatSearch.isSearching}
+                />
+              )
             ) : chatState.chats.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full p-4 text-center">
                 <MessageSquare className="h-12 w-12 text-muted-foreground mb-3 opacity-40" />
                 <p className="text-muted-foreground">{t("noChats")}</p>
               </div>
             ) : (
+              /* Normal Chat List Mode */
               chatState.senders.map((sender) => {
                 const senderChats = chatState.chats.filter(
                   (c) => c.senderId === sender.id
