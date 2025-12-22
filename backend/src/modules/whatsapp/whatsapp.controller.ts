@@ -18,8 +18,8 @@ import {
 } from './dto/message-edit-delete.dto';
 import { SaveNoteDto } from './dto/notes.dto';
 import { OutboundMessageDto } from './dto/outbound-message.dto';
-import { WhatsAppService } from './whatsapp.service';
 import { SendContactsDto } from './dto/send-contacts.dto';
+import { WhatsAppService } from './whatsapp.service';
 
 @Controller('whatsapp')
 @UseGuards(JwtAuthGuard)
@@ -121,11 +121,14 @@ export class WhatsAppController {
   @Get('chats/:chatId/messages')
   async getChatMessages(
     @Param('chatId') chatId: string,
-    @Query('skip') skip: number = 0,
-    @Query('take') take: number = 50,
+    @Query('skip') skip: string = '0',
+    @Query('take') take: string = '50',
   ) {
     this.logger.log(`Get messages for chat: ${chatId}`);
-    return this.whatsAppService.getChatMessages(chatId, skip, take);
+    // Parse query params as integers (they come as strings from URL)
+    const skipNum = parseInt(skip, 10) || 0;
+    const takeNum = parseInt(take, 10) || 50;
+    return this.whatsAppService.getChatMessages(chatId, skipNum, takeNum);
   }
 
   /**

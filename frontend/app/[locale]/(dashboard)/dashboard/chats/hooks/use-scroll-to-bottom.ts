@@ -2,6 +2,11 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import type { Message } from "../types";
+import {
+  scrollContainerToBottom,
+  scrollDebug,
+  isNearBottom as sharedIsNearBottom,
+} from "./scroll-utils";
 
 // ============================================================
 // TYPES
@@ -12,6 +17,8 @@ interface UseScrollToBottomDeps {
   selectedChatId: string | null;
   isInitialLoad: boolean;
   shouldAutoScroll: boolean;
+  /** Optional: Check if scroll position restoration should be skipped */
+  skipScrollToBottom?: (chatId: string) => boolean;
 }
 
 interface ScrollSession {
@@ -80,7 +87,13 @@ export function useScrollToBottom(
   containerRef: React.RefObject<HTMLDivElement | null>,
   deps: UseScrollToBottomDeps
 ) {
-  const { messages, selectedChatId, isInitialLoad, shouldAutoScroll } = deps;
+  const {
+    messages,
+    selectedChatId,
+    isInitialLoad,
+    shouldAutoScroll,
+    skipScrollToBottom,
+  } = deps;
 
   // Tracking refs for the automatic scroll effect
   const lastChatIdRef = useRef<string | null>(null);
@@ -89,6 +102,11 @@ export function useScrollToBottom(
 
   // Active scroll session reference
   const activeSessionRef = useRef<ScrollSession | null>(null);
+
+  // Track if user has intentionally scrolled away from bottom
+  // This prevents observers from snapping back to bottom
+  const userScrolledAwayRef = useRef(false);
+  const lastScrollTopRef = useRef(0);
 
   // ============================================================
   // CORE SCROLL FUNCTIONS
@@ -100,33 +118,20 @@ export function useScrollToBottom(
    */
   const scrollToBottom = useCallback(
     (smooth = false): boolean => {
-      const container = containerRef.current;
-      if (!container) return false;
-
-      if (smooth) {
-        container.scrollTo({
-          top: container.scrollHeight,
-          behavior: "smooth",
-        });
-      } else {
-        container.scrollTop = container.scrollHeight;
-      }
-      return true;
+      // CRITICAL: Reset user scroll intent since this is an explicit scroll request
+      userScrolledAwayRef.current = false;
+      return scrollContainerToBottom(containerRef.current, smooth);
     },
     [containerRef]
   );
 
   /**
    * Check if the container is scrolled near the bottom.
+   * Uses shared utility for consistency.
    */
   const isAtBottom = useCallback(
     (threshold = 100): boolean => {
-      const container = containerRef.current;
-      if (!container) return true;
-      return (
-        container.scrollHeight - container.scrollTop - container.clientHeight <
-        threshold
-      );
+      return sharedIsNearBottom(containerRef.current, threshold);
     },
     [containerRef]
   );
@@ -158,6 +163,9 @@ export function useScrollToBottom(
       // Cancel any existing session
       cancelPendingScroll();
 
+      // CRITICAL: Reset user scroll intent since this is an explicit scroll request
+      userScrolledAwayRef.current = false;
+
       const container = containerRef.current;
       if (!container) return undefined;
 
@@ -180,18 +188,20 @@ export function useScrollToBottom(
       let resizeObserver: ResizeObserver | null = null;
 
       // ============================================================
-      // HELPER: Perform scroll
+      // HELPER: Check if user is near bottom (uses shared utility)
+      // ============================================================
+      const isNearBottom = (threshold = 150): boolean => {
+        return sharedIsNearBottom(containerRef.current, threshold);
+      };
+
+      // ============================================================
+      // HELPER: Perform scroll (only if user hasn't scrolled away)
       // ============================================================
       const doScroll = () => {
         if (!isActive) return;
-        const c = containerRef.current;
-        if (!c) return;
-
-        if (smooth) {
-          c.scrollTo({ top: c.scrollHeight, behavior: "smooth" });
-        } else {
-          c.scrollTop = c.scrollHeight;
-        }
+        // CRITICAL: Don't scroll if user has intentionally scrolled away
+        if (userScrolledAwayRef.current) return;
+        scrollContainerToBottom(containerRef.current, smooth);
       };
 
       // ============================================================
@@ -455,8 +465,10 @@ export function useScrollToBottom(
             settleTimeoutId = null;
           }
 
-          // Scroll immediately for new content
-          doScroll();
+          // CRITICAL: Only scroll for new content if user hasn't scrolled away
+          if (!userScrolledAwayRef.current && isNearBottom(200)) {
+            doScroll();
+          }
 
           // Scan for new media
           scanForMedia();
@@ -473,9 +485,14 @@ export function useScrollToBottom(
 
       // Set up ResizeObserver as backup for content size changes
       // This catches cases where media dimensions change after load
+      // CRITICAL: Only scroll if user is still near bottom
       resizeObserver = new ResizeObserver(() => {
         if (!isActive) return;
-        doScroll();
+        if (userScrolledAwayRef.current) return;
+        // Only scroll if we're already near the bottom
+        if (isNearBottom(200)) {
+          doScroll();
+        }
       });
       resizeObserver.observe(container);
 
@@ -522,8 +539,8 @@ export function useScrollToBottom(
    * Main effect that triggers scroll-to-bottom based on state changes.
    *
    * This handles:
-   * - Opening a new chat (always scroll to bottom)
-   * - Initial message load for a chat (always scroll to bottom)
+   * - Opening a new chat (always scroll to bottom, UNLESS skipScrollToBottom returns true)
+   * - Initial message load for a chat (always scroll to bottom, UNLESS skipScrollToBottom returns true)
    * - New messages arriving (only if user was at bottom)
    */
   useEffect(() => {
@@ -551,11 +568,21 @@ export function useScrollToBottom(
     lastMessageCountRef.current = messages.length;
 
     // Determine if we should scroll
-    const shouldScrollToBottom =
+    const shouldScrollToBottomForNewChat =
       isNewChat || isFirstMessagesForChat || (isInitialLoad && isNewMessages);
 
-    if (shouldScrollToBottom) {
+    if (shouldScrollToBottomForNewChat) {
       hasScrolledForChatRef.current = selectedChatId;
+
+      // CRITICAL: Check if we should skip scrolling to bottom
+      // This allows scroll position restoration to work
+      if (skipScrollToBottom && skipScrollToBottom(selectedChatId)) {
+        scrollDebug(
+          "[ScrollToBottom] Skipping scroll - position will be restored by manager"
+        );
+        return;
+      }
+
       return requestScrollToBottom(false);
     }
 
@@ -573,6 +600,7 @@ export function useScrollToBottom(
     selectedChatId,
     isInitialLoad,
     shouldAutoScroll,
+    skipScrollToBottom,
     requestScrollToBottom,
     scrollToBottom,
     isAtBottom,
@@ -587,6 +615,59 @@ export function useScrollToBottom(
       cancelPendingScroll();
     };
   }, [cancelPendingScroll]);
+
+  // ============================================================
+  // USER SCROLL INTENT DETECTION
+  // ============================================================
+
+  /**
+   * Detect when user intentionally scrolls away from bottom.
+   * This prevents the observers from snapping back to bottom.
+   *
+   * The key insight is: if user scrolls UP while we have an active scroll session,
+   * they're intentionally trying to read older content. We should respect that.
+   */
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const currentScrollTop = container.scrollTop;
+      const scrollHeight = container.scrollHeight;
+      const clientHeight = container.clientHeight;
+      const distanceFromBottom = scrollHeight - currentScrollTop - clientHeight;
+
+      // Detect if user scrolled UP (away from bottom)
+      const scrolledUp = currentScrollTop < lastScrollTopRef.current;
+
+      // If user scrolled up and is no longer near bottom, mark as scrolled away
+      if (scrolledUp && distanceFromBottom > 200) {
+        userScrolledAwayRef.current = true;
+        // Cancel any active scroll session since user wants to stay where they are
+        if (activeSessionRef.current) {
+          cancelPendingScroll();
+        }
+      }
+
+      // If user is back at bottom, clear the flag
+      if (distanceFromBottom < 50) {
+        userScrolledAwayRef.current = false;
+      }
+
+      lastScrollTopRef.current = currentScrollTop;
+    };
+
+    container.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      container.removeEventListener("scroll", handleScroll);
+    };
+  }, [containerRef, cancelPendingScroll]);
+
+  // Reset user scroll intent when chat changes
+  useEffect(() => {
+    userScrolledAwayRef.current = false;
+    lastScrollTopRef.current = 0;
+  }, [selectedChatId]);
 
   // ============================================================
   // PUBLIC API

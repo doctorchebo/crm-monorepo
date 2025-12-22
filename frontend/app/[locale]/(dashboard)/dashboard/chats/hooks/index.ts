@@ -4,4 +4,6 @@ export { useDebouncedSearch } from "./use-debounced-search";
 export { useInputFocus } from "./use-input-focus";
 export { useMediaHandlers } from "./use-media-handlers";
 export { useMessageHandlers } from "./use-message-handlers";
+export { useMessagesPagination } from "./use-messages-pagination";
+export { useScrollPositionManager } from "./use-scroll-position-manager";
 export { useScrollToBottom } from "./use-scroll-to-bottom";

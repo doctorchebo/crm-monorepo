@@ -5,7 +5,20 @@ import { backendApi } from "@/lib/api/endpoints";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PAGE_SIZE } from "../constants";
 import type { Chat, Message, MessagesCacheEntry, Sender } from "../types";
+import { scrollDebug } from "./scroll-utils";
+import { useScrollPositionManager } from "./use-scroll-position-manager";
 import { useScrollToBottom } from "./use-scroll-to-bottom";
+
+/**
+ * Pagination state interface for type safety
+ * Tracked via ref to avoid stale closures in async operations
+ */
+interface PaginationState {
+  hasMore: boolean;
+  isLoading: boolean;
+  cursor: number;
+  chatId: string | null;
+}
 
 interface UseChatStateReturn {
   // Chat state
@@ -49,10 +62,8 @@ interface UseChatStateReturn {
   // Refs
   messagesContainerRef: React.RefObject<HTMLDivElement | null>;
   messagesCacheRef: React.MutableRefObject<Map<string, MessagesCacheEntry>>;
-  scrollPositionsRef: React.MutableRefObject<Map<string, number>>;
   currentCursorRef: React.MutableRefObject<number>;
   isTransitioningRef: React.MutableRefObject<boolean>;
-  allowScrollSaveRef: React.MutableRefObject<boolean>;
 
   // Handlers
   handleSelectChat: (chatId: string) => void;
@@ -72,10 +83,31 @@ export function useChatState(): UseChatStateReturn {
   const [error, setError] = useState<string | null>(null);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
 
-  // Infinite scroll state
+  // Infinite scroll state (React state for UI reactivity)
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
   const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
-  const loadOlderMessagesLockRef = useRef(false);
+
+  /**
+   * CRITICAL: Pagination state ref for synchronous access
+   *
+   * This ref is the SOURCE OF TRUTH for pagination state.
+   * React state (hasMoreMessages, isLoadingOlderMessages) is only for UI updates.
+   *
+   * Why a ref?
+   * - React state updates are asynchronous and batched
+   * - Callbacks capture state at creation time (stale closures)
+   * - Refs provide synchronous, always-current values
+   *
+   * The chatId field ensures we don't process responses for stale chats.
+   */
+  const paginationRef = useRef<PaginationState>({
+    hasMore: true,
+    isLoading: false,
+    cursor: 0,
+    chatId: null,
+  });
+
+  // Legacy ref kept for backward compatibility with external consumers
   const currentCursorRef = useRef<number>(0);
 
   // Scroll management
@@ -86,10 +118,33 @@ export function useChatState(): UseChatStateReturn {
   // Refs
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const messagesCacheRef = useRef<Map<string, MessagesCacheEntry>>(new Map());
-  const scrollPositionsRef = useRef<Map<string, number>>(new Map());
   const previousChatIdRef = useRef<string | null>(null);
+  const lastFetchedChatIdRef = useRef<string | null>(null); // Guards against duplicate fetches
   const isTransitioningRef = useRef(false);
-  const allowScrollSaveRef = useRef(false);
+
+  // Initialize the scroll position manager - SINGLE SOURCE OF TRUTH for scroll positions
+  const scrollPositionManager = useScrollPositionManager(messagesContainerRef, {
+    bottomThreshold: 100,
+    saveDebounceMs: 100,
+  });
+
+  // Callback to check if scroll-to-bottom should be skipped
+  // This is passed to useScrollToBottom to prevent it from overriding restored positions
+  const skipScrollToBottom = useCallback(
+    (chatId: string): boolean => {
+      // Check if we have a saved scroll position for this chat that's NOT at bottom
+      const savedPosition = scrollPositionManager.getSavedPosition(chatId);
+      const shouldSkip = savedPosition !== null && !savedPosition.wasAtBottom;
+      scrollDebug("[useChatState] skipScrollToBottom check:", {
+        chatId,
+        hasSavedPosition: savedPosition !== null,
+        wasAtBottom: savedPosition?.wasAtBottom,
+        shouldSkip,
+      });
+      return shouldSkip;
+    },
+    [scrollPositionManager]
+  );
 
   // Initialize the scroll-to-bottom hook
   const {
@@ -101,6 +156,7 @@ export function useChatState(): UseChatStateReturn {
     selectedChatId,
     isInitialLoad,
     shouldAutoScroll,
+    skipScrollToBottom,
   });
 
   // Memoize selectedChat
@@ -175,28 +231,28 @@ export function useChatState(): UseChatStateReturn {
   // Handler to select chat and save scroll position before switching
   const handleSelectChat = useCallback(
     async (chatId: string) => {
-      console.log("=== HANDLE SELECT CHAT ===");
-      console.log("Switching FROM:", selectedChatId, "TO:", chatId);
+      // Skip if same chat
+      if (chatId === selectedChatId) {
+        return;
+      }
 
-      const messagesContainer = messagesContainerRef.current;
-      if (selectedChatId && messagesContainer) {
-        const currentScroll = messagesContainer.scrollTop;
-        scrollPositionsRef.current.set(selectedChatId, currentScroll);
-        console.log("SAVED scroll for", selectedChatId, ":", currentScroll);
+      // CRITICAL: Notify scroll manager BEFORE switching
+      // This saves the current scroll position synchronously
+      scrollPositionManager.onChatWillChange(selectedChatId, chatId);
 
-        if (messages.length > 0) {
-          messagesCacheRef.current.set(selectedChatId, {
-            messages: [...messages],
-            hasMore: hasMoreMessages,
-            cursor: currentCursorRef.current,
-          });
-          console.log(
-            "CACHED",
-            messages.length,
-            "messages for",
-            selectedChatId
-          );
-        }
+      // Save messages to cache before switching
+      if (selectedChatId && messages.length > 0) {
+        messagesCacheRef.current.set(selectedChatId, {
+          messages: [...messages],
+          hasMore: paginationRef.current.hasMore,
+          cursor: paginationRef.current.cursor,
+        });
+        scrollDebug("[handleSelectChat] Saved to cache:", {
+          chatId: selectedChatId,
+          messageCount: messages.length,
+          hasMore: paginationRef.current.hasMore,
+          cursor: paginationRef.current.cursor,
+        });
       }
 
       // Mark the chat as read when selecting it
@@ -210,85 +266,180 @@ export function useChatState(): UseChatStateReturn {
         );
       } catch (error) {
         console.error("Failed to mark chat as read:", error);
-        // Non-critical, don't block the UI
       }
 
       setSelectedChatId(chatId);
     },
-    [selectedChatId, messages, hasMoreMessages, resetUnreadCount]
+    [selectedChatId, messages, resetUnreadCount, scrollPositionManager]
   );
 
-  // Load older messages when user scrolls to top
+  /**
+   * Load older messages for infinite scroll
+   *
+   * CRITICAL: This function uses paginationRef (not React state) for all
+   * pagination checks to avoid stale closure issues.
+   *
+   * Flow:
+   * 1. Check ref for hasMore/isLoading (synchronous, always current)
+   * 2. Set isLoading=true in ref FIRST (prevents concurrent calls)
+   * 3. Fetch data
+   * 4. Update ref with new cursor/hasMore
+   * 5. Update React state for UI
+   * 6. Restore scroll position
+   */
   const loadOlderMessages = useCallback(async () => {
-    if (
-      !selectedChatId ||
-      !hasMoreMessages ||
-      isLoadingOlderMessages ||
-      loadOlderMessagesLockRef.current
-    ) {
+    // Read current pagination state from ref (always up-to-date)
+    const currentState = paginationRef.current;
+    const { hasMore, isLoading, cursor, chatId } = currentState;
+
+    // Debug: Log entry state
+    scrollDebug("[loadOlderMessages] Entry state:", {
+      hasMore,
+      isLoading,
+      cursor,
+      chatId,
+    });
+
+    // Guard: no chat selected
+    if (!chatId) {
+      scrollDebug("[loadOlderMessages] SKIP: No chat selected");
+      return;
+    }
+
+    // Guard: no more messages to load
+    if (!hasMore) {
+      scrollDebug("[loadOlderMessages] SKIP: hasMore is false");
+      return;
+    }
+
+    // Guard: already loading (prevent concurrent requests)
+    if (isLoading) {
+      scrollDebug("[loadOlderMessages] SKIP: Already loading");
       return;
     }
 
     const container = messagesContainerRef.current;
-    if (!container) return;
+    if (!container) {
+      scrollDebug("[loadOlderMessages] SKIP: No container ref");
+      return;
+    }
 
-    loadOlderMessagesLockRef.current = true;
+    // CRITICAL: Set loading state in ref FIRST (synchronous)
+    // This prevents any concurrent calls before async operation starts
+    paginationRef.current.isLoading = true;
     setIsLoadingOlderMessages(true);
 
+    scrollDebug("[loadOlderMessages] STARTING fetch with cursor:", cursor);
+
+    // Save scroll position for restoration after prepending messages
     const previousScrollHeight = container.scrollHeight;
     const previousScrollTop = container.scrollTop;
 
     try {
       const response = await backendApi.whatsapp.getChatMessages(
-        selectedChatId,
-        currentCursorRef.current,
+        chatId,
+        cursor,
         PAGE_SIZE
       );
 
-      if (!response.messages || response.messages.length === 0) {
-        setHasMoreMessages(false);
+      // Race condition check: user may have switched chats during fetch
+      if (paginationRef.current.chatId !== chatId) {
+        scrollDebug("[loadOlderMessages] ABORT: Chat changed during fetch");
+        paginationRef.current.isLoading = false;
+        setIsLoadingOlderMessages(false);
         return;
       }
 
+      scrollDebug("[loadOlderMessages] RESPONSE received:", {
+        messageCount: response.messages?.length || 0,
+        hasMore: response.hasMore,
+        nextCursor: response.nextCursor,
+      });
+
+      // Handle empty response
+      if (!response.messages || response.messages.length === 0) {
+        scrollDebug(
+          "[loadOlderMessages] COMPLETE: No more messages (empty response)"
+        );
+        paginationRef.current.hasMore = false;
+        paginationRef.current.isLoading = false;
+        setHasMoreMessages(false);
+        setIsLoadingOlderMessages(false);
+        return;
+      }
+
+      // Sort older messages by timestamp (ascending for display)
       const sortedOlderMessages = [...response.messages].sort(
         (a, b) =>
           new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
       );
 
+      // Update messages state with deduplication
       setMessages((prevMessages) => {
         const existingIds = new Set(prevMessages.map((m) => m.messageId));
         const newMessages = sortedOlderMessages.filter(
           (m) => !existingIds.has(m.messageId)
         );
-
         const combined = [...newMessages, ...prevMessages];
 
-        messagesCacheRef.current.set(selectedChatId, {
+        // Update cache with new state
+        // IMPORTANT: Ensure cursor is a number to prevent string concatenation bugs
+        messagesCacheRef.current.set(chatId, {
           messages: combined,
           hasMore: response.hasMore,
-          cursor: response.nextCursor,
+          cursor: Number(response.nextCursor) || 0,
+        });
+
+        scrollDebug("[loadOlderMessages] Messages updated:", {
+          prevCount: prevMessages.length,
+          newCount: newMessages.length,
+          combinedCount: combined.length,
         });
 
         return combined;
       });
 
-      setHasMoreMessages(response.hasMore);
-      currentCursorRef.current = response.nextCursor;
+      // CRITICAL: Update pagination ref with new values
+      // IMPORTANT: Ensure cursor is a number to prevent string concatenation bugs
+      const nextCursor = Number(response.nextCursor) || 0;
+      const newPaginationState = {
+        hasMore: response.hasMore,
+        isLoading: false,
+        cursor: nextCursor,
+        chatId: chatId,
+      };
+      paginationRef.current = newPaginationState;
 
+      scrollDebug(
+        "[loadOlderMessages] COMPLETE - New pagination state:",
+        newPaginationState
+      );
+
+      // Update legacy ref and React state
+      currentCursorRef.current = nextCursor;
+      setHasMoreMessages(response.hasMore);
+      setIsLoadingOlderMessages(false);
+
+      // Restore scroll position after DOM update
       requestAnimationFrame(() => {
-        if (container) {
+        if (container && paginationRef.current.chatId === chatId) {
           const newScrollHeight = container.scrollHeight;
           const scrollDifference = newScrollHeight - previousScrollHeight;
           container.scrollTop = previousScrollTop + scrollDifference;
+          scrollDebug("[loadOlderMessages] Scroll restored:", {
+            previousScrollTop,
+            scrollDifference,
+            newScrollTop: previousScrollTop + scrollDifference,
+          });
         }
       });
     } catch (err) {
-      console.error("Error loading older messages:", err);
-    } finally {
+      console.error("[loadOlderMessages] ERROR:", err);
+      // Reset loading state on error
+      paginationRef.current.isLoading = false;
       setIsLoadingOlderMessages(false);
-      loadOlderMessagesLockRef.current = false;
     }
-  }, [selectedChatId, hasMoreMessages, isLoadingOlderMessages]);
+  }, []); // No dependencies - uses refs for all state
 
   // Handle scroll to bottom button click
   const handleScrollToBottom = useCallback(() => {
@@ -297,7 +448,7 @@ export function useChatState(): UseChatStateReturn {
     setShouldAutoScroll(true);
   }, [scrollHelperToBottom]);
 
-  // Handle scroll position tracking
+  // Handle scroll position tracking and infinite scroll trigger
   useEffect(() => {
     const messagesContainer = messagesContainerRef.current;
     if (!messagesContainer) return;
@@ -314,25 +465,48 @@ export function useChatState(): UseChatStateReturn {
 
       const scrollTop = messagesContainer.scrollTop;
       const threshold = 100;
+
+      // Read pagination state from ref (always current)
+      const paginationState = paginationRef.current;
+      const { hasMore, isLoading, cursor, chatId } = paginationState;
+
+      // Debug: Log every scroll event that's near the top
+      if (scrollTop < threshold + 50) {
+        scrollDebug("[Scroll Handler] Near top:", {
+          scrollTop,
+          hasMore,
+          isLoading,
+          cursor,
+          isTransitioning: isTransitioningRef.current,
+          willTrigger:
+            scrollTop < threshold &&
+            hasMore &&
+            !isLoading &&
+            !isTransitioningRef.current,
+        });
+      }
+
+      // Trigger load if user is near top and conditions are met
       if (
         scrollTop < threshold &&
-        hasMoreMessages &&
-        !isLoadingOlderMessages &&
-        !loadOlderMessagesLockRef.current &&
+        hasMore &&
+        !isLoading &&
         !isTransitioningRef.current
       ) {
+        scrollDebug("[Scroll Handler] >>> TRIGGERING loadOlderMessages <<<");
         loadOlderMessages();
       }
 
-      if (selectedChatId && allowScrollSaveRef.current) {
-        const scrollPos = messagesContainer.scrollTop;
-        scrollPositionsRef.current.set(selectedChatId, scrollPos);
+      // Save scroll position via the centralized manager
+      // The manager handles all the guards (transitioning, save enabled, etc.)
+      if (selectedChatId) {
+        scrollPositionManager.handleScroll(selectedChatId);
       }
     };
 
     const debouncedHandleScroll = () => {
       clearTimeout(scrollTimeout);
-      scrollTimeout = setTimeout(handleScroll, 100);
+      scrollTimeout = setTimeout(handleScroll, 50);
     };
 
     messagesContainer.addEventListener("scroll", debouncedHandleScroll);
@@ -342,29 +516,44 @@ export function useChatState(): UseChatStateReturn {
     };
   }, [
     selectedChatId,
-    hasMoreMessages,
-    isLoadingOlderMessages,
     loadOlderMessages,
     scrollHelperIsAtBottom,
+    scrollPositionManager,
   ]);
 
-  // Handle chat switch - reset initial load and save last scroll position
+  // Handle chat switch - reset state and update pagination ref
   useEffect(() => {
     if (selectedChatId && selectedChatId !== previousChatIdRef.current) {
-      console.log("=== CHAT SWITCH EFFECT ===");
+      scrollDebug(
+        "[Chat Switch] From:",
+        previousChatIdRef.current,
+        "To:",
+        selectedChatId
+      );
 
+      // CRITICAL: Reset pagination ref with new chatId
+      paginationRef.current = {
+        hasMore: true,
+        isLoading: false,
+        cursor: 0,
+        chatId: selectedChatId,
+      };
+
+      // Reset React state
       setHasMoreMessages(true);
       setIsLoadingOlderMessages(false);
-      loadOlderMessagesLockRef.current = false;
       currentCursorRef.current = 0;
 
+      // Set transitioning flags
       isTransitioningRef.current = true;
-      allowScrollSaveRef.current = false;
       setIsScrollRestoring(true);
 
+      // Update previousChatIdRef for the Chat Switch effect's own guard
       previousChatIdRef.current = selectedChatId;
       setIsInitialLoad(true);
       setHasNewMessages(false);
+
+      scrollDebug("[Chat Switch] Pagination ref reset:", paginationRef.current);
     }
   }, [selectedChatId]);
 
@@ -382,7 +571,10 @@ export function useChatState(): UseChatStateReturn {
 
     if (hasCachedMessages) {
       setIsInitialLoad(false);
-      allowScrollSaveRef.current = true;
+      // Notify scroll manager that transition is complete
+      if (selectedChatId) {
+        scrollPositionManager.onChatDidChange(selectedChatId);
+      }
       return;
     }
 
@@ -391,8 +583,11 @@ export function useChatState(): UseChatStateReturn {
     // This approach is event-driven rather than time-based
     setIsInitialLoad(false);
     setShouldAutoScroll(true);
-    allowScrollSaveRef.current = true;
-  }, [selectedChatId, messages.length, isInitialLoad]);
+    // Notify scroll manager that transition is complete
+    if (selectedChatId) {
+      scrollPositionManager.onChatDidChange(selectedChatId);
+    }
+  }, [selectedChatId, messages.length, isInitialLoad, scrollPositionManager]);
 
   // Fetch chats on mount
   useEffect(() => {
@@ -491,11 +686,37 @@ export function useChatState(): UseChatStateReturn {
   }, []);
 
   // Fetch messages when chat changes
+  // CRITICAL: This effect should only run ONCE per chat switch
   useEffect(() => {
     if (!selectedChatId) return;
 
-    const cachedData = messagesCacheRef.current.get(selectedChatId);
-    const savedScrollPosition = scrollPositionsRef.current.get(selectedChatId);
+    // CRITICAL GUARD: Only run if this is a NEW chat selection
+    // This prevents re-running when other dependencies change
+    if (lastFetchedChatIdRef.current === selectedChatId) {
+      scrollDebug(
+        "[Fetch Messages] Skipping - already fetched for:",
+        selectedChatId
+      );
+      return;
+    }
+
+    scrollDebug(
+      "[Fetch Messages] Running for:",
+      selectedChatId,
+      "Previous:",
+      lastFetchedChatIdRef.current
+    );
+
+    // Mark this chat as the one we're loading
+    const chatToLoad = selectedChatId;
+    lastFetchedChatIdRef.current = chatToLoad;
+
+    const cachedData = messagesCacheRef.current.get(chatToLoad);
+    scrollDebug("[Fetch Messages] Cache check:", {
+      chatToLoad,
+      hasCachedData: !!cachedData,
+      cachedMessageCount: cachedData?.messages?.length || 0,
+    });
 
     if (cachedData && cachedData.messages.length > 0) {
       setMessages(cachedData.messages);
@@ -503,9 +724,41 @@ export function useChatState(): UseChatStateReturn {
       setHasMoreMessages(cachedData.hasMore);
       currentCursorRef.current = cachedData.cursor;
 
-      // Restore scroll position using requestAnimationFrame for proper timing
-      // This runs after React has committed the DOM updates
-      requestAnimationFrame(() => {
+      // CRITICAL: Sync pagination ref with cached data
+      paginationRef.current = {
+        hasMore: cachedData.hasMore,
+        isLoading: false,
+        cursor: cachedData.cursor,
+        chatId: chatToLoad,
+      };
+
+      scrollDebug("[Cache Restore] Pagination state:", paginationRef.current);
+
+      // CRITICAL: For cached chats with saved scroll positions, we need to:
+      // 1. Let the scroll-to-bottom hook skip (via skipScrollToBottom callback)
+      // 2. Then manually apply the saved position
+      // 3. Enable scroll saving
+
+      const savedPosition = scrollPositionManager.getSavedPosition(chatToLoad);
+      const hasSavedPosition =
+        savedPosition !== null && !savedPosition.wasAtBottom;
+
+      scrollDebug("[Cache Restore] Scroll position info:", {
+        chatToLoad,
+        hasSavedPosition,
+        savedScrollTop: savedPosition?.scrollTop,
+        savedScrollHeight: savedPosition?.scrollHeight,
+        wasAtBottom: savedPosition?.wasAtBottom,
+      });
+
+      // Restore scroll position after DOM is updated
+      // We need multiple RAFs to ensure React has flushed all updates
+      const applyScrollPosition = () => {
+        // CRITICAL: Check if we're still on the same chat
+        if (lastFetchedChatIdRef.current !== chatToLoad) {
+          return; // User switched to another chat, abort
+        }
+
         const container = messagesContainerRef.current;
         if (!container) {
           isTransitioningRef.current = false;
@@ -513,33 +766,78 @@ export function useChatState(): UseChatStateReturn {
           return;
         }
 
-        if (savedScrollPosition !== undefined && savedScrollPosition >= 0) {
-          // Restore the saved position
-          container.scrollTop = savedScrollPosition;
-          const isAtBottom =
-            container.scrollHeight -
-              savedScrollPosition -
-              container.clientHeight <
-            50;
-          setShouldAutoScroll(isAtBottom);
+        scrollDebug("[Cache Restore] Container state before scroll:", {
+          scrollHeight: container.scrollHeight,
+          clientHeight: container.clientHeight,
+          currentScrollTop: container.scrollTop,
+        });
+
+        if (hasSavedPosition && savedPosition) {
+          // Calculate relative position if content height changed
+          // If the saved scrollHeight is different, we need to adjust
+          const scrollHeightDiff =
+            container.scrollHeight - savedPosition.scrollHeight;
+          let targetScrollTop = savedPosition.scrollTop;
+
+          // If new content was added at the bottom, adjust scroll position
+          if (scrollHeightDiff > 0 && savedPosition.scrollHeight > 0) {
+            // Content grew - keep the same visual position
+            targetScrollTop = savedPosition.scrollTop;
+          }
+
+          // Clamp to valid range
+          const maxScroll = container.scrollHeight - container.clientHeight;
+          targetScrollTop = Math.max(0, Math.min(targetScrollTop, maxScroll));
+
+          container.scrollTop = targetScrollTop;
+          setShouldAutoScroll(false);
+          scrollDebug(
+            "[Cache Restore] Applied saved scroll position:",
+            targetScrollTop,
+            "(original:",
+            savedPosition.scrollTop,
+            ")"
+          );
         } else {
-          // No saved position - let the scroll hook handle scrolling to bottom
+          // No saved position or was at bottom - scroll to bottom
+          container.scrollTop = container.scrollHeight;
           setShouldAutoScroll(true);
+          scrollDebug(
+            "[Cache Restore] Scrolled to bottom (no saved position or was at bottom)"
+          );
         }
 
-        // Use another RAF to ensure the scroll has been applied
+        // Finalize transition
         requestAnimationFrame(() => {
+          if (lastFetchedChatIdRef.current !== chatToLoad) {
+            return;
+          }
           isTransitioningRef.current = false;
           setIsScrollRestoring(false);
           setIsInitialLoad(false);
-          allowScrollSaveRef.current = true;
+          scrollPositionManager.onChatDidChange(chatToLoad);
+        });
+      };
+
+      // Use multiple RAFs to ensure DOM is fully updated
+      // RAF 1: React commits the state change
+      // RAF 2: Browser paints
+      // RAF 3: We apply scroll position
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(applyScrollPosition);
         });
       });
 
       // Fetch fresh data in background
       backendApi.whatsapp
-        .getChatMessages(selectedChatId, 0, PAGE_SIZE)
+        .getChatMessages(chatToLoad, 0, PAGE_SIZE)
         .then((response) => {
+          // CRITICAL: Check if we're still on the same chat
+          if (lastFetchedChatIdRef.current !== chatToLoad) {
+            return; // User switched to another chat, ignore this response
+          }
+
           if (response && response.messages) {
             const sorted = [...response.messages].sort(
               (a, b) =>
@@ -558,7 +856,7 @@ export function useChatState(): UseChatStateReturn {
               );
               setMessages(combined);
               setMessageCount(combined.length);
-              messagesCacheRef.current.set(selectedChatId, {
+              messagesCacheRef.current.set(chatToLoad, {
                 messages: combined,
                 hasMore: cachedData.hasMore,
                 cursor: cachedData.cursor,
@@ -578,10 +876,16 @@ export function useChatState(): UseChatStateReturn {
       try {
         setError(null);
         const response = await backendApi.whatsapp.getChatMessages(
-          selectedChatId,
+          chatToLoad,
           0,
           PAGE_SIZE
         );
+
+        // CRITICAL: Check if we're still on the same chat
+        if (lastFetchedChatIdRef.current !== chatToLoad) {
+          return; // User switched to another chat, ignore this response
+        }
+
         if (response && response.messages) {
           const sorted = [...response.messages].sort(
             (a, b) =>
@@ -590,12 +894,27 @@ export function useChatState(): UseChatStateReturn {
           setMessages(sorted);
           setMessageCount(sorted.length);
           setHasMoreMessages(response.hasMore);
-          currentCursorRef.current = response.nextCursor;
+          // CRITICAL: Ensure cursor is a number to prevent string concatenation bugs
+          const nextCursor = Number(response.nextCursor) || 0;
+          currentCursorRef.current = nextCursor;
 
-          messagesCacheRef.current.set(selectedChatId, {
+          // CRITICAL: Sync pagination ref with initial fetch
+          paginationRef.current = {
+            hasMore: response.hasMore,
+            isLoading: false,
+            cursor: nextCursor,
+            chatId: chatToLoad,
+          };
+
+          scrollDebug(
+            "[Initial Fetch] Pagination state:",
+            paginationRef.current
+          );
+
+          messagesCacheRef.current.set(chatToLoad, {
             messages: sorted,
             hasMore: response.hasMore,
-            cursor: response.nextCursor,
+            cursor: nextCursor,
           });
 
           setShouldAutoScroll(true);
@@ -603,9 +922,17 @@ export function useChatState(): UseChatStateReturn {
           // No need to call scrollHelperRequestScroll here - the hook effect handles it
 
           requestAnimationFrame(() => {
+            if (lastFetchedChatIdRef.current !== chatToLoad) {
+              return; // User switched, abort
+            }
             requestAnimationFrame(() => {
+              if (lastFetchedChatIdRef.current !== chatToLoad) {
+                return; // User switched, abort
+              }
               isTransitioningRef.current = false;
               setIsScrollRestoring(false);
+              // Notify scroll manager that transition is complete
+              scrollPositionManager.onChatDidChange(chatToLoad);
             });
           });
         }
@@ -617,6 +944,9 @@ export function useChatState(): UseChatStateReturn {
       }
     };
     fetchMessages();
+    // Only depend on selectedChatId - the ref-based guard prevents duplicate runs
+    // scrollPositionManager is stable (from useScrollPositionManager)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedChatId]);
 
   return {
@@ -650,10 +980,8 @@ export function useChatState(): UseChatStateReturn {
     scrollHelperIsAtBottom,
     messagesContainerRef,
     messagesCacheRef,
-    scrollPositionsRef,
     currentCursorRef,
     isTransitioningRef,
-    allowScrollSaveRef,
     handleSelectChat,
     handleScrollToBottom,
   };
