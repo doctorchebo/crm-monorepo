@@ -14,9 +14,12 @@ import { MessageText } from "@/components/ui/message-text";
 import { WhatsAppStatusIcon } from "@/components/whatsapp-status-icon";
 import { Attachment } from "@/lib/media/types";
 import { ReceivedContact } from "@/lib/types/contact-message.types";
+import { getDateKey } from "@/lib/utils/date-formatter";
 import { Loader } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { Chat, GroupedMessage, Message } from "../types";
+import { DateSeparator } from "./date-separator";
+import { StickyDateHeader } from "./sticky-date-header";
 
 // ============================================================
 // CONFIGURATION
@@ -92,6 +95,41 @@ function shouldAutoPlayGifs(
   const isWithinAgeThreshold = now - messageTime < GIF_AUTO_PLAY_MAX_AGE_MS;
 
   return isAmongRecent && isWithinAgeThreshold;
+}
+
+/**
+ * Get the first message from a grouped message (for date comparison).
+ */
+function getFirstMessageFromGroup(group: GroupedMessage): Message {
+  return group.messages[0];
+}
+
+/**
+ * Check if a date separator should be shown before a grouped message.
+ * Returns the date to show, or null if no separator needed.
+ */
+function shouldShowDateSeparatorForGroup(
+  currentGroup: GroupedMessage,
+  previousGroup: GroupedMessage | null
+): Date | null {
+  const currentMessage = getFirstMessageFromGroup(currentGroup);
+  const currentDate = new Date(currentMessage.timestamp);
+  const currentDateKey = getDateKey(currentDate);
+
+  if (!previousGroup) {
+    // First group - always show date separator
+    return currentDate;
+  }
+
+  const previousMessage = getFirstMessageFromGroup(previousGroup);
+  const previousDateKey = getDateKey(new Date(previousMessage.timestamp));
+
+  // Show separator if dates are different
+  if (currentDateKey !== previousDateKey) {
+    return currentDate;
+  }
+
+  return null;
 }
 
 interface MessagesListProps {
@@ -281,11 +319,16 @@ export function MessagesList({
   return (
     <div
       ref={messagesContainerRef}
-      className="h-full overflow-y-auto p-3 space-y-2"
+      className="h-full overflow-y-auto p-3"
       style={{
         opacity: isScrollRestoring ? 0 : 1,
       }}
     >
+      {/* Sticky date header - shows current date based on scroll position */}
+      {messages.length > 0 && (
+        <StickyDateHeader containerRef={messagesContainerRef} />
+      )}
+
       {/* Loading older messages indicator */}
       {isLoadingOlderMessages && (
         <div className="flex items-center justify-center py-3">
@@ -310,8 +353,15 @@ export function MessagesList({
           <p className="text-muted-foreground">No messages yet</p>
         </div>
       ) : (
-        <>
-          {groupedMessages.map((group) => {
+        <div className="space-y-2">
+          {groupedMessages.map((group, index) => {
+            // Check if we need a date separator before this group
+            const previousGroup = index > 0 ? groupedMessages[index - 1] : null;
+            const separatorDate = shouldShowDateSeparatorForGroup(
+              group,
+              previousGroup
+            );
+
             // Grouped media messages - render as single bubble
             if (group.type === "group" && group.messages.length > 1) {
               const lastMessage = group.messages[group.messages.length - 1];
@@ -322,20 +372,22 @@ export function MessagesList({
               });
 
               return (
-                <GroupedMediaBubble
-                  key={group.id}
-                  messages={group.messages}
-                  onImageClick={handleImageClick}
-                  statusIcon={
-                    <WhatsAppStatusIcon
-                      status={lastMessage.status || "pending"}
-                      deliveredAt={lastMessage.deliveredAt}
-                      readAt={lastMessage.readAt}
-                      className="ml-1"
-                    />
-                  }
-                  timeString={timeString}
-                />
+                <React.Fragment key={group.id}>
+                  {separatorDate && <DateSeparator date={separatorDate} />}
+                  <GroupedMediaBubble
+                    messages={group.messages}
+                    onImageClick={handleImageClick}
+                    statusIcon={
+                      <WhatsAppStatusIcon
+                        status={lastMessage.status || "pending"}
+                        deliveredAt={lastMessage.deliveredAt}
+                        readAt={lastMessage.readAt}
+                        className="ml-1"
+                      />
+                    }
+                    timeString={timeString}
+                  />
+                </React.Fragment>
               );
             }
 
@@ -354,20 +406,22 @@ export function MessagesList({
               const contacts = parseContactsFromMessage(message);
               if (contacts && contacts.length > 0) {
                 return (
-                  <ContactMessageBubble
-                    key={message.messageId || message.id}
-                    contacts={contacts}
-                    isOutbound={isOutbound}
-                    timestamp={message.timestamp}
-                    messageId={message.messageId}
-                    status={message.status}
-                    deliveredAt={message.deliveredAt}
-                    readAt={message.readAt}
-                    onViewAll={() => handleViewAllContacts(contacts)}
-                    onStartChat={handleStartChatWithContact}
-                    onReply={handleReplyById}
-                    onDelete={isOutbound ? handleDeleteMessage : undefined}
-                  />
+                  <React.Fragment key={message.messageId || message.id}>
+                    {separatorDate && <DateSeparator date={separatorDate} />}
+                    <ContactMessageBubble
+                      contacts={contacts}
+                      isOutbound={isOutbound}
+                      timestamp={message.timestamp}
+                      messageId={message.messageId}
+                      status={message.status}
+                      deliveredAt={message.deliveredAt}
+                      readAt={message.readAt}
+                      onViewAll={() => handleViewAllContacts(contacts)}
+                      onStartChat={handleStartChatWithContact}
+                      onReply={handleReplyById}
+                      onDelete={isOutbound ? handleDeleteMessage : undefined}
+                    />
+                  </React.Fragment>
                 );
               }
             }
@@ -379,199 +433,206 @@ export function MessagesList({
               );
               if (stickerAttachment) {
                 return (
-                  <div
-                    key={message.messageId || message.id}
-                    ref={(el) => {
-                      if (el && message.messageId) {
-                        messageRefs.current.set(message.messageId, el);
-                      }
-                    }}
-                    className={`flex ${
-                      isOutbound ? "justify-end" : "justify-start"
-                    }`}
-                  >
-                    <StickerMessageBubble
-                      attachment={stickerAttachment}
-                      messageId={message.messageId}
-                      isOutbound={isOutbound}
-                      timestamp={timeString}
-                      messageTimestamp={message.timestamp}
-                      status={message.status}
-                      deliveredAt={message.deliveredAt}
-                      readAt={message.readAt}
-                      onReply={handleReplyById}
-                      onDelete={isOutbound ? handleDeleteMessage : undefined}
-                    />
-                  </div>
+                  <React.Fragment key={message.messageId || message.id}>
+                    {separatorDate && <DateSeparator date={separatorDate} />}
+                    <div
+                      ref={(el) => {
+                        if (el && message.messageId) {
+                          messageRefs.current.set(message.messageId, el);
+                        }
+                      }}
+                      className={`flex ${
+                        isOutbound ? "justify-end" : "justify-start"
+                      }`}
+                    >
+                      <StickerMessageBubble
+                        attachment={stickerAttachment}
+                        messageId={message.messageId}
+                        isOutbound={isOutbound}
+                        timestamp={timeString}
+                        messageTimestamp={message.timestamp}
+                        status={message.status}
+                        deliveredAt={message.deliveredAt}
+                        readAt={message.readAt}
+                        onReply={handleReplyById}
+                        onDelete={isOutbound ? handleDeleteMessage : undefined}
+                      />
+                    </div>
+                  </React.Fragment>
                 );
               }
             }
 
             return (
-              <div
-                key={message.messageId || message.id}
-                ref={(el) => {
-                  if (el && message.messageId) {
-                    messageRefs.current.set(message.messageId, el);
-                  }
-                }}
-                className={`flex ${
-                  isOutbound ? "justify-end" : "justify-start"
-                }`}
-              >
+              <React.Fragment key={message.messageId || message.id}>
+                {separatorDate && <DateSeparator date={separatorDate} />}
                 <div
-                  className={`group px-3 py-1 rounded-lg text-xs relative ${
-                    // For image-only or gif-only messages, use standard image width
-                    message.attachments?.length === 1 &&
-                    (message.attachments[0].type === "image" ||
-                      message.attachments[0].type === "gif") &&
-                    !message.text &&
-                    !isDeleted
-                      ? "max-w-md"
-                      : "max-w-xs"
-                  } ${
-                    isOutbound
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted"
+                  key={message.messageId || message.id}
+                  ref={(el) => {
+                    if (el && message.messageId) {
+                      messageRefs.current.set(message.messageId, el);
+                    }
+                  }}
+                  className={`flex ${
+                    isOutbound ? "justify-end" : "justify-start"
                   }`}
                 >
-                  {/* Chevron positioned in top-right corner - visible on hover */}
-                  {!isDeleted && (
-                    <div className="absolute -top-1 -right-1 opacity-0 group-hover:opacity-100 transition-opacity z-20">
-                      <MessageActionsMenu
-                        messageId={message.messageId}
-                        messageTimestamp={message.timestamp}
-                        isOutbound={isOutbound}
-                        hasDownloadableMedia={message.attachments?.some(
-                          (a) =>
-                            a.type === "image" ||
-                            a.type === "video" ||
-                            a.type === "gif"
-                        )}
-                        onReply={handleReplyById}
-                        onDelete={isOutbound ? handleDeleteMessage : undefined}
-                        onDownload={handleDownloadById}
-                      />
-                    </div>
-                  )}
-
-                  {isDeleted ? (
-                    <p className="text-xs italic opacity-60">
-                      {t("thisMessageWasDeleted")}
-                    </p>
-                  ) : (
-                    <>
-                      {/* Quoted message block for replies */}
-                      {message.replyPreview && (
-                        <QuotedMessage
-                          replyPreview={{
-                            ...message.replyPreview,
-                            senderName:
-                              message.replyPreview.senderType === "customer"
-                                ? selectedChat?.participantName ||
-                                  message.replyPreview.senderName
-                                : message.replyPreview.senderName,
-                          }}
-                          originalMessageId={message.replyPreview.messageId}
-                          isOutbound={isOutbound}
-                          onClick={() => {
-                            if (
-                              message.replyPreview?.messageId &&
-                              !message.replyPreview?.unavailable
-                            ) {
-                              handleScrollToMessage(
-                                message.replyPreview.messageId
-                              );
-                            }
-                          }}
-                        />
-                      )}
-                      {/* Display attachments first, then text below */}
-                      {message.attachments &&
-                        message.attachments.length > 0 && (
-                          <div className={message.text ? "mb-2" : ""}>
-                            <AttachmentGallery
-                              attachments={message.attachments}
-                              messageId={
-                                message.messageId ||
-                                message.id?.toString() ||
-                                ""
-                              }
-                              onImageClick={(index) =>
-                                handleImageClick(
-                                  message.messageId ||
-                                    message.id?.toString() ||
-                                    "",
-                                  message.attachments || [],
-                                  index
-                                )
-                              }
-                              onShowDownloadMenu={(position) =>
-                                handleShowDownloadMenu(
-                                  message.messageId ||
-                                    message.id?.toString() ||
-                                    "",
-                                  message.attachments || [],
-                                  position
-                                )
-                              }
-                              isOutbound={isOutbound}
-                              onMessageDelete={handleDeleteMessage}
-                              senderName={
-                                isOutbound
-                                  ? "You"
-                                  : selectedChat?.participantName ||
-                                    selectedChat?.participantPhone
-                              }
-                              autoPlayGifs={
-                                message.messageId
-                                  ? combinedAutoPlayGifIds.has(
-                                      message.messageId
-                                    )
-                                  : false
-                              }
-                            />
-                          </div>
-                        )}
-
-                      {/* Text shown below media with link previews */}
-                      {message.text && (
-                        <MessageText
-                          text={message.text}
-                          isOutbound={isOutbound}
-                          showPreviews={!message.attachments?.length}
-                          onVideoPlay={handleVideoPlay}
-                        />
-                      )}
-                    </>
-                  )}
-
                   <div
-                    className={`text-xs mt-0.5 flex items-center justify-between gap-1 ${
+                    className={`group px-3 py-1 rounded-lg text-xs relative ${
+                      // For image-only or gif-only messages, use standard image width
+                      message.attachments?.length === 1 &&
+                      (message.attachments[0].type === "image" ||
+                        message.attachments[0].type === "gif") &&
+                      !message.text &&
+                      !isDeleted
+                        ? "max-w-md"
+                        : "max-w-xs"
+                    } ${
                       isOutbound
-                        ? "text-primary-foreground/70"
-                        : "text-muted-foreground"
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted"
                     }`}
                   >
-                    <span>
-                      {timeString}
-                      {message.editedAt && (
-                        <span className="ml-1 opacity-60">
-                          ({t("messageEdited")})
-                        </span>
-                      )}
-                    </span>
-                    {isOutbound && !isDeleted && (
-                      <WhatsAppStatusIcon
-                        status={message.status || "pending"}
-                        deliveredAt={message.deliveredAt}
-                        readAt={message.readAt}
-                        className="ml-1"
-                      />
+                    {/* Chevron positioned in top-right corner - visible on hover */}
+                    {!isDeleted && (
+                      <div className="absolute -top-1 -right-1 opacity-0 group-hover:opacity-100 transition-opacity z-20">
+                        <MessageActionsMenu
+                          messageId={message.messageId}
+                          messageTimestamp={message.timestamp}
+                          isOutbound={isOutbound}
+                          hasDownloadableMedia={message.attachments?.some(
+                            (a) =>
+                              a.type === "image" ||
+                              a.type === "video" ||
+                              a.type === "gif"
+                          )}
+                          onReply={handleReplyById}
+                          onDelete={
+                            isOutbound ? handleDeleteMessage : undefined
+                          }
+                          onDownload={handleDownloadById}
+                        />
+                      </div>
                     )}
+
+                    {isDeleted ? (
+                      <p className="text-xs italic opacity-60">
+                        {t("thisMessageWasDeleted")}
+                      </p>
+                    ) : (
+                      <>
+                        {/* Quoted message block for replies */}
+                        {message.replyPreview && (
+                          <QuotedMessage
+                            replyPreview={{
+                              ...message.replyPreview,
+                              senderName:
+                                message.replyPreview.senderType === "customer"
+                                  ? selectedChat?.participantName ||
+                                    message.replyPreview.senderName
+                                  : message.replyPreview.senderName,
+                            }}
+                            originalMessageId={message.replyPreview.messageId}
+                            isOutbound={isOutbound}
+                            onClick={() => {
+                              if (
+                                message.replyPreview?.messageId &&
+                                !message.replyPreview?.unavailable
+                              ) {
+                                handleScrollToMessage(
+                                  message.replyPreview.messageId
+                                );
+                              }
+                            }}
+                          />
+                        )}
+                        {/* Display attachments first, then text below */}
+                        {message.attachments &&
+                          message.attachments.length > 0 && (
+                            <div className={message.text ? "mb-2" : ""}>
+                              <AttachmentGallery
+                                attachments={message.attachments}
+                                messageId={
+                                  message.messageId ||
+                                  message.id?.toString() ||
+                                  ""
+                                }
+                                onImageClick={(index) =>
+                                  handleImageClick(
+                                    message.messageId ||
+                                      message.id?.toString() ||
+                                      "",
+                                    message.attachments || [],
+                                    index
+                                  )
+                                }
+                                onShowDownloadMenu={(position) =>
+                                  handleShowDownloadMenu(
+                                    message.messageId ||
+                                      message.id?.toString() ||
+                                      "",
+                                    message.attachments || [],
+                                    position
+                                  )
+                                }
+                                isOutbound={isOutbound}
+                                onMessageDelete={handleDeleteMessage}
+                                senderName={
+                                  isOutbound
+                                    ? "You"
+                                    : selectedChat?.participantName ||
+                                      selectedChat?.participantPhone
+                                }
+                                autoPlayGifs={
+                                  message.messageId
+                                    ? combinedAutoPlayGifIds.has(
+                                        message.messageId
+                                      )
+                                    : false
+                                }
+                              />
+                            </div>
+                          )}
+
+                        {/* Text shown below media with link previews */}
+                        {message.text && (
+                          <MessageText
+                            text={message.text}
+                            isOutbound={isOutbound}
+                            showPreviews={!message.attachments?.length}
+                            onVideoPlay={handleVideoPlay}
+                          />
+                        )}
+                      </>
+                    )}
+
+                    <div
+                      className={`text-xs mt-0.5 flex items-center justify-between gap-1 ${
+                        isOutbound
+                          ? "text-primary-foreground/70"
+                          : "text-muted-foreground"
+                      }`}
+                    >
+                      <span>
+                        {timeString}
+                        {message.editedAt && (
+                          <span className="ml-1 opacity-60">
+                            ({t("messageEdited")})
+                          </span>
+                        )}
+                      </span>
+                      {isOutbound && !isDeleted && (
+                        <WhatsAppStatusIcon
+                          status={message.status || "pending"}
+                          deliveredAt={message.deliveredAt}
+                          readAt={message.readAt}
+                          className="ml-1"
+                        />
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
+              </React.Fragment>
             );
           })}
 
@@ -588,7 +649,7 @@ export function MessagesList({
           )}
 
           <div ref={messagesEndRef} />
-        </>
+        </div>
       )}
     </div>
   );

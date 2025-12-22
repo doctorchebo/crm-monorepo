@@ -82,7 +82,18 @@
     "audioMessage": "Mensaje de audio",
     "document": "Documento",
     "contact": "Contacto",
-    "replyingTo": "Respondiendo a"
+    "replyingTo": "Respondiendo a",
+    "dates": {
+      "today": "Hoy",
+      "yesterday": "Ayer",
+      "monday": "Lunes",
+      "tuesday": "Martes",
+      "wednesday": "Miércoles",
+      "thursday": "Jueves",
+      "friday": "Viernes",
+      "saturday": "Sábado",
+      "sunday": "Domingo"
+    }
   },
   "emojiPicker": {
     "search": "Buscar emoji",
