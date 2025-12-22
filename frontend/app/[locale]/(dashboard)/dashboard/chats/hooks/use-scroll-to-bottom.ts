@@ -160,14 +160,23 @@ export function useScrollToBottom(
    */
   const requestScrollToBottom = useCallback(
     (smooth = false): (() => void) | undefined => {
+      console.log("[requestScrollToBottom] CALLED - creating scroll session");
+
       // Cancel any existing session
       cancelPendingScroll();
 
       // CRITICAL: Reset user scroll intent since this is an explicit scroll request
       userScrolledAwayRef.current = false;
+      // Also reset lastScrollTop to prevent false "scrolled up" detection
+      lastScrollTopRef.current = 0;
 
       const container = containerRef.current;
-      if (!container) return undefined;
+      if (!container) {
+        console.log("[requestScrollToBottom] ABORT: no container");
+        return undefined;
+      }
+
+      console.log("[requestScrollToBottom] Container found, starting session");
 
       // Generate unique session ID for debugging
       const sessionId = `scroll-${Date.now()}-${Math.random()
@@ -198,10 +207,30 @@ export function useScrollToBottom(
       // HELPER: Perform scroll (only if user hasn't scrolled away)
       // ============================================================
       const doScroll = () => {
-        if (!isActive) return;
+        if (!isActive) {
+          console.log("[doScroll] SKIP: session not active");
+          return;
+        }
         // CRITICAL: Don't scroll if user has intentionally scrolled away
-        if (userScrolledAwayRef.current) return;
+        if (userScrolledAwayRef.current) {
+          console.log("[doScroll] SKIP: user scrolled away");
+          return;
+        }
+        const beforeScrollTop = containerRef.current?.scrollTop;
+        const scrollHeight = containerRef.current?.scrollHeight;
+        const clientHeight = containerRef.current?.clientHeight;
+        console.log("[doScroll] SCROLLING TO BOTTOM. Before:", {
+          scrollTop: beforeScrollTop,
+          scrollHeight,
+          clientHeight,
+          targetScrollTop:
+            scrollHeight && clientHeight ? scrollHeight - clientHeight : "N/A",
+        });
         scrollContainerToBottom(containerRef.current, smooth);
+        console.log(
+          "[doScroll] After scrollTop:",
+          containerRef.current?.scrollTop
+        );
       };
 
       // ============================================================
@@ -465,8 +494,10 @@ export function useScrollToBottom(
             settleTimeoutId = null;
           }
 
-          // CRITICAL: Only scroll for new content if user hasn't scrolled away
-          if (!userScrolledAwayRef.current && isNearBottom(200)) {
+          // CRITICAL: Scroll to bottom if user hasn't intentionally scrolled away
+          // We do NOT check isNearBottom here - during initial load, content might
+          // push us far from bottom, but we still want to follow the content
+          if (!userScrolledAwayRef.current) {
             doScroll();
           }
 
@@ -485,14 +516,12 @@ export function useScrollToBottom(
 
       // Set up ResizeObserver as backup for content size changes
       // This catches cases where media dimensions change after load
-      // CRITICAL: Only scroll if user is still near bottom
+      // We scroll on ANY resize if user hasn't scrolled away - this ensures
+      // we follow content during initial load even if pushed far from bottom
       resizeObserver = new ResizeObserver(() => {
         if (!isActive) return;
         if (userScrolledAwayRef.current) return;
-        // Only scroll if we're already near the bottom
-        if (isNearBottom(200)) {
-          doScroll();
-        }
+        doScroll();
       });
       resizeObserver.observe(container);
 
@@ -544,8 +573,20 @@ export function useScrollToBottom(
    * - New messages arriving (only if user was at bottom)
    */
   useEffect(() => {
+    // DEBUG: Log every invocation
+    console.log("[ScrollToBottom Effect] Running:", {
+      selectedChatId,
+      messagesLength: messages.length,
+      isInitialLoad,
+      shouldAutoScroll,
+      lastChatIdRef: lastChatIdRef.current,
+      hasScrolledForChatRef: hasScrolledForChatRef.current,
+      lastMessageCountRef: lastMessageCountRef.current,
+    });
+
     // Skip if no chat selected
     if (!selectedChatId) {
+      console.log("[ScrollToBottom Effect] SKIP: no chat selected");
       lastChatIdRef.current = null;
       hasScrolledForChatRef.current = null;
       return;
@@ -553,6 +594,7 @@ export function useScrollToBottom(
 
     // Skip if no messages
     if (messages.length === 0) {
+      console.log("[ScrollToBottom Effect] SKIP: no messages");
       lastMessageCountRef.current = 0;
       return;
     }
@@ -563,6 +605,13 @@ export function useScrollToBottom(
       hasScrolledForChatRef.current !== selectedChatId;
     const isNewMessages = messages.length !== lastMessageCountRef.current;
 
+    console.log("[ScrollToBottom Effect] State analysis:", {
+      isNewChat,
+      isFirstMessagesForChat,
+      isNewMessages,
+      isInitialLoad,
+    });
+
     // Update tracking refs
     lastChatIdRef.current = selectedChatId;
     lastMessageCountRef.current = messages.length;
@@ -571,18 +620,27 @@ export function useScrollToBottom(
     const shouldScrollToBottomForNewChat =
       isNewChat || isFirstMessagesForChat || (isInitialLoad && isNewMessages);
 
+    console.log(
+      "[ScrollToBottom Effect] Should scroll for new chat:",
+      shouldScrollToBottomForNewChat
+    );
+
     if (shouldScrollToBottomForNewChat) {
       hasScrolledForChatRef.current = selectedChatId;
 
       // CRITICAL: Check if we should skip scrolling to bottom
       // This allows scroll position restoration to work
       if (skipScrollToBottom && skipScrollToBottom(selectedChatId)) {
+        console.log(
+          "[ScrollToBottom Effect] SKIP: skipScrollToBottom returned true"
+        );
         scrollDebug(
           "[ScrollToBottom] Skipping scroll - position will be restored by manager"
         );
         return;
       }
 
+      console.log("[ScrollToBottom Effect] CALLING requestScrollToBottom");
       return requestScrollToBottom(false);
     }
 
@@ -593,6 +651,9 @@ export function useScrollToBottom(
       isNewMessages &&
       isAtBottom(100)
     ) {
+      console.log(
+        "[ScrollToBottom Effect] Scrolling for new messages (user was at bottom)"
+      );
       scrollToBottom(false);
     }
   }, [

@@ -7,40 +7,55 @@ import {
 } from "./scroll-utils";
 
 // ============================================================
+// ARCHITECTURE OVERVIEW
+// ============================================================
+/**
+ * SCROLL POSITION MANAGER - Event-Driven Architecture
+ *
+ * This hook manages scroll position save/restore for chat switching.
+ * It uses a STRICTLY EVENT-DRIVEN approach with NO arbitrary timeouts.
+ *
+ * KEY PRINCIPLES:
+ * 1. STATE MACHINE - Clear states with explicit transitions
+ * 2. EVENT-DRIVEN - Use actual DOM events (load, error) to detect completion
+ * 3. USER INTENT - Only save from USER scroll, distinguish from programmatic
+ * 4. EXPLICIT COMPLETION - Restoration is async with proper completion signal
+ *
+ * STATE MACHINE:
+ * - IDLE: Normal operation, listening for user scrolls
+ * - TRANSITIONING: Chat switch in progress, all saves disabled
+ * - RESTORING: Actively restoring scroll position, waiting for media
+ *
+ * NO TIMEOUTS: Instead of guessing "800ms should be enough", we:
+ * - Listen to actual image/video load events
+ * - Track programmatic vs user scrolls
+ * - Use explicit state transitions
+ */
+
+// ============================================================
 // TYPES
 // ============================================================
 
 /**
- * Scroll position entry stored per chat
- * Includes metadata for intelligent restoration
+ * Scroll position entry stored per chat.
+ * Uses distanceFromBottom for accuracy across content changes.
  */
 interface ScrollPositionEntry {
-  /** The actual scroll position (scrollTop value) */
-  scrollTop: number;
-  /** The scroll height when position was saved (for validation) */
-  scrollHeight: number;
+  /** Distance from bottom of scrollable content - this is the key metric */
+  distanceFromBottom: number;
   /** Whether user was at the bottom when saved */
   wasAtBottom: boolean;
-  /** Timestamp when saved (for debugging/stale detection) */
+  /** Timestamp when saved (for stale detection) */
   savedAt: number;
 }
 
 /**
- * Manager state tracked via refs for synchronous access
+ * Manager states - explicit state machine
  */
-interface ScrollManagerState {
-  /** Currently active chat ID */
-  activeChatId: string | null;
-  /** Whether scroll saving is currently allowed */
-  isSaveEnabled: boolean;
-  /** Whether we're in the middle of a chat transition */
-  isTransitioning: boolean;
-  /** Whether scroll restoration is in progress */
-  isRestoring: boolean;
-}
+type ManagerState = "idle" | "transitioning" | "restoring";
 
 /**
- * Configuration options for the scroll position manager
+ * Configuration options
  */
 export interface ScrollPositionManagerOptions {
   /** Threshold in pixels to consider "at bottom" */
@@ -52,29 +67,48 @@ export interface ScrollPositionManagerOptions {
 }
 
 /**
- * Return type of the scroll position manager hook
+ * Options for restoreScrollPosition
+ */
+export interface RestoreOptions {
+  /** Maximum time to wait for media stability (default: 5000ms) */
+  maxWaitMs?: number;
+}
+
+/**
+ * Result of restoreScrollPosition
+ */
+export interface RestoreResult {
+  /** Whether restoration was successful */
+  success: boolean;
+  /** The scroll position that was applied */
+  appliedScrollTop: number;
+  /** Whether we scrolled to bottom (no saved position or was at bottom) */
+  scrolledToBottom: boolean;
+}
+
+/**
+ * Return type of the hook
  */
 export interface ScrollPositionManagerReturn {
-  /** Save scroll position for current chat */
-  saveScrollPosition: (chatId: string) => void;
-  /** Restore scroll position for a chat */
-  restoreScrollPosition: (chatId: string) => Promise<boolean>;
-  /** Notify manager of chat switch (call BEFORE switching) */
+  /** Notify manager of chat switch - saves current position immediately */
   onChatWillChange: (fromChatId: string | null, toChatId: string) => void;
-  /** Notify manager that chat switch is complete */
+  /** Notify manager that chat switch is fully complete - enables user scroll tracking */
   onChatDidChange: (chatId: string) => void;
-  /** Enable/disable scroll position saving */
-  setScrollSaveEnabled: (enabled: boolean) => void;
-  /** Check if scroll saving is currently enabled */
-  isScrollSaveEnabled: () => boolean;
-  /** Get saved position for a chat (without restoring) */
+  /** Restore scroll position - waits for media to load, returns promise */
+  restoreScrollPosition: (
+    chatId: string,
+    options?: RestoreOptions
+  ) => Promise<RestoreResult>;
+  /** Get saved position for a chat (for inspection) */
   getSavedPosition: (chatId: string) => ScrollPositionEntry | null;
-  /** Clear saved position for a chat or all chats */
+  /** Clear saved positions */
   clearSavedPositions: (chatId?: string) => void;
-  /** Check if currently transitioning between chats */
-  isTransitioning: () => boolean;
-  /** Handle scroll event (call from scroll listener) */
+  /** Handle scroll event from scroll listener */
   handleScroll: (chatId: string) => void;
+  /** Check if currently transitioning/restoring */
+  isTransitioning: () => boolean;
+  /** Get current state (for debugging) */
+  getState: () => ManagerState;
 }
 
 // ============================================================
@@ -88,30 +122,207 @@ const DEFAULT_OPTIONS: Required<ScrollPositionManagerOptions> = {
 };
 
 // ============================================================
-// MAIN HOOK
+// HELPER: Wait for media to load (event-driven, no arbitrary timeout)
 // ============================================================
 
 /**
- * useScrollPositionManager - A dedicated hook for managing chat scroll positions
+ * Waits for all images and videos in a container to finish loading.
+ * Uses actual DOM events - not timeouts.
  *
- * ARCHITECTURE:
- * This hook provides a single, centralized place for all scroll position
- * save/restore logic. It uses refs to avoid stale closure issues and provides
- * a clean API for the chat state management.
- *
- * KEY PRINCIPLES:
- * 1. SINGLE SOURCE OF TRUTH - All scroll position logic in one place
- * 2. LIFECYCLE AWARE - Properly handles chat transitions
- * 3. RACE CONDITION FREE - Uses refs and proper state machine
- * 4. DEBOUNCED SAVES - Prevents excessive saves during scroll
- * 5. INTELLIGENT RESTORE - Validates positions and handles edge cases
- *
- * USAGE:
- * 1. Call onChatWillChange BEFORE switching chats
- * 2. Call onChatDidChange AFTER switch is complete
- * 3. Call handleScroll from scroll event listener
- * 4. Use saveScrollPosition/restoreScrollPosition for manual control
+ * @param container - The scroll container to scan
+ * @param maxWaitMs - Maximum wait time (safety net for broken media)
+ * @returns Promise that resolves when all media is loaded or max wait reached
  */
+function waitForMediaLoaded(
+  container: HTMLDivElement,
+  maxWaitMs: number = 5000
+): Promise<void> {
+  return new Promise((resolve) => {
+    // Find all media elements
+    const images = Array.from(container.querySelectorAll("img"));
+    const videos = Array.from(container.querySelectorAll("video"));
+
+    // Filter to only pending (not yet loaded) media
+    const pendingImages = images.filter((img) => {
+      // Not complete, or complete but broken (no dimensions)
+      return !img.complete || img.naturalWidth === 0;
+    });
+
+    const pendingVideos = videos.filter((video) => {
+      // readyState < 2 means HAVE_CURRENT_DATA not reached
+      // Or no dimensions yet
+      return video.readyState < 2 || video.videoWidth === 0;
+    });
+
+    const totalPending = pendingImages.length + pendingVideos.length;
+
+    scrollDebug("[waitForMediaLoaded] Initial scan:", {
+      totalImages: images.length,
+      pendingImages: pendingImages.length,
+      totalVideos: videos.length,
+      pendingVideos: pendingVideos.length,
+    });
+
+    // If nothing pending, resolve immediately
+    if (totalPending === 0) {
+      scrollDebug("[waitForMediaLoaded] All media already loaded");
+      resolve();
+      return;
+    }
+
+    // Tracking
+    let remaining = totalPending;
+    let resolved = false;
+    const cleanupFns: (() => void)[] = [];
+
+    const onMediaComplete = () => {
+      if (resolved) return;
+      remaining--;
+      scrollDebug("[waitForMediaLoaded] Media loaded, remaining:", remaining);
+      if (remaining <= 0) {
+        resolved = true;
+        cleanup();
+        resolve();
+      }
+    };
+
+    const cleanup = () => {
+      cleanupFns.forEach((fn) => fn());
+    };
+
+    // Safety timeout - only as a fallback for truly broken media
+    const safetyTimer = setTimeout(() => {
+      if (!resolved) {
+        scrollDebug(
+          "[waitForMediaLoaded] Safety timeout reached, proceeding with",
+          remaining,
+          "pending"
+        );
+        resolved = true;
+        cleanup();
+        resolve();
+      }
+    }, maxWaitMs);
+    cleanupFns.push(() => clearTimeout(safetyTimer));
+
+    // Attach listeners to pending images
+    pendingImages.forEach((img) => {
+      const handleLoad = () => onMediaComplete();
+      const handleError = () => onMediaComplete();
+
+      img.addEventListener("load", handleLoad, { once: true });
+      img.addEventListener("error", handleError, { once: true });
+
+      cleanupFns.push(() => {
+        img.removeEventListener("load", handleLoad);
+        img.removeEventListener("error", handleError);
+      });
+
+      // Double-check: might have loaded while we were setting up
+      if (img.complete && img.naturalWidth > 0) {
+        // Already loaded, call handler
+        handleLoad();
+      }
+    });
+
+    // Attach listeners to pending videos
+    pendingVideos.forEach((video) => {
+      const handleReady = () => onMediaComplete();
+      const handleError = () => onMediaComplete();
+
+      // Listen to multiple events for better coverage
+      video.addEventListener("loadeddata", handleReady, { once: true });
+      video.addEventListener("canplay", handleReady, { once: true });
+      video.addEventListener("error", handleError, { once: true });
+
+      cleanupFns.push(() => {
+        video.removeEventListener("loadeddata", handleReady);
+        video.removeEventListener("canplay", handleReady);
+        video.removeEventListener("error", handleError);
+      });
+
+      // Double-check: might have loaded while setting up
+      if (video.readyState >= 2 && video.videoWidth > 0) {
+        handleReady();
+      }
+    });
+  });
+}
+
+// ============================================================
+// HELPER: Wait for scrollHeight to stabilize
+// ============================================================
+
+/**
+ * Waits for the container's scrollHeight to stabilize.
+ * Uses RAF polling to detect when height stops changing.
+ *
+ * @param container - The scroll container
+ * @param maxWaitMs - Maximum wait time
+ * @returns Promise that resolves with the stable scrollHeight
+ */
+function waitForHeightStabilization(
+  container: HTMLDivElement,
+  maxWaitMs: number = 2000
+): Promise<number> {
+  return new Promise((resolve) => {
+    let lastHeight = container.scrollHeight;
+    let stableCount = 0;
+    const requiredStableFrames = 5; // Need 5 consecutive stable frames (~83ms)
+    let frameCount = 0;
+    const maxFrames = Math.ceil(maxWaitMs / 16.67); // ~60 FPS
+
+    const checkStability = () => {
+      frameCount++;
+      const currentHeight = container.scrollHeight;
+
+      console.log(
+        "[waitForHeightStabilization] Frame",
+        frameCount,
+        "height:",
+        currentHeight,
+        "lastHeight:",
+        lastHeight,
+        "stableCount:",
+        stableCount
+      );
+
+      if (currentHeight === lastHeight) {
+        stableCount++;
+        if (stableCount >= requiredStableFrames) {
+          console.log(
+            "[waitForHeightStabilization] Height stable at:",
+            currentHeight
+          );
+          resolve(currentHeight);
+          return;
+        }
+      } else {
+        // Height changed, reset counter
+        stableCount = 0;
+        lastHeight = currentHeight;
+      }
+
+      if (frameCount >= maxFrames) {
+        console.log(
+          "[waitForHeightStabilization] Max frames reached, using:",
+          currentHeight
+        );
+        resolve(currentHeight);
+        return;
+      }
+
+      requestAnimationFrame(checkStability);
+    };
+
+    requestAnimationFrame(checkStability);
+  });
+}
+
+// ============================================================
+// MAIN HOOK
+// ============================================================
+
 export function useScrollPositionManager(
   containerRef: React.RefObject<HTMLDivElement | null>,
   options: ScrollPositionManagerOptions = {}
@@ -121,19 +332,23 @@ export function useScrollPositionManager(
   // Storage for scroll positions per chat
   const positionsRef = useRef<Map<string, ScrollPositionEntry>>(new Map());
 
-  // Manager state ref for synchronous access
-  const stateRef = useRef<ScrollManagerState>({
-    activeChatId: null,
-    isSaveEnabled: false,
-    isTransitioning: false,
-    isRestoring: false,
-  });
+  // State machine
+  const stateRef = useRef<ManagerState>("idle");
+  const activeChatIdRef = useRef<string | null>(null);
 
-  // Debounce timer ref
+  // Debounce timer for saves
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Track programmatic scrolls to avoid saving them
+  // When we set scroll programmatically, we set this ref before the scroll
+  // and clear it after a microtask (to catch the resulting scroll event)
+  const programmaticScrollRef = useRef<boolean>(false);
+
+  // Track the scroll position we programmatically set, to detect user deviation
+  const lastProgrammaticScrollTopRef = useRef<number | null>(null);
+
   // ============================================================
-  // HELPER: Check if scrolled near bottom (uses shared utility)
+  // HELPER: Check if at bottom
   // ============================================================
   const isNearBottom = useCallback(
     (container: HTMLDivElement): boolean => {
@@ -143,13 +358,15 @@ export function useScrollPositionManager(
   );
 
   // ============================================================
-  // HELPER: Create scroll position entry
+  // HELPER: Create position entry
   // ============================================================
   const createPositionEntry = useCallback(
     (container: HTMLDivElement): ScrollPositionEntry => {
+      const distanceFromBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight;
+
       return {
-        scrollTop: container.scrollTop,
-        scrollHeight: container.scrollHeight,
+        distanceFromBottom,
         wasAtBottom: isNearBottom(container),
         savedAt: Date.now(),
       };
@@ -158,67 +375,67 @@ export function useScrollPositionManager(
   );
 
   // ============================================================
-  // HELPER: Validate saved position is still usable
+  // HELPER: Validate saved position
   // ============================================================
   const isPositionValid = useCallback(
-    (entry: ScrollPositionEntry, container: HTMLDivElement): boolean => {
-      // Check if position is too old
-      if (Date.now() - entry.savedAt > opts.maxPositionAgeMs) {
-        return false;
-      }
-
-      // If user was at bottom, we'll scroll to bottom anyway
-      if (entry.wasAtBottom) {
-        return true;
-      }
-
-      // Position should be within reasonable bounds
-      // Allow some variance for content changes
-      const maxValidScroll = container.scrollHeight + 500;
-      if (entry.scrollTop > maxValidScroll) {
-        return false;
-      }
-
-      return true;
+    (entry: ScrollPositionEntry): boolean => {
+      // Check age
+      return Date.now() - entry.savedAt <= opts.maxPositionAgeMs;
     },
     [opts.maxPositionAgeMs]
   );
 
   // ============================================================
-  // CORE: Save scroll position (immediate)
+  // INTERNAL: Save scroll position immediately
   // ============================================================
   const saveScrollPositionImmediate = useCallback(
     (chatId: string, force: boolean = false): void => {
       const container = containerRef.current;
-      if (!container) return;
+      if (!container) {
+        console.log("[ScrollManager SAVE] No container");
+        return;
+      }
 
-      const state = stateRef.current;
+      // Only save in IDLE state unless forced
+      if (!force && stateRef.current !== "idle") {
+        console.log(
+          "[ScrollManager SAVE] SKIP: not idle, state=",
+          stateRef.current
+        );
+        return;
+      }
 
-      // If not forced, check conditions
-      if (!force) {
-        // Don't save if not enabled or transitioning
-        if (
-          !state.isSaveEnabled ||
-          state.isTransitioning ||
-          state.isRestoring
-        ) {
-          return;
-        }
-
-        // Don't save for wrong chat
-        if (state.activeChatId !== chatId) {
-          return;
-        }
+      // Only save for active chat unless forced
+      if (!force && activeChatIdRef.current !== chatId) {
+        console.log("[ScrollManager SAVE] SKIP: wrong chat", {
+          active: activeChatIdRef.current,
+          requested: chatId,
+        });
+        return;
       }
 
       const entry = createPositionEntry(container);
+
+      // DEBUG: Log with type info
+      console.log("[ScrollManager SAVE] Saving position:", {
+        chatId,
+        distanceFromBottom: entry.distanceFromBottom,
+        distanceFromBottomType: typeof entry.distanceFromBottom,
+        wasAtBottom: entry.wasAtBottom,
+        scrollHeight: container.scrollHeight,
+        scrollTop: container.scrollTop,
+        clientHeight: container.clientHeight,
+        calculation: `${container.scrollHeight} - ${container.scrollTop} - ${container.clientHeight} = ${entry.distanceFromBottom}`,
+        forced: force,
+      });
+
       positionsRef.current.set(chatId, entry);
 
-      scrollDebug("[ScrollPositionManager] Saved position:", {
+      scrollDebug("[ScrollManager] Saved position:", {
         chatId,
-        scrollTop: entry.scrollTop,
-        scrollHeight: entry.scrollHeight,
+        distanceFromBottom: entry.distanceFromBottom,
         wasAtBottom: entry.wasAtBottom,
+        state: stateRef.current,
         forced: force,
       });
     },
@@ -226,89 +443,297 @@ export function useScrollPositionManager(
   );
 
   // ============================================================
-  // PUBLIC: Save scroll position (debounced for scroll events)
+  // PUBLIC: Handle chat will change (BEFORE switching)
   // ============================================================
-  const saveScrollPosition = useCallback(
-    (chatId: string): void => {
-      // Clear any pending save
+  const onChatWillChange = useCallback(
+    (fromChatId: string | null, toChatId: string): void => {
+      scrollDebug("[ScrollManager] Chat will change:", {
+        from: fromChatId,
+        to: toChatId,
+        currentState: stateRef.current,
+      });
+
+      // Clear pending saves
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
       }
 
-      // Schedule debounced save
-      saveTimerRef.current = setTimeout(() => {
-        saveScrollPositionImmediate(chatId);
-        saveTimerRef.current = null;
-      }, opts.saveDebounceMs);
+      // Save current position IMMEDIATELY with force=true
+      if (fromChatId) {
+        saveScrollPositionImmediate(fromChatId, true);
+      }
+
+      // Transition to TRANSITIONING state
+      stateRef.current = "transitioning";
     },
-    [saveScrollPositionImmediate, opts.saveDebounceMs]
+    [saveScrollPositionImmediate]
   );
 
   // ============================================================
-  // PUBLIC: Restore scroll position
+  // PUBLIC: Restore scroll position (async, waits for media)
   // ============================================================
   const restoreScrollPosition = useCallback(
-    async (chatId: string): Promise<boolean> => {
+    async (
+      chatId: string,
+      options: RestoreOptions = {}
+    ): Promise<RestoreResult> => {
+      const { maxWaitMs = 5000 } = options;
+
+      console.log("[ScrollManager RESTORE] Starting for:", chatId);
+
       const container = containerRef.current;
       if (!container) {
-        return false;
+        console.log("[ScrollManager RESTORE] FAILED: no container");
+        scrollDebug("[ScrollManager] Restore failed: no container");
+        return { success: false, appliedScrollTop: 0, scrolledToBottom: false };
       }
 
-      const state = stateRef.current;
+      // Transition to RESTORING state
+      stateRef.current = "restoring";
+      activeChatIdRef.current = chatId;
+
+      console.log(
+        "[ScrollManager RESTORE] Container state before media wait:",
+        {
+          scrollHeight: container.scrollHeight,
+          scrollTop: container.scrollTop,
+          clientHeight: container.clientHeight,
+        }
+      );
+
+      scrollDebug("[ScrollManager] Starting restore for:", chatId);
+
+      // Wait for media to load - this is EVENT-DRIVEN, not a timeout guess
+      await waitForMediaLoaded(container, maxWaitMs);
+
+      console.log(
+        "[ScrollManager RESTORE] After media wait, scrollHeight:",
+        container.scrollHeight
+      );
+
+      // Re-check we're still on the same chat after waiting
+      if (activeChatIdRef.current !== chatId) {
+        console.log("[ScrollManager RESTORE] ABORTED: chat changed");
+        scrollDebug("[ScrollManager] Restore aborted: chat changed");
+        return { success: false, appliedScrollTop: 0, scrolledToBottom: false };
+      }
+
+      // CRITICAL: Wait for scrollHeight to stabilize BEFORE applying scroll
+      // This fixes the issue where cached images render but DOM height hasn't settled
+      console.log(
+        "[ScrollManager RESTORE] Waiting for height stabilization..."
+      );
+      const stableHeight = await waitForHeightStabilization(container, 2000);
+      console.log(
+        "[ScrollManager RESTORE] Height stabilized at:",
+        stableHeight
+      );
+
+      // Re-check we're still on the same chat after waiting
+      if (activeChatIdRef.current !== chatId) {
+        console.log(
+          "[ScrollManager RESTORE] ABORTED: chat changed during height wait"
+        );
+        scrollDebug(
+          "[ScrollManager] Restore aborted: chat changed during height wait"
+        );
+        return { success: false, appliedScrollTop: 0, scrolledToBottom: false };
+      }
+
+      // Re-get container (might have unmounted/remounted)
+      const currentContainer = containerRef.current;
+      if (!currentContainer) {
+        console.log("[ScrollManager RESTORE] FAILED: container gone");
+        scrollDebug("[ScrollManager] Restore failed: container gone");
+        stateRef.current = "idle";
+        return { success: false, appliedScrollTop: 0, scrolledToBottom: false };
+      }
+
+      // Get saved position
       const entry = positionsRef.current.get(chatId);
 
-      // If no saved position, scroll to bottom
-      if (!entry) {
-        scrollDebug(
-          "[ScrollPositionManager] No saved position, scrolling to bottom"
-        );
-        state.isRestoring = true;
-        container.scrollTop = container.scrollHeight;
-        state.isRestoring = false;
-        return true;
-      }
-
-      // Validate the saved position
-      if (!isPositionValid(entry, container)) {
-        scrollDebug(
-          "[ScrollPositionManager] Saved position invalid, scrolling to bottom"
-        );
-        positionsRef.current.delete(chatId);
-        state.isRestoring = true;
-        container.scrollTop = container.scrollHeight;
-        state.isRestoring = false;
-        return true;
-      }
-
-      // If user was at bottom, scroll to bottom
-      if (entry.wasAtBottom) {
-        scrollDebug(
-          "[ScrollPositionManager] Was at bottom, scrolling to bottom"
-        );
-        state.isRestoring = true;
-        container.scrollTop = container.scrollHeight;
-        state.isRestoring = false;
-        return true;
-      }
-
-      // Restore the exact position
-      scrollDebug("[ScrollPositionManager] Restoring position:", {
-        chatId,
-        scrollTop: entry.scrollTop,
+      console.log("[ScrollManager RESTORE] Saved entry:", {
+        hasEntry: !!entry,
+        entry: entry,
+        distanceFromBottomType: entry ? typeof entry.distanceFromBottom : "N/A",
       });
 
-      state.isRestoring = true;
+      // Determine if we should scroll to bottom or restore position
+      const shouldScrollToBottom =
+        !entry || entry.wasAtBottom || !isPositionValid(entry);
+      // CRITICAL: Ensure distanceFromBottom is a number
+      const savedDistanceFromBottom = entry
+        ? Number(entry.distanceFromBottom)
+        : 0;
 
-      // Use double RAF to ensure DOM is fully rendered
-      return new Promise((resolve) => {
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            if (containerRef.current) {
-              containerRef.current.scrollTop = entry.scrollTop;
-            }
-            state.isRestoring = false;
-            resolve(true);
+      console.log("[ScrollManager RESTORE] Decision:", {
+        shouldScrollToBottom,
+        savedDistanceFromBottom,
+        savedDistanceFromBottomType: typeof savedDistanceFromBottom,
+        wasAtBottom: entry?.wasAtBottom,
+        isValid: entry ? isPositionValid(entry) : "N/A",
+      });
+
+      // Function to calculate and apply scroll position
+      const applyScrollPosition = (): {
+        scrollTop: number;
+        scrolledToBottom: boolean;
+      } => {
+        const cont = containerRef.current;
+        if (!cont) return { scrollTop: 0, scrolledToBottom: false };
+
+        let targetScrollTop: number;
+        let scrolledToBottom = false;
+
+        // CRITICAL: Ensure all values are numbers
+        const scrollHeight = Number(cont.scrollHeight);
+        const clientHeight = Number(cont.clientHeight);
+
+        if (shouldScrollToBottom) {
+          targetScrollTop = scrollHeight - clientHeight;
+          scrolledToBottom = true;
+          console.log("[ScrollManager RESTORE] Scrolling to BOTTOM:", {
+            scrollHeight,
+            clientHeight,
+            targetScrollTop,
           });
+        } else {
+          // Calculate from distanceFromBottom
+          targetScrollTop =
+            scrollHeight - clientHeight - savedDistanceFromBottom;
+          // Clamp to valid range
+          const maxScroll = scrollHeight - clientHeight;
+          targetScrollTop = Math.max(0, Math.min(targetScrollTop, maxScroll));
+          console.log("[ScrollManager RESTORE] Restoring POSITION:", {
+            scrollHeight,
+            clientHeight,
+            savedDistanceFromBottom,
+            calculation: `${scrollHeight} - ${clientHeight} - ${savedDistanceFromBottom} = ${
+              scrollHeight - clientHeight - savedDistanceFromBottom
+            }`,
+            targetScrollTop,
+            maxScroll,
+          });
+        }
+
+        // Mark as programmatic scroll
+        programmaticScrollRef.current = true;
+        lastProgrammaticScrollTopRef.current = targetScrollTop;
+        cont.scrollTop = targetScrollTop;
+
+        console.log("[ScrollManager RESTORE] After applying scroll:", {
+          targetScrollTop,
+          actualScrollTop: cont.scrollTop,
+        });
+
+        return { scrollTop: targetScrollTop, scrolledToBottom };
+      };
+
+      // Apply initial scroll position
+      let result = applyScrollPosition();
+
+      scrollDebug("[ScrollManager] Initial scroll applied:", {
+        targetScrollTop: result.scrollTop,
+        scrolledToBottom: result.scrolledToBottom,
+        savedDistanceFromBottom,
+      });
+
+      // Set up a ResizeObserver to re-apply scroll position if content changes
+      // This handles late-loading media that wasn't detected by waitForMediaLoaded
+      return new Promise((resolve) => {
+        let stabilityCheckCount = 0;
+        const maxStabilityChecks = 20; // Max ~2 seconds of monitoring
+        let lastScrollHeight = currentContainer.scrollHeight;
+        let stableCount = 0;
+        const requiredStableChecks = 3; // Need 3 consecutive stable checks
+
+        const resizeObserver = new ResizeObserver(() => {
+          // Only act if still restoring for this chat
+          if (
+            stateRef.current !== "restoring" ||
+            activeChatIdRef.current !== chatId
+          ) {
+            return;
+          }
+
+          const cont = containerRef.current;
+          if (!cont) return;
+
+          // Re-apply scroll position when content size changes
+          result = applyScrollPosition();
+          scrollDebug("[ScrollManager] Re-applied scroll after resize:", {
+            newScrollTop: result.scrollTop,
+            scrollHeight: cont.scrollHeight,
+          });
+        });
+
+        resizeObserver.observe(currentContainer);
+
+        // Stability checker - polls for stable content height
+        const checkStability = () => {
+          stabilityCheckCount++;
+
+          // Safety limit
+          if (stabilityCheckCount >= maxStabilityChecks) {
+            scrollDebug(
+              "[ScrollManager] Max stability checks reached, finalizing"
+            );
+            finalize();
+            return;
+          }
+
+          // Check if chat changed
+          if (activeChatIdRef.current !== chatId) {
+            finalize();
+            return;
+          }
+
+          const cont = containerRef.current;
+          if (!cont) {
+            finalize();
+            return;
+          }
+
+          // Check if height is stable
+          if (cont.scrollHeight === lastScrollHeight) {
+            stableCount++;
+            if (stableCount >= requiredStableChecks) {
+              scrollDebug("[ScrollManager] Content stable, finalizing");
+              finalize();
+              return;
+            }
+          } else {
+            // Height changed, reset stability counter and re-apply scroll
+            stableCount = 0;
+            lastScrollHeight = cont.scrollHeight;
+            result = applyScrollPosition();
+          }
+
+          // Check again
+          requestAnimationFrame(checkStability);
+        };
+
+        const finalize = () => {
+          resizeObserver.disconnect();
+          programmaticScrollRef.current = false;
+
+          scrollDebug("[ScrollManager] Restore complete:", {
+            appliedScrollTop: result.scrollTop,
+            scrolledToBottom: result.scrolledToBottom,
+            finalScrollHeight: containerRef.current?.scrollHeight,
+          });
+
+          resolve({
+            success: true,
+            appliedScrollTop: result.scrollTop,
+            scrolledToBottom: result.scrolledToBottom,
+          });
+        };
+
+        // Start stability checking after a brief delay to let initial render settle
+        requestAnimationFrame(() => {
+          requestAnimationFrame(checkStability);
         });
       });
     },
@@ -316,70 +741,23 @@ export function useScrollPositionManager(
   );
 
   // ============================================================
-  // PUBLIC: Handle chat will change (call BEFORE switching)
-  // ============================================================
-  const onChatWillChange = useCallback(
-    (fromChatId: string | null, toChatId: string): void => {
-      const state = stateRef.current;
-
-      scrollDebug("[ScrollPositionManager] Chat will change:", {
-        from: fromChatId,
-        to: toChatId,
-      });
-
-      // Clear any pending debounced saves
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = null;
-      }
-
-      // CRITICAL: Save current position IMMEDIATELY with force=true
-      // This bypasses the isSaveEnabled check since we're leaving the chat
-      if (fromChatId) {
-        saveScrollPositionImmediate(fromChatId, true);
-      }
-
-      // Mark as transitioning
-      state.isTransitioning = true;
-      state.isSaveEnabled = false;
-    },
-    [saveScrollPositionImmediate]
-  );
-
-  // ============================================================
-  // PUBLIC: Handle chat did change (call AFTER switch complete)
+  // PUBLIC: Handle chat did change (AFTER switch complete)
   // ============================================================
   const onChatDidChange = useCallback((chatId: string): void => {
-    const state = stateRef.current;
-
-    scrollDebug("[ScrollPositionManager] Chat did change:", { chatId });
+    scrollDebug("[ScrollManager] Chat did change:", {
+      chatId,
+      previousState: stateRef.current,
+    });
 
     // Update active chat
-    state.activeChatId = chatId;
-    state.isTransitioning = false;
+    activeChatIdRef.current = chatId;
 
-    // Re-enable saving after a short delay
-    // This prevents immediate saves from scroll events during render
-    setTimeout(() => {
-      if (stateRef.current.activeChatId === chatId) {
-        stateRef.current.isSaveEnabled = true;
-        scrollDebug("[ScrollPositionManager] Saving enabled for:", chatId);
-      }
-    }, 200);
-  }, []);
+    // Transition to IDLE state - now user scrolls will be saved
+    stateRef.current = "idle";
 
-  // ============================================================
-  // PUBLIC: Set scroll save enabled
-  // ============================================================
-  const setScrollSaveEnabled = useCallback((enabled: boolean): void => {
-    stateRef.current.isSaveEnabled = enabled;
-  }, []);
-
-  // ============================================================
-  // PUBLIC: Check if scroll save enabled
-  // ============================================================
-  const isScrollSaveEnabled = useCallback((): boolean => {
-    return stateRef.current.isSaveEnabled;
+    // Clear programmatic scroll tracking
+    programmaticScrollRef.current = false;
+    lastProgrammaticScrollTopRef.current = null;
   }, []);
 
   // ============================================================
@@ -387,9 +765,15 @@ export function useScrollPositionManager(
   // ============================================================
   const getSavedPosition = useCallback(
     (chatId: string): ScrollPositionEntry | null => {
-      return positionsRef.current.get(chatId) || null;
+      const entry = positionsRef.current.get(chatId);
+      if (!entry) return null;
+      if (!isPositionValid(entry)) {
+        positionsRef.current.delete(chatId);
+        return null;
+      }
+      return entry;
     },
-    []
+    [isPositionValid]
   );
 
   // ============================================================
@@ -404,37 +788,68 @@ export function useScrollPositionManager(
   }, []);
 
   // ============================================================
-  // PUBLIC: Check if transitioning
-  // ============================================================
-  const isTransitioning = useCallback((): boolean => {
-    return stateRef.current.isTransitioning;
-  }, []);
-
-  // ============================================================
   // PUBLIC: Handle scroll event
   // ============================================================
   const handleScroll = useCallback(
     (chatId: string): void => {
-      const state = stateRef.current;
-
-      // Skip if conditions not met
-      if (
-        !state.isSaveEnabled ||
-        state.isTransitioning ||
-        state.isRestoring ||
-        state.activeChatId !== chatId
-      ) {
+      // Only save scrolls in IDLE state
+      if (stateRef.current !== "idle") {
         return;
       }
 
-      // Debounced save
-      saveScrollPosition(chatId);
+      // Only for active chat
+      if (activeChatIdRef.current !== chatId) {
+        return;
+      }
+
+      // Skip programmatic scrolls
+      if (programmaticScrollRef.current) {
+        return;
+      }
+
+      // Skip if this matches our last programmatic scroll (within threshold)
+      const container = containerRef.current;
+      if (container && lastProgrammaticScrollTopRef.current !== null) {
+        const diff = Math.abs(
+          container.scrollTop - lastProgrammaticScrollTopRef.current
+        );
+        if (diff < 5) {
+          // This is likely the scroll event from our programmatic scroll
+          return;
+        }
+        // User has scrolled away from programmatic position - clear it
+        lastProgrammaticScrollTopRef.current = null;
+      }
+
+      // Clear any pending save and schedule a new one (debounced)
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+      }
+
+      saveTimerRef.current = setTimeout(() => {
+        saveScrollPositionImmediate(chatId);
+        saveTimerRef.current = null;
+      }, opts.saveDebounceMs);
     },
-    [saveScrollPosition]
+    [containerRef, saveScrollPositionImmediate, opts.saveDebounceMs]
   );
 
   // ============================================================
-  // CLEANUP on unmount
+  // PUBLIC: Check if transitioning
+  // ============================================================
+  const isTransitioning = useCallback((): boolean => {
+    return stateRef.current !== "idle";
+  }, []);
+
+  // ============================================================
+  // PUBLIC: Get current state
+  // ============================================================
+  const getState = useCallback((): ManagerState => {
+    return stateRef.current;
+  }, []);
+
+  // ============================================================
+  // CLEANUP
   // ============================================================
   useEffect(() => {
     return () => {
@@ -445,15 +860,13 @@ export function useScrollPositionManager(
   }, []);
 
   return {
-    saveScrollPosition,
-    restoreScrollPosition,
     onChatWillChange,
     onChatDidChange,
-    setScrollSaveEnabled,
-    isScrollSaveEnabled,
+    restoreScrollPosition,
     getSavedPosition,
     clearSavedPositions,
-    isTransitioning,
     handleScroll,
+    isTransitioning,
+    getState,
   };
 }

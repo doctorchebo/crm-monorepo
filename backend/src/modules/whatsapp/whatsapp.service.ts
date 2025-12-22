@@ -973,6 +973,24 @@ export class WhatsAppService {
       console.log('Sender ID from webhook:', senderId);
       const messageId = message.id;
 
+      // === DEDUPLICATION CHECK ===
+      // Meta may retry webhooks, so check if we already have this message
+      const existingMessage = await db.query.messages.findFirst({
+        where: eq(messages.messageId, messageId),
+        columns: { id: true, messageId: true },
+      });
+
+      if (existingMessage) {
+        this.logger.warn(
+          `⚠️ Duplicate message detected: ${messageId} (already stored). ` +
+            `This is likely a Meta webhook retry. Skipping.`,
+        );
+        console.log(
+          `🔄 DUPLICATE: Message ${messageId} already exists - this is a Meta webhook retry`,
+        );
+        return; // Skip processing - already handled
+      }
+
       // Get sender details to get the business phone
       let sender: any = null;
       if (senderId) {

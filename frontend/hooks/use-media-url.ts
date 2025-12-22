@@ -7,6 +7,7 @@
  * - Cloud API blob URL lifecycle management
  * - Prevents race conditions on component unmount
  * - Thumbnail status awareness for progressive loading
+ * - Module-level URL cache for instant restoration on re-mount
  *
  * Usage:
  * ```tsx
@@ -17,6 +18,66 @@
 import { mediaApi } from "@/lib/media/api";
 import { Attachment, ThumbnailStatus } from "@/lib/media/types";
 import { useCallback, useEffect, useRef, useState } from "react";
+
+// ============================================================
+// MODULE-LEVEL THUMBNAIL URL CACHE
+// ============================================================
+// This cache persists across component unmounts/remounts
+// It stores thumbnail URLs that have been successfully loaded
+// This eliminates loading flicker when switching between chats
+// and prevents unnecessary skeleton displays
+
+interface CachedMediaEntry {
+  thumbnailUrl: string | null;
+  fullUrl: string | null;
+  cachedAt: number;
+}
+
+// Module-level cache - survives component unmounts
+const mediaUrlCache = new Map<string, CachedMediaEntry>();
+
+// Cache TTL - 30 minutes (thumbnail presigned URLs typically last 1 hour)
+const CACHE_TTL = 30 * 60 * 1000;
+
+function getCacheKey(messageId: string, attachmentId: string): string {
+  return `${messageId}:${attachmentId}`;
+}
+
+function getCachedEntry(
+  messageId: string,
+  attachmentId: string
+): CachedMediaEntry | null {
+  const key = getCacheKey(messageId, attachmentId);
+  const entry = mediaUrlCache.get(key);
+
+  if (!entry) return null;
+
+  // Check if entry is expired
+  if (Date.now() - entry.cachedAt > CACHE_TTL) {
+    mediaUrlCache.delete(key);
+    return null;
+  }
+
+  return entry;
+}
+
+function setCachedEntry(
+  messageId: string,
+  attachmentId: string,
+  thumbnailUrl: string | null,
+  fullUrl: string | null
+): void {
+  const key = getCacheKey(messageId, attachmentId);
+  mediaUrlCache.set(key, {
+    thumbnailUrl,
+    fullUrl,
+    cachedAt: Date.now(),
+  });
+}
+
+// ============================================================
+// HOOK TYPES
+// ============================================================
 
 interface UseMediaUrlOptions {
   loadThumbnail?: boolean; // Try to load thumbnail first
@@ -48,16 +109,37 @@ interface UseMediaUrlResult {
   loadFullResolution: () => void;
 }
 
+// ============================================================
+// MAIN HOOK
+// ============================================================
+
 export function useMediaUrl(
   messageId: string,
   attachmentId: string,
   options: UseMediaUrlOptions = {}
 ): UseMediaUrlResult {
   const { loadThumbnail = false, handleCloudApi = true, attachment } = options;
-  const [url, setUrl] = useState<string | null>(null);
-  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
-  const [fullUrl, setFullUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+
+  // Check module-level cache SYNCHRONOUSLY for initial state
+  // This prevents loading flicker when component remounts
+  const cachedEntry = attachmentId
+    ? getCachedEntry(messageId, attachmentId)
+    : null;
+  const hasCachedUrl =
+    cachedEntry && (cachedEntry.thumbnailUrl || cachedEntry.fullUrl);
+
+  // Initialize state from cache if available
+  const [url, setUrl] = useState<string | null>(
+    hasCachedUrl ? cachedEntry.thumbnailUrl || cachedEntry.fullUrl : null
+  );
+  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(
+    cachedEntry?.thumbnailUrl || null
+  );
+  const [fullUrl, setFullUrl] = useState<string | null>(
+    cachedEntry?.fullUrl || null
+  );
+  // CRITICAL: Start as NOT loading if we have cached data
+  const [loading, setLoading] = useState(!hasCachedUrl);
   const [error, setError] = useState<string | null>(null);
   const [shouldLoadFull, setShouldLoadFull] = useState(false);
 
@@ -92,11 +174,38 @@ export function useMediaUrl(
       return;
     }
 
+    // Check module-level cache first - if we have cached URLs, skip the fetch
+    const cached = getCachedEntry(messageId, attachmentId);
+    if (cached && (cached.thumbnailUrl || cached.fullUrl)) {
+      // We already have cached URLs, just ensure state is set correctly
+      // (This handles the case where dependencies change but we still have valid cache)
+      const displayUrl = cached.thumbnailUrl || cached.fullUrl;
+      if (
+        url !== displayUrl ||
+        thumbnailUrl !== cached.thumbnailUrl ||
+        fullUrl !== cached.fullUrl
+      ) {
+        setThumbnailUrl(cached.thumbnailUrl);
+        setFullUrl(cached.fullUrl);
+        setUrl(displayUrl);
+      }
+      setLoading(false);
+
+      // If thumbnail wasn't ready before but now is, we might need to fetch it
+      // Check if we should fetch thumbnail now that it's ready
+      if (loadThumbnail && hasThumbnail && !cached.thumbnailUrl) {
+        // Fall through to fetch thumbnail
+      } else {
+        console.log(`[useMediaUrl] Using cached URL for ${attachmentId}`);
+        return; // Cache hit - no need to fetch
+      }
+    }
+
     // Create abort controller for this effect
     abortControllerRef.current = new AbortController();
     let isMounted = true;
 
-    console.log(`[useMediaUrl] Effect running for ${attachmentId}:`, {
+    console.log(`[useMediaUrl] Fetching URL for ${attachmentId}:`, {
       hasThumbnail,
       thumbnailStatus,
       thumbnailKey: attachment?.thumbnailKey,
@@ -104,23 +213,21 @@ export function useMediaUrl(
 
     const loadUrl = async () => {
       try {
-        setLoading(true);
+        // Only set loading if we don't already have a URL to display
+        if (!url) {
+          setLoading(true);
+        }
         setError(null);
 
-        let thumbnailUrl: string | null = null;
+        let loadedThumbnailUrl: string | null = null;
         let originalUrl: string | null = null;
 
         // Try to load thumbnail if available and requested
         if (loadThumbnail && hasThumbnail) {
-          console.log(`[useMediaUrl] Loading thumbnail for ${attachmentId}`);
           try {
-            thumbnailUrl = await mediaApi.getThumbnailUrl(
+            loadedThumbnailUrl = await mediaApi.getThumbnailUrl(
               messageId,
               attachmentId
-            );
-            console.log(
-              `[useMediaUrl] Thumbnail URL loaded for ${attachmentId}:`,
-              thumbnailUrl
             );
           } catch (err) {
             console.debug("Thumbnail load failed, falling back to full image");
@@ -134,7 +241,7 @@ export function useMediaUrl(
 
         // Load full URL if thumbnail not available or explicitly requested
         // Skip full load for videos when we only want thumbnail display
-        if ((!thumbnailUrl && !shouldSkipFullLoad) || shouldLoadFull) {
+        if ((!loadedThumbnailUrl && !shouldSkipFullLoad) || shouldLoadFull) {
           // Use streaming endpoint to avoid CORS issues with direct S3 URLs
           // Fetch the media as a blob and create an object URL
           try {
@@ -180,10 +287,26 @@ export function useMediaUrl(
         // Update state if component is still mounted and request wasn't aborted
         if (isMounted && !abortControllerRef.current?.signal.aborted) {
           // Use thumbnail as primary URL if available, otherwise full
-          setThumbnailUrl(thumbnailUrl);
-          setUrl(thumbnailUrl || originalUrl);
+          setThumbnailUrl(loadedThumbnailUrl);
+          setUrl(loadedThumbnailUrl || originalUrl);
           setFullUrl(originalUrl);
           setError(null);
+
+          // Update module-level cache for instant restoration on re-mount
+          // Only cache presigned URLs (not blob URLs which are component-local)
+          if (
+            loadedThumbnailUrl ||
+            (originalUrl && !originalUrl.startsWith("blob:"))
+          ) {
+            setCachedEntry(
+              messageId,
+              attachmentId,
+              loadedThumbnailUrl,
+              originalUrl && !originalUrl.startsWith("blob:")
+                ? originalUrl
+                : null
+            );
+          }
         }
       } catch (err) {
         if (isMounted && !abortControllerRef.current?.signal.aborted) {

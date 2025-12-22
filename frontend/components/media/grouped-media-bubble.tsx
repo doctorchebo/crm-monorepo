@@ -7,10 +7,9 @@
  */
 
 import { useMediaUrl } from "@/hooks/use-media-url";
-import { mediaApi } from "@/lib/media/api";
 import { Attachment } from "@/lib/media/types";
 import { Film, Play } from "lucide-react";
-import { memo, useEffect, useState } from "react";
+import { memo } from "react";
 
 interface Message {
   id?: number;
@@ -55,31 +54,16 @@ function MediaThumbnail({
   showOverlay?: boolean;
   overlayCount?: number;
 }) {
-  const { url, loading } = useMediaUrl(messageId, attachment.id, {
+  // Use the enhanced useMediaUrl hook which now has module-level caching
+  // No need for separate thumbnail loading effect - the hook handles it
+  const { url, thumbnailUrl, loading } = useMediaUrl(messageId, attachment.id, {
     loadThumbnail: true,
     handleCloudApi: true,
+    attachment, // Pass attachment for metadata (blurhash, dimensions, etc.)
   });
-  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
   const isVideo = attachment.type === "video";
 
-  useEffect(() => {
-    if (!attachment.thumbnailKey) return;
-
-    const loadThumbnail = async () => {
-      try {
-        const thumbUrl = await mediaApi.getThumbnailUrl(
-          messageId,
-          attachment.id
-        );
-        setThumbnailUrl(thumbUrl);
-      } catch (err) {
-        // Thumbnail load failed
-      }
-    };
-
-    loadThumbnail();
-  }, [attachment.id, attachment.thumbnailKey, messageId]);
-
+  // Prefer thumbnail URL over full URL
   const displayUrl = thumbnailUrl || url;
 
   return (
@@ -93,6 +77,14 @@ function MediaThumbnail({
           alt={attachment.fileName}
           className="w-full h-full object-cover"
         />
+      ) : loading ? (
+        <div className="w-full h-full bg-gray-300 dark:bg-gray-700 flex items-center justify-center animate-pulse">
+          {isVideo ? (
+            <Film className="w-6 h-6 text-gray-500" />
+          ) : (
+            <div className="w-6 h-6 rounded bg-gray-400 dark:bg-gray-600" />
+          )}
+        </div>
       ) : (
         <div className="w-full h-full bg-gray-300 flex items-center justify-center">
           {isVideo ? (

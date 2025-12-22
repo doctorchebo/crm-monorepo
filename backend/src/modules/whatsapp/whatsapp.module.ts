@@ -7,12 +7,12 @@ import { ThumbnailQueueService } from '../thumbnail/thumbnail-queue.service';
 import { ThumbnailModule } from '../thumbnail/thumbnail.module';
 import { MediaController } from './controllers/media.controller';
 import { AudioConverterService } from './services/audio-converter.service';
+import { MediaAnalyzerService } from './services/media-analyzer.service';
 import { MediaService } from './services/media.service';
 import { WhatsAppController } from './whatsapp.controller';
 import { WhatsAppGateway, setWhatsAppGateway } from './whatsapp.gateway';
 import { WhatsAppService } from './whatsapp.service';
 import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
-import { MediaAnalyzerService } from './services/media-analyzer.service';
 
 /**
  * WhatsApp Module

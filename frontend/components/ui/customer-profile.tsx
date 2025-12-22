@@ -12,6 +12,11 @@ import {
 } from "@/components/ui/select";
 import { backendApi, ContactAttribute } from "@/lib/api/endpoints";
 import {
+  getAllResolvedVariables,
+  type ContactData,
+  type ResolvedTemplateVariable,
+} from "@/lib/utils/template-variables";
+import {
   Check,
   Loader2,
   Mail,
@@ -22,20 +27,12 @@ import {
   User,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 
 interface CustomerProfileProps {
   contactId: string;
   onProfileUpdate?: () => void;
-}
-
-interface ContactData {
-  contactId: string;
-  firstName: string;
-  lastName: string | null;
-  email: string | null;
-  phoneNumber: string;
 }
 
 type ValueType = "string" | "number" | "date" | "phone" | "email";
@@ -594,51 +591,73 @@ export function CustomerProfile({
           )}
         </div>
 
-        {/* Variable Reference */}
-        <div className="p-3 bg-muted/30 rounded-lg space-y-2">
-          <h4 className="text-xs font-semibold text-muted-foreground">
-            Template Variables
-          </h4>
-          <p className="text-[10px] text-muted-foreground mb-2">
-            Use these in your message templates:
-          </p>
-          <div className="text-xs space-y-1">
-            <div className="flex items-center gap-2">
-              <code className="bg-muted px-1 rounded text-[10px]">
-                {"{{customer.first_name}}"}
-              </code>
-              <span className="text-[10px] text-muted-foreground">
-                → {contact?.firstName || "—"}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <code className="bg-muted px-1 rounded text-[10px]">
-                {"{{customer.email}}"}
-              </code>
-              <span className="text-[10px] text-muted-foreground">
-                → {contact?.email || "—"}
-              </span>
-            </div>
-            {attributes.slice(0, 5).map((attr) => {
-              // Determine the correct prefix based on key
-              const prefix =
-                SUGGESTED_KEYS.find((s) => s.key === attr.key)?.category ||
-                "custom";
-              const varPrefix = prefix === "custom" ? "custom" : prefix;
-              return (
-                <div key={attr.key} className="flex items-center gap-2">
-                  <code className="bg-muted px-1 rounded text-[10px]">
-                    {`{{${varPrefix}.${attr.key}}}`}
-                  </code>
-                  <span className="text-[10px] text-muted-foreground">
-                    → {attr.value || "—"}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        {/* Template Variables Section */}
+        <TemplateVariablesSection contact={contact} attributes={attributes} />
       </div>
+    </div>
+  );
+}
+
+// Template Variables Section Component
+interface TemplateVariablesSectionProps {
+  contact: ContactData | null;
+  attributes: ContactAttribute[];
+}
+
+function TemplateVariablesSection({
+  contact,
+  attributes,
+}: TemplateVariablesSectionProps) {
+  // Compute resolved variables using the utility
+  const resolvedVariables = useMemo(
+    () =>
+      getAllResolvedVariables(contact, attributes, {
+        maxAttributes: 5,
+        includeCustomer: true,
+        includeAttributes: true,
+      }),
+    [contact, attributes]
+  );
+
+  // Don't show the section if there are no variables with values
+  if (resolvedVariables.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="p-3 bg-muted/30 rounded-lg space-y-2">
+      <h4 className="text-xs font-semibold text-muted-foreground">
+        Template Variables
+      </h4>
+      <p className="text-[10px] text-muted-foreground mb-2">
+        Use these in your message templates:
+      </p>
+      <div className="text-xs space-y-1">
+        {resolvedVariables.map((variable) => (
+          <TemplateVariableRow
+            key={`${variable.category}.${variable.property}`}
+            variable={variable}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Template Variable Row Component
+interface TemplateVariableRowProps {
+  variable: ResolvedTemplateVariable;
+}
+
+function TemplateVariableRow({ variable }: TemplateVariableRowProps) {
+  return (
+    <div className="flex items-center gap-2">
+      <code className="bg-muted px-1 rounded text-[10px]">
+        {variable.variable}
+      </code>
+      <span className="text-[10px] text-muted-foreground">
+        → {variable.value}
+      </span>
     </div>
   );
 }

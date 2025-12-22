@@ -27,9 +27,9 @@ import {
 import { useTranslations } from "next-intl";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { VoiceMessageBubble } from "../voice-message-bubble";
-import { ThumbnailSkeleton } from "./thumbnail-skeleton";
 import { GifAttachment } from "./gif-attachment";
 import { StickerAttachment } from "./sticker-attachment";
+import { ThumbnailSkeleton } from "./thumbnail-skeleton";
 
 interface AttachmentDisplayProps {
   attachment: Attachment;
@@ -67,12 +67,15 @@ export function ImageAttachment({
   });
 
   // Show skeleton while thumbnail is being generated or loading
+  // Also show skeleton for any case where we don't have a displayable URL yet
+  // This ensures we never render "nothing" while waiting for media
   const showSkeleton =
     !thumbnailUrl &&
     !imageUrl &&
     (loading ||
       thumbnailStatus === "pending" ||
-      thumbnailStatus === "processing");
+      thumbnailStatus === "processing" ||
+      thumbnailStatus === undefined); // Handle undefined status gracefully
 
   // Determine which URL to display (prefer thumbnail for initial view)
   const displayUrl = thumbnailUrl || imageUrl;
@@ -189,10 +192,13 @@ export function VideoAttachment({
 
   // Show skeleton while thumbnail is being generated or loading
   // For videos, we wait for thumbnail instead of downloading full video
+  // Handle undefined status gracefully to ensure we always show something
   const showSkeleton =
     loading ||
     (!thumbnailUrl &&
-      (thumbnailStatus === "pending" || thumbnailStatus === "processing"));
+      (thumbnailStatus === "pending" ||
+        thumbnailStatus === "processing" ||
+        thumbnailStatus === undefined));
 
   // Display URL is thumbnail for poster display (prefer thumbnail over video)
   const displayUrl = thumbnailUrl;

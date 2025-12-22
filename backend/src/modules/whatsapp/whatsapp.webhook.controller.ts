@@ -10,6 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
+import { verifyWebhookSignature } from './utils/cloud-api.utils';
 import { WhatsAppService } from './whatsapp.service';
 
 /**
@@ -44,8 +45,11 @@ export class NoAuthGuard implements CanActivate {
 @UseGuards(NoAuthGuard)
 export class WhatsAppWebhookController {
   private readonly logger = new Logger(WhatsAppWebhookController.name);
+  private readonly metaAppSecret: string;
 
-  constructor(private whatsAppService: WhatsAppService) {}
+  constructor(private whatsAppService: WhatsAppService) {
+    this.metaAppSecret = process.env.META_APP_SECRET || '';
+  }
 
   /**
    * Webhook verification challenge from Meta
@@ -102,6 +106,8 @@ export class WhatsAppWebhookController {
     @Req() req: any,
     @Res() res: Response,
   ): Promise<void> {
+    const startTime = Date.now();
+
     try {
       console.log('=== INCOMING WEBHOOK POST ===');
       console.log('Timestamp:', new Date().toISOString());
@@ -109,43 +115,54 @@ export class WhatsAppWebhookController {
       console.log('Remote IP:', req.ip);
 
       this.logger.log('Webhook event received from Meta');
-      this.logger.debug('Webhook payload:', JSON.stringify(payload, null, 2));
 
       // Get signature from headers for verification
       const signature = req.headers['x-hub-signature-256'] || '';
-
-      // Debug logging
-      console.log('=== WEBHOOK CONTROLLER DEBUG ===');
-      console.log('All headers:', Object.keys(req.headers));
-      console.log('x-hub-signature-256 header:', signature);
-      console.log('req.rawBody available:', !!req.rawBody);
-      console.log('req.rawBody length:', req.rawBody ? req.rawBody.length : 0);
-
-      // Get raw body as string for signature verification
       const rawBody = req.rawBody || JSON.stringify(payload);
 
-      console.log('Using raw body for verification:', !!req.rawBody);
+      // Verify signature BEFORE queueing (security check)
+      if (this.metaAppSecret) {
+        const isValid = verifyWebhookSignature(
+          rawBody,
+          signature,
+          this.metaAppSecret,
+        );
 
-      // Process webhook
+        if (!isValid) {
+          this.logger.warn('Invalid webhook signature - rejecting');
+          // Still return 200 to not leak info about signature validation
+          res.status(200).json({ received: true });
+          return;
+        }
+        console.log('✅ Webhook signature verified');
+      } else {
+        console.log('⚠️ No META_APP_SECRET - skipping signature verification');
+      }
+
+      // Process webhook synchronously
       const result = await this.whatsAppService.handleWebhookCallback(
         rawBody,
         signature,
       );
 
-      if (result.success) {
-        // Return 200 OK so Meta doesn't retry
-        console.log('✅ Webhook processed successfully');
-        res.status(200).json({ received: true });
-      } else {
-        // Still return 200 even on processing errors
-        // So Meta doesn't retry and flood us with requests
-        console.log('⚠️ Webhook processing error:', result.message);
-        this.logger.warn(`Webhook processing error: ${result.message}`);
-        res.status(200).json({ received: true, error: result.message });
-      }
+      const processingTime = Date.now() - startTime;
+      console.log(
+        `Webhook processed in ${processingTime}ms: ${result.success}`,
+      );
+
+      res.status(200).json({
+        received: true,
+        success: result.success,
+        processingTime,
+      });
     } catch (error) {
-      console.log('❌ Exception in webhook handler:', error.message);
+      const processingTime = Date.now() - startTime;
+      console.log(
+        `❌ Exception in webhook handler after ${processingTime}ms:`,
+        error.message,
+      );
       this.logger.error(`Error handling webhook: ${error.message}`, error);
+
       // Always return 200 so Meta stops retrying
       res.status(200).json({ received: true, error: error.message });
     }

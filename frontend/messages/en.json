@@ -43,6 +43,8 @@
     "searchChats": "Search chats...",
     "selectChat": "Select a chat to view details",
     "selectChatHint": "Choose a conversation from the list to start messaging",
+    "syncingMessages": "Syncing messages...",
+    "syncingMessagesDesc": "Please wait while we load your latest messages",
     "loading": "Loading...",
     "addNote": "Add Note",
     "typeMessage": "Type a message...",

@@ -161,7 +161,14 @@ export function useRealtimeChat(chatId?: string) {
       // Only add message if it matches the currently selected chat
       // This prevents messages from appearing in the wrong chat
       const currentChatId = chatIdRef.current;
-      if (currentChatId && message.chatId !== currentChatId) {
+
+      // If no chat is selected, don't add any messages
+      if (!currentChatId) {
+        console.log(`[RealtimeChat] ⏭️ Skipping message - no chat selected`);
+        return;
+      }
+
+      if (message.chatId !== currentChatId) {
         console.log(
           `[RealtimeChat] ⏭️ Skipping message - belongs to chat ${message.chatId}, not current chat ${currentChatId}`
         );
@@ -186,13 +193,17 @@ export function useRealtimeChat(chatId?: string) {
 
       const currentChatId = chatIdRef.current;
 
+      // If no chat is selected, don't add any messages
+      if (!currentChatId) {
+        console.log(`[RealtimeChat] ⏭️ Skipping batch - no chat selected`);
+        return;
+      }
+
       setMessages((prev) => {
         const existingIds = new Set(prev.map((m) => m.messageId));
         // Filter for messages that belong to the current chat and don't already exist
         const newMessages = messageList.filter(
-          (m) =>
-            !existingIds.has(m.messageId) &&
-            (!currentChatId || m.chatId === currentChatId)
+          (m) => !existingIds.has(m.messageId) && m.chatId === currentChatId
         );
         return [...prev, ...newMessages];
       });

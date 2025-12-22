@@ -43,6 +43,8 @@
     "searchChats": "Buscar chats...",
     "selectChat": "Selecciona un chat para ver detalles",
     "selectChatHint": "Elige una conversación de la lista para empezar a enviar mensajes",
+    "syncingMessages": "Sincronizando mensajes...",
+    "syncingMessagesDesc": "Por favor espera mientras cargamos tus últimos mensajes",
     "loading": "Cargando...",
     "addNote": "Agregar Nota",
     "typeMessage": "Escribe un mensaje...",

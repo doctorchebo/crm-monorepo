@@ -29,6 +29,11 @@ interface UseMessageHandlersProps {
   setError: React.Dispatch<React.SetStateAction<string | null>>;
   messagesContainerRef: React.RefObject<HTMLDivElement | null>;
   messagesCacheRef: React.MutableRefObject<Map<string, MessagesCacheEntry>>;
+  /**
+   * Ref to track which chat the current messages belong to.
+   * Use this to validate before updating messages to prevent cross-chat contamination.
+   */
+  currentMessagesChatIdRef: React.MutableRefObject<string | null>;
   shouldAutoScroll: boolean;
   setShouldAutoScroll: React.Dispatch<React.SetStateAction<boolean>>;
   setHasNewMessages: React.Dispatch<React.SetStateAction<boolean>>;
@@ -84,6 +89,7 @@ export function useMessageHandlers(
     setError,
     messagesContainerRef,
     messagesCacheRef,
+    currentMessagesChatIdRef,
     shouldAutoScroll,
     setShouldAutoScroll,
     setHasNewMessages,
@@ -184,12 +190,28 @@ export function useMessageHandlers(
         setTemplateInput("");
         setReplyingToMessage(null);
 
-        // Refresh messages
+        // Refresh messages - but only if we're still on the same chat
+        if (currentMessagesChatIdRef.current !== selectedChatId) {
+          console.log(
+            "[MessageHandlers] Skipping message refresh - chat changed"
+          );
+          return;
+        }
+
         const response = await backendApi.whatsapp.getChatMessages(
           selectedChatId,
           0,
           PAGE_SIZE
         );
+
+        // Double-check after async operation
+        if (currentMessagesChatIdRef.current !== selectedChatId) {
+          console.log(
+            "[MessageHandlers] Skipping message update - chat changed"
+          );
+          return;
+        }
+
         if (response && response.messages) {
           const sorted = [...response.messages].sort(
             (a, b) =>
@@ -228,6 +250,7 @@ export function useMessageHandlers(
       chats,
       replyingToMessage,
       messagesCacheRef,
+      currentMessagesChatIdRef,
       setMessages,
       setMessageCount,
       setError,
@@ -322,8 +345,23 @@ export function useMessageHandlers(
   );
 
   // Merge inbound WebSocket messages into the message list
+  // CRITICAL: This effect only runs when we have inbound messages AND a selected chat
+  // The currentMessagesChatIdRef ensures we don't update messages for a different chat
   useEffect(() => {
-    if (inboundMessages.length === 0) return;
+    if (inboundMessages.length === 0 || !selectedChatId) return;
+
+    // CRITICAL: Validate that we're updating the correct chat's messages
+    // This prevents race conditions where the effect fires after chat switch
+    if (currentMessagesChatIdRef.current !== selectedChatId) {
+      console.log(
+        `[MessageHandlers] Skipping inbound message merge - chat mismatch`,
+        {
+          selectedChatId,
+          currentMessagesChatId: currentMessagesChatIdRef.current,
+        }
+      );
+      return;
+    }
 
     const container = messagesContainerRef.current;
     const isCurrentlyAtBottom = container
@@ -331,13 +369,25 @@ export function useMessageHandlers(
         100
       : true;
 
+    // Track how many messages were actually added
+    let addedCount = 0;
+
     setMessages((prevMessages) => {
+      // Double-check chat ID inside the state updater to handle timing issues
+      if (currentMessagesChatIdRef.current !== selectedChatId) {
+        return prevMessages;
+      }
+
       const existingIds = new Set(prevMessages.map((m) => m.messageId));
+      // Filter for messages that belong to the current chat and don't already exist
       const newMessages = inboundMessages.filter(
-        (wsMsg: InboundMessage) => !existingIds.has(wsMsg.messageId)
+        (wsMsg: InboundMessage) =>
+          !existingIds.has(wsMsg.messageId) && wsMsg.chatId === selectedChatId
       );
 
       if (newMessages.length === 0) return prevMessages;
+
+      addedCount = newMessages.length;
 
       const newMessageObjects: Message[] = newMessages.map(
         (wsMsg: InboundMessage): Message => ({
@@ -386,9 +436,13 @@ export function useMessageHandlers(
       scrollHelperRequestScroll(true);
     }
 
-    setMessageCount((prev) => prev + inboundMessages.length);
+    if (addedCount > 0) {
+      setMessageCount((prev) => prev + addedCount);
+    }
   }, [
     inboundMessages,
+    selectedChatId,
+    currentMessagesChatIdRef,
     messagesContainerRef,
     setMessages,
     setMessageCount,

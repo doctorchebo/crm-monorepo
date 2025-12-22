@@ -113,6 +113,56 @@ export class ThumbnailQueueService {
   }
 
   /**
+   * HIGH PRIORITY: Queue thumbnail jobs for sync operation
+   * These jobs get priority 0 (highest) to ensure synced messages
+   * display thumbnails as quickly as possible
+   *
+   * @param jobsData - Array of thumbnail job data from sync
+   */
+  async queueSyncThumbnails(jobsData: ThumbnailJobData[]): Promise<void> {
+    // Filter to only media types that support thumbnails
+    const validJobs = jobsData.filter((job) =>
+      supportsThumbnail(job.mediaType, job.mimeType),
+    );
+
+    if (validJobs.length === 0) {
+      this.logger.debug('No valid sync jobs to queue for thumbnail generation');
+      return;
+    }
+
+    try {
+      // HIGH PRIORITY: Priority 0 for sync thumbnails (lower = higher priority)
+      const jobs = validJobs.map((jobData) => ({
+        name: THUMBNAIL_JOB_NAME,
+        data: { ...jobData, isSync: true }, // Mark as sync job for logging
+        opts: {
+          attempts: this.config.job.attempts,
+          backoff: {
+            type: this.config.job.backoffType as 'exponential' | 'fixed',
+            delay: this.config.job.backoffDelay,
+          },
+          removeOnComplete: this.config.job.removeOnComplete,
+          removeOnFail: this.config.job.removeOnFail,
+          timeout: this.config.job.timeout,
+          priority: 0, // HIGHEST PRIORITY for sync thumbnails
+        },
+      }));
+
+      await this.thumbnailQueue.addBulk(jobs);
+
+      this.logger.log(
+        `🚀 HIGH PRIORITY: Queued ${validJobs.length} sync thumbnail jobs`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to queue sync thumbnail jobs: ${error.message}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
+
+  /**
    * Get queue statistics
    */
   async getQueueStats(): Promise<{

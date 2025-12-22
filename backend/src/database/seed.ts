@@ -3,7 +3,7 @@
  * Populates the variable_definitions table with system-level variables
  */
 
-import { eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { db } from './db.connection';
 import { NewVariableDefinition, variableDefinitions } from './schema';
 
@@ -491,14 +491,17 @@ export async function seedVariableDefinitions(): Promise<void> {
 
   for (const varDef of VARIABLE_DEFINITIONS) {
     try {
-      // Check if variable already exists
-      const existing = await db.query.variableDefinitions.findFirst({
-        where: (fields, { and, eq }) =>
+      // Check if variable already exists using select() to avoid type resolution issues
+      const [existing] = await db
+        .select()
+        .from(variableDefinitions)
+        .where(
           and(
-            eq(fields.category, varDef.category),
-            eq(fields.property, varDef.property),
+            eq(variableDefinitions.category, varDef.category),
+            eq(variableDefinitions.property, varDef.property),
           ),
-      });
+        )
+        .limit(1);
 
       if (existing) {
         console.log(
@@ -528,10 +531,14 @@ export async function seedVariableDefinitions(): Promise<void> {
 export async function getVariableDefinitionsByCategory(): Promise<
   Record<string, typeof VARIABLE_DEFINITIONS>
 > {
-  const all = await db.query.variableDefinitions.findMany({
-    where: eq(variableDefinitions.isActive, true),
-    orderBy: (fields, { asc }) => [asc(fields.category), asc(fields.sortOrder)],
-  });
+  const all = await db
+    .select()
+    .from(variableDefinitions)
+    .where(eq(variableDefinitions.isActive, true))
+    .orderBy(
+      asc(variableDefinitions.category),
+      asc(variableDefinitions.sortOrder),
+    );
 
   const grouped: Record<string, typeof all> = {};
   for (const varDef of all) {

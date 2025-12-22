@@ -18,6 +18,11 @@ interface UseMediaHandlersProps {
   setMessageCount: React.Dispatch<React.SetStateAction<number>>;
   setError: React.Dispatch<React.SetStateAction<string | null>>;
   messagesCacheRef: React.MutableRefObject<Map<string, MessagesCacheEntry>>;
+  /**
+   * Ref to track which chat the current messages belong to.
+   * Use this to validate before updating messages to prevent cross-chat contamination.
+   */
+  currentMessagesChatIdRef: React.MutableRefObject<string | null>;
   setShouldAutoScroll: React.Dispatch<React.SetStateAction<boolean>>;
   scrollHelperRequestScroll: (smooth?: boolean) => (() => void) | undefined;
   replyingToMessage: Message | null;
@@ -102,6 +107,7 @@ export function useMediaHandlers(
     setMessageCount,
     setError,
     messagesCacheRef,
+    currentMessagesChatIdRef,
     setShouldAutoScroll,
     scrollHelperRequestScroll,
     replyingToMessage,
@@ -324,12 +330,28 @@ export function useMediaHandlers(
           }
         }
 
-        // Refresh messages
+        // Refresh messages - but only if we're still on the same chat
+        if (currentMessagesChatIdRef.current !== selectedChatId) {
+          console.log(
+            "[MediaHandlers] Skipping message refresh - chat changed during upload"
+          );
+          return;
+        }
+
         const response = await backendApi.whatsapp.getChatMessages(
           selectedChatId,
           0,
           PAGE_SIZE
         );
+
+        // Double-check after async operation
+        if (currentMessagesChatIdRef.current !== selectedChatId) {
+          console.log(
+            "[MediaHandlers] Skipping message update - chat changed during fetch"
+          );
+          return;
+        }
+
         if (response && response.messages) {
           const sorted = [...response.messages].sort(
             (a, b) =>
@@ -381,6 +403,7 @@ export function useMediaHandlers(
       chats,
       replyingToMessage,
       messagesCacheRef,
+      currentMessagesChatIdRef,
       setMessages,
       setMessageCount,
       setError,
@@ -516,11 +539,28 @@ export function useMediaHandlers(
 
         setReplyingToMessage(null);
 
+        // Refresh messages - but only if we're still on the same chat
+        if (currentMessagesChatIdRef.current !== selectedChatId) {
+          console.log(
+            "[MediaHandlers] Skipping voice note message refresh - chat changed"
+          );
+          return;
+        }
+
         const response = await backendApi.whatsapp.getChatMessages(
           selectedChatId,
           0,
           PAGE_SIZE
         );
+
+        // Double-check after async operation
+        if (currentMessagesChatIdRef.current !== selectedChatId) {
+          console.log(
+            "[MediaHandlers] Skipping voice note message update - chat changed"
+          );
+          return;
+        }
+
         if (response && response.messages) {
           const sorted = [...response.messages].sort(
             (a, b) =>
@@ -549,6 +589,7 @@ export function useMediaHandlers(
       chats,
       replyingToMessage,
       messagesCacheRef,
+      currentMessagesChatIdRef,
       setMessages,
       setMessageCount,
       setError,

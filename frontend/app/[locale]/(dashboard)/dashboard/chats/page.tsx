@@ -86,6 +86,7 @@ export default function ChatsPage() {
     setError: chatState.setError,
     messagesContainerRef: chatState.messagesContainerRef,
     messagesCacheRef: chatState.messagesCacheRef,
+    currentMessagesChatIdRef: chatState.currentMessagesChatIdRef,
     shouldAutoScroll: chatState.shouldAutoScroll,
     setShouldAutoScroll: chatState.setShouldAutoScroll,
     setHasNewMessages: chatState.setHasNewMessages,
@@ -103,6 +104,7 @@ export default function ChatsPage() {
     setMessageCount: chatState.setMessageCount,
     setError: chatState.setError,
     messagesCacheRef: chatState.messagesCacheRef,
+    currentMessagesChatIdRef: chatState.currentMessagesChatIdRef,
     setShouldAutoScroll: chatState.setShouldAutoScroll,
     scrollHelperRequestScroll: chatState.scrollHelperRequestScroll,
     replyingToMessage: messageHandlers.replyingToMessage,
@@ -119,6 +121,7 @@ export default function ChatsPage() {
     setMessages: chatState.setMessages,
     setMessageCount: chatState.setMessageCount,
     messagesCacheRef: chatState.messagesCacheRef,
+    currentMessagesChatIdRef: chatState.currentMessagesChatIdRef,
     setShouldAutoScroll: chatState.setShouldAutoScroll,
     scrollHelperRequestScroll: chatState.scrollHelperRequestScroll,
   });
@@ -361,6 +364,7 @@ export default function ChatsPage() {
                 <div className="flex-1 flex flex-col overflow-hidden min-h-0 relative">
                   {/* Messages scroll container wrapper */}
                   <div className="relative flex-1 min-h-0 overflow-hidden">
+                    {/* Show messages list - don't block on initial sync */}
                     <MessagesList
                       groupedMessages={groupedMessages}
                       messages={chatState.messages}

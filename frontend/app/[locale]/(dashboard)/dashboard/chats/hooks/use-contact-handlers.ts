@@ -18,6 +18,11 @@ interface UseContactHandlersProps {
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   setMessageCount: React.Dispatch<React.SetStateAction<number>>;
   messagesCacheRef: React.MutableRefObject<Map<string, MessagesCacheEntry>>;
+  /**
+   * Ref to track which chat the current messages belong to.
+   * Use this to validate before updating messages to prevent cross-chat contamination.
+   */
+  currentMessagesChatIdRef: React.MutableRefObject<string | null>;
   setShouldAutoScroll: React.Dispatch<React.SetStateAction<boolean>>;
   scrollHelperRequestScroll: (smooth?: boolean) => (() => void) | undefined;
 }
@@ -97,6 +102,7 @@ export function useContactHandlers(
     setMessages,
     setMessageCount,
     messagesCacheRef,
+    currentMessagesChatIdRef,
     setShouldAutoScroll,
     scrollHelperRequestScroll,
   } = props;
@@ -195,12 +201,26 @@ export function useContactHandlers(
       setContactPreviewModalOpen(false);
       setContactsToSend([]);
 
-      // Refresh messages
+      // Refresh messages - but only if we're still on the same chat
+      if (currentMessagesChatIdRef.current !== selectedChatId) {
+        console.log(
+          "[ContactHandlers] Skipping message refresh - chat changed"
+        );
+        return;
+      }
+
       const response = await backendApi.whatsapp.getChatMessages(
         selectedChatId,
         0,
         PAGE_SIZE
       );
+
+      // Double-check after async operation
+      if (currentMessagesChatIdRef.current !== selectedChatId) {
+        console.log("[ContactHandlers] Skipping message update - chat changed");
+        return;
+      }
+
       if (response && response.messages) {
         const sorted = [...response.messages].sort(
           (a, b) =>
@@ -238,6 +258,7 @@ export function useContactHandlers(
     contactsToSend,
     chats,
     messagesCacheRef,
+    currentMessagesChatIdRef,
     setMessages,
     setMessageCount,
     setShouldAutoScroll,
