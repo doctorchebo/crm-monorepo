@@ -678,6 +678,110 @@ export class ChatsService {
   }
 
   /**
+   * Find the first message on or after a specific date
+   * Used for "jump to date" functionality in the message search panel
+   *
+   * @param chatId - The chat ID
+   * @param targetDate - The date to jump to (start of day)
+   * @returns The first message on or after that date, with position info
+   */
+  async findMessageByDate(
+    chatId: string,
+    targetDate: Date,
+  ): Promise<{
+    found: boolean;
+    messageId: string | null;
+    message: any | null;
+    position: number;
+    totalCount: number;
+  }> {
+    try {
+      await this.findOne(chatId);
+
+      // Get total message count
+      const [countResult] = await db
+        .select({ count: count() })
+        .from(messages)
+        .where(and(eq(messages.chatId, chatId), eq(messages.isDeleted, false)));
+      const totalCount = Number(countResult?.count) || 0;
+
+      // Normalize to start of day
+      const startOfDay = new Date(targetDate);
+      startOfDay.setHours(0, 0, 0, 0);
+
+      // Find the first message on or after the target date
+      const targetMessage = await db.query.messages.findFirst({
+        where: and(
+          eq(messages.chatId, chatId),
+          eq(messages.isDeleted, false),
+          gte(messages.timestamp, startOfDay),
+        ),
+        orderBy: [asc(messages.timestamp)],
+      });
+
+      if (!targetMessage) {
+        // No message found on or after the date
+        // Return the last message instead
+        const lastMessage = await db.query.messages.findFirst({
+          where: and(
+            eq(messages.chatId, chatId),
+            eq(messages.isDeleted, false),
+          ),
+          orderBy: [desc(messages.timestamp)],
+        });
+
+        if (!lastMessage) {
+          return {
+            found: false,
+            messageId: null,
+            message: null,
+            position: 0,
+            totalCount,
+          };
+        }
+
+        return {
+          found: true,
+          messageId: lastMessage.messageId,
+          message: lastMessage,
+          position: totalCount,
+          totalCount,
+        };
+      }
+
+      // Get the position of this message (how many messages are before it)
+      const [positionResult] = await db
+        .select({ count: count() })
+        .from(messages)
+        .where(
+          and(
+            eq(messages.chatId, chatId),
+            eq(messages.isDeleted, false),
+            lte(messages.timestamp, targetMessage.timestamp),
+          ),
+        );
+      const position = Number(positionResult?.count) || 0;
+
+      this.logger.log(
+        `Found message by date in chat ${chatId}: ${targetMessage.messageId} at position ${position}`,
+      );
+
+      return {
+        found: true,
+        messageId: targetMessage.messageId,
+        message: targetMessage,
+        position,
+        totalCount,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error finding message by date in chat ${chatId}: ${error.message}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
    * Increment unread count for a chat
    * Called when a new inbound message arrives
    *

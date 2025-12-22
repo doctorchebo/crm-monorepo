@@ -131,6 +131,23 @@ export class ChatsController {
   }
 
   /**
+   * Find the first message on or after a specific date
+   * Used for "jump to date" functionality in message search
+   * GET /chats/:id/messages/by-date?date=2024-01-15
+   */
+  @Get(':id/messages/by-date')
+  async findMessageByDate(
+    @Param('id') chatId: string,
+    @Query('date') dateString: string,
+  ) {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) {
+      throw new Error('Invalid date format. Use ISO format (e.g., 2024-01-15)');
+    }
+    return this.chatsService.findMessageByDate(chatId, date);
+  }
+
+  /**
    * Get message position within a chat
    * Used for scroll-to-message functionality
    * GET /chats/:id/messages/:messageId/position

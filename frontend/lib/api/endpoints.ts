@@ -295,6 +295,23 @@ export const backendApi = {
       surroundingMessages: any[];
       totalCount: number;
     }> => apiClient.get(`/chats/${chatId}/messages/${messageId}/position`),
+    /**
+     * Find the first message on or after a specific date
+     * Used for "jump to date" functionality
+     */
+    findMessageByDate: (
+      chatId: string,
+      date: Date
+    ): Promise<{
+      found: boolean;
+      messageId: string | null;
+      message: any | null;
+      position: number;
+      totalCount: number;
+    }> =>
+      apiClient.get(
+        `/chats/${chatId}/messages/by-date?date=${date.toISOString()}`
+      ),
   },
 
   // Kanban endpoints

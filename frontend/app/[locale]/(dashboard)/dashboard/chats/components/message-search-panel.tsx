@@ -262,8 +262,8 @@ export function MessageSearchPanel({
 }: MessageSearchPanelProps) {
   const t = useTranslations("chats.search");
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+  const [isJumpingToDate, setIsJumpingToDate] = useState(false);
   const [results, setResults] = useState<MessageSearchResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -276,9 +276,36 @@ export function MessageSearchPanel({
   // Debounce the search query
   const debouncedQuery = useDebounce(searchQuery, 300);
 
+  // Jump to a specific date - find the first message on or after that date
+  const handleJumpToDate = useCallback(
+    async (date: Date) => {
+      try {
+        setIsJumpingToDate(true);
+        setError(null);
+
+        const response = await backendApi.chats.findMessageByDate(chatId, date);
+
+        if (response.found && response.messageId) {
+          // Navigate to the message
+          onSelectMessage(response.messageId);
+          // Close the date picker
+          setIsDatePickerOpen(false);
+        } else {
+          setError("noMessagesOnDate");
+        }
+      } catch (err) {
+        console.error("Jump to date error:", err);
+        setError("jumpToDateError");
+      } finally {
+        setIsJumpingToDate(false);
+      }
+    },
+    [chatId, onSelectMessage]
+  );
+
   // Perform search
   const performSearch = useCallback(
-    async (query: string, date?: Date, append = false) => {
+    async (query: string, append = false) => {
       if (query.length < 2) {
         if (!append) {
           setResults([]);
@@ -293,19 +320,11 @@ export function MessageSearchPanel({
         setError(null);
 
         const options: {
-          endDate?: string;
           skip?: number;
           take?: number;
         } = {
           take: 20,
         };
-
-        if (date) {
-          // Filter messages from the beginning of time up to and including the selected date
-          const endOfDay = new Date(date);
-          endOfDay.setHours(23, 59, 59, 999);
-          options.endDate = endOfDay.toISOString();
-        }
 
         if (append && results.length > 0) {
           options.skip = results.length;
@@ -337,10 +356,10 @@ export function MessageSearchPanel({
     [chatId, results.length]
   );
 
-  // Effect to trigger search on debounced query or date change
+  // Effect to trigger search on debounced query change
   useEffect(() => {
-    performSearch(debouncedQuery, selectedDate);
-  }, [debouncedQuery, selectedDate]); // Intentionally not including performSearch to avoid loops
+    performSearch(debouncedQuery);
+  }, [debouncedQuery]); // Intentionally not including performSearch to avoid loops
 
   // Reset search when panel opens
   useEffect(() => {
@@ -353,7 +372,6 @@ export function MessageSearchPanel({
   // Reset when chat changes
   useEffect(() => {
     setSearchQuery("");
-    setSelectedDate(undefined);
     setResults([]);
     setTotal(0);
     setHasMore(false);
@@ -363,7 +381,7 @@ export function MessageSearchPanel({
   // Handle load more
   const handleLoadMore = () => {
     if (!isLoading && hasMore) {
-      performSearch(debouncedQuery, selectedDate, true);
+      performSearch(debouncedQuery, true);
     }
   };
 
@@ -382,11 +400,6 @@ export function MessageSearchPanel({
   // Handle message selection
   const handleSelectMessage = (messageId: string) => {
     onSelectMessage(messageId);
-  };
-
-  // Clear date filter
-  const clearDateFilter = () => {
-    setSelectedDate(undefined);
   };
 
   if (!isOpen) return null;
@@ -438,70 +451,42 @@ export function MessageSearchPanel({
             )}
           </div>
 
-          {/* Date Picker */}
+          {/* Date Picker - Jump to Date */}
           <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
             <PopoverTrigger asChild>
               <Button
-                variant={selectedDate ? "default" : "outline"}
+                variant="outline"
                 size="icon"
                 className="h-9 w-9 flex-shrink-0"
-                title={
-                  selectedDate
-                    ? t("filteringUpTo", { date: format(selectedDate, "PP") })
-                    : t("filterByDate")
-                }
+                title={t("jumpToDate")}
+                disabled={isJumpingToDate}
               >
-                <CalendarIcon className="h-4 w-4" />
+                {isJumpingToDate ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <CalendarIcon className="h-4 w-4" />
+                )}
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0" align="end">
+              <div className="p-2 border-b">
+                <p className="text-sm font-medium text-center">
+                  {t("jumpToDate")}
+                </p>
+              </div>
               <Calendar
                 mode="single"
-                selected={selectedDate}
                 onSelect={(date) => {
-                  setSelectedDate(date);
-                  setIsDatePickerOpen(false);
+                  if (date) {
+                    handleJumpToDate(date);
+                  }
                 }}
                 disabled={(date) => date > new Date()}
                 initialFocus
               />
-              {selectedDate && (
-                <div className="border-t p-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="w-full"
-                    onClick={() => {
-                      clearDateFilter();
-                      setIsDatePickerOpen(false);
-                    }}
-                  >
-                    {t("clearDateFilter")}
-                  </Button>
-                </div>
-              )}
             </PopoverContent>
           </Popover>
         </div>
-
-        {/* Date filter indicator */}
-        {selectedDate && (
-          <div className="flex items-center gap-1 text-xs text-muted-foreground">
-            <span>
-              {t("showingResultsUpTo", {
-                date: format(selectedDate, "MMMM d, yyyy"),
-              })}
-            </span>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-4 w-4"
-              onClick={clearDateFilter}
-            >
-              <X className="h-3 w-3" />
-            </Button>
-          </div>
-        )}
       </div>
 
       {/* Results Area */}
@@ -538,14 +523,6 @@ export function MessageSearchPanel({
           results.length === 0 && (
             <div className="p-4 text-center text-sm text-muted-foreground">
               {t("noResultsFor", { query: searchQuery })}
-              {selectedDate && (
-                <span>
-                  {" "}
-                  {t("noResultsUpTo", {
-                    date: format(selectedDate, "MMMM d, yyyy"),
-                  })}
-                </span>
-              )}
             </div>
           )}
 
