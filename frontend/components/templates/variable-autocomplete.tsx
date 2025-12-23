@@ -39,6 +39,7 @@ interface VariableAutocompleteProps {
   rows?: number;
   className?: string;
   id?: string;
+  disabled?: boolean;
 }
 
 interface DropdownPosition {
@@ -53,6 +54,7 @@ export function VariableAutocomplete({
   rows = 6,
   className,
   id,
+  disabled = false,
 }: VariableAutocompleteProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -340,6 +342,7 @@ export function VariableAutocomplete({
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
         rows={rows}
+        disabled={disabled}
         className={cn(
           "flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
           className

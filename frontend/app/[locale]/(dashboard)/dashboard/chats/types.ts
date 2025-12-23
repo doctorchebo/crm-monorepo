@@ -13,6 +13,7 @@ export interface Template {
     header?: string;
     footer?: string;
     exampleVars?: Record<string, any>;
+    approvalStatus?: string;
   }>;
 }
 

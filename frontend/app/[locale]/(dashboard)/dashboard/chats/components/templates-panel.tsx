@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Loader, Search, X } from "lucide-react";
+import { ChevronDown, Clock, Info, Loader, Search, X } from "lucide-react";
 import React, { memo, useCallback, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -12,8 +12,22 @@ import {
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+
 import { useDebouncedSearch } from "../hooks/use-debounced-search";
 import type { Template } from "../types";
+import {
+  type ConversationWindowStatus,
+  enrichTemplatesWithAvailability,
+  formatTimeRemaining,
+  type TemplateUnavailableReason,
+  type TemplateWithAvailability,
+} from "../utils";
 
 // ============================================================================
 // Types & Interfaces
@@ -25,6 +39,16 @@ interface TemplatesPanelProps {
   onApplyTemplate: (template: Template) => void;
   t: (key: string) => string;
   /**
+   * Conversation window status - determines template availability
+   * If not provided, all templates are treated as available (for backwards compatibility)
+   */
+  conversationWindow?: ConversationWindowStatus;
+  /**
+   * Customer's preferred language code (e.g., "en", "es")
+   * Used to determine which locale to check for approval status
+   */
+  customerLanguage?: string;
+  /**
    * Default collapsed state
    * @default false
    */
@@ -32,8 +56,9 @@ interface TemplatesPanelProps {
 }
 
 interface TemplateButtonProps {
-  template: Template;
+  template: TemplateWithAvailability;
   onClick: (template: Template) => void;
+  t: (key: string) => string;
 }
 
 interface TemplateSearchInputProps {
@@ -45,8 +70,9 @@ interface TemplateSearchInputProps {
 }
 
 interface TemplateGridProps {
-  templates: Template[];
+  templates: TemplateWithAvailability[];
   onApplyTemplate: (template: Template) => void;
+  t: (key: string) => string;
 }
 
 // ============================================================================
@@ -61,25 +87,81 @@ const COLLAPSED_STATE_KEY = "templates-panel-collapsed";
 // ============================================================================
 
 /**
+ * Returns the translation key for an unavailable reason
+ */
+function getUnavailableReasonKey(reason: TemplateUnavailableReason): string {
+  switch (reason) {
+    case "not_approved":
+      return "templateNotApproved";
+    case "no_matching_locale":
+      return "templateNoMatchingLocale";
+    case "outside_window_not_approved":
+      return "templateOutsideWindowNotApproved";
+    default:
+      return "templateNotApproved";
+  }
+}
+
+/**
  * Individual template button - memoized to prevent re-renders when search changes
+ * Handles both available and unavailable states with tooltips
  */
 const TemplateButton = memo(function TemplateButton({
   template,
   onClick,
+  t,
 }: TemplateButtonProps) {
+  const { availability } = template;
+  const isAvailable = availability.isAvailable;
+
   const handleClick = useCallback(() => {
-    onClick(template);
-  }, [template, onClick]);
+    if (isAvailable) {
+      onClick(template);
+    }
+  }, [template, onClick, isAvailable]);
+
+  const displayName = template.displayName || template.name;
+
+  // If available, render a simple button
+  if (isAvailable) {
+    return (
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={handleClick}
+        className="text-left justify-start h-auto py-1 px-2 text-xs"
+      >
+        <span className="truncate">{displayName}</span>
+      </Button>
+    );
+  }
+
+  // If unavailable, render with tooltip explaining why
+  const tooltipKey = availability.unavailableReason
+    ? getUnavailableReasonKey(availability.unavailableReason)
+    : "templateNotApproved";
 
   return (
-    <Button
-      variant="outline"
-      size="sm"
-      onClick={handleClick}
-      className="text-left justify-start h-auto py-1 px-2 text-xs"
-    >
-      <span className="truncate">{template.displayName || template.name}</span>
-    </Button>
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled
+            className="text-left justify-start h-auto py-1 px-2 text-xs opacity-50 cursor-not-allowed"
+          >
+            <span className="truncate">{displayName}</span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-xs">
+          <div className="flex items-start gap-2">
+            <Info className="h-4 w-4 flex-shrink-0 mt-0.5 text-amber-500" />
+            <span className="text-xs">{t(tooltipKey)}</span>
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 });
 
@@ -129,18 +211,35 @@ const TemplateSearchInput = memo(function TemplateSearchInput({
 
 /**
  * Grid of template buttons - memoized with stable template list
+ * Sorts templates to show available ones first
  */
 const TemplateGrid = memo(function TemplateGrid({
   templates,
   onApplyTemplate,
+  t,
 }: TemplateGridProps) {
+  // Sort templates: available first, then unavailable
+  const sortedTemplates = useMemo(() => {
+    return [...templates].sort((a, b) => {
+      if (a.availability.isAvailable === b.availability.isAvailable) {
+        // Same availability - sort alphabetically
+        const nameA = a.displayName || a.name;
+        const nameB = b.displayName || b.name;
+        return nameA.localeCompare(nameB);
+      }
+      // Available templates come first
+      return a.availability.isAvailable ? -1 : 1;
+    });
+  }, [templates]);
+
   return (
     <div className="grid grid-cols-2 gap-1 overflow-y-auto">
-      {templates.map((template) => (
+      {sortedTemplates.map((template) => (
         <TemplateButton
           key={template.id}
           template={template}
           onClick={onApplyTemplate}
+          t={t}
         />
       ))}
     </div>
@@ -180,6 +279,54 @@ const NoTemplatesState = memo(function NoTemplatesState({
   return <p className="text-xs text-muted-foreground py-1">{message}</p>;
 });
 
+/**
+ * Window status indicator showing time remaining
+ */
+const WindowStatusIndicator = memo(function WindowStatusIndicator({
+  conversationWindow,
+  t,
+}: {
+  conversationWindow: ConversationWindowStatus;
+  t: (key: string) => string;
+}) {
+  if (conversationWindow.isWithinWindow) {
+    const timeRemaining = formatTimeRemaining(
+      conversationWindow.timeRemainingMs
+    );
+    return (
+      <TooltipProvider delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+              <Clock className="h-3 w-3" />
+              <span>{timeRemaining}</span>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="max-w-xs">
+            <span className="text-xs">{t("conversationWindowActive")}</span>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
+            <Info className="h-3 w-3" />
+            <span>{t("approvedOnly")}</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-xs">
+          <span className="text-xs">{t("conversationWindowExpired")}</span>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+});
+
 // ============================================================================
 // Utility Functions
 // ============================================================================
@@ -188,7 +335,10 @@ const NoTemplatesState = memo(function NoTemplatesState({
  * Filter templates by search query
  * Uses case-insensitive matching on displayName or name
  */
-function filterTemplates(templates: Template[], query: string): Template[] {
+function filterTemplates<T extends Template>(
+  templates: T[],
+  query: string
+): T[] {
   if (!query.trim()) {
     return templates;
   }
@@ -252,12 +402,16 @@ function persistCollapsedState(collapsed: boolean): void {
  * - Persistent collapsed state via localStorage
  * - Search with clear button
  * - Loading, empty, and no-results states
+ * - 24-hour conversation window awareness
+ * - Template availability indicators with tooltips
  */
 export const TemplatesPanel = memo(function TemplatesPanel({
   templates,
   templatesLoading,
   onApplyTemplate,
   t,
+  conversationWindow,
+  customerLanguage,
   defaultCollapsed = false,
 }: TemplatesPanelProps) {
   // Collapsed state with localStorage persistence
@@ -281,10 +435,39 @@ export const TemplatesPanel = memo(function TemplatesPanel({
     persistCollapsedState(collapsed);
   }, []);
 
+  // Create default window status if not provided (backwards compatibility)
+  const effectiveWindowStatus: ConversationWindowStatus = useMemo(
+    () =>
+      conversationWindow ?? {
+        isWithinWindow: true, // Default to within window so all templates are available
+        lastInboundMessageTime: null,
+        windowExpiresAt: null,
+        timeRemainingMs: 0,
+      },
+    [conversationWindow]
+  );
+
+  // Enrich templates with availability information
+  const enrichedTemplates = useMemo(
+    () =>
+      enrichTemplatesWithAvailability(
+        templates,
+        effectiveWindowStatus,
+        customerLanguage
+      ),
+    [templates, effectiveWindowStatus, customerLanguage]
+  );
+
   // Memoized filtered templates - only recomputes when templates or query changes
   const filteredTemplates = useMemo(
-    () => filterTemplates(templates, searchQuery),
-    [templates, searchQuery]
+    () => filterTemplates(enrichedTemplates, searchQuery),
+    [enrichedTemplates, searchQuery]
+  );
+
+  // Count available templates for display
+  const availableCount = useMemo(
+    () => enrichedTemplates.filter((t) => t.availability.isAvailable).length,
+    [enrichedTemplates]
   );
 
   // Determine content to render
@@ -295,6 +478,7 @@ export const TemplatesPanel = memo(function TemplatesPanel({
 
   // Template count for header
   const templateCount = templatesLoading ? "..." : templates.length;
+  const showWindowStatus = conversationWindow !== undefined && hasTemplates;
 
   return (
     <div className="border-t bg-muted/30 flex-shrink-0">
@@ -305,9 +489,17 @@ export const TemplatesPanel = memo(function TemplatesPanel({
             type="button"
             className="w-full flex items-center justify-between p-3 hover:bg-muted/50 transition-colors"
           >
-            <span className="text-xs font-medium text-muted-foreground">
-              {t("availableTemplates")} ({templateCount})
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-medium text-muted-foreground">
+                {t("availableTemplates")} ({availableCount}/{templateCount})
+              </span>
+              {showWindowStatus && (
+                <WindowStatusIndicator
+                  conversationWindow={effectiveWindowStatus}
+                  t={t}
+                />
+              )}
+            </div>
             <ChevronDown
               className={cn(
                 "h-4 w-4 text-muted-foreground transition-transform duration-200",
@@ -343,6 +535,7 @@ export const TemplatesPanel = memo(function TemplatesPanel({
               <TemplateGrid
                 templates={filteredTemplates}
                 onApplyTemplate={onApplyTemplate}
+                t={t}
               />
             ) : isSearchActive ? (
               <EmptySearchState />

@@ -51,6 +51,7 @@ export interface TemplateStatusResult {
   status: TemplateApprovalStatus;
   qualityRating?: TemplateQualityRating;
   rejectionReason?: string;
+  category?: TemplateCategory;
   providerResponse?: Record<string, any>;
 }
 

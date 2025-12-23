@@ -10,7 +10,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { backendApi, ContactAttribute } from "@/lib/api/endpoints";
+import {
+  backendApi,
+  ContactAttribute,
+  LANGUAGE_DISPLAY_NAMES,
+  SUPPORTED_LANGUAGES,
+} from "@/lib/api/endpoints";
 import {
   getAllResolvedVariables,
   type ContactData,
@@ -18,6 +23,7 @@ import {
 } from "@/lib/utils/template-variables";
 import {
   Check,
+  Globe,
   Loader2,
   Mail,
   Pencil,
@@ -181,6 +187,7 @@ export function CustomerProfile({
         lastName: profile.contact.lastName,
         email: profile.contact.email,
         phoneNumber: profile.contact.phoneNumber,
+        language: profile.contact.language || null,
       });
       setAttributes(profile.attributes);
     } catch (error) {
@@ -196,8 +203,8 @@ export function CustomerProfile({
 
   // Auto-save contact field
   const saveContactField = async (
-    field: "firstName" | "lastName" | "email",
-    value: string
+    field: "firstName" | "lastName" | "email" | "language",
+    value: string | null
   ) => {
     if (!contact) return;
 
@@ -413,6 +420,31 @@ export function CustomerProfile({
             <p className="text-sm px-2 py-1 bg-muted/50 rounded">
               {contact.phoneNumber}
             </p>
+          </div>
+
+          {/* Language Preference */}
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground flex items-center gap-1">
+              <Globe className="h-3 w-3" />
+              {t("language")}
+            </Label>
+            <Select
+              value={contact.language || ""}
+              onValueChange={(value) =>
+                saveContactField("language", value || null)
+              }
+            >
+              <SelectTrigger className="h-8 text-sm">
+                <SelectValue placeholder={t("selectLanguage")} />
+              </SelectTrigger>
+              <SelectContent>
+                {SUPPORTED_LANGUAGES.map((lang) => (
+                  <SelectItem key={lang} value={lang}>
+                    {LANGUAGE_DISPLAY_NAMES[lang]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 

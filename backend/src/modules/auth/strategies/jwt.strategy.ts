@@ -47,12 +47,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: any) {
-    this.logger.debug('[JWT Strategy] Full payload decoded:', payload);
-    this.logger.debug('[JWT Strategy] Token validated successfully', {
-      sub: payload.sub,
-      userId: payload.sub,
-      email: payload.email,
-    });
+    // this.logger.debug('[JWT Strategy] Full payload decoded:', payload);
+    // this.logger.debug('[JWT Strategy] Token validated successfully', {
+    //   sub: payload.sub,
+    //   userId: payload.sub,
+    //   email: payload.email,
+    // });
     return { userId: payload.sub, email: payload.email };
   }
 }

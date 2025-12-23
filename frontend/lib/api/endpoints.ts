@@ -7,11 +7,43 @@ import type {
 } from "@/lib/types/settings.types";
 import { apiClient } from "./client";
 
+// Supported language codes matching template locales
+export const SUPPORTED_LANGUAGES = [
+  "en",
+  "es",
+  "pt",
+  "fr",
+  "de",
+  "it",
+] as const;
+export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
+
+// Language display names for UI
+export const LANGUAGE_DISPLAY_NAMES: Record<SupportedLanguage, string> = {
+  en: "English",
+  es: "Español",
+  pt: "Português",
+  fr: "Français",
+  de: "Deutsch",
+  it: "Italiano",
+};
+
+// Language flags for UI
+export const LANGUAGE_FLAGS: Record<SupportedLanguage, string> = {
+  en: "🇺🇸",
+  es: "🇪🇸",
+  pt: "🇧🇷",
+  fr: "🇫🇷",
+  de: "🇩🇪",
+  it: "🇮🇹",
+};
+
 // DTOs
 export interface CreateContactDto {
   firstName: string;
   lastName?: string;
   email?: string;
+  language?: SupportedLanguage;
   countryCode: string;
   phoneNumber: string;
   senderIds: number[];
@@ -119,6 +151,45 @@ export interface TemplateApprovalResult {
   providerResponse?: Record<string, any>;
 }
 
+/**
+ * Result of syncing a single template status
+ */
+export interface TemplateSyncResult {
+  localeId: string;
+  templateId: string;
+  templateName: string;
+  locale: string;
+  previousStatus: string;
+  newStatus: string;
+  statusChanged: boolean;
+  qualityRating?: string;
+  error?: string;
+}
+
+/**
+ * Result of bulk sync operation
+ */
+export interface BulkSyncResult {
+  totalProcessed: number;
+  successCount: number;
+  errorCount: number;
+  statusChangedCount: number;
+  results: TemplateSyncResult[];
+}
+
+/**
+ * Template with pending approval status
+ */
+export interface PendingTemplate {
+  templateId: string;
+  templateName: string;
+  localeId: string;
+  locale: string;
+  approvalStatus: string;
+  metaTemplateId: string | null;
+  submittedAt: string | null;
+}
+
 export interface TemplateApprovalStatus {
   templateId: string;
   localeId: string;
@@ -139,6 +210,67 @@ export interface UserProfileDto {
   name: string;
   createdAt: string;
   updatedAt: string;
+}
+
+// ==================== Template Version Types ====================
+
+/**
+ * Version status enum - aligned with WhatsApp template lifecycle
+ */
+export type TemplateVersionStatus =
+  | "draft"
+  | "pending_approval"
+  | "approved"
+  | "rejected"
+  | "disabled";
+
+/**
+ * Content stored in a template version
+ */
+export interface VersionContent {
+  header?: string | null;
+  body: string;
+  footer?: string | null;
+  exampleVars?: Record<string, string>;
+  category?: string;
+}
+
+/**
+ * Detailed information about a single template version
+ */
+export interface TemplateVersionDetail {
+  id: string;
+  templateId: string;
+  localeId: string;
+  versionNumber: number;
+  content: VersionContent;
+  status: TemplateVersionStatus;
+  providerId: string | null;
+  providerName: string | null;
+  providerResponse: Record<string, any> | null;
+  platforms: string[] | null;
+  createdAt: string;
+  updatedAt: string;
+  isActive: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  canSubmit: boolean;
+}
+
+/**
+ * Comprehensive version info for a template locale
+ */
+export interface TemplateVersionInfo {
+  templateId: string;
+  localeId: string;
+  locale: string;
+  hasActiveVersion: boolean;
+  hasDraftVersion: boolean;
+  activeVersion: TemplateVersionDetail | null;
+  draftVersion: TemplateVersionDetail | null;
+  versionHistory: TemplateVersionDetail[];
+  canCreateNewVersion: boolean;
+  canEditDraft: boolean;
 }
 
 export const backendApi = {
@@ -560,11 +692,145 @@ export const backendApi = {
           locale
         )}`
       ),
+    /**
+     * Sync status for a single template with Meta API
+     * Returns detailed sync result including status change info
+     */
     syncStatus: (
       templateId: string,
       data: { locale: string }
-    ): Promise<TemplateApprovalStatus> =>
+    ): Promise<TemplateSyncResult> =>
       apiClient.post(`/templates/${templateId}/sync-status`, data),
+    /**
+     * Sync all pending templates with Meta API
+     * Useful when webhooks may have been missed or to force a refresh
+     */
+    syncAllPending: (data?: { statuses?: string[] }): Promise<BulkSyncResult> =>
+      apiClient.post("/templates/sync-all-pending", data || {}),
+    /**
+     * Get all templates with pending approval status
+     */
+    getPending: (): Promise<PendingTemplate[]> =>
+      apiClient.get("/templates/pending"),
+
+    // ==================== Version Management Endpoints ====================
+
+    /**
+     * Get comprehensive version info for a template locale
+     * Returns active version, draft version, and version history
+     */
+    getVersionInfo: (
+      templateId: string,
+      locale: string
+    ): Promise<TemplateVersionInfo> =>
+      apiClient.get(
+        `/templates/${templateId}/versions?locale=${encodeURIComponent(locale)}`
+      ),
+
+    /**
+     * Get the active (approved) version for a template locale
+     */
+    getActiveVersion: (
+      templateId: string,
+      locale: string
+    ): Promise<TemplateVersionDetail | null> =>
+      apiClient.get(
+        `/templates/${templateId}/versions/active?locale=${encodeURIComponent(
+          locale
+        )}`
+      ),
+
+    /**
+     * Get the draft version for a template locale (if exists)
+     */
+    getDraftVersion: (
+      templateId: string,
+      locale: string
+    ): Promise<TemplateVersionDetail | null> =>
+      apiClient.get(
+        `/templates/${templateId}/versions/draft?locale=${encodeURIComponent(
+          locale
+        )}`
+      ),
+
+    /**
+     * Create a new draft version for a template locale
+     * Always copies content from the active version if one exists.
+     */
+    createVersion: (
+      templateId: string,
+      data: { locale: string }
+    ): Promise<TemplateVersionDetail> =>
+      apiClient.post(`/templates/${templateId}/versions`, data),
+
+    /**
+     * Get a specific version by ID
+     */
+    getVersion: (
+      templateId: string,
+      versionId: string
+    ): Promise<TemplateVersionDetail> =>
+      apiClient.get(`/templates/${templateId}/versions/${versionId}`),
+
+    /**
+     * Update version content (only for draft/rejected versions)
+     */
+    updateVersionContent: (
+      templateId: string,
+      versionId: string,
+      data: Partial<VersionContent>
+    ): Promise<TemplateVersionDetail> =>
+      apiClient.patch(`/templates/${templateId}/versions/${versionId}`, data),
+
+    /**
+     * Delete a version (only for draft/rejected versions)
+     */
+    deleteVersion: (
+      templateId: string,
+      versionId: string
+    ): Promise<{ success: boolean }> =>
+      apiClient.delete(`/templates/${templateId}/versions/${versionId}`),
+
+    /**
+     * Submit a draft version for approval
+     * Changes status from draft to pending_approval
+     */
+    submitVersionForApproval: (
+      templateId: string,
+      versionId: string
+    ): Promise<TemplateVersionDetail> =>
+      apiClient.post(
+        `/templates/${templateId}/versions/${versionId}/submit`,
+        {}
+      ),
+
+    /**
+     * Duplicate a version as a new draft
+     * Useful for creating a new draft from an approved or rejected version
+     */
+    duplicateVersion: (
+      templateId: string,
+      versionId: string,
+      data: { locale: string }
+    ): Promise<TemplateVersionDetail> =>
+      apiClient.post(
+        `/templates/${templateId}/versions/${versionId}/duplicate`,
+        data
+      ),
+
+    /**
+     * Set a specific approved version as the active version for a locale
+     * By default, the latest approved version becomes active automatically,
+     * but this allows manual selection of any approved version
+     */
+    setActiveVersion: (
+      templateId: string,
+      versionId: string
+    ): Promise<TemplateVersionDetail> =>
+      apiClient.post(
+        `/templates/${templateId}/versions/${versionId}/set-active`,
+        {}
+      ),
   },
 
   // Notes endpoints

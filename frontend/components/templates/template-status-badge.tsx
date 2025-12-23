@@ -162,8 +162,14 @@ export function TemplateStatusBadge({
               <span>{statusLabel}</span>
             </Badge>
           </TooltipTrigger>
-          <TooltipContent className={customTooltip ? "max-w-xs" : undefined}>
-            <p>{tooltipContent}</p>
+          <TooltipContent
+            className={
+              customTooltip ? "max-w-xs whitespace-pre-wrap" : undefined
+            }
+          >
+            <p className={customTooltip ? "text-left" : undefined}>
+              {tooltipContent}
+            </p>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>

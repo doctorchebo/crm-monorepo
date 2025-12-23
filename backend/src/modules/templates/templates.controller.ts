@@ -26,8 +26,12 @@ import {
   TestTemplateDto,
   UpdateTemplateDto,
 } from './dto';
-import { MessagingProviderFactory } from './providers';
+import { MessagingProviderFactory, TemplateApprovalStatus } from './providers';
 import { TemplateApprovalService } from './services/template-approval.service';
+import {
+  TemplateVersionService,
+  VersionContent,
+} from './services/template-version.service';
 import { TemplatesService } from './services/templates.service';
 import { VariableResolutionService } from './services/variable-resolution.service';
 
@@ -38,6 +42,7 @@ export class TemplatesController {
     private templatesService: TemplatesService,
     private variableResolutionService: VariableResolutionService,
     private approvalService: TemplateApprovalService,
+    private versionService: TemplateVersionService,
     private providerFactory: MessagingProviderFactory,
   ) {}
 
@@ -113,6 +118,178 @@ export class TemplatesController {
     const onlyVisible = visible === 'true';
     return await this.templatesService.listTemplates(userId, onlyVisible);
   }
+
+  // ==================== Bulk Sync Endpoints (must be before :id routes) ====================
+
+  /**
+   * POST /templates/sync-all-pending - Sync all pending template statuses from Meta
+   * Fetches the current status from Meta API for all templates that are pending review.
+   * This is useful when webhooks may have been missed or to force a refresh.
+   */
+  @Post('sync-all-pending')
+  async syncAllPending(
+    @Body()
+    body?: {
+      /**
+       * Optional list of statuses to sync. Defaults to ['pending'].
+       * You can include other statuses like 'paused' to sync those as well.
+       */
+      statuses?: string[];
+    },
+  ) {
+    // Convert string statuses to enum values
+    const statuses = body?.statuses?.length
+      ? body.statuses.filter((s) =>
+          Object.values(TemplateApprovalStatus).includes(
+            s as TemplateApprovalStatus,
+          ),
+        )
+      : ['pending'];
+
+    return await this.approvalService.syncAllPendingTemplates(
+      statuses as TemplateApprovalStatus[],
+    );
+  }
+
+  /**
+   * GET /templates/pending - Get all templates with pending status
+   * Returns a list of templates that are awaiting approval from Meta
+   */
+  @Get('pending')
+  async getPendingTemplates() {
+    return await this.approvalService.getTemplatesWithPendingStatus();
+  }
+
+  // ==================== Version Management Endpoints ====================
+
+  /**
+   * GET /templates/:id/versions - Get all versions for a template locale
+   * Returns version info including active and draft versions
+   */
+  @Get(':id/versions')
+  async getVersionInfo(
+    @Param('id') templateId: string,
+    @Query('locale') locale: string,
+  ) {
+    if (!locale) {
+      throw new BadRequestException('Locale query parameter is required');
+    }
+    return await this.versionService.getVersionInfo(templateId, locale);
+  }
+
+  /**
+   * GET /templates/:id/versions/active - Get the active (approved) version
+   */
+  @Get(':id/versions/active')
+  async getActiveVersion(
+    @Param('id') templateId: string,
+    @Query('locale') locale: string,
+  ) {
+    if (!locale) {
+      throw new BadRequestException('Locale query parameter is required');
+    }
+    return await this.versionService.getActiveVersion(templateId, locale);
+  }
+
+  /**
+   * GET /templates/:id/versions/draft - Get the draft version if exists
+   */
+  @Get(':id/versions/draft')
+  async getDraftVersion(
+    @Param('id') templateId: string,
+    @Query('locale') locale: string,
+  ) {
+    if (!locale) {
+      throw new BadRequestException('Locale query parameter is required');
+    }
+    return await this.versionService.getDraftVersion(templateId, locale);
+  }
+
+  /**
+   * POST /templates/:id/versions - Create a new draft version
+   * Always copies content from the active version if one exists.
+   */
+  @Post(':id/versions')
+  async createVersion(
+    @Param('id') templateId: string,
+    @Body() body: { locale: string },
+  ) {
+    if (!body.locale) {
+      throw new BadRequestException('Locale is required');
+    }
+    return await this.versionService.createNewVersion(templateId, body.locale);
+  }
+
+  /**
+   * GET /templates/:id/versions/:versionId - Get a specific version
+   */
+  @Get(':id/versions/:versionId')
+  async getVersion(@Param('versionId') versionId: string) {
+    return await this.versionService.getVersion(versionId);
+  }
+
+  /**
+   * PATCH /templates/:id/versions/:versionId - Update version content
+   * Only draft or rejected versions can be edited
+   */
+  @Patch(':id/versions/:versionId')
+  async updateVersionContent(
+    @Param('versionId') versionId: string,
+    @Body() body: Partial<VersionContent>,
+  ) {
+    return await this.versionService.updateVersionContent(versionId, body);
+  }
+
+  /**
+   * DELETE /templates/:id/versions/:versionId - Delete a draft version
+   * Only draft or rejected versions can be deleted
+   */
+  @Delete(':id/versions/:versionId')
+  async deleteVersion(@Param('versionId') versionId: string) {
+    return await this.versionService.deleteVersion(versionId);
+  }
+
+  /**
+   * POST /templates/:id/versions/:versionId/submit - Submit version for approval
+   * Changes status from draft to pending_approval
+   */
+  @Post(':id/versions/:versionId/submit')
+  async submitVersionForApproval(@Param('versionId') versionId: string) {
+    return await this.versionService.submitForApproval(versionId);
+  }
+
+  /**
+   * POST /templates/:id/versions/:versionId/duplicate - Duplicate as new draft
+   * Creates a new draft version from an existing version (approved/rejected)
+   */
+  @Post(':id/versions/:versionId/duplicate')
+  async duplicateVersion(
+    @Param('id') templateId: string,
+    @Param('versionId') versionId: string,
+    @Body() body: { locale: string },
+  ) {
+    if (!body.locale) {
+      throw new BadRequestException('Locale is required');
+    }
+    return await this.versionService.duplicateAsDraft(
+      versionId,
+      templateId,
+      body.locale,
+    );
+  }
+
+  /**
+   * POST /templates/:id/versions/:versionId/set-active - Set version as active
+   * Manually set an approved version as the active version for its locale
+   * By default, the latest approved version becomes active automatically,
+   * but this endpoint allows users to choose a different approved version
+   */
+  @Post(':id/versions/:versionId/set-active')
+  async setActiveVersion(@Param('versionId') versionId: string) {
+    return await this.versionService.setActiveVersion(versionId);
+  }
+
+  // ==================== Template By ID Routes ====================
 
   /**
    * GET /templates/:id - Get template by ID
@@ -246,13 +423,17 @@ export class TemplatesController {
 
   /**
    * POST /templates/:id/sync-status - Sync template status with provider
+   * Returns detailed sync result including previous and new status
    */
   @Post(':id/sync-status')
   async syncStatus(
     @Param('id') templateId: string,
     @Body() body: { locale: string },
   ) {
-    return await this.approvalService.syncStatus(templateId, body.locale);
+    return await this.approvalService.syncSingleTemplateStatus(
+      templateId,
+      body.locale,
+    );
   }
 
   /**

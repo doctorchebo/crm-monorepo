@@ -321,7 +321,7 @@ export class MetaCloudApiProvider implements IMessagingProvider {
   async getTemplateStatus(templateId: string): Promise<TemplateStatusResult> {
     try {
       const accessToken = this.getAccessToken();
-      const url = `${this.baseUrl}/${this.apiVersion}/${templateId}?fields=status,quality_score,rejected_reason`;
+      const url = `${this.baseUrl}/${this.apiVersion}/${templateId}?fields=status,quality_score,rejected_reason,category`;
 
       const response = await fetch(url, {
         headers: {
@@ -347,10 +347,24 @@ export class MetaCloudApiProvider implements IMessagingProvider {
           TemplateQualityRating.PENDING
         : TemplateQualityRating.PENDING;
 
+      // Map Meta category to our category enum (Meta returns uppercase)
+      let category: TemplateCategory | undefined;
+      if (responseData.category) {
+        const categoryLower = responseData.category.toLowerCase();
+        if (
+          Object.values(TemplateCategory).includes(
+            categoryLower as TemplateCategory,
+          )
+        ) {
+          category = categoryLower as TemplateCategory;
+        }
+      }
+
       return {
         status,
         qualityRating,
         rejectionReason: responseData.rejected_reason,
+        category,
         providerResponse: responseData,
       };
     } catch (error) {

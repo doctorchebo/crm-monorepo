@@ -298,8 +298,66 @@ export function useMessageHandlers(
         return;
       }
 
-      const locale = template.locales[0];
       const chat = chats.find((c) => c.chatId === selectedChatId);
+
+      // Smart locale selection based on customer's preferred language
+      // Priority: customer language > 'en' > first available locale
+      let locale = template.locales[0]; // Default to first locale
+
+      if (selectedContactId && template.locales.length > 1) {
+        try {
+          // Fetch contact's preferred language
+          const contactProfile = await backendApi.contacts.getProfile(
+            selectedContactId
+          );
+          const customerLanguage = contactProfile?.contact?.language;
+
+          console.log(
+            "[Template Selection] Customer language:",
+            customerLanguage
+          );
+          console.log(
+            "[Template Selection] Available locales:",
+            template.locales.map((l: any) => ({
+              locale: l.locale,
+              status: l.approvalStatus,
+            }))
+          );
+
+          if (customerLanguage) {
+            // Try to find a locale matching the customer's language (check both approved and draft for flexibility)
+            const matchingLocale = template.locales.find(
+              (l: any) => l.locale === customerLanguage
+            );
+            console.log(
+              "[Template Selection] Matching locale found:",
+              matchingLocale?.locale
+            );
+            if (matchingLocale) {
+              locale = matchingLocale;
+            }
+          }
+
+          // If no matching locale found and customer language isn't English, try English as fallback
+          if (
+            locale === template.locales[0] &&
+            customerLanguage &&
+            customerLanguage !== "en"
+          ) {
+            const englishLocale = template.locales.find(
+              (l: any) => l.locale === "en"
+            );
+            if (englishLocale) {
+              locale = englishLocale;
+            }
+          }
+
+          console.log("[Template Selection] Selected locale:", locale.locale);
+        } catch (error) {
+          console.error("Failed to fetch contact language preference:", error);
+          // Continue with default locale
+        }
+      }
 
       // If we have a contact, resolve variables via the backend API
       if (selectedContactId && template.id && locale.locale) {

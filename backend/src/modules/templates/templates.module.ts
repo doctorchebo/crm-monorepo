@@ -13,6 +13,7 @@ import {
   TemplateValidatorService,
   VariableResolutionService,
 } from './services';
+import { TemplateVersionService } from './services/template-version.service';
 import { TemplateWebhookController } from './template.webhook.controller';
 import { TemplateWebhookGateway } from './template.webhook.gateway';
 import { TemplatesController } from './templates.controller';
@@ -28,6 +29,7 @@ import { TemplatesController } from './templates.controller';
     TemplateRenderService,
     VariableResolutionService,
     TemplateApprovalService,
+    TemplateVersionService,
     // Providers (for different messaging platforms)
     MetaCloudApiProvider,
     TwilioProviderAdapter,
@@ -39,6 +41,7 @@ import { TemplatesController } from './templates.controller';
     TemplatesService,
     VariableResolutionService,
     TemplateApprovalService,
+    TemplateVersionService,
     MessagingProviderFactory,
     TemplateWebhookGateway,
   ],

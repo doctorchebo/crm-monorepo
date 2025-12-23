@@ -1,6 +1,7 @@
 "use client";
 
 import { VariableAutocomplete } from "@/components/templates/variable-autocomplete";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -16,24 +17,31 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useNotification } from "@/hooks/use-notification";
 import { ApiError } from "@/lib/api/client";
-import { backendApi } from "@/lib/api/endpoints";
+import {
+  backendApi,
+  LANGUAGE_DISPLAY_NAMES,
+  SUPPORTED_LANGUAGES,
+} from "@/lib/api/endpoints";
 import { toMetaTemplateName } from "@/lib/utils/template-name";
-import { AlertCircle, Eye, Loader, X } from "lucide-react";
+import { AlertCircle, Eye, Globe, Loader, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import useSWR from "swr";
+import useSWR, { mutate as globalMutate } from "swr";
 
-const SUPPORTED_LOCALES = [
-  { code: "en", name: "English" },
-  { code: "es", name: "Español" },
-  { code: "pt", name: "Português" },
-  { code: "fr", name: "Français" },
-  { code: "de", name: "Deutsch" },
-  { code: "it", name: "Italiano" },
-];
+// Map SUPPORTED_LANGUAGES to locale format used in template UI
+const SUPPORTED_LOCALES = SUPPORTED_LANGUAGES.map((code) => ({
+  code,
+  name: LANGUAGE_DISPLAY_NAMES[code],
+}));
 
 const PLATFORMS = ["whatsapp", "messenger", "instagram"];
+
+const TEMPLATE_CATEGORIES = [
+  { code: "utility", name: "Utility" },
+  { code: "marketing", name: "Marketing" },
+  { code: "authentication", name: "Authentication" },
+];
 
 interface ValidationError {
   field: string;
@@ -54,6 +62,7 @@ interface Template {
     body: string;
     header?: string;
     footer?: string;
+    category?: string;
     exampleVars?: Record<string, any>;
     variables?: Array<{
       varName: string;
@@ -72,6 +81,7 @@ interface FormData {
   displayName: string;
   description: string;
   selectedLocale: string;
+  category: string;
   header: string;
   body: string;
   footer: string;
@@ -80,7 +90,48 @@ interface FormData {
   isVisible: boolean;
 }
 
-export function TemplateForm({ templateId }: { templateId?: string }) {
+/** Version content data from the versioning system */
+interface VersionData {
+  id: string;
+  versionNumber: number;
+  content: {
+    header?: string | null;
+    body: string;
+    footer?: string | null;
+    exampleVars?: Record<string, string>;
+    category?: string;
+  };
+  status: string;
+  canEdit: boolean;
+}
+
+interface TemplateFormProps {
+  templateId?: string;
+  readOnly?: boolean;
+  /** Selected locale code, controlled by parent */
+  selectedLocale?: string;
+  /** Callback when locale changes */
+  onLocaleChange?: (locale: string) => void;
+  /** Available locales for this template */
+  availableLocales?: string[];
+  /** Callback when save is successful (for edit mode to stay on page) */
+  onSaveSuccess?: () => void;
+  /** Whether we're in edit mode (shows different section organization) */
+  isEditMode?: boolean;
+  /** Version data when editing in version mode */
+  versionData?: VersionData | null;
+}
+
+export function TemplateForm({
+  templateId,
+  readOnly = false,
+  selectedLocale: controlledLocale,
+  onLocaleChange,
+  availableLocales,
+  onSaveSuccess,
+  isEditMode = false,
+  versionData,
+}: TemplateFormProps) {
   const router = useRouter();
   const params = useParams();
   const locale = params.locale as string;
@@ -91,7 +142,8 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
   const [formData, setFormData] = useState<FormData>({
     displayName: "",
     description: "",
-    selectedLocale: "en",
+    selectedLocale: controlledLocale || "en",
+    category: "utility",
     header: "",
     body: "",
     footer: "",
@@ -99,6 +151,13 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
     enabledPlatforms: ["whatsapp"],
     isVisible: true,
   });
+
+  // Sync with controlled locale from parent
+  useEffect(() => {
+    if (controlledLocale && controlledLocale !== formData.selectedLocale) {
+      setFormData((prev) => ({ ...prev, selectedLocale: controlledLocale }));
+    }
+  }, [controlledLocale]);
 
   // Auto-generated Meta-compliant template name
   const generatedName = useMemo(
@@ -124,7 +183,7 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
         : async () => await backendApi.templates.get(templateId)
     );
 
-  // Load existing template data
+  // Load existing template data (global fields like name, description)
   useEffect(() => {
     if (existingTemplate) {
       setFormData((prev) => ({
@@ -138,20 +197,56 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
         isVisible: existingTemplate.isVisible,
       }));
 
-      // Set first locale data
-      if (existingTemplate.locales && existingTemplate.locales.length > 0) {
-        const firstLocale = existingTemplate.locales[0];
-        setFormData((prev) => ({
-          ...prev,
-          selectedLocale: firstLocale.locale,
-          header: firstLocale.header || "",
-          body: firstLocale.body || "",
-          footer: firstLocale.footer || "",
-          exampleVars: firstLocale.exampleVars || {},
-        }));
+      // Only load locale data if NOT using version data
+      // When version data is provided, content comes from the version
+      if (!versionData) {
+        // Set locale data based on controlled locale or first available
+        const targetLocale =
+          controlledLocale || existingTemplate.locales?.[0]?.locale || "en";
+        const localeData = existingTemplate.locales?.find(
+          (l) => l.locale === targetLocale
+        );
+
+        if (localeData) {
+          setFormData((prev) => ({
+            ...prev,
+            selectedLocale: localeData.locale,
+            category: localeData.category || "utility",
+            header: localeData.header || "",
+            body: localeData.body || "",
+            footer: localeData.footer || "",
+            exampleVars: localeData.exampleVars || {},
+          }));
+        } else {
+          // New locale - reset content fields but keep selected locale
+          setFormData((prev) => ({
+            ...prev,
+            selectedLocale: targetLocale,
+            category: "utility",
+            header: "",
+            body: "",
+            footer: "",
+            exampleVars: {},
+          }));
+        }
       }
     }
-  }, [existingTemplate]);
+  }, [existingTemplate, versionData, controlledLocale]);
+
+  // Load version data when provided (takes precedence over locale data)
+  useEffect(() => {
+    if (versionData) {
+      setFormData((prev) => ({
+        ...prev,
+        selectedLocale: controlledLocale || prev.selectedLocale,
+        category: versionData.content.category || "utility",
+        header: versionData.content.header || "",
+        body: versionData.content.body || "",
+        footer: versionData.content.footer || "",
+        exampleVars: versionData.content.exampleVars || {},
+      }));
+    }
+  }, [versionData, controlledLocale]);
 
   // Extract variables from body
   const extractedVariables = useMemo(() => {
@@ -194,6 +289,9 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
 
   // Validate template
   const validate = async () => {
+    // Clear previous validation errors before validating
+    setValidationErrors([]);
+
     try {
       if (!formData.displayName.trim()) {
         setValidationErrors([
@@ -218,13 +316,21 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
         return false;
       }
 
-      // For new template, validate on backend
+      // For existing template, validate on backend only if the locale already exists
       if (templateId) {
-        const result = (await backendApi.templates.validate(templateId, {
-          locale: formData.selectedLocale,
-        })) as { errors?: ValidationError[]; hasCriticalErrors?: boolean };
-        setValidationErrors(result.errors || []);
-        return !(result.hasCriticalErrors || false);
+        // Check if the selected locale already exists for this template
+        const localeExists = existingTemplate?.locales?.some(
+          (loc) => loc.locale === formData.selectedLocale
+        );
+
+        if (localeExists) {
+          const result = (await backendApi.templates.validate(templateId, {
+            locale: formData.selectedLocale,
+          })) as { errors?: ValidationError[]; hasCriticalErrors?: boolean };
+          setValidationErrors(result.errors || []);
+          return !(result.hasCriticalErrors || false);
+        }
+        // If locale doesn't exist yet, skip backend validation (it will be created on save)
       }
 
       return true;
@@ -283,24 +389,39 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
 
     setIsSubmitting(true);
     try {
-      let response;
-
       if (templateId) {
-        // Update existing template
+        // Update existing template global fields
         await backendApi.templates.update(templateId, {
           displayName: formData.displayName,
           description: formData.description,
           isVisible: formData.isVisible,
         });
 
-        // Update locale
-        await backendApi.templates.addLocale(templateId, {
-          locale: formData.selectedLocale,
-          body: formData.body,
-          header: formData.header,
-          footer: formData.footer,
-          exampleVars: formData.exampleVars,
-        });
+        // If we have version data, save to the version; otherwise save to locale
+        if (versionData && versionData.canEdit) {
+          // Save content to the version
+          await backendApi.templates.updateVersionContent(
+            templateId,
+            versionData.id,
+            {
+              header: formData.header || null,
+              body: formData.body,
+              footer: formData.footer || null,
+              exampleVars: formData.exampleVars,
+              category: formData.category,
+            }
+          );
+        } else if (!versionData) {
+          // Legacy mode: save directly to locale (for non-versioned templates)
+          await backendApi.templates.addLocale(templateId, {
+            locale: formData.selectedLocale,
+            category: formData.category,
+            body: formData.body,
+            header: formData.header,
+            footer: formData.footer,
+            exampleVars: formData.exampleVars,
+          });
+        }
 
         addNotification(
           t("templateUpdated") || "Template updated successfully",
@@ -308,7 +429,15 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
           3000
         );
 
-        router.push(`/${locale}/dashboard/templates`);
+        // Refresh template data
+        globalMutate(`template-${templateId}`);
+
+        // Call success callback (stay on edit page) or navigate back
+        if (onSaveSuccess) {
+          onSaveSuccess();
+        } else {
+          router.push(`/${locale}/dashboard/templates`);
+        }
       } else {
         // Create new template
         const templateRes = (await backendApi.templates.create({
@@ -320,6 +449,7 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
         // Add locale
         await backendApi.templates.addLocale(templateRes.id, {
           locale: formData.selectedLocale,
+          category: formData.category,
           body: formData.body,
           header: formData.header,
           footer: formData.footer,
@@ -376,11 +506,19 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
   return (
     <div className="space-y-6">
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Basic Info */}
+        {/* Basic Info - Global fields */}
         <Card className="p-6">
-          <h2 className="text-xl font-semibold mb-4">
-            {t("basicInfo") || "Basic Information"}
-          </h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold">
+              {t("basicInfo") || "Basic Information"}
+            </h2>
+            {isEditMode && (
+              <Badge variant="outline" className="gap-1">
+                <Globe className="h-3 w-3" />
+                {t("globalField") || "Global"}
+              </Badge>
+            )}
+          </div>
 
           <div className="space-y-4">
             {/* Display Name - User-friendly name */}
@@ -397,6 +535,7 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
                 placeholder={
                   t("displayNamePlaceholder") || "e.g., Order Confirmation"
                 }
+                disabled={readOnly}
               />
               <p className="text-xs text-muted-foreground mt-1">
                 {t("displayNameHint") ||
@@ -437,6 +576,7 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
                 }
                 placeholder="Describe what this template is used for..."
                 rows={3}
+                disabled={readOnly}
               />
             </div>
 
@@ -447,6 +587,7 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
                 onCheckedChange={(checked) =>
                   setFormData({ ...formData, isVisible: checked as boolean })
                 }
+                disabled={readOnly}
               />
               <Label htmlFor="isVisible">
                 {t("makeVisible") || "Make this template visible in chats"}
@@ -455,11 +596,19 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
           </div>
         </Card>
 
-        {/* Platforms */}
+        {/* Platforms - Global field */}
         <Card className="p-6">
-          <h2 className="text-xl font-semibold mb-4">
-            {t("platforms") || "Available Platforms"}
-          </h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold">
+              {t("platforms") || "Available Platforms"}
+            </h2>
+            {isEditMode && (
+              <Badge variant="outline" className="gap-1">
+                <Globe className="h-3 w-3" />
+                {t("globalField") || "Global"}
+              </Badge>
+            )}
+          </div>
 
           <div className="space-y-2">
             {PLATFORMS.map((platform) => (
@@ -475,6 +624,7 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
                         : prev.enabledPlatforms.filter((p) => p !== platform),
                     }));
                   }}
+                  disabled={readOnly}
                 />
                 <Label htmlFor={`platform-${platform}`} className="capitalize">
                   {platform}
@@ -484,31 +634,79 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
           </div>
         </Card>
 
-        {/* Locale Selection */}
+        {/* Locale-specific content */}
         <Card className="p-6">
-          <h2 className="text-xl font-semibold mb-4">
-            {t("content") || "Content"}
-          </h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold">
+              {t("content") || "Content"}
+            </h2>
+            {isEditMode && (
+              <Badge variant="secondary" className="gap-1">
+                {t("localeSpecific") || "Locale-specific"}
+              </Badge>
+            )}
+          </div>
 
+          {/* Language selector - only shown for new templates (edit mode uses tabs) */}
+          {!isEditMode && (
+            <div className="mb-4">
+              <Label htmlFor="locale">{t("language") || "Language"}</Label>
+              <Select
+                value={formData.selectedLocale}
+                onValueChange={(value: string) => {
+                  setFormData({ ...formData, selectedLocale: value });
+                  // Notify parent of locale change
+                  onLocaleChange?.(value);
+                }}
+                disabled={readOnly}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SUPPORTED_LOCALES.map((loc) => (
+                    <SelectItem key={loc.code} value={loc.code}>
+                      {loc.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {/* Category selector */}
           <div className="mb-4">
-            <Label htmlFor="locale">{t("language") || "Language"}</Label>
+            <Label htmlFor="category">{t("category") || "Category"}</Label>
             <Select
-              value={formData.selectedLocale}
-              onValueChange={(value: string) =>
-                setFormData({ ...formData, selectedLocale: value })
-              }
+              value={formData.category}
+              onValueChange={(value: string) => {
+                setFormData({ ...formData, category: value });
+              }}
+              disabled={readOnly}
             >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {SUPPORTED_LOCALES.map((loc) => (
-                  <SelectItem key={loc.code} value={loc.code}>
-                    {loc.name}
+                {TEMPLATE_CATEGORIES.map((cat) => (
+                  <SelectItem key={cat.code} value={cat.code}>
+                    {t(`categories.${cat.code}`) || cat.name}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            <p className="text-xs text-muted-foreground mt-1">
+              {t("categoryHint") ||
+                "Meta requires a category for template approval"}
+            </p>
+            {/* Category description help text */}
+            {formData.category && (
+              <div className="mt-2 p-3 rounded-md bg-muted/50 border border-border">
+                <p className="text-sm text-muted-foreground">
+                  {t(`categoryDescriptions.${formData.category}`)}
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Template Fields */}
@@ -523,7 +721,11 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
                 onChange={(e) =>
                   setFormData({ ...formData, header: e.target.value })
                 }
-                placeholder="e.g., 📋 Order Details or a media URL"
+                placeholder={
+                  t("headerPlaceholder") ||
+                  "e.g., 📋 Order Details or a media URL"
+                }
+                disabled={readOnly}
               />
             </div>
 
@@ -538,8 +740,12 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
                 id="body"
                 value={formData.body}
                 onChange={(value) => setFormData({ ...formData, body: value })}
-                placeholder="Hello {{customer.first_name}}, your order {{order.order_id}} is ready!"
+                placeholder={
+                  t("bodyPlaceholder") ||
+                  "Hello {{customer.first_name}}, your order {{order.order_id}} is ready!"
+                }
                 rows={6}
+                disabled={readOnly}
               />
             </div>
 
@@ -553,18 +759,33 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                   setFormData({ ...formData, footer: e.target.value })
                 }
-                placeholder="e.g., Thank you for your business"
+                placeholder={
+                  t("footerPlaceholder") || "e.g., Thank you for your business"
+                }
+                disabled={readOnly}
               />
             </div>
           </div>
         </Card>
 
-        {/* Variables */}
+        {/* Variables - Locale-specific */}
         {extractedVariables.length > 0 && (
           <Card className="p-6">
-            <h2 className="text-xl font-semibold mb-4">
-              {t("variables") || "Variables"}
-            </h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold">
+                {t("variables") || "Variables"}
+              </h2>
+              {isEditMode && (
+                <Badge variant="secondary" className="gap-1">
+                  {t("localeSpecific") || "Locale-specific"}
+                </Badge>
+              )}
+            </div>
+
+            <p className="text-sm text-muted-foreground mb-4">
+              {t("variablesHelp") ||
+                "Enter friendly example values for your variables. These help you preview the template and are used as placeholders in the approval request."}
+            </p>
 
             <div className="space-y-3">
               {extractedVariables.map((varName) => (
@@ -586,7 +807,11 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
                         },
                       }))
                     }
-                    placeholder={`Example value for ${varName}`}
+                    placeholder={
+                      t("variableExamplePlaceholder", { varName }) ||
+                      `Example value for ${varName}`
+                    }
+                    disabled={readOnly}
                   />
                 </div>
               ))}
@@ -644,7 +869,9 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
             variant="outline"
             onClick={() => router.push(`/${locale}/dashboard/templates`)}
           >
-            {tCommon("cancel") || "Cancel"}
+            {readOnly
+              ? tCommon("back") || "Back"
+              : tCommon("cancel") || "Cancel"}
           </Button>
 
           <Button
@@ -656,12 +883,14 @@ export function TemplateForm({ templateId }: { templateId?: string }) {
             {t("preview") || "Preview"}
           </Button>
 
-          <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting && <Loader className="h-4 w-4 mr-2 animate-spin" />}
-            {templateId
-              ? t("update") || "Update"
-              : tCommon("create") || "Create"}
-          </Button>
+          {!readOnly && (
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting && <Loader className="h-4 w-4 mr-2 animate-spin" />}
+              {templateId
+                ? t("update") || "Update"
+                : tCommon("create") || "Create"}
+            </Button>
+          )}
         </div>
       </form>
 

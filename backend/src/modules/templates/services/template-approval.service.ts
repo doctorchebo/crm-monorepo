@@ -1,12 +1,12 @@
 import { db } from '@database/db.connection';
-import { templateLocales, templates } from '@database/schema';
+import { templateLocales, templates, templateVersions } from '@database/schema';
 import {
   BadRequestException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull } from 'drizzle-orm';
 import {
   MessagingProviderFactory,
   TemplateApprovalStatus,
@@ -49,6 +49,32 @@ export interface ApprovalStatusResult {
   reviewedAt?: Date | null;
   canSubmit: boolean;
   canResubmit: boolean;
+}
+
+/**
+ * Result of syncing a single template status
+ */
+export interface TemplateSyncResult {
+  localeId: string;
+  templateId: string;
+  templateName: string;
+  locale: string;
+  previousStatus: string;
+  newStatus: string;
+  statusChanged: boolean;
+  qualityRating?: string;
+  error?: string;
+}
+
+/**
+ * Result of bulk sync operation
+ */
+export interface BulkSyncResult {
+  totalProcessed: number;
+  successCount: number;
+  errorCount: number;
+  statusChangedCount: number;
+  results: TemplateSyncResult[];
 }
 
 /**
@@ -162,10 +188,53 @@ export class TemplateApprovalService {
 
     // Get provider and submit
     const provider = this.providerFactory.getProvider(providerName);
-    const category = (localeData.category || 'utility') as TemplateCategory;
+
+    // Determine the category to use:
+    // 1. Check if another locale of this template is already approved (use that category)
+    // 2. Otherwise, use the locale's own category
+    let category = (localeData.category || 'utility') as TemplateCategory;
+
+    // Check for approved locales with potentially different category from Meta
+    const approvedLocale = template.locales?.find(
+      (l) =>
+        l.locale !== locale &&
+        l.approvalStatus === TemplateApprovalStatus.APPROVED &&
+        l.metaTemplateId,
+    );
+
+    if (approvedLocale) {
+      // Another locale is approved - fetch its current category from Meta
+      // to ensure we use the category that Meta has on record
+      try {
+        const statusResult = await provider.getTemplateStatus(
+          approvedLocale.metaTemplateId!,
+        );
+        if (statusResult.category) {
+          category = statusResult.category;
+          this.logger.log(
+            `📝 Using category from approved locale ${approvedLocale.locale}: ${category}`,
+          );
+
+          // Also update our locale's category to match
+          if (localeData.category !== category) {
+            await db
+              .update(templateLocales)
+              .set({ category, updatedAt: new Date() })
+              .where(eq(templateLocales.id, localeData.id));
+            this.logger.log(
+              `📝 Updated locale ${locale} category from ${localeData.category} to ${category}`,
+            );
+          }
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Failed to fetch category from approved locale: ${error.message}. Using current category: ${category}`,
+        );
+      }
+    }
 
     this.logger.log(
-      `Submitting template '${template.name}' (locale: ${locale}) to ${providerName}`,
+      `Submitting template '${template.name}' (locale: ${locale}) to ${providerName} with category: ${category}`,
     );
 
     const result = await provider.submitTemplate(
@@ -183,8 +252,47 @@ export class TemplateApprovalService {
         metaResponse: result.providerResponse,
         submittedAt: new Date(),
         updatedAt: new Date(),
+        // Update category in case it was changed
+        category,
       })
       .where(eq(templateLocales.id, localeData.id));
+
+    // Also update the draft version status (the latest draft for this locale)
+    // This ensures the version history shows the correct status
+    const draftVersion = await db.query.templateVersions.findFirst({
+      where: and(
+        eq(templateVersions.templateId, templateId),
+        eq(templateVersions.localeId, localeData.id),
+        eq(templateVersions.status, 'draft'),
+      ),
+      orderBy: [desc(templateVersions.versionNumber)],
+    });
+
+    if (draftVersion) {
+      const versionStatus =
+        result.status === TemplateApprovalStatus.PENDING
+          ? 'pending_approval'
+          : result.status === TemplateApprovalStatus.APPROVED
+            ? 'approved'
+            : result.status === TemplateApprovalStatus.REJECTED
+              ? 'rejected'
+              : 'draft';
+
+      await db
+        .update(templateVersions)
+        .set({
+          status: versionStatus,
+          providerId: result.providerId,
+          providerName: providerName,
+          providerResponse: result.providerResponse,
+          updatedAt: new Date(),
+        })
+        .where(eq(templateVersions.id, draftVersion.id));
+
+      this.logger.log(
+        `Updated version ${draftVersion.id} status to ${versionStatus}`,
+      );
+    }
 
     if (result.success) {
       this.logger.log(
@@ -279,13 +387,28 @@ export class TemplateApprovalService {
         localeData.metaTemplateId,
       );
 
-      // Update local status
+      // Map Meta status to version status
+      const versionStatus =
+        statusResult.status === TemplateApprovalStatus.APPROVED
+          ? 'approved'
+          : statusResult.status === TemplateApprovalStatus.REJECTED
+            ? 'rejected'
+            : statusResult.status === TemplateApprovalStatus.PENDING
+              ? 'pending_approval'
+              : statusResult.status === TemplateApprovalStatus.PAUSED ||
+                  statusResult.status === TemplateApprovalStatus.DISABLED
+                ? 'disabled'
+                : 'draft';
+
+      // Update local status (including category if Meta changed it)
       await db
         .update(templateLocales)
         .set({
           approvalStatus: statusResult.status,
           qualityRating: statusResult.qualityRating,
           rejectionReason: statusResult.rejectionReason,
+          // Update category if Meta returned a different one
+          ...(statusResult.category && { category: statusResult.category }),
           metaResponse: statusResult.providerResponse,
           reviewedAt:
             statusResult.status !== TemplateApprovalStatus.PENDING
@@ -294,6 +417,41 @@ export class TemplateApprovalService {
           updatedAt: new Date(),
         })
         .where(eq(templateLocales.id, localeData.id));
+
+      // Also update templateVersions for pending versions
+      await db
+        .update(templateVersions)
+        .set({
+          status: versionStatus,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(templateVersions.localeId, localeData.id),
+            eq(templateVersions.status, 'pending_approval'),
+          ),
+        );
+
+      // If approved, set the version as active
+      if (statusResult.status === TemplateApprovalStatus.APPROVED) {
+        const approvedVersion = await db.query.templateVersions.findFirst({
+          where: and(
+            eq(templateVersions.localeId, localeData.id),
+            eq(templateVersions.status, 'approved'),
+          ),
+          orderBy: [desc(templateVersions.versionNumber)],
+        });
+
+        if (approvedVersion) {
+          await db
+            .update(templateLocales)
+            .set({
+              activeVersion: approvedVersion.versionNumber,
+              updatedAt: new Date(),
+            })
+            .where(eq(templateLocales.id, localeData.id));
+        }
+      }
 
       this.logger.log(
         `Synced template status: ${statusResult.status} (quality: ${statusResult.qualityRating})`,
@@ -393,11 +551,120 @@ export class TemplateApprovalService {
       updateData.qualityRating = qualityRating;
     }
 
+    // If template was APPROVED, fetch full status from Meta to get the category
+    // Meta may have changed the category during approval
+    if (newStatus === TemplateApprovalStatus.APPROVED) {
+      try {
+        const provider = this.providerFactory.getDefaultProvider();
+        const statusResult = await provider.getTemplateStatus(
+          payload.messageTemplateId,
+        );
+
+        if (statusResult.category) {
+          updateData.category = statusResult.category;
+          this.logger.log(
+            `📝 Category from Meta: ${statusResult.category} for template ${payload.messageTemplateName}`,
+          );
+
+          // Update ALL locales of this template to have the same category
+          // This ensures consistency when submitting new locales
+          const allLocales = await db.query.templateLocales.findMany({
+            where: eq(templateLocales.templateId, localeData.templateId),
+          });
+
+          for (const loc of allLocales) {
+            if (
+              loc.id !== localeData.id &&
+              loc.category !== statusResult.category
+            ) {
+              await db
+                .update(templateLocales)
+                .set({
+                  category: statusResult.category,
+                  updatedAt: new Date(),
+                })
+                .where(eq(templateLocales.id, loc.id));
+              this.logger.log(
+                `📝 Updated category for locale ${loc.locale} to ${statusResult.category}`,
+              );
+            }
+          }
+        }
+
+        if (statusResult.qualityRating) {
+          updateData.qualityRating = statusResult.qualityRating;
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Failed to fetch full status for approved template: ${error.message}`,
+        );
+      }
+    }
+
     // Update local status
     await db
       .update(templateLocales)
       .set(updateData)
       .where(eq(templateLocales.id, localeData.id));
+
+    // Also update templateVersions status for consistency
+    // Find the version(s) that are pending approval for this locale
+    const versionStatus =
+      newStatus === TemplateApprovalStatus.APPROVED
+        ? 'approved'
+        : newStatus === TemplateApprovalStatus.REJECTED
+          ? 'rejected'
+          : newStatus === TemplateApprovalStatus.PENDING
+            ? 'pending_approval'
+            : newStatus === TemplateApprovalStatus.PAUSED ||
+                newStatus === TemplateApprovalStatus.DISABLED
+              ? 'disabled'
+              : 'draft';
+
+    // Update all pending_approval versions for this locale
+    const updatedVersions = await db
+      .update(templateVersions)
+      .set({
+        status: versionStatus,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(templateVersions.localeId, localeData.id),
+          eq(templateVersions.status, 'pending_approval'),
+        ),
+      )
+      .returning({ id: templateVersions.id });
+
+    if (updatedVersions.length > 0) {
+      this.logger.log(
+        `📝 Updated ${updatedVersions.length} version(s) status to ${versionStatus}`,
+      );
+
+      // If approved, set the version as active
+      if (newStatus === TemplateApprovalStatus.APPROVED) {
+        const approvedVersion = await db.query.templateVersions.findFirst({
+          where: and(
+            eq(templateVersions.localeId, localeData.id),
+            eq(templateVersions.status, 'approved'),
+          ),
+          orderBy: [desc(templateVersions.versionNumber)],
+        });
+
+        if (approvedVersion) {
+          await db
+            .update(templateLocales)
+            .set({
+              activeVersion: approvedVersion.versionNumber,
+              updatedAt: new Date(),
+            })
+            .where(eq(templateLocales.id, localeData.id));
+          this.logger.log(
+            `📝 Set active version to v${approvedVersion.versionNumber}`,
+          );
+        }
+      }
+    }
 
     this.logger.log(
       `✅ Updated template ${localeData.id} (${payload.messageTemplateName}) status to ${newStatus}`,
@@ -448,5 +715,277 @@ export class TemplateApprovalService {
     }
 
     return template;
+  }
+
+  /**
+   * Sync status for all templates that have been submitted to Meta but are still pending.
+   * This is useful for catching up on status changes when webhooks may have been missed.
+   *
+   * @param statuses - Optional array of statuses to sync. Defaults to ['pending'].
+   * @returns BulkSyncResult with details of each template's sync operation
+   */
+  async syncAllPendingTemplates(
+    statuses: TemplateApprovalStatus[] = [TemplateApprovalStatus.PENDING],
+  ): Promise<BulkSyncResult> {
+    this.logger.log(
+      `Starting bulk sync for templates with statuses: ${statuses.join(', ')}`,
+    );
+
+    // Find all template locales that:
+    // 1. Have a metaTemplateId (were submitted to Meta)
+    // 2. Have one of the specified statuses
+    const pendingLocales = await db.query.templateLocales.findMany({
+      where: and(
+        isNotNull(templateLocales.metaTemplateId),
+        inArray(templateLocales.approvalStatus, statuses),
+      ),
+      with: {
+        template: true,
+      },
+    });
+
+    this.logger.log(`Found ${pendingLocales.length} templates to sync`);
+
+    if (pendingLocales.length === 0) {
+      return {
+        totalProcessed: 0,
+        successCount: 0,
+        errorCount: 0,
+        statusChangedCount: 0,
+        results: [],
+      };
+    }
+
+    const results: TemplateSyncResult[] = [];
+    let successCount = 0;
+    let errorCount = 0;
+    let statusChangedCount = 0;
+
+    const provider = this.providerFactory.getDefaultProvider();
+
+    // Process each template sequentially to avoid rate limiting
+    for (const localeData of pendingLocales) {
+      const result: TemplateSyncResult = {
+        localeId: localeData.id,
+        templateId: localeData.templateId,
+        templateName: localeData.template?.name || 'Unknown',
+        locale: localeData.locale,
+        previousStatus: localeData.approvalStatus || 'draft',
+        newStatus: localeData.approvalStatus || 'draft',
+        statusChanged: false,
+      };
+
+      try {
+        if (!localeData.metaTemplateId) {
+          result.error = 'No Meta template ID found';
+          errorCount++;
+          results.push(result);
+          continue;
+        }
+
+        // Fetch status from Meta API
+        const statusResult = await provider.getTemplateStatus(
+          localeData.metaTemplateId,
+        );
+
+        result.newStatus = statusResult.status;
+        result.qualityRating = statusResult.qualityRating;
+        result.statusChanged = result.previousStatus !== statusResult.status;
+
+        // Update local status if changed (including category if Meta changed it)
+        if (result.statusChanged || statusResult.qualityRating) {
+          await db
+            .update(templateLocales)
+            .set({
+              approvalStatus: statusResult.status,
+              qualityRating: statusResult.qualityRating,
+              rejectionReason: statusResult.rejectionReason,
+              // Update category if Meta returned a different one
+              ...(statusResult.category && { category: statusResult.category }),
+              metaResponse: statusResult.providerResponse,
+              reviewedAt:
+                statusResult.status !== TemplateApprovalStatus.PENDING
+                  ? new Date()
+                  : localeData.reviewedAt,
+              updatedAt: new Date(),
+            })
+            .where(eq(templateLocales.id, localeData.id));
+
+          this.logger.log(
+            `✅ Synced ${localeData.template?.name} (${localeData.locale}): ${result.previousStatus} → ${statusResult.status}`,
+          );
+
+          // Emit WebSocket event for real-time UI updates if status changed
+          if (result.statusChanged) {
+            statusChangedCount++;
+            this.emitStatusUpdate({
+              templateId: localeData.metaTemplateId,
+              templateName: localeData.template?.name || 'Unknown',
+              language: localeData.locale,
+              status: statusResult.status,
+              reason: statusResult.rejectionReason,
+              timestamp: new Date(),
+              localeId: localeData.id,
+            });
+          }
+        }
+
+        successCount++;
+      } catch (error) {
+        result.error = error.message || 'Unknown error';
+        errorCount++;
+        this.logger.error(
+          `Failed to sync template ${localeData.template?.name} (${localeData.locale}): ${error.message}`,
+        );
+      }
+
+      results.push(result);
+
+      // Small delay to avoid rate limiting (Meta API has rate limits)
+      await this.delay(100);
+    }
+
+    this.logger.log(
+      `Bulk sync completed: ${successCount} success, ${errorCount} errors, ${statusChangedCount} status changes`,
+    );
+
+    return {
+      totalProcessed: pendingLocales.length,
+      successCount,
+      errorCount,
+      statusChangedCount,
+      results,
+    };
+  }
+
+  /**
+   * Sync status for a single template by template ID and locale.
+   * Returns detailed information about the sync operation.
+   *
+   * @param templateId - The internal template ID
+   * @param locale - The locale code (e.g., 'en', 'es')
+   * @returns TemplateSyncResult with sync details
+   */
+  async syncSingleTemplateStatus(
+    templateId: string,
+    locale: string,
+  ): Promise<TemplateSyncResult> {
+    const template = await this.getTemplateWithLocale(templateId, locale);
+    const localeData = template.locales?.find((l) => l.locale === locale);
+
+    if (!localeData) {
+      throw new NotFoundException(`Locale ${locale} not found for template`);
+    }
+
+    const result: TemplateSyncResult = {
+      localeId: localeData.id,
+      templateId: templateId,
+      templateName: template.name,
+      locale: locale,
+      previousStatus: localeData.approvalStatus || 'draft',
+      newStatus: localeData.approvalStatus || 'draft',
+      statusChanged: false,
+    };
+
+    if (!localeData.metaTemplateId) {
+      result.error = 'Template has not been submitted to Meta yet';
+      return result;
+    }
+
+    try {
+      const provider = this.providerFactory.getDefaultProvider();
+      const statusResult = await provider.getTemplateStatus(
+        localeData.metaTemplateId,
+      );
+
+      result.newStatus = statusResult.status;
+      result.qualityRating = statusResult.qualityRating;
+      result.statusChanged = result.previousStatus !== statusResult.status;
+
+      // Update local status (including category if Meta changed it)
+      await db
+        .update(templateLocales)
+        .set({
+          approvalStatus: statusResult.status,
+          qualityRating: statusResult.qualityRating,
+          rejectionReason: statusResult.rejectionReason,
+          // Update category if Meta returned a different one
+          ...(statusResult.category && { category: statusResult.category }),
+          metaResponse: statusResult.providerResponse,
+          reviewedAt:
+            statusResult.status !== TemplateApprovalStatus.PENDING
+              ? new Date()
+              : localeData.reviewedAt,
+          updatedAt: new Date(),
+        })
+        .where(eq(templateLocales.id, localeData.id));
+
+      this.logger.log(
+        `✅ Synced ${template.name} (${locale}): ${result.previousStatus} → ${statusResult.status}`,
+      );
+
+      // Emit WebSocket event for real-time UI updates if status changed
+      if (result.statusChanged) {
+        this.emitStatusUpdate({
+          templateId: localeData.metaTemplateId,
+          templateName: template.name,
+          language: locale,
+          status: statusResult.status,
+          reason: statusResult.rejectionReason,
+          timestamp: new Date(),
+          localeId: localeData.id,
+        });
+      }
+    } catch (error) {
+      result.error = error.message || 'Failed to fetch status from Meta';
+      this.logger.error(
+        `Failed to sync template ${template.name} (${locale}): ${error.message}`,
+      );
+    }
+
+    return result;
+  }
+
+  /**
+   * Get all templates with their current approval status.
+   * Useful for displaying a list of pending templates.
+   */
+  async getTemplatesWithPendingStatus(): Promise<
+    Array<{
+      templateId: string;
+      templateName: string;
+      localeId: string;
+      locale: string;
+      approvalStatus: string;
+      metaTemplateId: string | null;
+      submittedAt: Date | null;
+    }>
+  > {
+    const pendingLocales = await db.query.templateLocales.findMany({
+      where: and(
+        isNotNull(templateLocales.metaTemplateId),
+        eq(templateLocales.approvalStatus, TemplateApprovalStatus.PENDING),
+      ),
+      with: {
+        template: true,
+      },
+    });
+
+    return pendingLocales.map((locale) => ({
+      templateId: locale.templateId,
+      templateName: locale.template?.name || 'Unknown',
+      localeId: locale.id,
+      locale: locale.locale,
+      approvalStatus: locale.approvalStatus || 'draft',
+      metaTemplateId: locale.metaTemplateId,
+      submittedAt: locale.submittedAt,
+    }));
+  }
+
+  /**
+   * Helper method to add a delay
+   */
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }

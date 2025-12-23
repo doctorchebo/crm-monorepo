@@ -32,6 +32,8 @@ interface RequestApprovalModalProps {
   templateId: string;
   locale: string;
   templateName: string;
+  /** Optional version number to display in the modal */
+  versionNumber?: number;
 }
 
 type ModalStep = "validating" | "errors" | "confirm" | "submitting" | "result";
@@ -43,6 +45,7 @@ export function RequestApprovalModal({
   templateId,
   locale,
   templateName,
+  versionNumber,
 }: RequestApprovalModalProps) {
   const t = useTranslations("templates.approval.modal");
   const tCommon = useTranslations("common");
@@ -168,11 +171,33 @@ export function RequestApprovalModal({
 
       <div className="bg-muted rounded-lg p-4 space-y-2">
         <div className="flex justify-between text-sm">
-          <span className="text-muted-foreground">Template:</span>
+          <span className="text-muted-foreground">
+            {t("template") || "Template"}:
+          </span>
           <span className="font-medium text-foreground">{templateName}</span>
         </div>
         <div className="flex justify-between text-sm">
-          <span className="text-muted-foreground">Provider:</span>
+          <span className="text-muted-foreground">
+            {t("language") || "Language"}:
+          </span>
+          <span className="font-medium text-foreground uppercase">
+            {locale}
+          </span>
+        </div>
+        {versionNumber && (
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">
+              {t("version") || "Version"}:
+            </span>
+            <span className="font-medium text-foreground">
+              v{versionNumber}
+            </span>
+          </div>
+        )}
+        <div className="flex justify-between text-sm">
+          <span className="text-muted-foreground">
+            {t("provider") || "Provider"}:
+          </span>
           <span className="font-medium text-foreground">Meta Cloud API</span>
         </div>
       </div>

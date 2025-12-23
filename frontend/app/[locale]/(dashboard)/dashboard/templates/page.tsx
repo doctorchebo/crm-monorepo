@@ -1,17 +1,12 @@
 "use client";
 
 import { DeleteConfirmationDialog } from "@/components/dialogs/delete-confirmation-dialog";
-import { RequestApprovalModal } from "@/components/templates/request-approval-modal";
-import { TemplateStatusBadge } from "@/components/templates/template-status-badge";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  TemplateCard,
+  type TemplateCardData,
+  type TemplateLocaleData,
+} from "@/components/templates/template-card";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -27,57 +22,27 @@ import {
   useTemplateStatusSocket,
   type TemplateStatusUpdate,
 } from "@/hooks/use-template-status-socket";
-import { backendApi, TemplateApprovalStatusValue } from "@/lib/api/endpoints";
-import { MoreVertical, Pencil, Plus, Send, Trash2 } from "lucide-react";
+import {
+  backendApi,
+  BulkSyncResult,
+  TemplateSyncResult,
+} from "@/lib/api/endpoints";
+import { Loader2, Plus, RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useParams, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
 import useSWR from "swr";
 
-interface TemplateLocale {
-  id: string;
-  locale: string;
-  body: string;
-  header?: string;
-  footer?: string;
-  approvalStatus?: TemplateApprovalStatusValue;
-  qualityRating?: "high" | "medium" | "low" | null;
-  rejectionReason?: string | null;
-}
-
-interface Template {
-  id: string;
-  name: string;
-  displayName?: string;
-  description?: string;
-  isVisible: boolean;
-  isActive: boolean;
-  locales?: TemplateLocale[];
-  platforms?: Array<{
-    platformName: string;
-    isEnabled: boolean;
-  }>;
+/**
+ * Template interface matching the API response
+ */
+interface Template extends TemplateCardData {
   createdAt: string;
   updatedAt: string;
 }
 
-function truncateText(text: string, maxLength: number = 100): string {
-  if (!text) return "";
-  if (text.length <= maxLength) return text;
-  return text.substring(0, maxLength) + "...";
-}
-
-function getPlatformBadges(
-  platforms?: Array<{ platformName: string; isEnabled: boolean }>
-): string[] {
-  if (!platforms) return ["WhatsApp"];
-  return platforms.filter((p) => p.isEnabled).map((p) => p.platformName);
-}
-
 export default function TemplatesPage() {
   const router = useRouter();
-  const params = useParams();
-  const locale = params.locale as string;
   const t = useTranslations("templates");
   const tCommon = useTranslations("common");
   const { addNotification } = useNotification();
@@ -91,12 +56,12 @@ export default function TemplatesPage() {
     null
   );
   const [isDeleting, setIsDeleting] = useState(false);
-  const [approvalModalOpen, setApprovalModalOpen] = useState(false);
-  const [templateForApproval, setTemplateForApproval] = useState<{
-    templateId: string;
-    locale: string;
-    templateName: string;
-  } | null>(null);
+
+  // Sync-related state
+  const [isSyncingAll, setIsSyncingAll] = useState(false);
+  const [syncingTemplateId, setSyncingTemplateId] = useState<string | null>(
+    null
+  );
 
   const {
     data: templates = [],
@@ -159,11 +124,11 @@ export default function TemplatesPage() {
     },
   });
 
+  // Filter and sort templates
   const filteredTemplates = useMemo(() => {
     return (templates as Template[])
-      .filter((template: Template) => {
+      .filter((template) => {
         const searchLower = searchQuery.toLowerCase();
-        // Search by displayName first, fall back to name
         const nameToSearch = (
           template.displayName || template.name
         ).toLowerCase();
@@ -182,6 +147,7 @@ export default function TemplatesPage() {
       });
   }, [templates, searchQuery]);
 
+  // Delete template handler
   const handleDelete = async () => {
     if (!templateToDelete) return;
 
@@ -208,8 +174,14 @@ export default function TemplatesPage() {
     }
   };
 
-  const handleEdit = (templateId: string) => {
-    router.push(`/dashboard/templates/${templateId}/edit`);
+  /**
+   * Navigate to edit page for a template, optionally with a specific locale selected
+   */
+  const handleEdit = (templateId: string, selectedLocale?: string) => {
+    const url = selectedLocale
+      ? `/dashboard/templates/${templateId}/edit?locale=${selectedLocale}`
+      : `/dashboard/templates/${templateId}/edit`;
+    router.push(url);
   };
 
   const handleDeleteClick = (template: Template) => {
@@ -217,64 +189,144 @@ export default function TemplatesPage() {
     setDeleteDialogOpen(true);
   };
 
-  const handleRequestApproval = (
+  /**
+   * Check if a locale can be synced (has been submitted to Meta)
+   */
+  const canSyncStatus = (locale: TemplateLocaleData): boolean => {
+    return !!locale.metaTemplateId;
+  };
+
+  /**
+   * Sync all pending templates with Meta API
+   */
+  const handleSyncAllPending = async () => {
+    if (isSyncingAll) return;
+
+    setIsSyncingAll(true);
+    try {
+      const result: BulkSyncResult = await backendApi.templates.syncAllPending({
+        statuses: ["pending"],
+      });
+
+      if (result.totalProcessed === 0) {
+        addNotification(
+          t("noTemplatesNeedSync") || "No templates need syncing",
+          "info",
+          3000
+        );
+      } else if (result.statusChangedCount > 0) {
+        addNotification(
+          t("syncCompleteWithChanges", {
+            total: result.totalProcessed,
+            changed: result.statusChangedCount,
+          }) ||
+            `Synced ${result.totalProcessed} templates. ${
+              result.statusChangedCount
+            } status${result.statusChangedCount !== 1 ? "es" : ""} changed.`,
+          "success",
+          5000
+        );
+        mutate();
+      } else {
+        addNotification(
+          t("syncCompleteNoChanges", { total: result.totalProcessed }) ||
+            `Synced ${result.totalProcessed} templates. No status changes detected.`,
+          "info",
+          3000
+        );
+      }
+    } catch (error) {
+      console.error("Failed to sync templates:", error);
+      addNotification(
+        t("syncFailed") || "Failed to sync template statuses",
+        "error",
+        3000
+      );
+    } finally {
+      setIsSyncingAll(false);
+    }
+  };
+
+  /**
+   * Sync a single template's status with Meta API
+   */
+  const handleSyncSingleTemplate = async (
     template: Template,
-    templateLocale: TemplateLocale
+    locale: TemplateLocaleData
   ) => {
-    setTemplateForApproval({
-      templateId: template.id,
-      locale: templateLocale.locale,
-      templateName: `${
-        template.displayName || template.name
-      } (${templateLocale.locale.toUpperCase()})`,
-    });
-    setApprovalModalOpen(true);
-  };
+    if (syncingTemplateId === template.id) return;
 
-  const canRequestApproval = (templateLocale?: TemplateLocale): boolean => {
-    if (!templateLocale) return false;
-    const status = templateLocale.approvalStatus;
-    // Can request approval if draft, rejected, or not yet submitted
-    return !status || status === "draft" || status === "rejected";
+    setSyncingTemplateId(template.id);
+    try {
+      const result: TemplateSyncResult = await backendApi.templates.syncStatus(
+        template.id,
+        { locale: locale.locale }
+      );
+
+      if (result.error) {
+        addNotification(
+          t("syncSingleFailed", {
+            name: template.displayName || template.name,
+          }) || `Failed to sync "${template.displayName || template.name}"`,
+          "error",
+          3000
+        );
+      } else if (result.statusChanged) {
+        const statusLabels: Record<string, string> = {
+          approved: t("approval.status.approved") || "Approved",
+          rejected: t("approval.status.rejected") || "Rejected",
+          pending: t("approval.status.pending") || "Pending",
+          paused: t("approval.status.paused") || "Paused",
+          disabled: t("approval.status.disabled") || "Disabled",
+          draft: t("approval.status.draft") || "Draft",
+        };
+        const newStatusLabel =
+          statusLabels[result.newStatus] || result.newStatus;
+        addNotification(
+          t("syncSingleChanged", {
+            name: template.displayName || template.name,
+            status: newStatusLabel,
+          }) ||
+            `"${
+              template.displayName || template.name
+            }" status updated to ${newStatusLabel}`,
+          result.newStatus === "approved" ? "success" : "info",
+          4000
+        );
+        mutate();
+      } else {
+        addNotification(
+          t("syncSingleNoChange", {
+            name: template.displayName || template.name,
+          }) || `"${template.displayName || template.name}" is up to date`,
+          "info",
+          3000
+        );
+      }
+    } catch (error) {
+      console.error("Failed to sync template:", error);
+      addNotification(
+        t("syncSingleFailed", {
+          name: template.displayName || template.name,
+        }) || `Failed to sync "${template.displayName || template.name}"`,
+        "error",
+        3000
+      );
+    } finally {
+      setSyncingTemplateId(null);
+    }
   };
 
   /**
-   * Statuses that prevent template editing.
-   * Templates under review or with certain Meta-controlled statuses cannot be edited.
+   * Count of templates that have pending status (across any locale)
    */
-  const NON_EDITABLE_STATUSES: TemplateApprovalStatusValue[] = [
-    "pending",
-    "approved",
-    "paused",
-    "disabled",
-  ];
-
-  /**
-   * Determines if a template can be edited based on its approval status.
-   * Templates can only be edited if they are in draft, rejected, or appeal_requested state.
-   */
-  const canEdit = (templateLocale?: TemplateLocale): boolean => {
-    if (!templateLocale) return true; // New templates can be edited
-    const status = templateLocale.approvalStatus;
-    if (!status) return true; // No status = editable
-    return !NON_EDITABLE_STATUSES.includes(status);
-  };
-
-  /**
-   * Returns the translation key for why editing is disabled for a given status.
-   * Returns null if the template can be edited.
-   */
-  const getEditDisabledReason = (
-    templateLocale?: TemplateLocale
-  ): string | null => {
-    if (!templateLocale) return null;
-    const status = templateLocale.approvalStatus;
-    if (!status || !NON_EDITABLE_STATUSES.includes(status)) return null;
-
-    // Get the localized reason from translations
-    const reasonKey = `editDisabled.${status}` as const;
-    return t(`approval.${reasonKey}`);
-  };
+  const pendingTemplatesCount = useMemo(() => {
+    return (templates as Template[]).filter((template) => {
+      return template.locales?.some(
+        (locale) => locale.approvalStatus === "pending" && locale.metaTemplateId
+      );
+    }).length;
+  }, [templates]);
 
   return (
     <div className="flex flex-col h-full">
@@ -287,13 +339,46 @@ export default function TemplatesPage() {
               "Create and manage message templates for all your platforms"}
           </p>
         </div>
-        <Button
-          onClick={() => router.push(`/dashboard/templates/new`)}
-          className="gap-2"
-        >
-          <Plus className="h-4 w-4" />
-          {tCommon("create")}
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* Sync All Pending Button */}
+          {pendingTemplatesCount > 0 && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    onClick={handleSyncAllPending}
+                    disabled={isSyncingAll}
+                    className="gap-2"
+                  >
+                    {isSyncingAll ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4" />
+                    )}
+                    {t("syncStatus") || "Sync Status"}
+                    <span className="ml-1 px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-800 rounded-full">
+                      {pendingTemplatesCount}
+                    </span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>
+                    {t("syncStatusTooltip") ||
+                      "Refresh approval status from Meta for all pending templates"}
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+          <Button
+            onClick={() => router.push(`/dashboard/templates/new`)}
+            className="gap-2"
+          >
+            <Plus className="h-4 w-4" />
+            {tCommon("create")}
+          </Button>
+        </div>
       </div>
 
       {/* Search */}
@@ -331,159 +416,22 @@ export default function TemplatesPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredTemplates.map((template) => {
-              const templateLocale = template.locales?.[0];
-              const isEditable = canEdit(templateLocale);
-              const editDisabledReason = getEditDisabledReason(templateLocale);
-
-              return (
-                <Card
-                  key={template.id}
-                  className={`p-4 hover:shadow-lg transition-shadow group relative ${
-                    isEditable ? "cursor-pointer" : "cursor-default"
-                  }`}
-                >
-                  {/* Template Content */}
-                  <div
-                    className="mb-3"
-                    onClick={
-                      isEditable ? () => handleEdit(template.id) : undefined
-                    }
-                  >
-                    <div className="flex items-start justify-between mb-2 pr-8">
-                      <h3 className="font-semibold text-lg truncate flex-1 min-w-0">
-                        {template.displayName || template.name}
-                      </h3>
-                      <div className="flex gap-1 items-center flex-shrink-0">
-                        {/* Approval Status Badge */}
-                        {templateLocale && templateLocale.approvalStatus && (
-                          <TemplateStatusBadge
-                            status={templateLocale.approvalStatus}
-                            qualityRating={
-                              templateLocale.qualityRating ?? undefined
-                            }
-                            showQuality={
-                              templateLocale.approvalStatus === "approved"
-                            }
-                            customTooltip={editDisabledReason ?? undefined}
-                            stopPropagation={!isEditable}
-                          />
-                        )}
-                        {template.isVisible ? (
-                          <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
-                            {t("visible") || "Visible"}
-                          </span>
-                        ) : (
-                          <span className="text-xs bg-gray-100 text-gray-800 px-2 py-1 rounded">
-                            {t("hidden") || "Hidden"}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {template.description && (
-                      <p className="text-xs text-gray-600 mb-2">
-                        {template.description}
-                      </p>
-                    )}
-
-                    {/* Template Preview */}
-                    {templateLocale && (
-                      <div className="bg-blue-50 p-3 rounded-md mb-3 border border-blue-100">
-                        <p className="text-xs font-semibold text-blue-900 mb-1">
-                          {templateLocale.locale.toUpperCase()}
-                        </p>
-                        <p className="text-sm text-gray-700 whitespace-pre-wrap">
-                          {truncateText(templateLocale.body, 80)}
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Platforms */}
-                    <div className="flex gap-1 flex-wrap">
-                      {getPlatformBadges(template.platforms).map((platform) => (
-                        <span
-                          key={platform}
-                          className="text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded"
-                        >
-                          {platform}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Hover Options */}
-                  <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 hover:bg-muted"
-                        >
-                          <MoreVertical className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        {/* Edit option - disabled with tooltip when template is under review */}
-                        {isEditable ? (
-                          <DropdownMenuItem
-                            onClick={() => handleEdit(template.id)}
-                          >
-                            <Pencil className="h-4 w-4 mr-2" />
-                            {tCommon("edit")}
-                          </DropdownMenuItem>
-                        ) : (
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <div>
-                                  <DropdownMenuItem
-                                    disabled
-                                    className="opacity-50 cursor-not-allowed"
-                                  >
-                                    <Pencil className="h-4 w-4 mr-2" />
-                                    {tCommon("edit")}
-                                  </DropdownMenuItem>
-                                </div>
-                              </TooltipTrigger>
-                              <TooltipContent side="left" className="max-w-xs">
-                                <p>{editDisabledReason}</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        )}
-                        {templateLocale &&
-                          canRequestApproval(templateLocale) && (
-                            <>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                onClick={() =>
-                                  handleRequestApproval(
-                                    template,
-                                    templateLocale
-                                  )
-                                }
-                              >
-                                <Send className="h-4 w-4 mr-2" />
-                                {t("requestApproval") || "Request Approval"}
-                              </DropdownMenuItem>
-                            </>
-                          )}
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          onClick={() => handleDeleteClick(template)}
-                          className="text-red-600"
-                        >
-                          <Trash2 className="h-4 w-4 mr-2" />
-                          {tCommon("delete")}
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </Card>
-              );
-            })}
+            {filteredTemplates.map((template) => (
+              <TemplateCard
+                key={template.id}
+                template={template}
+                onClick={() => handleEdit(template.id)}
+                onLocaleClick={(locale) =>
+                  handleEdit(template.id, locale.locale)
+                }
+                onDelete={() => handleDeleteClick(template)}
+                onSyncStatus={(locale) =>
+                  handleSyncSingleTemplate(template, locale)
+                }
+                isSyncing={syncingTemplateId === template.id}
+                canSyncStatus={canSyncStatus}
+              />
+            ))}
           </div>
         )}
       </div>
@@ -503,31 +451,6 @@ export default function TemplatesPage() {
         onConfirm={handleDelete}
         isLoading={isDeleting}
       />
-
-      {/* Request Approval Modal */}
-      {templateForApproval && (
-        <RequestApprovalModal
-          open={approvalModalOpen}
-          onOpenChange={(open) => {
-            setApprovalModalOpen(open);
-            if (!open) {
-              setTemplateForApproval(null);
-            }
-          }}
-          templateId={templateForApproval.templateId}
-          locale={templateForApproval.locale}
-          templateName={templateForApproval.templateName}
-          onSuccess={() => {
-            mutate(); // Refresh templates list
-            addNotification(
-              t("approvalRequestSubmitted") ||
-                "Approval request submitted successfully",
-              "success",
-              3000
-            );
-          }}
-        />
-      )}
     </div>
   );
 }

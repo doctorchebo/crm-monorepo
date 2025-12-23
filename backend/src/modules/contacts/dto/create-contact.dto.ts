@@ -1,11 +1,23 @@
 import {
   IsArray,
   IsEmail,
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
   Matches,
 } from 'class-validator';
+
+// Supported language codes matching template locales
+export const SUPPORTED_LANGUAGES = [
+  'en',
+  'es',
+  'pt',
+  'fr',
+  'de',
+  'it',
+] as const;
+export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
 
 export class CreateContactDto {
   @IsString()
@@ -18,6 +30,13 @@ export class CreateContactDto {
   @IsOptional()
   @IsEmail()
   email?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(SUPPORTED_LANGUAGES, {
+    message: `Language must be one of: ${SUPPORTED_LANGUAGES.join(', ')}`,
+  })
+  language?: SupportedLanguage;
 
   @IsString()
   @Matches(/^\+\d{1,3}$/, {

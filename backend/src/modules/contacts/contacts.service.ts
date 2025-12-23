@@ -359,6 +359,9 @@ export class ContactsService {
       if (updateContactDto.avatar !== undefined) {
         updateData.avatar = updateContactDto.avatar || null;
       }
+      if (updateContactDto.language !== undefined) {
+        updateData.language = updateContactDto.language || null;
+      }
 
       // If phone details changed, update separately
       if (updateContactDto.countryCode) {

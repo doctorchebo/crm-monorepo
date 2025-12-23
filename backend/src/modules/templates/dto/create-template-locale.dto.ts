@@ -5,4 +5,5 @@ export class CreateTemplateLocaleDto {
   body: string; // Main message with {{placeholder}} syntax
   footer?: string;
   exampleVars?: Record<string, any>; // Example values for preview
+  category?: string; // 'authentication', 'marketing', 'utility'
 }

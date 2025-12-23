@@ -1,5 +1,19 @@
 import type { GroupedMessage, Message } from "./types";
 
+// Re-export conversation window utilities
+export {
+  calculateConversationWindow,
+  enrichTemplatesWithAvailability,
+  formatTimeRemaining,
+  getLastInboundMessage,
+  getTemplateAvailability,
+  type ConversationWindowStatus,
+  type TemplateAvailability,
+  type TemplateLocale,
+  type TemplateUnavailableReason,
+  type TemplateWithAvailability,
+} from "./utils/conversation-window";
+
 /**
  * Groups consecutive outbound media-only messages that were sent within 2 seconds.
  * This creates WhatsApp-like grouped media bubbles.

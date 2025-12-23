@@ -5,7 +5,7 @@ import { CustomerProfile } from "@/components/ui/customer-profile";
 import { NotesPanel } from "@/components/ui/notes-panel";
 import { FileText, User } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 interface NotesGeneralAndMessage {
   chatId: string;
@@ -47,23 +47,20 @@ export function ChatSidebar({
   onProfileUpdate,
 }: ChatSidebarProps) {
   const t = useTranslations("notes");
-  const [activeTab, setActiveTab] = useState<"profile" | "notes">("profile");
+  // Default to profile tab if contactId exists, otherwise notes
+  const [activeTab, setActiveTab] = useState<"profile" | "notes">(
+    contactId ? "profile" : "notes"
+  );
 
-  // If no contactId, show only notes
-  if (!contactId) {
-    return (
-      <div className="flex flex-col h-full border-l bg-background">
-        <NotesPanel
-          chatId={chatId}
-          currentUserId={currentUserId}
-          notes={notes}
-          loading={notesLoading}
-          onAddNote={onAddNote}
-          onDeleteNote={onDeleteNote}
-        />
-      </div>
-    );
-  }
+  // Switch to notes tab if contact becomes unavailable, or to profile if it becomes available
+  useEffect(() => {
+    if (!contactId && activeTab === "profile") {
+      setActiveTab("notes");
+    } else if (contactId && activeTab === "notes") {
+      // Optionally switch to profile when contact becomes available
+      setActiveTab("profile");
+    }
+  }, [contactId, activeTab]);
 
   return (
     <div className="flex flex-col h-full border-l bg-background">
@@ -74,7 +71,8 @@ export function ChatSidebar({
             variant={activeTab === "profile" ? "default" : "ghost"}
             size="sm"
             className="flex-1 h-7 text-xs gap-1"
-            onClick={() => setActiveTab("profile")}
+            onClick={() => contactId && setActiveTab("profile")}
+            disabled={!contactId}
           >
             <User className="h-3 w-3" />
             {t("profile")}
@@ -93,7 +91,7 @@ export function ChatSidebar({
 
       {/* Tab Content */}
       <div className="flex-1 overflow-hidden">
-        {activeTab === "profile" ? (
+        {activeTab === "profile" && contactId ? (
           <CustomerProfile
             contactId={contactId}
             onProfileUpdate={onProfileUpdate}

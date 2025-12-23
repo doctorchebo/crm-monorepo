@@ -4,6 +4,7 @@ import {
   templatePlatforms,
   templates,
   templateVariables,
+  templateVersions,
 } from '@database/schema';
 import {
   BadRequestException,
@@ -23,6 +24,7 @@ import {
 import { TemplateParserService } from './template-parser.service';
 import { TemplateRenderService } from './template-render.service';
 import { TemplateValidatorService } from './template-validator.service';
+import { VersionStatus } from './template-version.service';
 
 /**
  * Templates service
@@ -178,6 +180,7 @@ export class TemplatesService {
 
   /**
    * Add locale content to template
+   * IMPORTANT: This method now auto-creates version 1 when adding a new locale
    */
   async addLocale(templateId: string, dto: CreateTemplateLocaleDto) {
     await this.getTemplate(templateId); // Verify template exists
@@ -207,23 +210,82 @@ export class TemplatesService {
     });
 
     if (existing) {
-      // Update existing locale
-      await db
-        .update(templateLocales)
-        .set({
-          type: dto.type || 'text',
-          header: dto.header,
-          body: dto.body,
-          footer: dto.footer,
-          exampleVars: dto.exampleVars || {},
-          updatedAt: new Date(),
-        })
-        .where(eq(templateLocales.id, existing.id));
+      // For existing locales, we need to check if there's an editable version
+      // If there's a draft, update the draft version content
+      // If approved/pending, this should fail (user must create new version)
+      const versions = await db.query.templateVersions.findMany({
+        where: and(
+          eq(templateVersions.templateId, templateId),
+          eq(templateVersions.localeId, existing.id),
+        ),
+        orderBy: (templateVersions, { desc }) => [
+          desc(templateVersions.versionNumber),
+        ],
+      });
+
+      if (versions.length > 0) {
+        const latestVersion = versions[0];
+        const status = latestVersion.status as VersionStatus;
+
+        // Only allow editing draft or rejected versions
+        if (
+          status === VersionStatus.DRAFT ||
+          status === VersionStatus.REJECTED
+        ) {
+          // Update the version content
+          await db
+            .update(templateVersions)
+            .set({
+              content: {
+                header: dto.header,
+                body: dto.body,
+                footer: dto.footer,
+                exampleVars: dto.exampleVars || {},
+                category: dto.category || 'utility',
+              },
+              updatedAt: new Date(),
+            })
+            .where(eq(templateVersions.id, latestVersion.id));
+
+          // Also update locale for legacy compatibility / caching
+          await db
+            .update(templateLocales)
+            .set({
+              type: dto.type || 'text',
+              header: dto.header,
+              body: dto.body,
+              footer: dto.footer,
+              exampleVars: dto.exampleVars || {},
+              updatedAt: new Date(),
+            })
+            .where(eq(templateLocales.id, existing.id));
+
+          return this.getLocale(existing.id);
+        } else {
+          // Version is immutable - cannot edit directly
+          throw new BadRequestException({
+            message: `Cannot edit locale directly. The current version (v${latestVersion.versionNumber}) has status "${status}". Create a new draft version to make changes.`,
+            code: 'VERSION_IMMUTABLE',
+            currentVersion: latestVersion.versionNumber,
+            currentStatus: status,
+          });
+        }
+      }
+
+      // No versions exist for this locale - this shouldn't happen but handle gracefully
+      // Create v1
+      await this.createInitialVersion(templateId, existing.id, {
+        header: dto.header,
+        body: dto.body,
+        footer: dto.footer,
+        exampleVars: dto.exampleVars || {},
+        category: dto.category || 'utility',
+      });
 
       return this.getLocale(existing.id);
     }
 
-    // Create new locale
+    // Create new locale with initial version v1
     await db.insert(templateLocales).values({
       id: localeId,
       templateId,
@@ -233,6 +295,8 @@ export class TemplatesService {
       body: dto.body,
       footer: dto.footer,
       exampleVars: dto.exampleVars || {},
+      activeVersion: 1,
+      approvalStatus: 'draft',
     });
 
     // Extract and create variables
@@ -247,7 +311,53 @@ export class TemplatesService {
       });
     }
 
+    // Create initial version v1 for this locale
+    await this.createInitialVersion(templateId, localeId, {
+      header: dto.header,
+      body: dto.body,
+      footer: dto.footer,
+      exampleVars: dto.exampleVars || {},
+      category: dto.category || 'utility',
+    });
+
     return this.getLocale(localeId);
+  }
+
+  /**
+   * Create initial version (v1) for a locale
+   * This is called automatically when adding a new locale
+   */
+  private async createInitialVersion(
+    templateId: string,
+    localeId: string,
+    content: {
+      header?: string;
+      body: string;
+      footer?: string;
+      exampleVars?: Record<string, any>;
+      category?: string;
+    },
+  ) {
+    const versionId = crypto.randomUUID();
+
+    await db.insert(templateVersions).values({
+      id: versionId,
+      templateId,
+      localeId,
+      versionNumber: 1,
+      content: {
+        header: content.header || null,
+        body: content.body,
+        footer: content.footer || null,
+        exampleVars: content.exampleVars || {},
+        category: content.category || 'utility',
+      },
+      status: VersionStatus.DRAFT,
+      providerName: 'meta',
+      platforms: ['whatsapp'],
+    });
+
+    return versionId;
   }
 
   /**
@@ -287,9 +397,9 @@ export class TemplatesService {
 
     const rendered = this.renderService.render(
       {
-        header: localeData.header,
+        header: localeData.header ?? undefined,
         body: localeData.body,
-        footer: localeData.footer,
+        footer: localeData.footer ?? undefined,
       },
       vars,
     );
@@ -321,8 +431,8 @@ export class TemplatesService {
 
     const errors = this.validatorService.validate(
       localeData.body,
-      localeData.header,
-      localeData.footer,
+      localeData.header ?? undefined,
+      localeData.footer ?? undefined,
     );
 
     return {

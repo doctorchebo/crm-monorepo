@@ -160,6 +160,7 @@ export const contacts = pgTable(
     firstName: varchar('first_name').notNull(),
     lastName: varchar('last_name'),
     email: varchar('email'), // Contact email address
+    language: varchar('language', { length: 10 }), // Preferred language code (e.g., 'en', 'es', 'pt')
     countryCode: varchar('country_code').notNull(), // e.g., '+591' for Bolivia
     phoneNumber: varchar('phone_number').notNull(), // Full phone number
     twilioContactId: varchar('twilio_contact_id'), // Contact ID from Twilio if synced

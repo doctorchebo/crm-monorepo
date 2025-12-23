@@ -22,6 +22,7 @@ import { backendApi } from "@/lib/api/endpoints";
 import { PendingUpload } from "@/lib/media/types";
 
 // Local imports
+import type { SupportedLanguage } from "@/lib/api/endpoints";
 import {
   ChatHeader,
   ChatSearchResults,
@@ -41,7 +42,7 @@ import {
   useMessageSearch,
 } from "./hooks";
 import type { Template } from "./types";
-import { groupMessages } from "./utils";
+import { calculateConversationWindow, groupMessages } from "./utils";
 
 export default function ChatsPage() {
   const t = useTranslations("chats");
@@ -73,6 +74,9 @@ export default function ChatsPage() {
   const [selectedContactId, setSelectedContactId] = useState<string | null>(
     null
   );
+  const [customerLanguage, setCustomerLanguage] = useState<
+    SupportedLanguage | undefined
+  >(undefined);
 
   // Chat state hook - manages chats, messages, pagination, scroll
   const chatState = useChatState();
@@ -155,6 +159,25 @@ export default function ChatsPage() {
     }
   );
 
+  // Filter templates to only show those with at least one approved locale
+  const approvedTemplates = useMemo(() => {
+    return (templates as Template[]).filter((template) =>
+      template.locales?.some((locale) => locale.approvalStatus === "approved")
+    );
+  }, [templates]);
+
+  // Calculate conversation window status based on messages
+  // This determines if we're within the 24-hour window for free-form messaging
+  const conversationWindow = useMemo(
+    () => calculateConversationWindow(chatState.messages),
+    [chatState.messages]
+  );
+
+  // All visible templates (for the new template panel with availability logic)
+  const visibleTemplates = useMemo(() => {
+    return (templates as Template[]).filter((template) => template.isVisible);
+  }, [templates]);
+
   // Fetch current user on mount
   useEffect(() => {
     const fetchCurrentUser = async () => {
@@ -197,6 +220,7 @@ export default function ChatsPage() {
   useEffect(() => {
     if (!chatState.selectedChatId) {
       setSelectedContactId(null);
+      setCustomerLanguage(undefined);
       return;
     }
 
@@ -205,6 +229,7 @@ export default function ChatsPage() {
     );
     if (!selectedChat?.participantPhone) {
       setSelectedContactId(null);
+      setCustomerLanguage(undefined);
       return;
     }
 
@@ -215,11 +240,19 @@ export default function ChatsPage() {
         );
         if (contact && typeof contact === "object" && "contactId" in contact) {
           setSelectedContactId((contact as { contactId: string }).contactId);
+          // Extract customer language for template availability
+          const contactWithLang = contact as {
+            contactId: string;
+            language?: SupportedLanguage | null;
+          };
+          setCustomerLanguage(contactWithLang.language || undefined);
         } else {
           setSelectedContactId(null);
+          setCustomerLanguage(undefined);
         }
       } catch (error) {
         setSelectedContactId(null);
+        setCustomerLanguage(undefined);
       }
     };
 
@@ -529,9 +562,11 @@ export default function ChatsPage() {
 
                   {/* Templates Panel */}
                   <TemplatesPanel
-                    templates={templates as Template[]}
+                    templates={visibleTemplates}
                     templatesLoading={templatesLoading}
                     onApplyTemplate={messageHandlers.handleApplyTemplate}
+                    conversationWindow={conversationWindow}
+                    customerLanguage={customerLanguage}
                     t={t}
                   />
 

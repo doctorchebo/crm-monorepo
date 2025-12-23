@@ -12,7 +12,11 @@
  * - custom: User-defined custom attributes
  */
 
-import type { ContactAttribute, VariableDefinition } from "@/lib/api/endpoints";
+import type {
+  ContactAttribute,
+  SupportedLanguage,
+  VariableDefinition,
+} from "@/lib/api/endpoints";
 
 /**
  * Contact data interface matching the CustomerProfile component's expected structure
@@ -23,6 +27,7 @@ export interface ContactData {
   lastName: string | null;
   email: string | null;
   phoneNumber: string;
+  language?: SupportedLanguage | null;
 }
 
 /**
