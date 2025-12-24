@@ -3,10 +3,14 @@ import type { GroupedMessage, Message } from "./types";
 // Re-export conversation window utilities
 export {
   calculateConversationWindow,
+  CONVERSATION_WINDOW_DURATION_HOURS,
+  CONVERSATION_WINDOW_DURATION_MS,
+  EFFECTIVE_WINDOW_MS,
   enrichTemplatesWithAvailability,
   formatTimeRemaining,
   getLastInboundMessage,
   getTemplateAvailability,
+  SAFETY_MARGIN_MS,
   type ConversationWindowStatus,
   type TemplateAvailability,
   type TemplateLocale,

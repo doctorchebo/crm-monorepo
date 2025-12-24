@@ -9,6 +9,9 @@
  * - Within the window: You can send any message type (free-form text, media, etc.)
  * - Outside the window: You can ONLY initiate conversations using approved templates
  *
+ * CRITICAL: This implementation includes a 5-minute safety margin to prevent
+ * edge-case violations that could result in WABA account bans.
+ *
  * @see https://developers.facebook.com/docs/whatsapp/conversation-types
  */
 
@@ -27,6 +30,25 @@ export const CONVERSATION_WINDOW_DURATION_MS = 24 * 60 * 60 * 1000;
  * Duration in hours for display purposes
  */
 export const CONVERSATION_WINDOW_DURATION_HOURS = 24;
+
+/**
+ * Safety margin to subtract from the window to avoid edge-case violations (5 minutes)
+ * This accounts for:
+ * - Clock drift between client and server
+ * - Network latency
+ * - Processing delays
+ * - Database timestamp precision
+ *
+ * IMPORTANT: The backend has the same safety margin. When in doubt,
+ * use the backend's validation endpoints for authoritative status.
+ */
+export const SAFETY_MARGIN_MS = 5 * 60 * 1000;
+
+/**
+ * Effective window duration after safety margin
+ */
+export const EFFECTIVE_WINDOW_MS =
+  CONVERSATION_WINDOW_DURATION_MS - SAFETY_MARGIN_MS;
 
 // ============================================================================
 // Types
@@ -135,6 +157,9 @@ export function getLastInboundMessage(messages: Message[]): Message | null {
 /**
  * Calculates the conversation window status based on messages
  *
+ * IMPORTANT: This function includes a safety margin to prevent edge-case violations.
+ * The window is considered "expired" 5 minutes before the actual 24-hour mark.
+ *
  * @param messages - Array of messages to analyze
  * @param referenceTime - Optional reference time for calculations (defaults to now)
  * @returns ConversationWindowStatus object with window details
@@ -155,19 +180,24 @@ export function calculateConversationWindow(
   }
 
   const lastInboundTime = new Date(lastInbound.timestamp);
-  const windowExpiresAt = new Date(
-    lastInboundTime.getTime() + CONVERSATION_WINDOW_DURATION_MS
+
+  // Use effective window (with safety margin) for determining if window is open
+  const effectiveExpiresAt = new Date(
+    lastInboundTime.getTime() + EFFECTIVE_WINDOW_MS
   );
+
+  // Calculate time remaining with safety margin applied
   const timeRemainingMs = Math.max(
     0,
-    windowExpiresAt.getTime() - referenceTime.getTime()
+    effectiveExpiresAt.getTime() - referenceTime.getTime()
   );
   const isWithinWindow = timeRemainingMs > 0;
 
   return {
     isWithinWindow,
     lastInboundMessageTime: lastInboundTime,
-    windowExpiresAt: isWithinWindow ? windowExpiresAt : null,
+    // Return the effective expiration time (with safety margin)
+    windowExpiresAt: isWithinWindow ? effectiveExpiresAt : null,
     timeRemainingMs,
   };
 }

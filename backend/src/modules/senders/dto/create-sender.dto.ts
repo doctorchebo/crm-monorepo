@@ -1,5 +1,12 @@
 import { IsOptional, IsString, Matches } from 'class-validator';
 
+/**
+ * DTO for creating a sender manually
+ *
+ * Note: In production, prefer using Meta Embedded Signup which
+ * automatically creates senders with all required information.
+ * Manual creation is primarily useful for testing purposes.
+ */
 export class CreateSenderDto {
   @IsString()
   @Matches(/^\+\d{1,3}\d{1,14}$/, {
@@ -13,13 +20,5 @@ export class CreateSenderDto {
 
   @IsOptional()
   @IsString()
-  twilioPhoneNumberSid?: string;
-
-  @IsOptional()
-  @IsString()
-  twilioMessagingServiceSid?: string;
-
-  @IsOptional()
-  @IsString()
-  twilioAccountSid?: string;
+  phoneNumberId?: string; // Meta Cloud API phone number ID (for manual entry)
 }

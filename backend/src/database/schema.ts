@@ -156,7 +156,6 @@ export const contacts = pgTable(
   {
     id: serial('id').primaryKey(),
     contactId: uuid('contact_id').notNull().unique().defaultRandom(), // UUID generated on create
-    phoneNumberId: integer('phone_number_id'), // Foreign key to senders.id (the WhatsApp Business phone this contact belongs to)
     firstName: varchar('first_name').notNull(),
     lastName: varchar('last_name'),
     email: varchar('email'), // Contact email address
@@ -206,50 +205,51 @@ export const contactAttributes = pgTable(
 export type ContactAttribute = typeof contactAttributes.$inferSelect;
 export type NewContactAttribute = typeof contactAttributes.$inferInsert;
 
-// Senders table - link between users and WhatsApp business phone numbers
+/**
+ * Senders table - WhatsApp Business phone numbers
+ *
+ * Phone numbers are managed through the system's single WABA (configured via META_WABA_ID).
+ * Users can manually add phone numbers or sync them from the WABA via Meta Cloud API.
+ *
+ * Status Flow:
+ * - PENDING: Phone added manually, not yet verified with Meta
+ * - CONNECTED: Phone synced from WABA and verified
+ * - DISCONNECTED: Phone removed from WABA or deactivated
+ * - BANNED: Phone banned by Meta
+ */
 export const senders = pgTable(
   'senders',
   {
     id: serial('id').primaryKey(),
-    userId: integer('user_id').notNull(),
+    userId: integer('user_id').notNull(), // Owner of this sender number
     phoneNumber: varchar('phone_number').notNull(), // WhatsApp Business phone (e.g., +14144557966)
-    displayName: varchar('display_name'), // Optional friendly name (e.g., 'Main Office')
-    twilioPhoneNumberSid: varchar('twilio_phone_number_sid'), // Twilio's internal ID for this number
-    twilioMessagingServiceSid: varchar('twilio_messaging_service_sid'),
-    twilioAccountSid: varchar('twilio_account_sid'), // Twilio account for verification
-    phoneNumberId: varchar('phone_number_id'), // Meta Cloud API phone number ID
-    isActive: boolean('is_active').default(true), // Active status
-    isVerified: boolean('is_verified').default(false), // Twilio verification status
-    contactCount: integer('contact_count').default(0), // Denormalized count for performance
+    phoneNumberId: varchar('phone_number_id'), // Meta Cloud API phone number ID (from WABA sync)
+    displayName: varchar('display_name'), // User-friendly display name (e.g., 'Main Office')
+    verifiedName: varchar('verified_name'), // Meta-verified business name
+    codeVerificationStatus: varchar('code_verification_status', { length: 20 }), // 'NOT_VERIFIED', 'VERIFIED'
+    qualityRating: varchar('quality_rating', { length: 20 }), // 'GREEN', 'YELLOW', 'RED', 'NA'
+    messagingLimit: varchar('messaging_limit', { length: 50 }), // e.g., 'TIER_1K', 'TIER_10K', etc.
+    status: varchar('status', { length: 20 }).default('PENDING'), // 'PENDING', 'CONNECTED', 'DISCONNECTED', 'BANNED'
+    nameStatus: varchar('name_status', { length: 50 }), // Display name approval status
+    isActive: boolean('is_active').default(true),
+    isOfficialBusinessAccount: boolean('is_official_business_account').default(
+      false,
+    ), // OBA status (blue checkmark)
     lastUsedAt: timestamp('last_used_at'), // When this sender was last used
+    registeredAt: timestamp('registered_at'), // When the phone number was registered with Meta
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
   },
   (table) => ({
     phoneNumberUnique: unique().on(table.phoneNumber),
+    phoneNumberIdIndex: index('sender_phone_number_id_idx').on(
+      table.phoneNumberId,
+    ),
   }),
 );
 
 export type Sender = typeof senders.$inferSelect;
 export type NewSender = typeof senders.$inferInsert;
-
-// Contact Senders junction table - Many-to-Many relationship
-export const contactSenders = pgTable(
-  'contact_senders',
-  {
-    id: serial('id').primaryKey(),
-    contactId: uuid('contact_id').notNull(), // Foreign key to contacts.contact_id
-    senderId: integer('sender_id').notNull(), // Foreign key to senders.id
-    isPrimary: boolean('is_primary').default(false), // Default sender for this contact
-    addedAt: timestamp('added_at').defaultNow(),
-  },
-  (table) => ({
-    contactSenderUnique: unique().on(table.contactId, table.senderId),
-  }),
-);
-
-export type ContactSender = typeof contactSenders.$inferSelect;
-export type NewContactSender = typeof contactSenders.$inferInsert;
 
 // Templates table - business-facing templates with friendly placeholders
 export const templates = pgTable(
@@ -530,7 +530,6 @@ export const messagesRelations = relations(messages, ({ many }) => ({
 // Contact and ContactAttributes relations
 export const contactsRelations = relations(contacts, ({ many }) => ({
   attributes: many(contactAttributes),
-  contactSenders: many(contactSenders),
 }));
 
 export const contactAttributesRelations = relations(

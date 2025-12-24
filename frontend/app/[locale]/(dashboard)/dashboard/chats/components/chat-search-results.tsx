@@ -34,7 +34,7 @@ interface ChatSearchResult {
 interface Sender {
   id: number;
   phoneNumber: string;
-  displayName?: string;
+  displayName?: string | null;
 }
 
 interface ChatSearchResultsProps {

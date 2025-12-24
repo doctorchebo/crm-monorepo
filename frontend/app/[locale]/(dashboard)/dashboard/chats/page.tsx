@@ -140,6 +140,7 @@ export default function ChatsPage() {
     senders: chatState.senders,
     setMessages: chatState.setMessages,
     setMessageCount: chatState.setMessageCount,
+    setError: chatState.setError,
     messagesCacheRef: chatState.messagesCacheRef,
     currentMessagesChatIdRef: chatState.currentMessagesChatIdRef,
     setShouldAutoScroll: chatState.setShouldAutoScroll,
@@ -589,6 +590,7 @@ export default function ChatsPage() {
                     onCancelReply={messageHandlers.handleCancelReply}
                     onFilesSelected={mediaHandlers.handleFilesSelected}
                     onContactsClick={contactHandlers.handleContactsClick}
+                    conversationWindow={conversationWindow}
                   />
 
                   {/* Media Staging and Preview Modals (within messages area) */}

@@ -1,19 +1,51 @@
 import { db } from '@database/db.connection';
-import { contactSenders, Sender, senders } from '@database/schema';
+import { Sender, senders } from '@database/schema';
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { and, count, eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { CreateSenderDto } from './dto/create-sender.dto';
 import { UpdateSenderDto } from './dto/update-sender.dto';
 
 /**
+ * Meta phone number data from WABA sync
+ */
+interface WabaPhoneNumber {
+  id: string;
+  phoneNumber: string;
+  verifiedName?: string;
+  qualityRating?: string;
+  codeVerificationStatus?: string;
+  nameStatus?: string;
+  isOfficialBusinessAccount: boolean;
+  messagingLimitTier?: string;
+}
+
+/**
+ * Result of sync operation
+ */
+export interface SyncResult {
+  created: Sender[];
+  updated: Sender[];
+  total: number;
+}
+
+/**
  * Senders Service
- * Manages WhatsApp business phone numbers (senders) for users
+ *
+ * Manages WhatsApp business phone numbers (senders) for users.
+ * Phone numbers are registered in the system's single WABA (configured via META_WABA_ID).
+ *
+ * Key features:
+ * - Sync phone numbers from Meta WABA
+ * - Manual phone number creation (for testing or unsynced numbers)
+ * - Update sender metadata from Meta
+ * - Link/unlink contacts to senders
  */
 @Injectable()
 export class SendersService {
@@ -21,105 +53,285 @@ export class SendersService {
 
   constructor(private readonly whatsAppService: WhatsAppService) {}
 
+  // ==================== SYNC OPERATIONS ====================
+
   /**
-   * Create a new sender (WhatsApp business number)
-   * Fetches phoneNumberId from Meta Cloud API if not provided
+   * Sync all phone numbers from the WABA to the database
+   *
+   * This fetches all phone numbers registered in the system's WABA
+   * and creates/updates sender records for the specified user.
+   *
+   * @param userId - User ID to assign synced phone numbers to
+   * @returns Sync result with created and updated senders
+   */
+  async syncFromWaba(userId: number): Promise<SyncResult> {
+    this.logger.log(`Starting WABA sync for user ${userId}`);
+
+    // Fetch all phone numbers from Meta WABA
+    const wabaPhones = await this.whatsAppService.getAllWabaPhoneNumbers();
+
+    if (wabaPhones.length === 0) {
+      this.logger.log('No phone numbers found in WABA');
+      return { created: [], updated: [], total: 0 };
+    }
+
+    this.logger.log(`Found ${wabaPhones.length} phone numbers in WABA`);
+
+    const created: Sender[] = [];
+    const updated: Sender[] = [];
+
+    for (const phone of wabaPhones) {
+      const result = await this.upsertSenderFromWaba(userId, phone);
+      if (result.isNew) {
+        created.push(result.sender);
+      } else {
+        updated.push(result.sender);
+      }
+    }
+
+    this.logger.log(
+      `Sync complete: ${created.length} created, ${updated.length} updated`,
+    );
+
+    return {
+      created,
+      updated,
+      total: wabaPhones.length,
+    };
+  }
+
+  /**
+   * Refresh a single sender's metadata from Meta
+   *
+   * @param userId - User ID for ownership verification
+   * @param senderId - Sender ID to refresh
+   * @returns Updated sender
+   */
+  async refreshFromMeta(userId: number, senderId: number): Promise<Sender> {
+    const sender = await this.findOne(userId, senderId);
+
+    let phoneNumberId = sender.phoneNumberId;
+
+    // If no phoneNumberId, try to look it up from Meta
+    if (!phoneNumberId) {
+      this.logger.log(
+        `Sender ${senderId} has no phoneNumberId, attempting to look up from Meta...`,
+      );
+      try {
+        phoneNumberId = await this.whatsAppService.getPhoneNumberIdFromMeta(
+          sender.phoneNumber,
+        );
+        this.logger.log(
+          `Found phoneNumberId for ${sender.phoneNumber}: ${phoneNumberId}`,
+        );
+      } catch (error) {
+        this.logger.error(
+          `Failed to get phoneNumberId from Meta: ${error.message}`,
+        );
+        throw new BadRequestException(
+          `Phone number ${sender.phoneNumber} not found in Meta WABA. Make sure it's registered in your WhatsApp Business Account.`,
+        );
+      }
+    }
+
+    // Fetch latest details from Meta
+    const details =
+      await this.whatsAppService.getPhoneNumberDetails(phoneNumberId);
+
+    // Update sender with latest data (including the phoneNumberId if we just looked it up)
+    const [updated] = await db
+      .update(senders)
+      .set({
+        phoneNumberId: phoneNumberId,
+        verifiedName: details.verifiedName ?? sender.verifiedName,
+        qualityRating: details.qualityRating ?? sender.qualityRating,
+        codeVerificationStatus:
+          details.codeVerificationStatus ?? sender.codeVerificationStatus,
+        nameStatus: details.nameStatus ?? sender.nameStatus,
+        isOfficialBusinessAccount:
+          details.isOfficialBusinessAccount ?? sender.isOfficialBusinessAccount,
+        messagingLimit: details.messagingLimitTier ?? sender.messagingLimit,
+        status:
+          details.codeVerificationStatus === 'VERIFIED'
+            ? 'CONNECTED'
+            : sender.status,
+        updatedAt: new Date(),
+      })
+      .where(eq(senders.id, senderId))
+      .returning();
+
+    this.logger.log(`Refreshed sender ${senderId} from Meta`);
+    return updated;
+  }
+
+  /**
+   * Upsert a sender from WABA phone data
+   * Creates if phone number doesn't exist, updates if it does
+   */
+  private async upsertSenderFromWaba(
+    userId: number,
+    phone: WabaPhoneNumber,
+  ): Promise<{ sender: Sender; isNew: boolean }> {
+    // Check if sender already exists by phoneNumberId or phoneNumber
+    const existing = await db.query.senders.findFirst({
+      where: eq(senders.phoneNumber, phone.phoneNumber),
+    });
+
+    if (existing) {
+      // Update existing sender
+      const [updated] = await db
+        .update(senders)
+        .set({
+          phoneNumberId: phone.id,
+          verifiedName: phone.verifiedName ?? existing.verifiedName,
+          qualityRating: phone.qualityRating ?? existing.qualityRating,
+          codeVerificationStatus:
+            phone.codeVerificationStatus ?? existing.codeVerificationStatus,
+          nameStatus: phone.nameStatus ?? existing.nameStatus,
+          isOfficialBusinessAccount: phone.isOfficialBusinessAccount,
+          messagingLimit: phone.messagingLimitTier ?? existing.messagingLimit,
+          status:
+            phone.codeVerificationStatus === 'VERIFIED'
+              ? 'CONNECTED'
+              : existing.status,
+          isActive: true,
+          updatedAt: new Date(),
+        })
+        .where(eq(senders.id, existing.id))
+        .returning();
+
+      return { sender: updated, isNew: false };
+    }
+
+    // Create new sender
+    const [created] = await db
+      .insert(senders)
+      .values({
+        userId,
+        phoneNumber: phone.phoneNumber,
+        phoneNumberId: phone.id,
+        displayName: phone.verifiedName || null,
+        verifiedName: phone.verifiedName || null,
+        qualityRating: phone.qualityRating || null,
+        codeVerificationStatus: phone.codeVerificationStatus || null,
+        nameStatus: phone.nameStatus || null,
+        isOfficialBusinessAccount: phone.isOfficialBusinessAccount,
+        messagingLimit: phone.messagingLimitTier || null,
+        status:
+          phone.codeVerificationStatus === 'VERIFIED' ? 'CONNECTED' : 'PENDING',
+        isActive: true,
+        registeredAt: new Date(),
+      })
+      .returning();
+
+    return { sender: created, isNew: true };
+  }
+
+  // ==================== CRUD OPERATIONS ====================
+
+  /**
+   * Create a new sender (manual phone number entry)
+   *
+   * Use this for adding phone numbers that are not yet in the WABA,
+   * or for testing purposes. In production, prefer syncFromWaba().
    */
   async create(
     userId: number,
     createSenderDto: CreateSenderDto,
   ): Promise<Sender> {
-    try {
-      // Check if phone number already exists for this user
-      const existingSender = await db.query.senders.findFirst({
-        where: and(
-          eq(senders.userId, userId),
-          eq(senders.phoneNumber, createSenderDto.phoneNumber),
-        ),
-      });
+    // Check if phone number already exists
+    const existingSender = await db.query.senders.findFirst({
+      where: eq(senders.phoneNumber, createSenderDto.phoneNumber),
+    });
 
-      if (existingSender) {
-        throw new ConflictException(
-          'You already have a sender with this phone number',
-        );
-      }
-
-      // Get phoneNumberId from Meta Cloud API
-      let phoneNumberId: string | null = null;
-      try {
-        phoneNumberId = await this.whatsAppService.getPhoneNumberIdFromMeta(
-          createSenderDto.phoneNumber,
-        );
-        this.logger.log(
-          `Successfully retrieved phoneNumberId for ${createSenderDto.phoneNumber}: ${phoneNumberId}`,
-        );
-      } catch (error) {
-        this.logger.warn(
-          `Could not retrieve phoneNumberId from Meta API: ${error.message}. Sender will be created without it.`,
-        );
-        // Don't throw - allow creation without phoneNumberId
-        // User can configure it manually later if needed
-      }
-
-      const [sender] = await db
-        .insert(senders)
-        .values({
-          userId,
-          phoneNumber: createSenderDto.phoneNumber,
-          displayName: createSenderDto.displayName || null,
-          twilioPhoneNumberSid: createSenderDto.twilioPhoneNumberSid || null,
-          twilioMessagingServiceSid:
-            createSenderDto.twilioMessagingServiceSid || null,
-          twilioAccountSid: createSenderDto.twilioAccountSid || null,
-          phoneNumberId: phoneNumberId || null,
-          isActive: true,
-          isVerified: false,
-          contactCount: 0,
-        })
-        .returning();
-
-      this.logger.log(`Sender created: ${createSenderDto.phoneNumber}`);
-      return sender;
-    } catch (error) {
-      this.logger.error(`Error creating sender: ${error.message}`);
-      throw error;
+    if (existingSender) {
+      throw new ConflictException(
+        'A sender with this phone number already exists',
+      );
     }
+
+    // Try to get phoneNumberId from Meta (may fail if number not in WABA)
+    let phoneNumberId: string | null = null;
+    let metaDetails: Awaited<
+      ReturnType<WhatsAppService['getPhoneNumberDetails']>
+    > | null = null;
+
+    try {
+      phoneNumberId = await this.whatsAppService.getPhoneNumberIdFromMeta(
+        createSenderDto.phoneNumber,
+      );
+      if (phoneNumberId) {
+        metaDetails =
+          await this.whatsAppService.getPhoneNumberDetails(phoneNumberId);
+      }
+      this.logger.log(
+        `Found phoneNumberId for ${createSenderDto.phoneNumber}: ${phoneNumberId}`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Phone number not found in WABA: ${error.message}. Creating as PENDING.`,
+      );
+    }
+
+    const [sender] = await db
+      .insert(senders)
+      .values({
+        userId,
+        phoneNumber: createSenderDto.phoneNumber,
+        phoneNumberId: createSenderDto.phoneNumberId || phoneNumberId || null,
+        displayName:
+          createSenderDto.displayName || metaDetails?.verifiedName || null,
+        verifiedName: metaDetails?.verifiedName || null,
+        qualityRating: metaDetails?.qualityRating || null,
+        codeVerificationStatus: metaDetails?.codeVerificationStatus || null,
+        nameStatus: metaDetails?.nameStatus || null,
+        isOfficialBusinessAccount:
+          metaDetails?.isOfficialBusinessAccount || false,
+        messagingLimit: metaDetails?.messagingLimitTier || null,
+        status: phoneNumberId ? 'CONNECTED' : 'PENDING',
+        isActive: true,
+      })
+      .returning();
+
+    this.logger.log(
+      `Created sender: ${createSenderDto.phoneNumber} (status: ${sender.status})`,
+    );
+    return sender;
   }
 
   /**
    * Get all senders for a user
    */
   async findAll(userId: number): Promise<Sender[]> {
-    try {
-      const result = await db.query.senders.findMany({
-        where: eq(senders.userId, userId),
-        orderBy: (senders, { desc }) => desc(senders.createdAt),
-      });
-      return result;
-    } catch (error) {
-      this.logger.error(`Error fetching senders: ${error.message}`);
-      throw error;
-    }
+    return db.query.senders.findMany({
+      where: eq(senders.userId, userId),
+      orderBy: (senders, { desc }) => desc(senders.createdAt),
+    });
+  }
+
+  /**
+   * Get all active senders for a user
+   */
+  async findAllActive(userId: number): Promise<Sender[]> {
+    return db.query.senders.findMany({
+      where: and(eq(senders.userId, userId), eq(senders.isActive, true)),
+      orderBy: (senders, { desc }) => desc(senders.createdAt),
+    });
   }
 
   /**
    * Get a specific sender by ID
    */
   async findOne(userId: number, senderId: number): Promise<Sender> {
-    try {
-      const sender = await db.query.senders.findFirst({
-        where: and(eq(senders.userId, userId), eq(senders.id, senderId)),
-      });
+    const sender = await db.query.senders.findFirst({
+      where: and(eq(senders.userId, userId), eq(senders.id, senderId)),
+    });
 
-      if (!sender) {
-        throw new NotFoundException('Sender not found');
-      }
-
-      return sender;
-    } catch (error) {
-      this.logger.error(`Error fetching sender: ${error.message}`);
-      throw error;
+    if (!sender) {
+      throw new NotFoundException('Sender not found');
     }
+
+    return sender;
   }
 
   /**
@@ -130,241 +342,131 @@ export class SendersService {
     senderId: number,
     updateSenderDto: UpdateSenderDto,
   ): Promise<Sender> {
-    try {
-      // Verify sender belongs to user
-      const sender = await this.findOne(userId, senderId);
+    const sender = await this.findOne(userId, senderId);
 
-      // If updating phone number, check for conflicts
-      if (
-        updateSenderDto.phoneNumber &&
-        updateSenderDto.phoneNumber !== sender.phoneNumber
-      ) {
-        const existingSender = await db.query.senders.findFirst({
-          where: and(
-            eq(senders.userId, userId),
-            eq(senders.phoneNumber, updateSenderDto.phoneNumber),
-          ),
-        });
+    // Check for phone number conflicts if changing phone number
+    if (
+      updateSenderDto.phoneNumber &&
+      updateSenderDto.phoneNumber !== sender.phoneNumber
+    ) {
+      const existingSender = await db.query.senders.findFirst({
+        where: eq(senders.phoneNumber, updateSenderDto.phoneNumber),
+      });
 
-        if (existingSender) {
-          throw new ConflictException(
-            'You already have a sender with this phone number',
-          );
-        }
+      if (existingSender) {
+        throw new ConflictException(
+          'A sender with this phone number already exists',
+        );
       }
-
-      const [updated] = await db
-        .update(senders)
-        .set({
-          phoneNumber: updateSenderDto.phoneNumber || sender.phoneNumber,
-          displayName: updateSenderDto.displayName ?? sender.displayName,
-          twilioPhoneNumberSid:
-            updateSenderDto.twilioPhoneNumberSid ?? sender.twilioPhoneNumberSid,
-          twilioMessagingServiceSid:
-            updateSenderDto.twilioMessagingServiceSid ??
-            sender.twilioMessagingServiceSid,
-          twilioAccountSid:
-            updateSenderDto.twilioAccountSid ?? sender.twilioAccountSid,
-          updatedAt: new Date(),
-        })
-        .where(eq(senders.id, senderId))
-        .returning();
-
-      this.logger.log(`Sender updated: ${senderId}`);
-      return updated;
-    } catch (error) {
-      this.logger.error(`Error updating sender: ${error.message}`);
-      throw error;
     }
+
+    const [updated] = await db
+      .update(senders)
+      .set({
+        phoneNumber: updateSenderDto.phoneNumber ?? sender.phoneNumber,
+        displayName: updateSenderDto.displayName ?? sender.displayName,
+        phoneNumberId: updateSenderDto.phoneNumberId ?? sender.phoneNumberId,
+        updatedAt: new Date(),
+      })
+      .where(eq(senders.id, senderId))
+      .returning();
+
+    this.logger.log(`Updated sender ${senderId}`);
+    return updated;
   }
 
   /**
    * Soft delete a sender (mark as inactive)
-   * Note: This doesn't delete contacts, just unlinks this sender
    */
   async remove(userId: number, senderId: number): Promise<Sender> {
-    try {
-      // Verify sender belongs to user
-      await this.findOne(userId, senderId);
+    await this.findOne(userId, senderId);
 
-      // Soft delete: mark as inactive
-      const [deleted] = await db
-        .update(senders)
-        .set({
-          isActive: false,
-          updatedAt: new Date(),
-        })
-        .where(eq(senders.id, senderId))
-        .returning();
-
-      // Remove all contact associations
-      await db
-        .delete(contactSenders)
-        .where(eq(contactSenders.senderId, senderId));
-
-      this.logger.log(`Sender soft deleted: ${senderId}`);
-      return deleted;
-    } catch (error) {
-      this.logger.error(`Error deleting sender: ${error.message}`);
-      throw error;
-    }
-  }
-
-  /**
-   * Link a contact to a sender
-   */
-  async linkContact(
-    userId: number,
-    senderId: number,
-    contactId: string,
-    isPrimary = false,
-  ): Promise<void> {
-    try {
-      // Verify sender belongs to user
-      await this.findOne(userId, senderId);
-
-      // Check if already linked
-      const existing = await db.query.contactSenders.findFirst({
-        where: and(
-          eq(contactSenders.senderId, senderId),
-          eq(contactSenders.contactId, contactId as any),
-        ),
-      });
-
-      if (existing) {
-        throw new ConflictException('Contact is already linked to this sender');
-      }
-
-      // If setting as primary, unset others first
-      if (isPrimary) {
-        await db
-          .update(contactSenders)
-          .set({ isPrimary: false })
-          .where(eq(contactSenders.contactId, contactId as any));
-      }
-
-      // Link contact
-      await db.insert(contactSenders).values({
-        contactId: contactId as any,
-        senderId,
-        isPrimary,
-      });
-
-      // Update contact count
-      await this.updateContactCount(senderId);
-
-      this.logger.log(`Contact linked to sender: ${contactId} -> ${senderId}`);
-    } catch (error) {
-      this.logger.error(`Error linking contact: ${error.message}`);
-      throw error;
-    }
-  }
-
-  /**
-   * Unlink a contact from a sender
-   */
-  async unlinkContact(
-    userId: number,
-    senderId: number,
-    contactId: string,
-  ): Promise<void> {
-    try {
-      // Verify sender belongs to user
-      await this.findOne(userId, senderId);
-
-      await db
-        .delete(contactSenders)
-        .where(
-          and(
-            eq(contactSenders.senderId, senderId),
-            eq(contactSenders.contactId, contactId as any),
-          ),
-        );
-
-      // Update contact count
-      await this.updateContactCount(senderId);
-
-      this.logger.log(
-        `Contact unlinked from sender: ${contactId} <- ${senderId}`,
-      );
-    } catch (error) {
-      this.logger.error(`Error unlinking contact: ${error.message}`);
-      throw error;
-    }
-  }
-
-  /**
-   * Get contacts for a sender
-   */
-  async getContacts(userId: number, senderId: number) {
-    try {
-      // Verify sender belongs to user
-      await this.findOne(userId, senderId);
-
-      const result = await db.query.contactSenders.findMany({
-        where: eq(contactSenders.senderId, senderId),
-      });
-
-      return result;
-    } catch (error) {
-      this.logger.error(`Error fetching sender contacts: ${error.message}`);
-      throw error;
-    }
-  }
-
-  /**
-   * Verify sender phone number and retrieve phoneNumberId from Meta
-   * Updates the sender record with the phoneNumberId
-   */
-  async verifySender(userId: number, senderId: number): Promise<Sender> {
-    try {
-      // Verify sender belongs to user
-      const sender = await this.findOne(userId, senderId);
-
-      // Get phoneNumberId from Meta
-      const phoneNumberId = await this.whatsAppService.getPhoneNumberIdFromMeta(
-        sender.phoneNumber,
-      );
-
-      // Update sender with phoneNumberId
-      const [updated] = await db
-        .update(senders)
-        .set({
-          phoneNumberId,
-          updatedAt: new Date(),
-        })
-        .where(eq(senders.id, senderId))
-        .returning();
-
-      this.logger.log(
-        `Sender verified and updated with phoneNumberId: ${phoneNumberId}`,
-      );
-      return updated;
-    } catch (error) {
-      this.logger.error(`Error verifying sender: ${error.message}`);
-      throw error;
-    }
-  }
-
-  /**
-   * Update contact count for a sender (internal helper)
-   */
-  private async updateContactCount(senderId: number): Promise<void> {
-    const result = await db
-      .select({
-        count: count(),
-      })
-      .from(contactSenders)
-      .where(eq(contactSenders.senderId, senderId));
-
-    const contactCount = result[0]?.count || 0;
-
-    await db
+    const [deleted] = await db
       .update(senders)
       .set({
-        contactCount: contactCount,
+        isActive: false,
+        status: 'DISCONNECTED',
         updatedAt: new Date(),
       })
-      .where(eq(senders.id, senderId));
+      .where(eq(senders.id, senderId))
+      .returning();
+
+    this.logger.log(`Soft deleted sender ${senderId}`);
+    return deleted;
+  }
+
+  /**
+   * Permanently delete a sender
+   * Use with caution - this removes all history
+   */
+  async hardDelete(userId: number, senderId: number): Promise<void> {
+    await this.findOne(userId, senderId);
+
+    // Delete the sender
+    await db.delete(senders).where(eq(senders.id, senderId));
+
+    this.logger.log(`Hard deleted sender ${senderId}`);
+  }
+
+  // ==================== VERIFICATION ====================
+
+  /**
+   * Verify a sender phone number and update with Meta data
+   * Call this after manually adding a phone number to retrieve its metadata
+   */
+  async verifySender(userId: number, senderId: number): Promise<Sender> {
+    const sender = await this.findOne(userId, senderId);
+
+    // Get phoneNumberId from Meta if not set
+    let phoneNumberId = sender.phoneNumberId;
+    if (!phoneNumberId) {
+      try {
+        phoneNumberId = await this.whatsAppService.getPhoneNumberIdFromMeta(
+          sender.phoneNumber,
+        );
+      } catch (error) {
+        throw new BadRequestException(
+          `Phone number not found in WABA: ${error.message}`,
+        );
+      }
+    }
+
+    // Get full details
+    const details =
+      await this.whatsAppService.getPhoneNumberDetails(phoneNumberId);
+
+    // Update sender with all metadata
+    const [updated] = await db
+      .update(senders)
+      .set({
+        phoneNumberId,
+        verifiedName: details.verifiedName,
+        qualityRating: details.qualityRating,
+        codeVerificationStatus: details.codeVerificationStatus,
+        nameStatus: details.nameStatus,
+        isOfficialBusinessAccount: details.isOfficialBusinessAccount,
+        messagingLimit: details.messagingLimitTier,
+        status:
+          details.codeVerificationStatus === 'VERIFIED'
+            ? 'CONNECTED'
+            : 'PENDING',
+        updatedAt: new Date(),
+      })
+      .where(eq(senders.id, senderId))
+      .returning();
+
+    this.logger.log(
+      `Verified sender ${senderId}: phoneNumberId=${phoneNumberId}, status=${updated.status}`,
+    );
+    return updated;
+  }
+
+  // ==================== HELPERS ====================
+
+  /**
+   * Get WABA info for display purposes
+   */
+  getWabaId(): string | undefined {
+    return this.whatsAppService.getWabaId();
   }
 }

@@ -390,9 +390,24 @@ export function useMediaHandlers(
         }, 500);
 
         setReplyingToMessage(null);
-      } catch (err) {
+      } catch (err: any) {
         console.error("Error sending media:", err);
-        setError("Failed to send media");
+
+        // Check if this is a conversation window violation error from the backend
+        if (
+          err?.response?.data?.error === "CONVERSATION_WINDOW_VIOLATION" ||
+          err?.response?.data?.errorCode === "OUTSIDE_CONVERSATION_WINDOW" ||
+          err?.response?.data?.errorCode === "NO_CUSTOMER_MESSAGES"
+        ) {
+          const errorData = err.response.data;
+          setError(
+            errorData.message ||
+              "Cannot send media: Outside 24-hour conversation window. Use an approved template."
+          );
+        } else {
+          setError("Failed to send media");
+        }
+
         setPendingMediaUploads([]);
         setPendingCaption("");
       }
@@ -579,9 +594,25 @@ export function useMediaHandlers(
         setTimeout(() => {
           setPendingMediaUploads([]);
         }, 2000);
-      } catch (err) {
+      } catch (err: any) {
         console.error("Error sending voice note:", err);
-        setError("Failed to send voice note");
+
+        // Check if this is a conversation window violation error from the backend
+        if (
+          err?.response?.data?.error === "CONVERSATION_WINDOW_VIOLATION" ||
+          err?.response?.data?.errorCode === "OUTSIDE_CONVERSATION_WINDOW" ||
+          err?.response?.data?.errorCode === "NO_CUSTOMER_MESSAGES"
+        ) {
+          const errorData = err.response.data;
+          setError(
+            errorData.message ||
+              "Cannot send voice note: Outside 24-hour conversation window. Use an approved template."
+          );
+        } else {
+          setError("Failed to send voice note");
+        }
+
+        setPendingMediaUploads([]);
       }
     },
     [

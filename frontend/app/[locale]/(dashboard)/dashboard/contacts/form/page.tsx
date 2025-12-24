@@ -2,7 +2,6 @@
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { CountryCodeSelect } from "@/components/ui/country-code-select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,13 +12,6 @@ import { ArrowLeft } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
-
-interface Sender {
-  id: number;
-  phoneNumber: string;
-  displayName: string | null;
-  isActive: boolean;
-}
 
 interface Contact {
   id: string;
@@ -35,11 +27,6 @@ interface Contact {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
-  senders?: Array<{
-    id: number;
-    phoneNumber: string;
-    displayName: string | null;
-  }>;
 }
 
 export default function ContactFormPage() {
@@ -53,35 +40,14 @@ export default function ContactFormPage() {
   const { addNotification } = useNotification();
 
   const [isLoading, setIsLoading] = useState(false);
-  const [isSendersLoading, setIsSendersLoading] = useState(true);
   const [isContactLoading, setIsContactLoading] = useState(isEdit);
   const [error, setError] = useState<string | null>(null);
-  const [senders, setSenders] = useState<Sender[]>([]);
-  const [contact, setContact] = useState<Contact | null>(null);
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
     countryCode: "",
     phoneNumber: "",
-    senderIds: [] as number[],
   });
-
-  // Fetch senders on mount
-  useEffect(() => {
-    const fetchSenders = async () => {
-      try {
-        const result = (await backendApi.senders.list()) as Sender[];
-        setSenders(result.filter((s: Sender) => s.isActive));
-        setIsSendersLoading(false);
-      } catch (err) {
-        console.error("Failed to fetch senders:", err);
-        setIsSendersLoading(false);
-        addNotification("Failed to load senders", "error");
-      }
-    };
-
-    fetchSenders();
-  }, [addNotification]);
 
   // Fetch contact data if editing
   useEffect(() => {
@@ -94,14 +60,12 @@ export default function ContactFormPage() {
       try {
         setIsContactLoading(true);
         const data = (await backendApi.contacts.get(contactId)) as Contact;
-        setContact(data);
-        const linkedSenderIds = data.senders?.map((s) => s.id) || [];
 
         // Extract country code and phone number from the full phone number
         // phoneNumber is stored as full E.164 format (e.g., +59167131914)
         // countryCode is stored separately (e.g., +591)
         let phoneNumberOnly = data.phoneNumber;
-        let countryCode = data.countryCode;
+        const countryCode = data.countryCode;
 
         // If phoneNumber starts with country code, extract the number part
         if (
@@ -116,9 +80,8 @@ export default function ContactFormPage() {
           lastName: data.lastName || "",
           countryCode: countryCode,
           phoneNumber: phoneNumberOnly,
-          senderIds: linkedSenderIds,
         });
-      } catch (err: any) {
+      } catch {
         setError("Failed to load contact");
         addNotification("Failed to load contact", "error");
       } finally {
@@ -136,16 +99,6 @@ export default function ContactFormPage() {
       [name]: value,
     }));
     // Clear error when user starts typing
-    if (error) setError(null);
-  };
-
-  const handleSenderToggle = (senderId: number) => {
-    setFormData((prev) => ({
-      ...prev,
-      senderIds: prev.senderIds.includes(senderId)
-        ? prev.senderIds.filter((id) => id !== senderId)
-        : [...prev.senderIds, senderId],
-    }));
     if (error) setError(null);
   };
 
@@ -170,10 +123,6 @@ export default function ContactFormPage() {
       setError("Invalid phone number (6-15 digits)");
       return false;
     }
-    if (formData.senderIds.length === 0) {
-      setError("Please select at least one sender");
-      return false;
-    }
     return true;
   };
 
@@ -193,12 +142,11 @@ export default function ContactFormPage() {
 
       if (isEdit && contactId) {
         // Update contact
-        const updatePayload: any = {
+        const updatePayload = {
           firstName: formData.firstName.trim(),
           lastName: formData.lastName.trim(),
           countryCode: formData.countryCode.trim(),
           phoneNumber: fullPhoneNumber,
-          senderIds: formData.senderIds,
         };
 
         await backendApi.contacts.update(contactId, updatePayload);
@@ -210,7 +158,6 @@ export default function ContactFormPage() {
           lastName: formData.lastName.trim(),
           countryCode: formData.countryCode.trim(),
           phoneNumber: fullPhoneNumber,
-          senderIds: formData.senderIds,
         };
 
         await backendApi.contacts.create(createPayload);
@@ -221,9 +168,9 @@ export default function ContactFormPage() {
       }
 
       router.push(`/${locale}/dashboard/contacts`);
-    } catch (err: any) {
+    } catch (err: unknown) {
       const errorMessage =
-        err?.message ||
+        (err as Error)?.message ||
         `Failed to ${isEdit ? "update" : "create"} contact. Please try again.`;
       setError(errorMessage);
       addNotification(errorMessage, "error");
@@ -355,49 +302,6 @@ export default function ContactFormPage() {
               </p>
             </div>
 
-            <div className="grid gap-4">
-              <Label>
-                Link to Senders <span className="text-red-500">*</span>
-              </Label>
-              {isSendersLoading ? (
-                <div className="space-y-2">
-                  <Skeleton className="h-6 w-full" />
-                  <Skeleton className="h-6 w-full" />
-                  <Skeleton className="h-6 w-full" />
-                </div>
-              ) : senders.length === 0 ? (
-                <div className="rounded-md bg-amber-50 p-3 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
-                  No senders available. Please create a sender first.
-                </div>
-              ) : (
-                <div className="space-y-3 border rounded-lg p-4">
-                  {senders.map((sender) => (
-                    <div key={sender.id} className="flex items-center gap-2">
-                      <Checkbox
-                        id={`sender-${sender.id}`}
-                        checked={formData.senderIds.includes(sender.id)}
-                        onCheckedChange={() => handleSenderToggle(sender.id)}
-                        disabled={isLoading}
-                      />
-                      <label
-                        htmlFor={`sender-${sender.id}`}
-                        className="flex-1 cursor-pointer text-sm"
-                      >
-                        {sender.displayName || sender.phoneNumber}
-                        <span className="text-muted-foreground ml-1">
-                          ({sender.phoneNumber})
-                        </span>
-                      </label>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <p className="text-xs text-muted-foreground">
-                Select one or more senders to link this contact with. The first
-                selected sender will be the primary sender.
-              </p>
-            </div>
-
             <div className="flex gap-2 justify-end">
               <Button
                 type="button"
@@ -407,7 +311,7 @@ export default function ContactFormPage() {
               >
                 {t("cancel")}
               </Button>
-              <Button type="submit" disabled={isLoading || isSendersLoading}>
+              <Button type="submit" disabled={isLoading}>
                 {isLoading ? `${submitButtonLabel}...` : submitButtonLabel}
               </Button>
             </div>

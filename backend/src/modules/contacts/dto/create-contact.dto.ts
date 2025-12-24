@@ -1,12 +1,4 @@
-import {
-  IsArray,
-  IsEmail,
-  IsIn,
-  IsNumber,
-  IsOptional,
-  IsString,
-  Matches,
-} from 'class-validator';
+import { IsEmail, IsIn, IsOptional, IsString, Matches } from 'class-validator';
 
 // Supported language codes matching template locales
 export const SUPPORTED_LANGUAGES = [
@@ -49,10 +41,6 @@ export class CreateContactDto {
     message: 'Phone number must be in E.164 format (e.g., +14155552671)',
   })
   phoneNumber: string; // Full phone number including country code (e.g., +59167131914)
-
-  @IsArray()
-  @IsNumber({}, { each: true })
-  senderIds: number[]; // IDs of the WhatsApp Business phones this contact is linked to
 
   @IsOptional()
   @IsString()

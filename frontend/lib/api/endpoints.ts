@@ -7,6 +7,48 @@ import type {
 } from "@/lib/types/settings.types";
 import { apiClient } from "./client";
 
+// ==================== WhatsApp Business Account Types ====================
+
+/**
+ * Sender (WhatsApp Business Phone Number)
+ */
+export interface Sender {
+  id: number;
+  userId: number;
+  phoneNumber: string;
+  phoneNumberId: string | null;
+  displayName: string | null;
+  verifiedName: string | null;
+  codeVerificationStatus: string | null;
+  qualityRating: string | null;
+  messagingLimit: string | null;
+  status: string | null;
+  nameStatus: string | null;
+  isActive: boolean;
+  isOfficialBusinessAccount: boolean;
+  lastUsedAt: string | null;
+  registeredAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Result of WABA sync operation
+ */
+export interface SyncResult {
+  created: Sender[];
+  updated: Sender[];
+  total: number;
+}
+
+/**
+ * WABA configuration info
+ */
+export interface WabaInfo {
+  wabaId: string | null;
+  isConfigured: boolean;
+}
+
 // Supported language codes matching template locales
 export const SUPPORTED_LANGUAGES = [
   "en",
@@ -46,7 +88,6 @@ export interface CreateContactDto {
   language?: SupportedLanguage;
   countryCode: string;
   phoneNumber: string;
-  senderIds: number[];
 }
 
 export interface UpdateContactDto extends Partial<CreateContactDto> {}
@@ -555,6 +596,48 @@ export const backendApi = {
       apiClient.put(`/whatsapp/messages/${messageId}/edit`, data),
     deleteMessage: (messageId: string, data?: { chatId?: string }) =>
       apiClient.delete(`/whatsapp/messages/${messageId}`),
+    // Conversation window endpoints - for 24-hour rule enforcement
+    getConversationWindowStatus: (
+      chatId: string
+    ): Promise<{
+      canSendFreeFormMessage: boolean;
+      canSendApprovedTemplate: boolean;
+      lastInboundMessageTime: string | null;
+      windowExpiresAt: string | null;
+      timeRemainingMs: number;
+      hasInboundMessage: boolean;
+      blockReason?:
+        | "no_inbound_messages"
+        | "window_expired"
+        | "window_expiring_soon";
+    }> => apiClient.get(`/whatsapp/chats/${chatId}/window-status`),
+    validateSend: (
+      chatId: string,
+      data: {
+        messageType: "free-form" | "template";
+        isTemplateApproved?: boolean;
+      }
+    ): Promise<{
+      isValid: boolean;
+      windowStatus: {
+        canSendFreeFormMessage: boolean;
+        canSendApprovedTemplate: boolean;
+        lastInboundMessageTime: string | null;
+        windowExpiresAt: string | null;
+        timeRemainingMs: number;
+        hasInboundMessage: boolean;
+        blockReason?:
+          | "no_inbound_messages"
+          | "window_expired"
+          | "window_expiring_soon";
+      };
+      errorMessage?: string;
+      errorCode?:
+        | "OUTSIDE_CONVERSATION_WINDOW"
+        | "NO_CUSTOMER_MESSAGES"
+        | "TEMPLATE_NOT_APPROVED"
+        | "INVALID_MESSAGE_TYPE";
+    }> => apiClient.post(`/whatsapp/chats/${chatId}/validate-send`, data),
   },
 
   // Contacts endpoints
@@ -601,22 +684,73 @@ export const backendApi = {
     ) => apiClient.post(`/contacts/${contactId}/attributes/bulk`, data),
   },
 
-  // Senders endpoints
+  // Senders endpoints - Phone number management for the WABA
   senders: {
-    list: () => apiClient.get("/senders"),
-    get: (senderId: number) => apiClient.get(`/senders/${senderId}`),
-    create: (data: any) => apiClient.post("/senders", data),
-    update: (senderId: number, data: any) =>
-      apiClient.patch(`/senders/${senderId}`, data),
-    delete: (senderId: number) => apiClient.delete(`/senders/${senderId}`),
-    verify: (senderId: number) =>
+    /**
+     * Sync phone numbers from Meta WABA
+     * Fetches all phone numbers and creates/updates senders
+     */
+    sync: (): Promise<SyncResult> => apiClient.post("/senders/sync", {}),
+
+    /**
+     * Get WABA configuration info
+     */
+    getWabaInfo: (): Promise<WabaInfo> => apiClient.get("/senders/waba-info"),
+
+    /**
+     * Get all senders
+     */
+    list: (): Promise<Sender[]> => apiClient.get("/senders"),
+
+    /**
+     * Get only active senders
+     */
+    listActive: (): Promise<Sender[]> => apiClient.get("/senders/active"),
+
+    /**
+     * Get a specific sender
+     */
+    get: (senderId: number): Promise<Sender> =>
+      apiClient.get(`/senders/${senderId}`),
+
+    /**
+     * Create a sender manually
+     */
+    create: (data: {
+      phoneNumber: string;
+      displayName?: string;
+      phoneNumberId?: string;
+    }): Promise<Sender> => apiClient.post("/senders", data),
+
+    /**
+     * Update a sender
+     */
+    update: (
+      senderId: number,
+      data: {
+        phoneNumber?: string;
+        displayName?: string;
+        phoneNumberId?: string;
+      }
+    ): Promise<Sender> => apiClient.patch(`/senders/${senderId}`, data),
+
+    /**
+     * Soft delete a sender
+     */
+    delete: (senderId: number): Promise<Sender> =>
+      apiClient.delete(`/senders/${senderId}`),
+
+    /**
+     * Verify sender with Meta and retrieve metadata
+     */
+    verify: (senderId: number): Promise<Sender> =>
       apiClient.patch(`/senders/${senderId}/verify`, {}),
-    getContacts: (senderId: number) =>
-      apiClient.get(`/senders/${senderId}/contacts`),
-    linkContact: (senderId: number, contactId: string, data?: any) =>
-      apiClient.post(`/senders/${senderId}/contacts/${contactId}`, data || {}),
-    unlinkContact: (senderId: number, contactId: string) =>
-      apiClient.delete(`/senders/${senderId}/contacts/${contactId}`),
+
+    /**
+     * Refresh sender metadata from Meta
+     */
+    refresh: (senderId: number): Promise<Sender> =>
+      apiClient.patch(`/senders/${senderId}/refresh`, {}),
   },
 
   // Templates endpoints

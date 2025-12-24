@@ -6,6 +6,7 @@
 
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import * as crypto from 'crypto';
 
 export interface MetaCloudAPIConfig {
   baseUrl: string;
@@ -22,10 +23,12 @@ export class MetaCloudAPIConfigService {
   private readonly baseUrl = 'https://graph.facebook.com';
   private readonly apiVersion = 'v20.0';
   private readonly accessToken: string;
+  private readonly appSecret: string | undefined;
 
   constructor(private configService: ConfigService) {
     this.accessToken =
       this.configService.getOrThrow<string>('META_ACCESS_TOKEN');
+    this.appSecret = this.configService.get<string>('META_APP_SECRET');
   }
 
   /**
@@ -50,6 +53,21 @@ export class MetaCloudAPIConfigService {
   }
 
   /**
+   * Generate appsecret_proof for secure API calls
+   * This is an HMAC-SHA256 hash of the access token using the app secret
+   * Required when "Require App Secret" is enabled in Meta App settings
+   */
+  getAppSecretProof(): string | undefined {
+    if (!this.appSecret) {
+      return undefined;
+    }
+    return crypto
+      .createHmac('sha256', this.appSecret)
+      .update(this.accessToken)
+      .digest('hex');
+  }
+
+  /**
    * Build a complete Graph API endpoint URL
    * @param path - The path after version (e.g., "123456/phone_numbers" or "media-id")
    * @returns Complete URL with base, version, and path
@@ -62,7 +80,7 @@ export class MetaCloudAPIConfigService {
    * Build a URL with query parameters
    * @param path - The path after version
    * @param params - Optional query parameters object
-   * @returns Complete URL with query parameters
+   * @returns Complete URL with query parameters (includes appsecret_proof if configured)
    */
   buildEndpointWithParams(
     path: string,
@@ -70,16 +88,22 @@ export class MetaCloudAPIConfigService {
   ): string {
     const url = this.buildEndpoint(path);
 
-    if (!params) {
-      return url;
+    const queryParams = new URLSearchParams();
+
+    // Add appsecret_proof if app secret is configured
+    const appSecretProof = this.getAppSecretProof();
+    if (appSecretProof) {
+      queryParams.append('appsecret_proof', appSecretProof);
     }
 
-    const queryParams = new URLSearchParams();
-    Object.entries(params).forEach(([key, value]) => {
-      queryParams.append(key, String(value));
-    });
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        queryParams.append(key, String(value));
+      });
+    }
 
-    return `${url}?${queryParams.toString()}`;
+    const queryString = queryParams.toString();
+    return queryString ? `${url}?${queryString}` : url;
   }
 
   /**
@@ -115,6 +139,19 @@ export class MetaCloudAPIConfigService {
       getPhoneNumbers: (wabaId: string) =>
         this.buildEndpointWithParams(`${wabaId}/phone_numbers`, {
           access_token: this.accessToken,
+          fields:
+            'id,verified_name,display_phone_number,quality_rating,code_verification_status,name_status,is_official_business_account,certificate,messaging_limit_tier,account_mode,last_onboarded_time',
+        }),
+
+      /**
+       * Get single phone number details
+       * GET https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}
+       */
+      getPhoneNumberDetails: (phoneNumberId: string) =>
+        this.buildEndpointWithParams(phoneNumberId, {
+          access_token: this.accessToken,
+          fields:
+            'id,verified_name,display_phone_number,quality_rating,code_verification_status,name_status,is_official_business_account,certificate,messaging_limit_tier,account_mode,last_onboarded_time',
         }),
 
       /**

@@ -1,48 +1,38 @@
 import { db } from '@database/db.connection';
-import { Contact, contacts, contactSenders, senders } from '@database/schema';
+import { Contact, contacts, senders } from '@database/schema';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { and, count, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { CreateContactDto } from './dto/create-contact.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
 
 /**
  * Contacts Service
  * Manages WhatsApp contacts
+ *
+ * Note: Contacts are global and can be messaged by any sender.
+ * There is no sender-contact relationship - any registered WhatsApp number can message any contact.
  */
 @Injectable()
 export class ContactsService {
   private readonly logger = new Logger(ContactsService.name);
 
   /**
-   * Create a new contact linked to one or more senders
-   * When a contact is created, it must be linked to at least one sender (WhatsApp Business number)
+   * Create a new contact
    */
   async create(
     userId: number,
     createContactDto: CreateContactDto,
   ): Promise<Contact> {
     try {
-      // Validate that at least one sender is provided
-      if (
-        !createContactDto.senderIds ||
-        createContactDto.senderIds.length === 0
-      ) {
-        throw new Error('At least one sender must be selected for the contact');
-      }
+      // Verify user has at least one active sender (they need a WhatsApp number to send messages)
+      const userSenders = await db.query.senders.findFirst({
+        where: and(eq(senders.userId, userId), eq(senders.isActive, true)),
+      });
 
-      // Verify all senders belong to the user
-      const senderCount = await db
-        .select({ count: count() })
-        .from(senders)
-        .where(
-          and(
-            eq(senders.userId, userId),
-            inArray(senders.id, createContactDto.senderIds),
-          ),
+      if (!userSenders) {
+        throw new Error(
+          'You need at least one registered WhatsApp number to create contacts',
         );
-
-      if (senderCount[0].count !== createContactDto.senderIds.length) {
-        throw new Error('One or more senders do not belong to this user');
       }
 
       // Check if contact already exists (active or inactive) by phone number
@@ -64,7 +54,6 @@ export class ContactsService {
         const [reactivated] = await db
           .update(contacts)
           .set({
-            phoneNumberId: createContactDto.senderIds[0] || null, // Store first sender as primary
             firstName: createContactDto.firstName,
             lastName: createContactDto.lastName || null,
             countryCode: createContactDto.countryCode,
@@ -78,12 +67,6 @@ export class ContactsService {
 
         this.logger.log(`Contact reactivated: ${existingContact.contactId}`);
 
-        // Link the contact to all provided senders
-        await this.linkContactToMultipleSenders(
-          existingContact.contactId,
-          createContactDto.senderIds,
-        );
-
         return reactivated;
       }
 
@@ -92,7 +75,6 @@ export class ContactsService {
       const [contact] = await db
         .insert(contacts)
         .values({
-          phoneNumberId: createContactDto.senderIds[0] || null, // Store first sender as primary in backward-compatible field
           firstName: createContactDto.firstName,
           lastName: createContactDto.lastName || null,
           countryCode: createContactDto.countryCode,
@@ -104,12 +86,6 @@ export class ContactsService {
 
       this.logger.log(`Contact created: ${contact.contactId}`);
 
-      // Link the contact to all provided senders
-      await this.linkContactToMultipleSenders(
-        contact.contactId,
-        createContactDto.senderIds,
-      );
-
       return contact;
     } catch (error) {
       this.logger.error(`Error creating contact: ${error.message}`);
@@ -118,144 +94,29 @@ export class ContactsService {
   }
 
   /**
-   * Link a contact to multiple senders
-   * The first sender in the array becomes the primary sender
-   */
-  private async linkContactToMultipleSenders(
-    contactId: string,
-    senderIds: number[],
-  ): Promise<void> {
-    try {
-      const linkedSenderIds: number[] = [];
-
-      for (let index = 0; index < senderIds.length; index++) {
-        const senderId = senderIds[index];
-        const isPrimary = index === 0; // First sender is primary
-
-        // Check if link already exists
-        const existingLink = await db.query.contactSenders.findFirst({
-          where: and(
-            eq(contactSenders.contactId, contactId),
-            eq(contactSenders.senderId, senderId),
-          ),
-        });
-
-        if (existingLink) {
-          this.logger.log(
-            `Link already exists between contact ${contactId} and sender ${senderId}`,
-          );
-          linkedSenderIds.push(senderId); // Still track it for count update
-          continue;
-        }
-
-        // Create the link
-        await db.insert(contactSenders).values({
-          contactId,
-          senderId,
-          isPrimary,
-        });
-
-        linkedSenderIds.push(senderId);
-
-        this.logger.log(
-          `Linked contact ${contactId} to sender ${senderId} (isPrimary: ${isPrimary})`,
-        );
-      }
-
-      // Update contact count for all linked senders
-      for (const senderId of linkedSenderIds) {
-        await this.updateSenderContactCount(senderId);
-      }
-    } catch (error) {
-      this.logger.error(`Error linking contact to senders: ${error.message}`);
-      throw error;
-    }
-  }
-
-  /**
-   * Update contact count for a sender (internal helper)
-   */
-  private async updateSenderContactCount(senderId: number): Promise<void> {
-    try {
-      const result = await db
-        .select({
-          count: count(),
-        })
-        .from(contactSenders)
-        .where(eq(contactSenders.senderId, senderId));
-
-      const contactCount = result[0]?.count || 0;
-
-      await db
-        .update(senders)
-        .set({
-          contactCount: contactCount,
-          updatedAt: new Date(),
-        })
-        .where(eq(senders.id, senderId));
-
-      this.logger.log(
-        `Updated contact count for sender ${senderId}: ${contactCount}`,
-      );
-    } catch (error) {
-      this.logger.error(
-        `Error updating contact count for sender ${senderId}: ${error.message}`,
-      );
-      throw error;
-    }
-  }
-
-  /**
-   * Get all contacts for a user's registered senders
-   * Only shows contacts that are linked to at least one of the user's senders
+   * Get all contacts
+   * Contacts are global - any sender can message any contact
    */
   async findAll(
     userId: number,
     skip: number = 0,
     take: number = 50,
-    phoneNumberId?: number,
   ): Promise<Contact[]> {
     try {
-      // Get all sender IDs for this user
-      const userSenders = await db.query.senders.findMany({
+      // Verify user has at least one active sender
+      const userSender = await db.query.senders.findFirst({
         where: and(eq(senders.userId, userId), eq(senders.isActive, true)),
       });
 
-      const senderIds = userSenders.map((s) => s.id);
-
-      // If user has no senders, return empty array
-      if (senderIds.length === 0) {
+      // If user has no senders, return empty array (they need a WhatsApp number first)
+      if (!userSender) {
         this.logger.log(`User ${userId} has no active senders`);
         return [];
       }
 
-      // Get all contacts linked to any of the user's senders via contact_senders junction table
-      const linkedContactIds = await db
-        .selectDistinct({ contactId: contactSenders.contactId })
-        .from(contactSenders)
-        .where(inArray(contactSenders.senderId, senderIds));
-
-      const contactIds = linkedContactIds.map((lc) => lc.contactId);
-
-      // If no contacts linked to user's senders, return empty array
-      if (contactIds.length === 0) {
-        this.logger.log(`No contacts linked to user ${userId}'s senders`);
-        return [];
-      }
-
-      // Build the query with all filters
-      const whereConditions = [
-        eq(contacts.isActive, true),
-        inArray(contacts.contactId, contactIds),
-      ];
-
-      // Optional filter by specific phoneNumberId
-      if (phoneNumberId) {
-        whereConditions.push(eq(contacts.phoneNumberId, phoneNumberId));
-      }
-
+      // Return all active contacts, ordered by last message time
       const result = await db.query.contacts.findMany({
-        where: and(...whereConditions),
+        where: eq(contacts.isActive, true),
         orderBy: desc(contacts.lastMessageTime),
         limit: take,
         offset: skip,
@@ -269,17 +130,9 @@ export class ContactsService {
   }
 
   /**
-   * Get a single contact with its linked senders
+   * Get a single contact
    */
-  async findOne(contactId: string): Promise<
-    Contact & {
-      senders?: Array<{
-        id: number;
-        phoneNumber: string;
-        displayName: string | null;
-      }>;
-    }
-  > {
+  async findOne(contactId: string): Promise<Contact> {
     try {
       const contact = await db.query.contacts.findFirst({
         where: eq(contacts.contactId, contactId),
@@ -289,35 +142,7 @@ export class ContactsService {
         throw new NotFoundException(`Contact ${contactId} not found`);
       }
 
-      // Fetch linked senders
-      const links = await db.query.contactSenders.findMany({
-        where: eq(contactSenders.contactId, contactId),
-      });
-
-      const senderIds = links.map((link) => link.senderId);
-
-      let linkedSenders: Array<{
-        id: number;
-        phoneNumber: string;
-        displayName: string | null;
-      }> = [];
-
-      if (senderIds.length > 0) {
-        const sendersData = await db.query.senders.findMany({
-          where: inArray(senders.id, senderIds),
-        });
-
-        linkedSenders = sendersData.map((s) => ({
-          id: s.id,
-          phoneNumber: s.phoneNumber,
-          displayName: s.displayName,
-        }));
-      }
-
-      return {
-        ...contact,
-        senders: linkedSenders,
-      };
+      return contact;
     } catch (error) {
       this.logger.error(`Error fetching contact: ${error.message}`);
       throw error;
@@ -325,25 +150,17 @@ export class ContactsService {
   }
 
   /**
-   * Update a contact and optionally update its sender associations
+   * Update a contact
    */
   async update(
     contactId: string,
     updateContactDto: UpdateContactDto,
-  ): Promise<
-    Contact & {
-      senders?: Array<{
-        id: number;
-        phoneNumber: string;
-        displayName: string | null;
-      }>;
-    }
-  > {
+  ): Promise<Contact> {
     try {
-      // Verify contact exists and get current senders
-      const existingContact = await this.findOne(contactId);
+      // Verify contact exists
+      await this.findOne(contactId);
 
-      const updateData: any = {
+      const updateData: Record<string, unknown> = {
         updatedAt: new Date(),
       };
 
@@ -371,33 +188,6 @@ export class ContactsService {
         updateData.phoneNumber = updateContactDto.phoneNumber;
       }
 
-      // Update sender associations if provided
-      let finalSenderIds = existingContact.senders?.map((s) => s.id) || [];
-
-      if (updateContactDto.senderIds) {
-        // Validate that at least one sender is provided
-        if (updateContactDto.senderIds.length === 0) {
-          throw new Error(
-            'At least one sender must be selected for the contact',
-          );
-        }
-
-        // Remove all existing sender links
-        await db
-          .delete(contactSenders)
-          .where(eq(contactSenders.contactId, contactId as any));
-
-        // Link to new senders
-        await this.linkContactToMultipleSenders(
-          contactId,
-          updateContactDto.senderIds,
-        );
-        finalSenderIds = updateContactDto.senderIds;
-
-        // Update the primary sender (first in the array) in the contact record
-        updateData.phoneNumberId = updateContactDto.senderIds[0] || null;
-      }
-
       const [updated] = await db
         .update(contacts)
         .set(updateData)
@@ -406,19 +196,7 @@ export class ContactsService {
 
       this.logger.log(`Contact updated: ${contactId}`);
 
-      // Return with current senders
-      const linkedSendersData = await db.query.senders.findMany({
-        where: inArray(senders.id, finalSenderIds),
-      });
-
-      return {
-        ...updated,
-        senders: linkedSendersData.map((s) => ({
-          id: s.id,
-          phoneNumber: s.phoneNumber,
-          displayName: s.displayName,
-        })),
-      };
+      return updated;
     } catch (error) {
       this.logger.error(`Error updating contact: ${error.message}`);
       throw error;

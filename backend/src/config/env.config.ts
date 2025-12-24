@@ -61,6 +61,9 @@ class EnvironmentVariables {
   META_APP_SECRET?: string;
 
   @IsString()
+  META_EMBEDDED_SIGNUP_CONFIG_ID?: string; // Facebook Login for Business configuration ID
+
+  @IsString()
   OPENAI_API_KEY: string;
 
   @IsString()

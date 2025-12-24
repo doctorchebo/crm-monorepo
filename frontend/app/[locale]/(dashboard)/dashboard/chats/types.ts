@@ -105,5 +105,5 @@ export interface MessagesCacheEntry {
 export interface Sender {
   id: number;
   phoneNumber: string;
-  displayName?: string;
+  displayName?: string | null;
 }

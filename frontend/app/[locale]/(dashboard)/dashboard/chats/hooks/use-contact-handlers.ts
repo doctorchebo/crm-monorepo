@@ -17,6 +17,7 @@ interface UseContactHandlersProps {
   senders: Sender[];
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   setMessageCount: React.Dispatch<React.SetStateAction<number>>;
+  setError: React.Dispatch<React.SetStateAction<string | null>>;
   messagesCacheRef: React.MutableRefObject<Map<string, MessagesCacheEntry>>;
   /**
    * Ref to track which chat the current messages belong to.
@@ -101,6 +102,7 @@ export function useContactHandlers(
     senders,
     setMessages,
     setMessageCount,
+    setError,
     messagesCacheRef,
     currentMessagesChatIdRef,
     setShouldAutoScroll,
@@ -248,8 +250,23 @@ export function useContactHandlers(
         setShouldAutoScroll(true);
         scrollHelperRequestScroll(true);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error sending contacts:", err);
+
+      // Check if this is a conversation window violation error from the backend
+      if (
+        err?.response?.data?.error === "CONVERSATION_WINDOW_VIOLATION" ||
+        err?.response?.data?.errorCode === "OUTSIDE_CONVERSATION_WINDOW" ||
+        err?.response?.data?.errorCode === "NO_CUSTOMER_MESSAGES"
+      ) {
+        const errorData = err.response.data;
+        setError(
+          errorData.message ||
+            "Cannot send contacts: Outside 24-hour conversation window. Use an approved template."
+        );
+      } else {
+        setError("Failed to send contacts");
+      }
     } finally {
       setIsSendingContacts(false);
     }
@@ -261,6 +278,7 @@ export function useContactHandlers(
     currentMessagesChatIdRef,
     setMessages,
     setMessageCount,
+    setError,
     setShouldAutoScroll,
     scrollHelperRequestScroll,
   ]);

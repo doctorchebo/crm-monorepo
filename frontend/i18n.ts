@@ -6,16 +6,18 @@ export const defaultLocale: Locale = "en";
 
 export default getRequestConfig(async ({ locale }) => {
   // Validate locale is supported
-  if (!locales.includes(locale as any)) {
+  const validLocale = locales.includes(locale as any)
+    ? (locale as string)
+    : defaultLocale;
+
+  if (validLocale !== locale) {
     console.warn(
       `Unsupported locale: ${locale}, falling back to ${defaultLocale}`
     );
-    return {
-      messages: (await import(`./messages/${defaultLocale}.json`)).default,
-    };
   }
 
   return {
-    messages: (await import(`./messages/${locale}.json`)).default,
+    locale: validLocale,
+    messages: (await import(`./messages/${validLocale}.json`)).default,
   };
 });

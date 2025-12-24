@@ -20,7 +20,7 @@ import { useEffect, useState } from "react";
 interface Sender {
   id: number;
   phoneNumber: string;
-  displayName?: string;
+  displayName?: string | null;
 }
 
 interface Contact {

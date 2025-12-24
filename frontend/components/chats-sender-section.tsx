@@ -35,7 +35,7 @@ interface Chat {
 
 interface ChatsSenderSectionProps {
   senderPhoneNumber: string;
-  senderDisplayName?: string;
+  senderDisplayName?: string | null;
   chats: Chat[];
   selectedChatId?: string | null;
   onSelectChat: (chatId: string) => void;

@@ -7,10 +7,11 @@ import {
   messages,
   senders,
 } from '@database/schema';
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MetaCloudAPIConfigService } from '@shared/services/meta-cloud-api.config';
 import { S3Service } from '@shared/services/s3.service';
+import { withRetry } from '@shared/utils/retry.util';
 import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import { ThumbnailQueueService } from '../thumbnail/thumbnail-queue.service';
 import {
@@ -19,6 +20,7 @@ import {
 } from '../thumbnail/thumbnail.types';
 import { OutboundMessageDto } from './dto/outbound-message.dto';
 import { AudioConverterService } from './services/audio-converter.service';
+import { ConversationWindowService } from './services/conversation-window.service';
 import { MediaService } from './services/media.service';
 import {
   CloudAPIInboundMessage,
@@ -57,8 +59,6 @@ import { whatsAppGatewayInstance } from './whatsapp.gateway';
 export class WhatsAppService {
   private readonly logger = new Logger(WhatsAppService.name);
 
-  private readonly metaPhoneNumberId: string;
-  private readonly metaBusinessPhoneNumber: string;
   private readonly metaAccessToken: string;
   private readonly metaVerifyToken: string;
   private readonly metaAppSecret: string | undefined;
@@ -71,13 +71,8 @@ export class WhatsAppService {
     private thumbnailQueueService: ThumbnailQueueService,
     private audioConverterService: AudioConverterService,
     private s3Service: S3Service,
+    private conversationWindowService: ConversationWindowService,
   ) {
-    this.metaPhoneNumberId = this.configService.getOrThrow<string>(
-      'META_PHONE_NUMBER_ID',
-    );
-    this.metaBusinessPhoneNumber = this.configService.getOrThrow<string>(
-      'META_BUSINESS_PHONE_NUMBER',
-    );
     this.metaAccessToken =
       this.configService.getOrThrow<string>('META_ACCESS_TOKEN');
     this.metaVerifyToken =
@@ -85,16 +80,9 @@ export class WhatsAppService {
     this.metaAppSecret = this.configService.get<string>('META_APP_SECRET');
     this.wabaId = this.configService.get<string>('META_WABA_ID');
 
-    if (
-      !this.metaPhoneNumberId ||
-      !this.metaBusinessPhoneNumber ||
-      !this.metaAccessToken ||
-      !this.metaVerifyToken
-    ) {
+    if (!this.metaAccessToken || !this.metaVerifyToken) {
       this.logger.error('Missing required Meta Cloud API credentials');
-      throw new Error(
-        'Missing META_PHONE_NUMBER_ID, META_BUSINESS_PHONE_NUMBER, META_ACCESS_TOKEN, or META_VERIFY_TOKEN',
-      );
+      throw new Error('Missing META_ACCESS_TOKEN, or META_VERIFY_TOKEN');
     }
 
     this.logger.log('Cloud API Service initialized');
@@ -442,6 +430,30 @@ export class WhatsAppService {
         senderId,
       );
 
+      // ========================================================================
+      // CRITICAL: Enforce 24-hour conversation window rule
+      // This prevents WABA bans from sending messages outside the allowed window
+      // ========================================================================
+      const windowValidation =
+        await this.conversationWindowService.validateFreeFormMessage(chatId);
+
+      if (!windowValidation.isValid) {
+        this.logger.error(
+          `Conversation window validation failed for chat ${chatId}: ${windowValidation.errorMessage}`,
+        );
+        throw new BadRequestException({
+          statusCode: 400,
+          error: 'CONVERSATION_WINDOW_VIOLATION',
+          errorCode: windowValidation.errorCode,
+          message: windowValidation.errorMessage,
+          windowStatus: windowValidation.windowStatus,
+        });
+      }
+
+      this.logger.log(
+        `Conversation window valid for chat ${chatId}. Time remaining: ${Math.round(windowValidation.windowStatus.timeRemainingMs / 60000)}m`,
+      );
+
       let waMessageId: string;
 
       // Handle reply context if this is a reply
@@ -597,6 +609,35 @@ export class WhatsAppService {
   ): Promise<any> {
     try {
       const cleanedPhone = cleanPhoneNumber(recipientPhone);
+
+      // ========================================================================
+      // CRITICAL: Enforce 24-hour conversation window rule for media messages
+      // ========================================================================
+      if (senderId) {
+        const sender = await db.query.senders.findFirst({
+          where: eq(senders.id, senderId),
+        });
+        if (sender) {
+          const chatId = generateChatId(sender.phoneNumber, cleanedPhone);
+          const windowValidation =
+            await this.conversationWindowService.validateFreeFormMessage(
+              chatId,
+            );
+
+          if (!windowValidation.isValid) {
+            this.logger.error(
+              `Conversation window validation failed for media to ${cleanedPhone}: ${windowValidation.errorMessage}`,
+            );
+            throw new BadRequestException({
+              statusCode: 400,
+              error: 'CONVERSATION_WINDOW_VIOLATION',
+              errorCode: windowValidation.errorCode,
+              message: windowValidation.errorMessage,
+              windowStatus: windowValidation.windowStatus,
+            });
+          }
+        }
+      }
 
       let finalMediaUrl = mediaUrl;
 
@@ -829,7 +870,12 @@ export class WhatsAppService {
   }
 
   /**
-   * Internal method: Send message via Cloud API HTTP endpoint
+   * Internal method: Send message via Cloud API HTTP endpoint with retry
+   *
+   * IMPORTANT: Uses exponential backoff with max 3 retries to prevent:
+   * - Infinite retry loops that can cause WABA bans
+   * - Rate limiting issues with Meta's API
+   *
    * @private
    */
   private async sendCloudAPIMessage(
@@ -837,29 +883,50 @@ export class WhatsAppService {
     phoneNumberId?: string,
   ): Promise<CloudAPISendMessageResponse> {
     // Use provided phoneNumberId, or fall back to default (for backward compatibility)
-    const actualPhoneNumberId = phoneNumberId || this.metaPhoneNumberId;
+    const actualPhoneNumberId = phoneNumberId!;
     const url = buildCloudAPIUrl(actualPhoneNumberId, 'messages');
     const headers = getCloudAPIHeaders(this.metaAccessToken);
 
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(message),
-      });
+    const result = await withRetry(
+      async () => {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(message),
+        });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(
-          `Cloud API error: ${response.status} ${JSON.stringify(errorData)}`,
-        );
-      }
+        if (!response.ok) {
+          const errorData = await response.json();
+          const error = new Error(
+            `Cloud API error: ${response.status} ${JSON.stringify(errorData)}`,
+          );
+          // Attach status for retry logic classification
+          (error as any).response = {
+            status: response.status,
+            data: errorData,
+          };
+          throw error;
+        }
 
-      return await response.json();
-    } catch (error) {
-      this.logger.error('Cloud API request failed:', error);
-      throw error;
+        return await response.json();
+      },
+      {
+        maxAttempts: 3,
+        baseDelayMs: 1000,
+        maxDelayMs: 10000,
+        logger: this.logger,
+        operationName: 'sendCloudAPIMessage',
+      },
+    );
+
+    if (!result.success) {
+      this.logger.error(
+        `Cloud API request failed permanently after ${result.attempts} attempts: ${result.error?.message}`,
+      );
+      throw result.error;
     }
+
+    return result.result;
   }
 
   /**
@@ -2004,18 +2071,25 @@ export class WhatsAppService {
       const data = (await response.json()) as any;
       const phoneNumbers = data.data || [];
 
-      // Clean phone number for comparison
-      const cleanedPhone = cleanPhoneNumber(phoneNumber);
+      // Clean phone number for comparison (remove +, spaces, dashes, etc.)
+      const cleanedPhone = phoneNumber.replace(/[^0-9]/g, '');
 
-      // Find matching phone number
+      this.logger.debug(
+        `Looking for phone: ${cleanedPhone}, Available: ${JSON.stringify(phoneNumbers.map((p: any) => ({ id: p.id, display: p.display_phone_number })))}`,
+      );
+
+      // Find matching phone number - Meta returns display_phone_number with formatting
       const matchingPhone = phoneNumbers.find((pn: any) => {
-        const cleanedMeta = cleanPhoneNumber(pn.phone_number || '');
-        return cleanedMeta === cleanedPhone;
+        const metaPhone = (pn.display_phone_number || '').replace(
+          /[^0-9]/g,
+          '',
+        );
+        return metaPhone === cleanedPhone;
       });
 
       if (!matchingPhone) {
         throw new Error(
-          `Phone number ${phoneNumber} not found in Meta WABA. Available numbers: ${phoneNumbers.map((p: any) => p.phone_number).join(', ')}`,
+          `Phone number ${phoneNumber} not found in Meta WABA. Available numbers: ${phoneNumbers.map((p: any) => p.display_phone_number).join(', ')}`,
         );
       }
 
@@ -2027,6 +2101,140 @@ export class WhatsAppService {
       this.logger.error(`Error getting phone number ID from Meta:`, error);
       throw error;
     }
+  }
+
+  /**
+   * Get all phone numbers from the WABA with full details
+   * Returns comprehensive phone number data for sync operations
+   *
+   * @returns Array of phone numbers with all Meta-provided details
+   */
+  async getAllWabaPhoneNumbers(): Promise<
+    Array<{
+      id: string;
+      phoneNumber: string;
+      verifiedName?: string;
+      qualityRating?: string;
+      codeVerificationStatus?: string;
+      nameStatus?: string;
+      isOfficialBusinessAccount: boolean;
+      messagingLimitTier?: string;
+      accountMode?: string;
+      lastOnboardedTime?: string;
+    }>
+  > {
+    if (!this.wabaId) {
+      throw new BadRequestException('META_WABA_ID not configured');
+    }
+
+    const url = this.metaCloudAPIConfig
+      .getEndpoints()
+      .getPhoneNumbers(this.wabaId);
+
+    this.logger.debug(`Fetching all phone numbers from WABA: ${this.wabaId}`);
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: this.metaCloudAPIConfig.getDefaultHeaders(),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      this.logger.error('Failed to fetch phone numbers from Meta:', errorData);
+      throw new BadRequestException(
+        `Failed to fetch phone numbers: ${errorData.error?.message || response.statusText}`,
+      );
+    }
+
+    const data = await response.json();
+    const phoneNumbers = data.data || [];
+
+    this.logger.log(`Retrieved ${phoneNumbers.length} phone numbers from WABA`);
+
+    return phoneNumbers.map((pn: any) => ({
+      id: pn.id,
+      phoneNumber: this.normalizePhoneNumberFormat(pn.display_phone_number),
+      verifiedName: pn.verified_name,
+      qualityRating: pn.quality_rating,
+      codeVerificationStatus: pn.code_verification_status,
+      nameStatus: pn.name_status,
+      isOfficialBusinessAccount: pn.is_official_business_account || false,
+      messagingLimitTier: pn.messaging_limit_tier,
+      accountMode: pn.account_mode,
+      lastOnboardedTime: pn.last_onboarded_time,
+    }));
+  }
+
+  /**
+   * Get details for a specific phone number by its Meta ID
+   *
+   * @param phoneNumberId - Meta phone number ID
+   * @returns Phone number details
+   */
+  async getPhoneNumberDetails(phoneNumberId: string): Promise<{
+    id: string;
+    phoneNumber: string;
+    verifiedName?: string;
+    qualityRating?: string;
+    codeVerificationStatus?: string;
+    nameStatus?: string;
+    isOfficialBusinessAccount: boolean;
+    messagingLimitTier?: string;
+  }> {
+    const url = this.metaCloudAPIConfig
+      .getEndpoints()
+      .getPhoneNumberDetails(phoneNumberId);
+
+    this.logger.debug(`Fetching phone number details for: ${phoneNumberId}`);
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: this.metaCloudAPIConfig.getDefaultHeaders(),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      this.logger.error('Failed to fetch phone number details:', errorData);
+      throw new BadRequestException(
+        `Failed to fetch phone details: ${errorData.error?.message || response.statusText}`,
+      );
+    }
+
+    const pn = await response.json();
+
+    return {
+      id: pn.id,
+      phoneNumber: this.normalizePhoneNumberFormat(pn.display_phone_number),
+      verifiedName: pn.verified_name,
+      qualityRating: pn.quality_rating,
+      codeVerificationStatus: pn.code_verification_status,
+      nameStatus: pn.name_status,
+      isOfficialBusinessAccount: pn.is_official_business_account || false,
+      messagingLimitTier: pn.messaging_limit_tier,
+    };
+  }
+
+  /**
+   * Get the WABA ID configured for this service
+   * Useful for admin/sync operations
+   */
+  getWabaId(): string | undefined {
+    return this.wabaId;
+  }
+
+  /**
+   * Normalize phone number to E.164 format
+   * Handles various input formats from Meta API
+   */
+  private normalizePhoneNumberFormat(phone: string): string {
+    if (!phone) return '';
+    // Remove all non-digit characters except leading +
+    let normalized = phone.replace(/[^\d+]/g, '');
+    // Ensure it starts with +
+    if (!normalized.startsWith('+')) {
+      normalized = '+' + normalized;
+    }
+    return normalized;
   }
 
   /**
@@ -2206,6 +2414,25 @@ export class WhatsAppService {
         recipientPhone,
         senderRecord.id,
       );
+
+      // ========================================================================
+      // CRITICAL: Enforce 24-hour conversation window rule for contact messages
+      // ========================================================================
+      const windowValidation =
+        await this.conversationWindowService.validateFreeFormMessage(chatId);
+
+      if (!windowValidation.isValid) {
+        this.logger.error(
+          `Conversation window validation failed for contacts to ${recipientPhone}: ${windowValidation.errorMessage}`,
+        );
+        throw new BadRequestException({
+          statusCode: 400,
+          error: 'CONVERSATION_WINDOW_VIOLATION',
+          errorCode: windowValidation.errorCode,
+          message: windowValidation.errorMessage,
+          windowStatus: windowValidation.windowStatus,
+        });
+      }
 
       // Build Cloud API contacts message
       // For each contact phone, we need:

@@ -7,7 +7,7 @@ export class NoteResponseDto {
   chatId?: string;
   userId: number;
   note: string;
-  createdAt: Date;
+  createdAt: Date | null;
   user?: {
     id: number;
     name: string;

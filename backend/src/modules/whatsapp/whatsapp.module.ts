@@ -7,6 +7,7 @@ import { ThumbnailQueueService } from '../thumbnail/thumbnail-queue.service';
 import { ThumbnailModule } from '../thumbnail/thumbnail.module';
 import { MediaController } from './controllers/media.controller';
 import { AudioConverterService } from './services/audio-converter.service';
+import { ConversationWindowService } from './services/conversation-window.service';
 import { MediaAnalyzerService } from './services/media-analyzer.service';
 import { MediaService } from './services/media.service';
 import { WhatsAppController } from './whatsapp.controller';
@@ -43,6 +44,7 @@ import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
   controllers: [WhatsAppController, WhatsAppWebhookController, MediaController],
   providers: [
     WhatsAppService,
+    ConversationWindowService,
     MediaService,
     MediaAnalyzerService,
     AudioConverterService,
@@ -52,6 +54,7 @@ import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
   ],
   exports: [
     WhatsAppService,
+    ConversationWindowService,
     MediaService,
     MediaAnalyzerService,
     AudioConverterService,

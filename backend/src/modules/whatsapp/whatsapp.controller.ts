@@ -19,6 +19,7 @@ import {
 import { SaveNoteDto } from './dto/notes.dto';
 import { OutboundMessageDto } from './dto/outbound-message.dto';
 import { SendContactsDto } from './dto/send-contacts.dto';
+import { ConversationWindowService } from './services/conversation-window.service';
 import { WhatsAppService } from './whatsapp.service';
 
 @Controller('whatsapp')
@@ -26,7 +27,10 @@ import { WhatsAppService } from './whatsapp.service';
 export class WhatsAppController {
   private readonly logger = new Logger(WhatsAppController.name);
 
-  constructor(private whatsAppService: WhatsAppService) {}
+  constructor(
+    private whatsAppService: WhatsAppService,
+    private conversationWindowService: ConversationWindowService,
+  ) {}
 
   /**
    * Send a WhatsApp message
@@ -188,5 +192,48 @@ export class WhatsAppController {
     this.logger.log(`Delete message ${messageId} request from user ${userId}`);
     // Phone number ID will be determined from the message's sender in the service
     return this.whatsAppService.deleteMessage(messageId, '');
+  }
+
+  /**
+   * Get conversation window status for a chat
+   * GET /whatsapp/chats/:chatId/window-status
+   *
+   * Returns the 24-hour conversation window status to determine
+   * what types of messages can be sent to this chat.
+   */
+  @Get('chats/:chatId/window-status')
+  async getConversationWindowStatus(@Param('chatId') chatId: string) {
+    this.logger.log(`Get conversation window status for chat ${chatId}`);
+    return this.conversationWindowService.getWindowStatus(chatId);
+  }
+
+  /**
+   * Validate if a message can be sent to a chat
+   * POST /whatsapp/chats/:chatId/validate-send
+   *
+   * Validates whether a free-form message or template can be sent
+   * based on the 24-hour conversation window rules.
+   */
+  @Post('chats/:chatId/validate-send')
+  async validateSend(
+    @Param('chatId') chatId: string,
+    @Body()
+    body: {
+      messageType: 'free-form' | 'template';
+      isTemplateApproved?: boolean;
+    },
+  ) {
+    this.logger.log(
+      `Validate send for chat ${chatId}, type: ${body.messageType}`,
+    );
+
+    if (body.messageType === 'template') {
+      return this.conversationWindowService.validateTemplateMessage(
+        chatId,
+        body.isTemplateApproved ?? false,
+      );
+    }
+
+    return this.conversationWindowService.validateFreeFormMessage(chatId);
   }
 }

@@ -5,6 +5,7 @@ import {
   Get,
   Logger,
   Param,
+  ParseIntPipe,
   Patch,
   Post,
   Req,
@@ -17,7 +18,20 @@ import { SendersService } from './senders.service';
 
 /**
  * Senders Controller
- * REST API endpoints for WhatsApp business number management
+ *
+ * REST API endpoints for WhatsApp business phone number management.
+ * All phone numbers are managed through the system's single WABA.
+ *
+ * Endpoints:
+ * - POST /senders/sync          - Sync phone numbers from WABA
+ * - GET  /senders/waba-info     - Get WABA configuration info
+ * - POST /senders               - Create sender manually
+ * - GET  /senders               - List all senders
+ * - GET  /senders/:id           - Get specific sender
+ * - PATCH /senders/:id          - Update sender
+ * - DELETE /senders/:id         - Soft delete sender
+ * - PATCH /senders/:id/verify   - Verify sender with Meta
+ * - PATCH /senders/:id/refresh  - Refresh sender metadata from Meta
  */
 @Controller('senders')
 @UseGuards(JwtAuthGuard)
@@ -26,8 +40,42 @@ export class SendersController {
 
   constructor(private readonly sendersService: SendersService) {}
 
+  // ==================== SYNC OPERATIONS ====================
+
   /**
-   * Create a new sender
+   * Sync phone numbers from WABA
+   * Fetches all phone numbers from Meta WABA and creates/updates senders
+   *
+   * POST /senders/sync
+   */
+  @Post('sync')
+  async syncFromWaba(@Req() req: any) {
+    const userId = req.user?.userId;
+    this.logger.log(`Sync WABA phone numbers for user ${userId}`);
+    return this.sendersService.syncFromWaba(userId);
+  }
+
+  /**
+   * Get WABA configuration info
+   * Returns the WABA ID for display/reference purposes
+   *
+   * GET /senders/waba-info
+   */
+  @Get('waba-info')
+  getWabaInfo() {
+    const wabaId = this.sendersService.getWabaId();
+    return {
+      wabaId: wabaId || null,
+      isConfigured: !!wabaId,
+    };
+  }
+
+  // ==================== CRUD OPERATIONS ====================
+
+  /**
+   * Create a new sender manually
+   * Use sync endpoint for automatic creation from WABA
+   *
    * POST /senders
    */
   @Post()
@@ -39,6 +87,7 @@ export class SendersController {
 
   /**
    * Get all senders for current user
+   *
    * GET /senders
    */
   @Get()
@@ -49,110 +98,88 @@ export class SendersController {
   }
 
   /**
-   * Get a specific sender
+   * Get only active senders for current user
+   *
+   * GET /senders/active
+   */
+  @Get('active')
+  async findAllActive(@Req() req: any) {
+    const userId = req.user?.userId;
+    this.logger.log(`Get active senders for user ${userId}`);
+    return this.sendersService.findAllActive(userId);
+  }
+
+  /**
+   * Get a specific sender by ID
+   *
    * GET /senders/:id
    */
   @Get(':id')
-  async findOne(@Param('id') senderId: string) {
+  async findOne(@Param('id', ParseIntPipe) senderId: number, @Req() req: any) {
+    const userId = req.user?.userId;
     this.logger.log(`Get sender: ${senderId}`);
-    // TODO: Get userId from auth context
-    const userId = 1; // Hardcoded for now
-    return this.sendersService.findOne(userId, parseInt(senderId, 10));
+    return this.sendersService.findOne(userId, senderId);
   }
 
   /**
    * Update a sender
+   *
    * PATCH /senders/:id
    */
   @Patch(':id')
   async update(
-    @Param('id') senderId: string,
+    @Param('id', ParseIntPipe) senderId: number,
     @Body() updateSenderDto: UpdateSenderDto,
+    @Req() req: any,
   ) {
+    const userId = req.user?.userId;
     this.logger.log(`Update sender: ${senderId}`);
-    // TODO: Get userId from auth context
-    const userId = 1; // Hardcoded for now
-    return this.sendersService.update(
-      userId,
-      parseInt(senderId, 10),
-      updateSenderDto,
-    );
+    return this.sendersService.update(userId, senderId, updateSenderDto);
   }
 
   /**
-   * Delete (soft delete) a sender
+   * Soft delete a sender (mark as inactive)
+   *
    * DELETE /senders/:id
    */
   @Delete(':id')
-  async remove(@Param('id') senderId: string) {
+  async remove(@Param('id', ParseIntPipe) senderId: number, @Req() req: any) {
+    const userId = req.user?.userId;
     this.logger.log(`Delete sender: ${senderId}`);
-    // TODO: Get userId from auth context
-    const userId = 1; // Hardcoded for now
-    return this.sendersService.remove(userId, parseInt(senderId, 10));
+    return this.sendersService.remove(userId, senderId);
   }
 
-  /**
-   * Get contacts for a sender
-   * GET /senders/:id/contacts
-   */
-  @Get(':id/contacts')
-  async getContacts(@Param('id') senderId: string) {
-    this.logger.log(`Get contacts for sender: ${senderId}`);
-    // TODO: Get userId from auth context
-    const userId = 1; // Hardcoded for now
-    return this.sendersService.getContacts(userId, parseInt(senderId, 10));
-  }
+  // ==================== VERIFICATION ====================
 
   /**
-   * Link a contact to a sender
-   * POST /senders/:senderId/contacts/:contactId
-   */
-  @Post(':senderId/contacts/:contactId')
-  async linkContact(
-    @Param('senderId') senderId: string,
-    @Param('contactId') contactId: string,
-    @Body() body?: { isPrimary?: boolean },
-  ) {
-    this.logger.log(`Link contact to sender: ${contactId} -> ${senderId}`);
-    // TODO: Get userId from auth context
-    const userId = 1; // Hardcoded for now
-    await this.sendersService.linkContact(
-      userId,
-      parseInt(senderId, 10),
-      contactId,
-      body?.isPrimary || false,
-    );
-    return { success: true };
-  }
-
-  /**
-   * Unlink a contact from a sender
-   * DELETE /senders/:senderId/contacts/:contactId
-   */
-  @Delete(':senderId/contacts/:contactId')
-  async unlinkContact(
-    @Param('senderId') senderId: string,
-    @Param('contactId') contactId: string,
-  ) {
-    this.logger.log(`Unlink contact from sender: ${contactId} <- ${senderId}`);
-    // TODO: Get userId from auth context
-    const userId = 1; // Hardcoded for now
-    await this.sendersService.unlinkContact(
-      userId,
-      parseInt(senderId, 10),
-      contactId,
-    );
-    return { success: true };
-  }
-
-  /**
-   * Verify sender phone number and retrieve phoneNumberId from Meta
+   * Verify sender phone number with Meta
+   * Retrieves phoneNumberId and metadata from Meta WABA
+   *
    * PATCH /senders/:id/verify
    */
   @Patch(':id/verify')
-  async verifySender(@Param('id') senderId: string, @Req() req: any) {
-    this.logger.log(`Verify sender: ${senderId}`);
+  async verifySender(
+    @Param('id', ParseIntPipe) senderId: number,
+    @Req() req: any,
+  ) {
     const userId = req.user?.userId;
-    return this.sendersService.verifySender(userId, parseInt(senderId, 10));
+    this.logger.log(`Verify sender: ${senderId}`);
+    return this.sendersService.verifySender(userId, senderId);
+  }
+
+  /**
+   * Refresh sender metadata from Meta
+   * Updates quality rating, verification status, etc.
+   *
+   * PATCH /senders/:id/refresh
+   */
+  @Patch(':id/refresh')
+  async refreshFromMeta(
+    @Param('id', ParseIntPipe) senderId: number,
+    @Req() req: any,
+  ) {
+    const userId = req.user?.userId;
+    this.logger.log(`Refresh sender from Meta: ${senderId}`);
+    return this.sendersService.refreshFromMeta(userId, senderId);
   }
 }

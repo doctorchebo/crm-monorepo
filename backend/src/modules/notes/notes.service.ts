@@ -200,8 +200,8 @@ export class NotesService {
       const messageNotes =
         messageIds.length > 0
           ? await db.query.notes.findMany({
-              where: (notesTable: any) =>
-                messageIds.includes(notesTable.messageId),
+              where: (notesTable, { inArray }) =>
+                inArray(notesTable.messageId, messageIds),
             })
           : [];
 
@@ -251,12 +251,14 @@ export class NotesService {
           user: usersMap.get(note.userId),
         };
 
-        if (!formattedMessageNotesMap.has(note.messageId)) {
-          formattedMessageNotesMap.set(note.messageId, []);
-        }
-        const notesList = formattedMessageNotesMap.get(note.messageId);
-        if (notesList) {
-          notesList.push(formatted);
+        if (note.messageId) {
+          if (!formattedMessageNotesMap.has(note.messageId)) {
+            formattedMessageNotesMap.set(note.messageId, []);
+          }
+          const notesList = formattedMessageNotesMap.get(note.messageId);
+          if (notesList) {
+            notesList.push(formatted);
+          }
         }
       }
 

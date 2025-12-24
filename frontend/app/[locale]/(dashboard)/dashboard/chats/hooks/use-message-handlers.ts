@@ -240,9 +240,23 @@ export function useMessageHandlers(
           setShouldAutoScroll(true);
           scrollHelperRequestScroll(true);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Error sending message:", err);
-        setError("Failed to send message");
+
+        // Check if this is a conversation window violation error from the backend
+        if (
+          err?.response?.data?.error === "CONVERSATION_WINDOW_VIOLATION" ||
+          err?.response?.data?.errorCode === "OUTSIDE_CONVERSATION_WINDOW" ||
+          err?.response?.data?.errorCode === "NO_CUSTOMER_MESSAGES"
+        ) {
+          const errorData = err.response.data;
+          setError(
+            errorData.message ||
+              "Cannot send message: Outside 24-hour conversation window. Use an approved template."
+          );
+        } else {
+          setError("Failed to send message");
+        }
       }
     },
     [
