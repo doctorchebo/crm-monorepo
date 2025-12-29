@@ -1,6 +1,7 @@
 import { NotificationContainer } from "@/components/notifications/notification-container";
 import { NotificationProvider } from "@/hooks/use-notification";
 import { defaultLocale, locales } from "@/i18n";
+import { TokenProvider } from "@/lib/auth/token-provider";
 import { getTeamForUser, getUser } from "@/lib/db/queries";
 import { ThemeProvider } from "@/lib/theme/theme-provider";
 import { ThemeScript } from "@/lib/theme/theme-script";
@@ -12,7 +13,7 @@ import { Manrope } from "next/font/google";
 import { notFound } from "next/navigation";
 import { SWRConfig } from "swr";
 import "./globals.css";
-import { TokenProvider } from "@/lib/auth/token-provider";
+import { AudioUnlockInitializer } from "@/components/audio-unlock-initializer";
 
 export const metadata: Metadata = {
   title: "Next.js SaaS Starter",
@@ -54,6 +55,7 @@ export default async function RootLayout({ children, params }: Props) {
         <ThemeScript />
       </head>
       <body className="min-h-[100dvh] bg-white dark:bg-gray-950 text-black dark:text-white">
+        <AudioUnlockInitializer />
         <TokenProvider>
           <NotificationProvider>
             <NextIntlClientProvider locale={locale}>

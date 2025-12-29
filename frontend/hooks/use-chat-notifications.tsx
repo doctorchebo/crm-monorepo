@@ -248,8 +248,13 @@ export function ChatNotificationsProvider({
       // Get current settings from ref (always up-to-date)
       const currentSettings = settingsRef.current;
 
+      console.log(
+        `[ChatNotifications] 🔔 Triggering notifications for chat ${update.chatId}, soundEnabled=${currentSettings.soundEnabled}`
+      );
+
       // Play sound if enabled
       if (currentSettings.soundEnabled) {
+        console.log("[ChatNotifications] 🔊 Calling playSound");
         playSoundRef.current();
       }
 

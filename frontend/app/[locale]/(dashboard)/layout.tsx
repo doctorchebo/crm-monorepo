@@ -1,5 +1,6 @@
 "use client";
 
+import { EnableSoundsBanner } from "@/components/enable-sounds-banner";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -144,6 +145,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <Header />
         <div className="flex-1 overflow-auto">{children}</div>
       </section>
+      <EnableSoundsBanner />
     </ChatNotificationsProvider>
   );
 }
