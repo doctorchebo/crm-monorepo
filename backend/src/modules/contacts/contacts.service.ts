@@ -233,12 +233,30 @@ export class ContactsService {
 
   /**
    * Get contact by phone number
+   * Handles both formats: with '+' prefix (e.g., +59167131914) and without (e.g., 59167131914)
    */
   async findByPhoneNumber(phoneNumber: string): Promise<Contact | null> {
     try {
-      const contact = await db.query.contacts.findFirst({
-        where: eq(contacts.phoneNumber, phoneNumber),
+      // Normalize the phone number - ensure it has the + prefix
+      const normalizedPhone = phoneNumber.startsWith('+')
+        ? phoneNumber
+        : `+${phoneNumber}`;
+
+      // Also try without the + in case the DB has it stored differently
+      const phoneWithoutPlus = phoneNumber.replace(/^\+/, '');
+
+      // First try with the + prefix (standard E.164 format)
+      let contact = await db.query.contacts.findFirst({
+        where: eq(contacts.phoneNumber, normalizedPhone),
       });
+
+      // If not found, try without the + prefix
+      if (!contact) {
+        contact = await db.query.contacts.findFirst({
+          where: eq(contacts.phoneNumber, phoneWithoutPlus),
+        });
+      }
+
       return contact ?? null;
     } catch (error) {
       this.logger.error(`Error finding contact by phone: ${error.message}`);

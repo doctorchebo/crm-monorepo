@@ -180,6 +180,34 @@
       "email": "Correo"
     }
   },
+  "unknownContact": {
+    "title": "Nuevo Contacto",
+    "infoBanner": "Este número aún no está guardado como contacto. Completa los detalles a continuación para guardarlo en tu lista de contactos.",
+    "saveContact": "Guardar Contacto",
+    "saving": "Guardando...",
+    "checkingContact": "Verificando si el contacto existe...",
+    "placeholders": {
+      "firstName": "Ingresa el nombre",
+      "lastName": "Ingresa el apellido (opcional)",
+      "email": "Ingresa el correo (opcional)",
+      "phoneNumber": "Número de teléfono"
+    },
+    "phoneNumberHint": "El número de teléfono se detecta automáticamente del chat",
+    "errors": {
+      "firstNameRequired": "El nombre es obligatorio",
+      "countryCodeRequired": "El código de país es obligatorio",
+      "invalidCountryCode": "Formato de código de país inválido (ej., +1, +34)",
+      "phoneNumberRequired": "El número de teléfono es obligatorio",
+      "invalidPhoneNumber": "Número de teléfono inválido (6-15 dígitos)",
+      "invalidEmail": "Dirección de correo inválida",
+      "failedToCreateContact": "Error al crear contacto. Por favor, intenta de nuevo."
+    },
+    "success": {
+      "contactCreated": "¡Contacto creado exitosamente!",
+      "profileAvailable": "El perfil ahora está disponible",
+      "contactFound": "Contacto encontrado, cargando perfil..."
+    }
+  },
   "notes": {
     "title": "Notas",
     "profile": "Perfil",

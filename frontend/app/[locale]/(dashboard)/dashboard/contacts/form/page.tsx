@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useNotification } from "@/hooks/use-notification";
 import { backendApi, CreateContactDto } from "@/lib/api/endpoints";
+import { extractPhoneNumberParts } from "@/lib/utils/phone-number";
 import { ArrowLeft } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -61,19 +62,13 @@ export default function ContactFormPage() {
         setIsContactLoading(true);
         const data = (await backendApi.contacts.get(contactId)) as Contact;
 
-        // Extract country code and phone number from the full phone number
-        // phoneNumber is stored as full E.164 format (e.g., +59167131914)
-        // countryCode is stored separately (e.g., +591)
-        let phoneNumberOnly = data.phoneNumber;
-        const countryCode = data.countryCode;
+        // Use shared utility to extract phone number parts
+        // The utility handles cases where phone number includes country code
+        const phoneParts = extractPhoneNumberParts(data.phoneNumber);
 
-        // If phoneNumber starts with country code, extract the number part
-        if (
-          data.phoneNumber.startsWith(data.countryCode) &&
-          data.phoneNumber.length > data.countryCode.length
-        ) {
-          phoneNumberOnly = data.phoneNumber.substring(data.countryCode.length);
-        }
+        // Prefer the stored countryCode if available, otherwise use extracted one
+        const countryCode = data.countryCode || phoneParts.countryCode;
+        const phoneNumberOnly = phoneParts.phoneNumber;
 
         setFormData({
           firstName: data.firstName,

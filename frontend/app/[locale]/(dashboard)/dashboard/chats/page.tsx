@@ -217,48 +217,31 @@ export default function ChatsPage() {
     fetchNotes();
   }, [chatState.selectedChatId]);
 
-  // Fetch contact for sidebar when chat changes
+  // Handler for when a contact is resolved (created or found) from the sidebar
+  // This updates the selectedContactId and fetches language for template availability
+  const handleContactResolved = useCallback(async (contactId: string) => {
+    setSelectedContactId(contactId);
+    // Fetch customer language for template availability
+    try {
+      const contact = await backendApi.contacts.get(contactId);
+      if (contact && typeof contact === "object" && "language" in contact) {
+        setCustomerLanguage(
+          (contact as { language?: SupportedLanguage | null }).language ||
+            undefined
+        );
+      }
+    } catch {
+      // Ignore errors - language is optional
+    }
+  }, []);
+
+  // Clear contact state when chat changes
   useEffect(() => {
     if (!chatState.selectedChatId) {
       setSelectedContactId(null);
       setCustomerLanguage(undefined);
-      return;
     }
-
-    const selectedChat = chatState.chats.find(
-      (c) => c.chatId === chatState.selectedChatId
-    );
-    if (!selectedChat?.participantPhone) {
-      setSelectedContactId(null);
-      setCustomerLanguage(undefined);
-      return;
-    }
-
-    const fetchContact = async () => {
-      try {
-        const contact = await backendApi.contacts.getByPhone(
-          selectedChat.participantPhone
-        );
-        if (contact && typeof contact === "object" && "contactId" in contact) {
-          setSelectedContactId((contact as { contactId: string }).contactId);
-          // Extract customer language for template availability
-          const contactWithLang = contact as {
-            contactId: string;
-            language?: SupportedLanguage | null;
-          };
-          setCustomerLanguage(contactWithLang.language || undefined);
-        } else {
-          setSelectedContactId(null);
-          setCustomerLanguage(undefined);
-        }
-      } catch (error) {
-        setSelectedContactId(null);
-        setCustomerLanguage(undefined);
-      }
-    };
-
-    fetchContact();
-  }, [chatState.selectedChatId, chatState.chats]);
+  }, [chatState.selectedChatId]);
 
   // Note handlers
   const handleAddNote = async (noteText: string, messageId?: string) => {
@@ -737,6 +720,13 @@ export default function ChatsPage() {
                         onAddNote={handleAddNote}
                         onDeleteNote={handleDeleteNote}
                         onProfileUpdate={() => {}}
+                        participantPhone={
+                          chatState.selectedChat?.participantPhone
+                        }
+                        participantName={
+                          chatState.selectedChat?.participantName
+                        }
+                        onContactCreated={handleContactResolved}
                       />
                     )
                   )}

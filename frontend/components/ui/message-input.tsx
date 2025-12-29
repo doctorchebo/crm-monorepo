@@ -129,7 +129,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
           disabled={disabled}
           rows={minRows}
           className={cn(
-            "flex-1 resize-none bg-transparent text-sm placeholder:text-muted-foreground focus:outline-none disabled:cursor-not-allowed leading-5 self-center",
+            "flex-1 resize-none bg-transparent text-sm placeholder:text-muted-foreground focus:outline-none disabled:cursor-not-allowed leading-5 self-center py-0.5",
             "scrollbar-thin scrollbar-thumb-muted scrollbar-track-transparent"
           )}
           style={{

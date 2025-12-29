@@ -1,28 +1,30 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { CustomerProfile } from "@/components/ui/customer-profile";
+import { ContactProfilePanel } from "@/components/ui/contact-profile-panel";
 import { NotesPanel } from "@/components/ui/notes-panel";
 import { FileText, User } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
+import { memo, useCallback, useState } from "react";
+
+interface Note {
+  id: number;
+  messageId?: string;
+  chatId?: string;
+  userId: number;
+  note: string;
+  createdAt: Date;
+  user?: {
+    id: number;
+    name: string;
+    email: string;
+  };
+}
 
 interface NotesGeneralAndMessage {
   chatId: string;
-  generalNotes: Array<{
-    id: number;
-    messageId?: string;
-    chatId?: string;
-    userId: number;
-    note: string;
-    createdAt: Date;
-    user?: {
-      id: number;
-      name: string;
-      email: string;
-    };
-  }>;
-  messageNotes: Record<string, Array<any>>;
+  generalNotes: Note[];
+  messageNotes: Record<string, Note[]>;
 }
 
 interface ChatSidebarProps {
@@ -34,9 +36,53 @@ interface ChatSidebarProps {
   onAddNote: (note: string, messageId?: string) => Promise<void>;
   onDeleteNote: (noteId: number) => Promise<void>;
   onProfileUpdate?: () => void;
+  /** Phone number of the chat participant (for creating new contacts) */
+  participantPhone?: string;
+  /** Name of the chat participant (if available from WhatsApp profile) */
+  participantName?: string;
+  /** Callback when a new contact is created or found */
+  onContactCreated?: (contactId: string) => void;
 }
 
-export function ChatSidebar({
+/**
+ * Memoized tab button to prevent unnecessary re-renders
+ */
+const TabButton = memo(function TabButton({
+  active,
+  disabled,
+  onClick,
+  icon: Icon,
+  label,
+}: {
+  active: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+}) {
+  return (
+    <Button
+      variant={active ? "default" : "ghost"}
+      size="sm"
+      className="flex-1 h-7 text-xs gap-1"
+      onClick={onClick}
+      disabled={disabled}
+    >
+      <Icon className="h-3 w-3" />
+      {label}
+    </Button>
+  );
+});
+
+/**
+ * ChatSidebar - Displays profile/notes tabs for the selected chat
+ *
+ * Uses ContactProfilePanel for unified contact management:
+ * - Shows existing contact profile if contactId is provided
+ * - Looks up contact by phone if only phone is available
+ * - Shows create form if no contact exists
+ */
+export const ChatSidebar = memo(function ChatSidebar({
   chatId,
   contactId,
   currentUserId,
@@ -45,55 +91,66 @@ export function ChatSidebar({
   onAddNote,
   onDeleteNote,
   onProfileUpdate,
+  participantPhone,
+  participantName,
+  onContactCreated,
 }: ChatSidebarProps) {
   const t = useTranslations("notes");
-  // Default to profile tab if contactId exists, otherwise notes
-  const [activeTab, setActiveTab] = useState<"profile" | "notes">(
-    contactId ? "profile" : "notes"
+  const [activeTab, setActiveTab] = useState<"profile" | "notes">("profile");
+
+  // Can show profile if we have either contactId or participantPhone
+  const canShowProfile = !!contactId || !!participantPhone;
+
+  // Handle contact resolution from ContactProfilePanel
+  const handleContactResolved = useCallback(
+    (newContactId: string) => {
+      onContactCreated?.(newContactId);
+    },
+    [onContactCreated]
   );
 
-  // Switch to notes tab if contact becomes unavailable, or to profile if it becomes available
-  useEffect(() => {
-    if (!contactId && activeTab === "profile") {
-      setActiveTab("notes");
-    } else if (contactId && activeTab === "notes") {
-      // Optionally switch to profile when contact becomes available
+  // Switch to profile tab
+  const handleProfileClick = useCallback(() => {
+    if (canShowProfile) {
       setActiveTab("profile");
     }
-  }, [contactId, activeTab]);
+  }, [canShowProfile]);
+
+  // Switch to notes tab
+  const handleNotesClick = useCallback(() => {
+    setActiveTab("notes");
+  }, []);
 
   return (
     <div className="flex flex-col h-full border-l bg-background">
       {/* Tab Header */}
       <div className="border-b px-2 py-1">
         <div className="flex rounded-lg bg-muted p-1">
-          <Button
-            variant={activeTab === "profile" ? "default" : "ghost"}
-            size="sm"
-            className="flex-1 h-7 text-xs gap-1"
-            onClick={() => contactId && setActiveTab("profile")}
-            disabled={!contactId}
-          >
-            <User className="h-3 w-3" />
-            {t("profile")}
-          </Button>
-          <Button
-            variant={activeTab === "notes" ? "default" : "ghost"}
-            size="sm"
-            className="flex-1 h-7 text-xs gap-1"
-            onClick={() => setActiveTab("notes")}
-          >
-            <FileText className="h-3 w-3" />
-            {t("title")}
-          </Button>
+          <TabButton
+            active={activeTab === "profile"}
+            disabled={!canShowProfile}
+            onClick={handleProfileClick}
+            icon={User}
+            label={t("profile")}
+          />
+          <TabButton
+            active={activeTab === "notes"}
+            onClick={handleNotesClick}
+            icon={FileText}
+            label={t("title")}
+          />
         </div>
       </div>
 
       {/* Tab Content */}
       <div className="flex-1 overflow-hidden">
-        {activeTab === "profile" && contactId ? (
-          <CustomerProfile
+        {activeTab === "profile" ? (
+          <ContactProfilePanel
             contactId={contactId}
+            chatId={chatId}
+            participantPhone={participantPhone}
+            participantName={participantName}
+            onContactResolved={handleContactResolved}
             onProfileUpdate={onProfileUpdate}
           />
         ) : (
@@ -109,4 +166,4 @@ export function ChatSidebar({
       </div>
     </div>
   );
-}
+});

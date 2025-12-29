@@ -181,7 +181,9 @@ export const contacts = pgTable(
 export type Contact = typeof contacts.$inferSelect;
 export type NewContact = typeof contacts.$inferInsert;
 
-// Contact Attributes table - custom key-value profile fields
+// Contact Attributes table - custom key-value profile fields (chat-specific)
+// Attributes are now per-chat, allowing the same contact to have different
+// attribute values in different chats (e.g., different order IDs per sender)
 export const contactAttributes = pgTable(
   'contact_attributes',
   {
@@ -189,6 +191,7 @@ export const contactAttributes = pgTable(
     contactId: uuid('contact_id')
       .notNull()
       .references(() => contacts.contactId, { onDelete: 'cascade' }),
+    chatId: varchar('chat_id', { length: 255 }), // Chat-specific attributes
     key: varchar('key', { length: 100 }).notNull(),
     value: text('value'),
     valueType: varchar('value_type', { length: 20 }).default('string'), // 'string', 'number', 'date', 'phone', 'email'
@@ -197,8 +200,9 @@ export const contactAttributes = pgTable(
   },
   (table) => ({
     contactIdIndex: index().on(table.contactId),
+    chatIdIndex: index().on(table.chatId),
     keyIndex: index().on(table.key),
-    uniqueContactKey: unique().on(table.contactId, table.key),
+    uniqueContactChatKey: unique().on(table.contactId, table.chatId, table.key),
   }),
 );
 

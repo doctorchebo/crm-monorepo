@@ -14,9 +14,13 @@ import {
 import { JwtAuthGuard } from '../auth/auth.guard';
 import { ContactAttributesService } from './contact-attributes.service';
 import { ContactsService } from './contacts.service';
+import {
+  BulkUpsertAttributesDto,
+  CreateContactAttributeDto,
+  UpdateContactAttributeDto,
+} from './dto/contact-attribute.dto';
 import { CreateContactDto } from './dto/create-contact.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
-import { BulkUpsertAttributesDto, CreateContactAttributeDto, UpdateContactAttributeDto } from './dto/contact-attribute.dto';
 
 @Controller('contacts')
 @UseGuards(JwtAuthGuard)
@@ -106,44 +110,56 @@ export class ContactsController {
   // ==================== Contact Attributes Endpoints ====================
 
   /**
-   * Get all attributes for a contact
-   * GET /contacts/:contactId/attributes
+   * Get all attributes for a contact in a specific chat
+   * GET /contacts/:contactId/attributes?chatId=xxx
    */
   @Get(':contactId/attributes')
-  async getAttributes(@Param('contactId') contactId: string) {
-    this.logger.log(`Get attributes for contact: ${contactId}`);
-    return this.contactAttributesService.getAttributes(contactId);
+  async getAttributes(
+    @Param('contactId') contactId: string,
+    @Query('chatId') chatId?: string,
+  ) {
+    this.logger.log(
+      `Get attributes for contact: ${contactId}${chatId ? ` in chat ${chatId}` : ''}`,
+    );
+    return this.contactAttributesService.getAttributes(contactId, chatId);
   }
 
   /**
    * Get a specific attribute by key
-   * GET /contacts/:contactId/attributes/:key
+   * GET /contacts/:contactId/attributes/:key?chatId=xxx
    */
   @Get(':contactId/attributes/:key')
   async getAttribute(
     @Param('contactId') contactId: string,
     @Param('key') key: string,
+    @Query('chatId') chatId?: string,
   ) {
-    this.logger.log(`Get attribute '${key}' for contact: ${contactId}`);
-    return this.contactAttributesService.getAttribute(contactId, key);
+    this.logger.log(
+      `Get attribute '${key}' for contact: ${contactId}${chatId ? ` in chat ${chatId}` : ''}`,
+    );
+    return this.contactAttributesService.getAttribute(contactId, key, chatId);
   }
 
   /**
-   * Create or update a single attribute
-   * PUT /contacts/:contactId/attributes
+   * Create or update a single attribute for a specific chat
+   * POST /contacts/:contactId/attributes
+   * Body: { key, value, valueType?, chatId? }
    */
   @Post(':contactId/attributes')
   async upsertAttribute(
     @Param('contactId') contactId: string,
     @Body() dto: CreateContactAttributeDto,
   ) {
-    this.logger.log(`Upsert attribute '${dto.key}' for contact: ${contactId}`);
+    this.logger.log(
+      `Upsert attribute '${dto.key}' for contact: ${contactId}${dto.chatId ? ` in chat ${dto.chatId}` : ''}`,
+    );
     return this.contactAttributesService.upsertAttribute(contactId, dto);
   }
 
   /**
-   * Update an attribute value
+   * Update an attribute value for a specific chat
    * PATCH /contacts/:contactId/attributes/:key
+   * Body: { value?, valueType?, chatId? }
    */
   @Patch(':contactId/attributes/:key')
   async updateAttribute(
@@ -151,46 +167,65 @@ export class ContactsController {
     @Param('key') key: string,
     @Body() dto: UpdateContactAttributeDto,
   ) {
-    this.logger.log(`Update attribute '${key}' for contact: ${contactId}`);
+    this.logger.log(
+      `Update attribute '${key}' for contact: ${contactId}${dto.chatId ? ` in chat ${dto.chatId}` : ''}`,
+    );
     return this.contactAttributesService.updateAttribute(contactId, key, dto);
   }
 
   /**
-   * Delete an attribute
-   * DELETE /contacts/:contactId/attributes/:key
+   * Delete an attribute for a specific chat
+   * DELETE /contacts/:contactId/attributes/:key?chatId=xxx
    */
   @Delete(':contactId/attributes/:key')
   async deleteAttribute(
     @Param('contactId') contactId: string,
     @Param('key') key: string,
+    @Query('chatId') chatId?: string,
   ) {
-    this.logger.log(`Delete attribute '${key}' for contact: ${contactId}`);
-    return this.contactAttributesService.deleteAttribute(contactId, key);
+    this.logger.log(
+      `Delete attribute '${key}' for contact: ${contactId}${chatId ? ` in chat ${chatId}` : ''}`,
+    );
+    return this.contactAttributesService.deleteAttribute(
+      contactId,
+      key,
+      chatId,
+    );
   }
 
   /**
-   * Bulk upsert attributes
-   * PUT /contacts/:contactId/attributes/bulk
+   * Bulk upsert attributes for a specific chat
+   * POST /contacts/:contactId/attributes/bulk
+   * Body: { attributes: [...], chatId? }
    */
   @Post(':contactId/attributes/bulk')
   async bulkUpsertAttributes(
     @Param('contactId') contactId: string,
     @Body() dto: BulkUpsertAttributesDto,
   ) {
-    this.logger.log(`Bulk upsert attributes for contact: ${contactId}`);
+    this.logger.log(
+      `Bulk upsert attributes for contact: ${contactId}${dto.chatId ? ` in chat ${dto.chatId}` : ''}`,
+    );
     return this.contactAttributesService.bulkUpsertAttributes(contactId, dto);
   }
 
   /**
    * Get customer profile (contact + attributes) for template variable resolution
-   * GET /contacts/:contactId/profile
+   * GET /contacts/:contactId/profile?chatId=xxx
    */
   @Get(':contactId/profile')
-  async getProfile(@Param('contactId') contactId: string) {
-    this.logger.log(`Get profile for contact: ${contactId}`);
+  async getProfile(
+    @Param('contactId') contactId: string,
+    @Query('chatId') chatId?: string,
+  ) {
+    this.logger.log(
+      `Get profile for contact: ${contactId}${chatId ? ` in chat ${chatId}` : ''}`,
+    );
     const contact = await this.contactsService.findOne(contactId);
-    const attributes =
-      await this.contactAttributesService.getAttributes(contactId);
+    const attributes = await this.contactAttributesService.getAttributes(
+      contactId,
+      chatId,
+    );
 
     return {
       contact,

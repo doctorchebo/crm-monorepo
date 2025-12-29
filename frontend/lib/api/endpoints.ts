@@ -655,31 +655,58 @@ export const backendApi = {
     delete: (contactId: string) => apiClient.delete(`/contacts/${contactId}`),
     getByPhone: (phoneNumber: string) =>
       apiClient.get(`/contacts/phone/${phoneNumber}`),
-    // Profile endpoints
-    getProfile: (contactId: string): Promise<CustomerProfile> =>
-      apiClient.get(`/contacts/${contactId}/profile`),
-    // Attributes endpoints
-    getAttributes: (contactId: string): Promise<ContactAttribute[]> =>
-      apiClient.get(`/contacts/${contactId}/attributes`),
-    getAttribute: (contactId: string, key: string): Promise<ContactAttribute> =>
-      apiClient.get(`/contacts/${contactId}/attributes/${key}`),
+    // Profile endpoints (chatId is optional for chat-specific attributes)
+    getProfile: (
+      contactId: string,
+      chatId?: string
+    ): Promise<CustomerProfile> =>
+      apiClient.get(
+        `/contacts/${contactId}/profile${
+          chatId ? `?chatId=${encodeURIComponent(chatId)}` : ""
+        }`
+      ),
+    // Attributes endpoints (chatId is optional for chat-specific attributes)
+    getAttributes: (
+      contactId: string,
+      chatId?: string
+    ): Promise<ContactAttribute[]> =>
+      apiClient.get(
+        `/contacts/${contactId}/attributes${
+          chatId ? `?chatId=${encodeURIComponent(chatId)}` : ""
+        }`
+      ),
+    getAttribute: (
+      contactId: string,
+      key: string,
+      chatId?: string
+    ): Promise<ContactAttribute> =>
+      apiClient.get(
+        `/contacts/${contactId}/attributes/${key}${
+          chatId ? `?chatId=${encodeURIComponent(chatId)}` : ""
+        }`
+      ),
     upsertAttribute: (
       contactId: string,
-      data: { key: string; value?: string; valueType?: string }
+      data: { key: string; value?: string; valueType?: string; chatId?: string }
     ): Promise<ContactAttribute> =>
       apiClient.post(`/contacts/${contactId}/attributes`, data),
     updateAttribute: (
       contactId: string,
       key: string,
-      data: { value?: string; valueType?: string }
+      data: { value?: string; valueType?: string; chatId?: string }
     ): Promise<ContactAttribute> =>
       apiClient.patch(`/contacts/${contactId}/attributes/${key}`, data),
-    deleteAttribute: (contactId: string, key: string) =>
-      apiClient.delete(`/contacts/${contactId}/attributes/${key}`),
+    deleteAttribute: (contactId: string, key: string, chatId?: string) =>
+      apiClient.delete(
+        `/contacts/${contactId}/attributes/${key}${
+          chatId ? `?chatId=${encodeURIComponent(chatId)}` : ""
+        }`
+      ),
     bulkUpsertAttributes: (
       contactId: string,
       data: {
         attributes: Array<{ key: string; value?: string; valueType?: string }>;
+        chatId?: string;
       }
     ) => apiClient.post(`/contacts/${contactId}/attributes/bulk`, data),
   },

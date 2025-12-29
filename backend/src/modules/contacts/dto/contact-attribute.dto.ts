@@ -19,6 +19,10 @@ export class CreateContactAttributeDto {
   @IsOptional()
   @IsEnum(['string', 'number', 'date', 'phone', 'email'])
   valueType?: AttributeValueType;
+
+  @IsOptional()
+  @IsString()
+  chatId?: string;
 }
 
 export class UpdateContactAttributeDto {
@@ -29,6 +33,10 @@ export class UpdateContactAttributeDto {
   @IsOptional()
   @IsEnum(['string', 'number', 'date', 'phone', 'email'])
   valueType?: AttributeValueType;
+
+  @IsOptional()
+  @IsString()
+  chatId?: string;
 }
 
 export class BulkUpsertAttributesDto {
@@ -38,4 +46,8 @@ export class BulkUpsertAttributesDto {
     value?: string;
     valueType?: AttributeValueType;
   }>;
+
+  @IsOptional()
+  @IsString()
+  chatId?: string;
 }

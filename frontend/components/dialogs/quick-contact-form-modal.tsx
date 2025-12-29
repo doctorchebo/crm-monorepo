@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { extractPhoneNumberParts } from "@/lib/utils/phone-number";
 import { useEffect, useState } from "react";
 
 interface QuickContactFormModalProps {
@@ -44,33 +45,6 @@ interface QuickContactFormModalProps {
     phoneNumber?: string;
   };
   isLoading?: boolean;
-}
-
-/**
- * Parse a full phone number to extract country code and local number
- * Example: +59167131914 -> { countryCode: "+591", phoneNumber: "67131914" }
- */
-function parsePhoneNumber(fullPhone: string): {
-  countryCode: string;
-  phoneNumber: string;
-} {
-  if (!fullPhone) return { countryCode: "", phoneNumber: "" };
-
-  // Remove any spaces, dashes, or parentheses
-  const cleaned = fullPhone.replace(/[\s\-()]/g, "");
-
-  // If it starts with +, extract country code (1-3 digits after +)
-  if (cleaned.startsWith("+")) {
-    // Common country codes are 1-3 digits
-    // Try to match common patterns
-    const match = cleaned.match(/^(\+\d{1,3})(\d+)$/);
-    if (match) {
-      return { countryCode: match[1], phoneNumber: match[2] };
-    }
-  }
-
-  // If no country code detected, return as is
-  return { countryCode: "", phoneNumber: cleaned };
 }
 
 export function QuickContactFormModal({
@@ -96,7 +70,7 @@ export function QuickContactFormModal({
       let phoneNumber = initialData.phoneNumber || "";
 
       if (!countryCode && phoneNumber) {
-        const parsed = parsePhoneNumber(phoneNumber);
+        const parsed = extractPhoneNumberParts(phoneNumber);
         countryCode = parsed.countryCode;
         phoneNumber = parsed.phoneNumber;
       }
