@@ -360,6 +360,13 @@ export const backendApi = {
     list: (skip?: number, take?: number) =>
       apiClient.get(`/chats?skip=${skip || 0}&take=${take || 20}`),
     /**
+     * Get all archived chats
+     * @param skip - Pagination offset
+     * @param take - Number of chats to fetch
+     */
+    listArchived: (skip?: number, take?: number) =>
+      apiClient.get(`/chats/archived?skip=${skip || 0}&take=${take || 20}`),
+    /**
      * Search chats by participant name or phone number
      * @param query - Search query string (searches name and phone)
      * @param options - Optional pagination
@@ -398,6 +405,21 @@ export const backendApi = {
     create: (data: any) => apiClient.post("/chats", data),
     update: (id: string, data: any) => apiClient.patch(`/chats/${id}`, data),
     close: (id: string) => apiClient.post(`/chats/${id}/close`, {}),
+    /**
+     * Archive a chat
+     * @param id - The chat ID to archive
+     */
+    archive: (id: string) => apiClient.post(`/chats/${id}/archive`, {}),
+    /**
+     * Unarchive a chat
+     * @param id - The chat ID to unarchive
+     */
+    unarchive: (id: string) => apiClient.post(`/chats/${id}/unarchive`, {}),
+    /**
+     * Delete a chat and all associated data permanently
+     * @param id - The chat ID to delete
+     */
+    delete: (id: string) => apiClient.delete(`/chats/${id}`),
     markAsRead: (id: string) => apiClient.post(`/chats/${id}/mark-read`, {}),
     getMessages: (id: string, skip?: number, take?: number) =>
       apiClient.get(

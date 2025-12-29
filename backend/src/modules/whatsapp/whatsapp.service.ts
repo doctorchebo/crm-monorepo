@@ -1780,13 +1780,22 @@ export class WhatsAppService {
   /**
    * Get contact name for a phone number (for reply preview)
    * Falls back to phone number if no contact found
+   * Handles phone number normalization (with or without + prefix)
    * @private
    */
   private async getContactNameForReply(phoneNumber: string): Promise<string> {
     try {
+      // Normalize phone number - try both with and without + prefix
+      const normalizedPhone = phoneNumber.replace(/^\+/, '');
+      const phoneWithPlus = `+${normalizedPhone}`;
+
       const contact = await db.query.contacts.findFirst({
         where: and(
-          eq(contacts.phoneNumber, phoneNumber),
+          or(
+            eq(contacts.phoneNumber, phoneNumber),
+            eq(contacts.phoneNumber, normalizedPhone),
+            eq(contacts.phoneNumber, phoneWithPlus),
+          ),
           eq(contacts.isActive, true),
         ),
       });
@@ -1835,20 +1844,26 @@ export class WhatsAppService {
           where: eq(senders.id, senderId),
         });
 
+        // Try to find contact name by phone number
+        const participantName =
+          await this.getContactNameForReply(participantPhone);
+
         const [newChat] = await db
           .insert(chats)
           .values({
             chatId,
             businessPhone,
             participantPhone,
-            participantName: participantPhone,
+            participantName,
             senderId,
             userId: sender?.userId,
             isActive: true,
           })
           .returning();
 
-        this.logger.log(`Chat created: ${chatId} for sender ${senderId}`);
+        this.logger.log(
+          `Chat created: ${chatId} for sender ${senderId} with participant name: ${participantName}`,
+        );
         return { chat: newChat, isNewChat: true };
       }
 
@@ -1861,6 +1876,7 @@ export class WhatsAppService {
 
   /**
    * Update chat with latest message info and increment unread count for inbound messages
+   * Also auto-unarchives the chat if it was archived (new activity restores chat to main list)
    * @private
    */
   private async updateChatLastMessage(
@@ -1875,6 +1891,9 @@ export class WhatsAppService {
         lastMessageType: lastMessageType || 'text',
         lastMessageTime: new Date(),
         updatedAt: new Date(),
+        // Auto-unarchive: any new message activity (inbound or outbound) restores the chat
+        isArchived: false,
+        archivedAt: null,
       };
 
       // Only increment unread count for inbound messages
@@ -1897,6 +1916,11 @@ export class WhatsAppService {
           lastMessageType: updatedChat.lastMessageType || undefined,
           lastMessageTime: updatedChat.lastMessageTime || undefined,
         });
+
+        // If the chat was archived, also emit the unarchive event
+        if (whatsAppGatewayInstance.emitChatArchived) {
+          whatsAppGatewayInstance.emitChatArchived(chatId, false);
+        }
       }
     } catch (error) {
       this.logger.error(`Error updating chat last message: ${error.message}`);
@@ -1990,9 +2014,11 @@ export class WhatsAppService {
 
       // Get chats for this user's senders with proper ordering
       // Sort by: 1) IS NULL DESC (puts NULL first), then 2) lastMessageTime DESC
+      // Filter out archived chats
       const chatsData = await db.query.chats.findMany({
         where: and(
           eq(chats.isActive, true),
+          eq(chats.isArchived, false),
           inArray(chats.businessPhone, phoneNumbers),
         ),
         orderBy: [

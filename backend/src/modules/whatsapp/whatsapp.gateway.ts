@@ -307,6 +307,52 @@ export class WhatsAppGateway
   }
 
   /**
+   * Emit chat archived/unarchived event to all connected clients
+   * Called when a chat's archive status changes
+   *
+   * @param chatId - The chat ID
+   * @param isArchived - Whether the chat is now archived
+   */
+  emitChatArchived(chatId: string, isArchived: boolean): void {
+    if (this.connectedClients.size === 0) {
+      return; // No clients connected
+    }
+
+    console.log(
+      `📡 Emitting chat:archived for ${chatId} (isArchived: ${isArchived}) to ${this.connectedClients.size} clients`,
+    );
+
+    // Emit to all connected clients
+    this.server.emit('chat:archived', {
+      chatId,
+      isArchived,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Emit chat deleted event to all connected clients
+   * Called when a chat is permanently deleted
+   *
+   * @param chatId - The chat ID that was deleted
+   */
+  emitChatDeleted(chatId: string): void {
+    if (this.connectedClients.size === 0) {
+      return; // No clients connected
+    }
+
+    console.log(
+      `📡 Emitting chat:deleted for ${chatId} to ${this.connectedClients.size} clients`,
+    );
+
+    // Emit to all connected clients
+    this.server.emit('chat:deleted', {
+      chatId,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /**
    * Get number of connected clients (for monitoring)
    */
   getConnectedClientsCount(): number {

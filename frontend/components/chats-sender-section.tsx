@@ -3,18 +3,29 @@
  * Collapsible section for chats grouped by sender number
  * Each sender has its own inbox with ability to expand/collapse
  * Shows unread message badges per chat item (WhatsApp-style)
+ * Includes archive/delete actions via chevron menu on hover
  */
 
 "use client";
 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import {
+  Archive,
+  ArchiveRestore,
   ChevronDown,
   ChevronRight,
   FileIcon,
   ImageIcon,
   Mic,
+  MoreVertical,
   Sticker,
+  Trash2,
   Video,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -31,6 +42,7 @@ interface Chat {
   lastMessageType?: string | null;
   lastMessageTime?: string | null;
   unreadCount?: number;
+  isArchived?: boolean;
 }
 
 interface ChatsSenderSectionProps {
@@ -39,6 +51,10 @@ interface ChatsSenderSectionProps {
   chats: Chat[];
   selectedChatId?: string | null;
   onSelectChat: (chatId: string) => void;
+  onArchiveChat?: (chatId: string) => void;
+  onUnarchiveChat?: (chatId: string) => void;
+  onDeleteChat?: (chatId: string, participantName?: string) => void;
+  isArchivedView?: boolean;
 }
 
 export function ChatsSenderSection({
@@ -47,6 +63,10 @@ export function ChatsSenderSection({
   chats,
   selectedChatId,
   onSelectChat,
+  onArchiveChat,
+  onUnarchiveChat,
+  onDeleteChat,
+  isArchivedView = false,
 }: ChatsSenderSectionProps) {
   const [isExpanded, setIsExpanded] = useState(true);
   const t = useTranslations("chats.chatList");
@@ -103,6 +123,22 @@ export function ChatsSenderSection({
               chat={chat}
               isSelected={selectedChatId === chat.chatId}
               onSelect={() => onSelectChat(chat.chatId)}
+              onArchive={
+                onArchiveChat ? () => onArchiveChat(chat.chatId) : undefined
+              }
+              onUnarchive={
+                onUnarchiveChat ? () => onUnarchiveChat(chat.chatId) : undefined
+              }
+              onDelete={
+                onDeleteChat
+                  ? () =>
+                      onDeleteChat(
+                        chat.chatId,
+                        chat.participantName || chat.participantPhone
+                      )
+                  : undefined
+              }
+              isArchivedView={isArchivedView}
               t={t}
             />
           ))}
@@ -113,19 +149,23 @@ export function ChatsSenderSection({
 }
 
 /**
- * Individual chat list item with unread badge
+ * Individual chat list item with unread badge and actions menu
  */
 interface ChatListItemProps {
   chat: Chat;
   isSelected: boolean;
   onSelect: () => void;
+  onArchive?: () => void;
+  onUnarchive?: () => void;
+  onDelete?: () => void;
+  isArchivedView?: boolean;
   t: ReturnType<typeof useTranslations>;
 }
 
 /**
  * Get the icon component for a message type
  */
-function getMessageTypeIcon(type: string | undefined) {
+function getMessageTypeIcon(type: string | null | undefined) {
   switch (type) {
     case "gif":
       return (
@@ -153,8 +193,8 @@ function getMessageTypeIcon(type: string | undefined) {
  * Get the preview text for a message type with translations
  */
 function getMessageTypePreview(
-  type: string | undefined,
-  textContent: string | undefined,
+  type: string | null | undefined,
+  textContent: string | null | undefined,
   t: ReturnType<typeof useTranslations>
 ): string {
   // If there's text content, use it
@@ -182,7 +222,18 @@ function getMessageTypePreview(
   }
 }
 
-function ChatListItem({ chat, isSelected, onSelect, t }: ChatListItemProps) {
+function ChatListItem({
+  chat,
+  isSelected,
+  onSelect,
+  onArchive,
+  onUnarchive,
+  onDelete,
+  isArchivedView,
+  t,
+}: ChatListItemProps) {
+  const [isHovered, setIsHovered] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
   const hasUnread = (chat.unreadCount || 0) > 0;
   const icon = getMessageTypeIcon(chat.lastMessageType);
   const previewText = getMessageTypePreview(
@@ -191,65 +242,139 @@ function ChatListItem({ chat, isSelected, onSelect, t }: ChatListItemProps) {
     t
   );
 
+  const showMenu = isHovered || isMenuOpen;
+
   return (
-    <button
-      onClick={onSelect}
+    <div
       className={cn(
-        "w-full rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-muted",
+        "relative group w-full rounded-lg text-sm transition-colors hover:bg-muted",
         isSelected && "bg-primary/10 font-medium",
         hasUnread && !isSelected && "bg-muted/50"
       )}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <p
-              className={cn(
-                "truncate",
-                hasUnread ? "font-semibold" : "font-medium"
-              )}
-            >
-              {chat.participantName || chat.participantPhone}
-            </p>
+      <button onClick={onSelect} className="w-full px-3 py-2 text-left">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <p
+                className={cn(
+                  "truncate",
+                  hasUnread ? "font-semibold" : "font-medium"
+                )}
+              >
+                {chat.participantName || chat.participantPhone}
+              </p>
+            </div>
+            {previewText && (
+              <p
+                className={cn(
+                  "flex items-center truncate text-xs",
+                  hasUnread
+                    ? "text-foreground font-medium"
+                    : "text-muted-foreground"
+                )}
+              >
+                {icon}
+                <span className="truncate">{previewText}</span>
+              </p>
+            )}
           </div>
-          {previewText && (
-            <p
-              className={cn(
-                "flex items-center truncate text-xs",
-                hasUnread
-                  ? "text-foreground font-medium"
-                  : "text-muted-foreground"
-              )}
-            >
-              {icon}
-              <span className="truncate">{previewText}</span>
-            </p>
-          )}
-        </div>
 
-        <div className="flex flex-col items-end gap-1 flex-shrink-0">
-          {chat.lastMessageTime && (
-            <span
-              className={cn(
-                "whitespace-nowrap text-xs",
-                hasUnread
-                  ? "text-[#25D366] font-medium"
-                  : "text-muted-foreground"
-              )}
-            >
-              {formatTime(new Date(chat.lastMessageTime), t)}
-            </span>
-          )}
+          <div className="flex flex-col items-end gap-1 flex-shrink-0">
+            {chat.lastMessageTime && (
+              <span
+                className={cn(
+                  "whitespace-nowrap text-xs",
+                  hasUnread
+                    ? "text-[#25D366] font-medium"
+                    : "text-muted-foreground"
+                )}
+              >
+                {formatTime(new Date(chat.lastMessageTime), t)}
+              </span>
+            )}
 
-          {/* Unread Badge - WhatsApp Style */}
-          {hasUnread && (
-            <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[#25D366] px-1.5 text-xs font-bold text-white">
-              {chat.unreadCount! > 99 ? "99+" : chat.unreadCount}
-            </span>
-          )}
+            <div className="flex items-center gap-1">
+              {/* Unread Badge - WhatsApp Style */}
+              {hasUnread && (
+                <span
+                  className={cn(
+                    "inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[#25D366] px-1.5 text-xs font-bold text-white transition-all duration-200",
+                    showMenu && "mr-1"
+                  )}
+                >
+                  {chat.unreadCount! > 99 ? "99+" : chat.unreadCount}
+                </span>
+              )}
+            </div>
+          </div>
         </div>
-      </div>
-    </button>
+      </button>
+
+      {/* Actions Menu - positioned at bottom right of chat item */}
+      {(onArchive || onUnarchive || onDelete) && (
+        <div
+          className={cn(
+            "absolute bottom-2 right-2 transition-opacity duration-200",
+            showMenu ? "opacity-100" : "opacity-0 pointer-events-none"
+          )}
+        >
+          <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
+            <DropdownMenuTrigger asChild>
+              <button
+                className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <MoreVertical className="h-4 w-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-40">
+              {isArchivedView
+                ? // Archived view: show unarchive option
+                  onUnarchive && (
+                    <DropdownMenuItem
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onUnarchive();
+                      }}
+                      className="gap-2"
+                    >
+                      <ArchiveRestore className="h-4 w-4" />
+                      {t("unarchiveChat")}
+                    </DropdownMenuItem>
+                  )
+                : // Normal view: show archive option
+                  onArchive && (
+                    <DropdownMenuItem
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onArchive();
+                      }}
+                      className="gap-2"
+                    >
+                      <Archive className="h-4 w-4" />
+                      {t("archiveChat")}
+                    </DropdownMenuItem>
+                  )}
+              {onDelete && (
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete();
+                  }}
+                  className="gap-2 text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400 focus:bg-red-500/10"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  {t("deleteChat")}
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
+    </div>
   );
 }
 

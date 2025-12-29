@@ -5,8 +5,10 @@
 
 import {
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -196,6 +198,98 @@ export class S3Service {
     } catch (error) {
       this.logger.error(`Failed to delete S3 object: ${error.message}`, error);
       throw new Error(`Failed to delete file: ${error.message}`);
+    }
+  }
+
+  /**
+   * Delete all files with a given prefix from S3
+   * This effectively deletes a "folder" and all its contents
+   *
+   * @param prefix - The prefix/path to delete (e.g., "inbound/chat_123/")
+   * @returns Object with count of deleted files and any errors
+   */
+  async deleteByPrefix(
+    prefix: string,
+  ): Promise<{ deletedCount: number; errors: string[] }> {
+    const errors: string[] = [];
+    let deletedCount = 0;
+    let continuationToken: string | undefined;
+
+    try {
+      this.logger.log(
+        `Starting deletion of all objects with prefix: ${prefix}`,
+      );
+
+      // List and delete in batches (S3 allows max 1000 objects per delete request)
+      do {
+        // List objects with the prefix
+        const listCommand = new ListObjectsV2Command({
+          Bucket: this.bucketName,
+          Prefix: prefix,
+          ContinuationToken: continuationToken,
+        });
+
+        const listResponse = await this.s3Client.send(listCommand);
+        const objects = listResponse.Contents || [];
+
+        if (objects.length === 0) {
+          this.logger.log(`No objects found with prefix: ${prefix}`);
+          break;
+        }
+
+        this.logger.log(
+          `Found ${objects.length} objects to delete with prefix: ${prefix}`,
+        );
+
+        // Prepare delete request
+        const objectsToDelete = objects
+          .filter((obj) => obj.Key)
+          .map((obj) => ({ Key: obj.Key! }));
+
+        if (objectsToDelete.length > 0) {
+          const deleteCommand = new DeleteObjectsCommand({
+            Bucket: this.bucketName,
+            Delete: {
+              Objects: objectsToDelete,
+              Quiet: false, // Get details about deleted objects
+            },
+          });
+
+          const deleteResponse = await this.s3Client.send(deleteCommand);
+
+          // Count successes
+          if (deleteResponse.Deleted) {
+            deletedCount += deleteResponse.Deleted.length;
+            for (const deleted of deleteResponse.Deleted) {
+              this.logger.log(`Deleted: ${deleted.Key}`);
+            }
+          }
+
+          // Track errors
+          if (deleteResponse.Errors) {
+            for (const error of deleteResponse.Errors) {
+              const errorMsg = `Failed to delete ${error.Key}: ${error.Message}`;
+              errors.push(errorMsg);
+              this.logger.warn(errorMsg);
+            }
+          }
+        }
+
+        continuationToken = listResponse.NextContinuationToken;
+      } while (continuationToken);
+
+      this.logger.log(
+        `Prefix deletion complete: ${deletedCount} objects deleted, ${errors.length} errors`,
+      );
+
+      return { deletedCount, errors };
+    } catch (error) {
+      this.logger.error(
+        `Failed to delete objects with prefix ${prefix}: ${error.message}`,
+        error,
+      );
+      errors.push(`Batch delete failed: ${error.message}`);
+      return { deletedCount, errors };
     }
   }
 

@@ -78,11 +78,14 @@ export const chats = pgTable(
     lastMessageTime: timestamp('last_message_time'),
     unreadCount: integer('unread_count').default(0).notNull(), // Count of unread inbound messages
     isActive: boolean('is_active').default(true),
+    isArchived: boolean('is_archived').default(false), // Whether the chat is archived
+    archivedAt: timestamp('archived_at'), // When the chat was archived
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
   },
   (table) => ({
     chatIdUnique: unique().on(table.chatId),
+    isArchivedIndex: index('idx_chats_is_archived').on(table.isArchived),
   }),
 );
 

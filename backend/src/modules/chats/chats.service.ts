@@ -8,6 +8,7 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common';
+import { S3Service } from '@shared/services/s3.service';
 import {
   and,
   asc,
@@ -42,6 +43,8 @@ interface IChatUpdateGateway {
     lastMessageType?: string;
     lastMessageTime?: Date;
   }): void;
+  emitChatArchived?(chatId: string, isArchived: boolean): void;
+  emitChatDeleted?(chatId: string): void;
 }
 
 // Injection token for the gateway
@@ -56,6 +59,7 @@ export class ChatsService {
   private readonly logger = new Logger(ChatsService.name);
 
   constructor(
+    private readonly s3Service: S3Service,
     @Optional()
     @Inject(CHAT_UPDATE_GATEWAY)
     private readonly chatUpdateGateway?: IChatUpdateGateway,
@@ -116,14 +120,23 @@ export class ChatsService {
 
   /**
    * Find contact by phone number and return their name if found
+   * Handles phone number normalization (with or without + prefix)
    */
   private async getContactNameByPhone(
     participantPhone: string,
   ): Promise<string | null> {
     try {
+      // Normalize phone number - try both with and without + prefix
+      const normalizedPhone = participantPhone.replace(/^\+/, '');
+      const phoneWithPlus = `+${normalizedPhone}`;
+
       const contact = await db.query.contacts.findFirst({
         where: and(
-          eq(contacts.phoneNumber, participantPhone),
+          or(
+            eq(contacts.phoneNumber, participantPhone),
+            eq(contacts.phoneNumber, normalizedPhone),
+            eq(contacts.phoneNumber, phoneWithPlus),
+          ),
           eq(contacts.isActive, true),
         ),
       });
@@ -334,7 +347,7 @@ export class ChatsService {
   }
 
   /**
-   * Get all chats for a team
+   * Get all chats for a team (excludes archived chats)
    */
   async findByTeam(
     userId: number,
@@ -344,7 +357,11 @@ export class ChatsService {
   ) {
     try {
       const result = await db.query.chats.findMany({
-        where: and(eq(chats.userId, userId), eq(chats.isActive, true)),
+        where: and(
+          eq(chats.userId, userId),
+          eq(chats.isActive, true),
+          eq(chats.isArchived, false),
+        ),
         orderBy: [
           desc(sql`${chats.lastMessageTime} IS NULL`),
           desc(chats.lastMessageTime),
@@ -353,10 +370,18 @@ export class ChatsService {
         offset: skip,
       });
 
-      // For chats without participantName, try to look up from contacts
+      // For chats without participantName or where participantName is just the phone number,
+      // try to look up from contacts to show actual contact names
       const enrichedChats = await Promise.all(
         result.map(async (chat) => {
-          if (!chat.participantName) {
+          // Check if participantName is missing or is just the phone number
+          const needsNameLookup =
+            !chat.participantName ||
+            chat.participantName === chat.participantPhone ||
+            chat.participantName === `+${chat.participantPhone}` ||
+            `+${chat.participantName}` === chat.participantPhone;
+
+          if (needsNameLookup) {
             const contactName = await this.getContactNameByPhone(
               chat.participantPhone,
             );
@@ -430,6 +455,217 @@ export class ChatsService {
     } catch (error) {
       this.logger.error(`Error closing chat: ${error.message}`);
       throw error;
+    }
+  }
+
+  /**
+   * Archive a chat
+   * Moves the chat to archived state without deleting any data
+   *
+   * @param chatId - The chat ID to archive
+   * @returns Updated chat with isArchived=true
+   */
+  async archiveChat(chatId: string): Promise<Chat> {
+    try {
+      await this.findOne(chatId);
+
+      const [updated] = await db
+        .update(chats)
+        .set({
+          isArchived: true,
+          archivedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(chats.chatId, chatId))
+        .returning();
+
+      this.logger.log(`Chat ${chatId} archived`);
+
+      // Emit archive event via WebSocket
+      if (this.chatUpdateGateway?.emitChatArchived) {
+        this.chatUpdateGateway.emitChatArchived(chatId, true);
+      }
+
+      return updated;
+    } catch (error) {
+      this.logger.error(`Error archiving chat ${chatId}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Unarchive a chat
+   * Restores the chat from archived state to active chats list
+   *
+   * @param chatId - The chat ID to unarchive
+   * @returns Updated chat with isArchived=false
+   */
+  async unarchiveChat(chatId: string): Promise<Chat> {
+    try {
+      await this.findOne(chatId);
+
+      const [updated] = await db
+        .update(chats)
+        .set({
+          isArchived: false,
+          archivedAt: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(chats.chatId, chatId))
+        .returning();
+
+      this.logger.log(`Chat ${chatId} unarchived`);
+
+      // Emit unarchive event via WebSocket
+      if (this.chatUpdateGateway?.emitChatArchived) {
+        this.chatUpdateGateway.emitChatArchived(chatId, false);
+      }
+
+      return updated;
+    } catch (error) {
+      this.logger.error(`Error unarchiving chat ${chatId}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all archived chats for a user
+   *
+   * @param userId - The user ID
+   * @param skip - Pagination offset
+   * @param take - Number of chats to fetch
+   * @returns Array of archived chats
+   */
+  async getArchivedChats(
+    userId: number,
+    skip: number = 0,
+    take: number = 20,
+  ): Promise<{ chats: Chat[]; total: number }> {
+    try {
+      // Get total count of archived chats
+      const countResult = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(chats)
+        .where(and(eq(chats.userId, userId), eq(chats.isArchived, true)));
+      const total = countResult[0]?.count || 0;
+
+      const result = await db.query.chats.findMany({
+        where: and(eq(chats.userId, userId), eq(chats.isArchived, true)),
+        orderBy: [desc(chats.archivedAt)],
+        limit: take,
+        offset: skip,
+      });
+
+      // Enrich with contact names
+      const enrichedChats = await this.enrichChatsWithContactNames(result);
+      return { chats: enrichedChats, total };
+    } catch (error) {
+      this.logger.error(
+        `Error fetching archived chats for user ${userId}: ${error.message}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Delete a chat and all associated data
+   * This permanently deletes:
+   * - The chat record
+   * - All messages in the chat
+   * - All media files in S3 associated with the chat
+   *
+   * @param chatId - The chat ID to delete
+   * @param userId - The user ID (for authorization)
+   */
+  async deleteChat(chatId: string, userId: number): Promise<void> {
+    try {
+      // Verify chat exists and belongs to user
+      const chat = await this.findOne(chatId);
+      if (chat.userId !== userId) {
+        throw new BadRequestException('Chat does not belong to this user');
+      }
+
+      this.logger.log(`Starting deletion of chat ${chatId}`);
+
+      // Get the sender info for outbound media path
+      const sender = await db.query.senders.findFirst({
+        where: eq(senders.id, chat.senderId),
+      });
+
+      // Delete S3 media files using prefix-based deletion
+      // This ensures ALL files are deleted, including thumbnails and any orphaned files
+      const s3Prefixes: string[] = [];
+
+      // 1. Inbound media: inbound/{chatId}/
+      s3Prefixes.push(`inbound/${chatId}/`);
+
+      // 2. Outbound media: {senderPhoneNumber}/{chatId}/
+      // The sender phone number is used as the folder for outbound messages
+      if (sender?.phoneNumber) {
+        s3Prefixes.push(`${sender.phoneNumber}/${chatId}/`);
+      }
+
+      this.logger.log(
+        `Deleting S3 media with prefixes: ${s3Prefixes.join(', ')}`,
+      );
+
+      // Delete all files for each prefix
+      let totalDeleted = 0;
+      const allErrors: string[] = [];
+
+      for (const prefix of s3Prefixes) {
+        const result = await this.s3Service.deleteByPrefix(prefix);
+        totalDeleted += result.deletedCount;
+        allErrors.push(...result.errors);
+      }
+
+      this.logger.log(
+        `S3 cleanup complete for chat ${chatId}: ${totalDeleted} files deleted, ${allErrors.length} errors`,
+      );
+
+      if (allErrors.length > 0) {
+        this.logger.warn(`S3 deletion errors: ${allErrors.join('; ')}`);
+      }
+
+      // Delete all messages for the chat
+      await db.delete(messages).where(eq(messages.chatId, chatId));
+      this.logger.log(`Deleted messages for chat ${chatId}`);
+
+      // Delete the chat
+      await db.delete(chats).where(eq(chats.chatId, chatId));
+      this.logger.log(`Deleted chat ${chatId}`);
+
+      // Emit delete event via WebSocket
+      if (this.chatUpdateGateway?.emitChatDeleted) {
+        this.chatUpdateGateway.emitChatDeleted(chatId);
+      }
+    } catch (error) {
+      this.logger.error(`Error deleting chat ${chatId}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Auto-unarchive a chat when a new message is sent or received
+   * Called automatically when processing incoming or outgoing messages
+   *
+   * @param chatId - The chat ID to check and potentially unarchive
+   */
+  async autoUnarchiveOnMessage(chatId: string): Promise<void> {
+    try {
+      const chat = await db.query.chats.findFirst({
+        where: eq(chats.chatId, chatId),
+      });
+
+      if (chat && chat.isArchived) {
+        await this.unarchiveChat(chatId);
+        this.logger.log(`Chat ${chatId} auto-unarchived due to new message`);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed to auto-unarchive chat ${chatId}: ${error.message}`,
+      );
+      // Don't throw - this is a non-critical operation
     }
   }
 
@@ -784,12 +1020,16 @@ export class ChatsService {
   /**
    * Increment unread count for a chat
    * Called when a new inbound message arrives
+   * Also auto-unarchives the chat if it was archived
    *
    * @param chatId - The chat ID to increment
    * @returns Updated chat with new unread count
    */
   async incrementUnreadCount(chatId: string): Promise<Chat> {
     try {
+      // Auto-unarchive if needed (doesn't throw on failure)
+      await this.autoUnarchiveOnMessage(chatId);
+
       const [updated] = await db
         .update(chats)
         .set({
@@ -905,10 +1145,11 @@ export class ChatsService {
     try {
       const { query, skip = 0, take = 50 } = searchDto;
 
-      // Base conditions: user's active chats
+      // Base conditions: user's active, non-archived chats
       const baseConditions = [
         eq(chats.userId, userId),
         eq(chats.isActive, true),
+        eq(chats.isArchived, false),
       ];
 
       // If no query, return all chats with pagination
@@ -1044,11 +1285,19 @@ export class ChatsService {
 
   /**
    * Helper method to enrich chats with contact names from the contacts table
+   * Handles cases where participantName is missing or is just the phone number
    */
   private async enrichChatsWithContactNames(chatList: Chat[]): Promise<Chat[]> {
     return Promise.all(
       chatList.map(async (chat) => {
-        if (!chat.participantName) {
+        // Check if participantName is missing or is just the phone number
+        const needsNameLookup =
+          !chat.participantName ||
+          chat.participantName === chat.participantPhone ||
+          chat.participantName === `+${chat.participantPhone}` ||
+          `+${chat.participantName}` === chat.participantPhone;
+
+        if (needsNameLookup) {
           const contactName = await this.getContactNameByPhone(
             chat.participantPhone,
           );

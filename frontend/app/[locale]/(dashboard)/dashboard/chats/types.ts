@@ -28,6 +28,8 @@ export interface Chat {
   lastMessageTime?: string | null;
   unreadCount: number;
   isActive: boolean;
+  isArchived?: boolean;
+  archivedAt?: string | null;
   senderId: number;
   userId?: number;
   createdAt?: string;

@@ -1,6 +1,13 @@
 "use client";
 
-import { ArrowDown, Loader2, MessageSquare, Search, X } from "lucide-react";
+import {
+  Archive,
+  ArrowDown,
+  Loader2,
+  MessageSquare,
+  Search,
+  X,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import React, {
@@ -12,12 +19,18 @@ import React, {
 } from "react";
 import useSWR from "swr";
 
+import {
+  ArchivedChat,
+  ArchivedChatsDrawer,
+} from "@/components/archived-chats-drawer";
 import { ChatsSenderSection } from "@/components/chats-sender-section";
+import { DeleteChatDialog } from "@/components/dialogs/delete-chat-dialog";
 import { Button } from "@/components/ui/button";
 import { ChatSidebar } from "@/components/ui/chat-sidebar";
 import { Input } from "@/components/ui/input";
 import { useAuthProtection } from "@/hooks/use-auth";
 import { useMediaUpload } from "@/hooks/use-media-upload";
+import { useNotification } from "@/hooks/use-notification";
 import { backendApi } from "@/lib/api/endpoints";
 import { PendingUpload } from "@/lib/media/types";
 
@@ -41,7 +54,7 @@ import {
   useMessageHandlers,
   useMessageSearch,
 } from "./hooks";
-import type { Template } from "./types";
+import type { Chat, Template } from "./types";
 import { calculateConversationWindow, groupMessages } from "./utils";
 
 export default function ChatsPage() {
@@ -51,6 +64,7 @@ export default function ChatsPage() {
   const containerRef = useRef<HTMLDivElement>(null);
   const separatorRef = useRef<HTMLDivElement>(null);
   const notesPanelRef = useRef<HTMLDivElement>(null);
+  const { addNotification } = useNotification();
 
   // Protect this route
   useAuthProtection();
@@ -65,6 +79,18 @@ export default function ChatsPage() {
 
   // Automation state
   const [automationEnabled, setAutomationEnabled] = useState(false);
+
+  // Archive/Delete state
+  const [isArchivedDrawerOpen, setIsArchivedDrawerOpen] = useState(false);
+  const [viewedArchivedChat, setViewedArchivedChat] =
+    useState<ArchivedChat | null>(null);
+  const [deleteChatId, setDeleteChatId] = useState<string | null>(null);
+  const [deleteChatName, setDeleteChatName] = useState<string | undefined>(
+    undefined
+  );
+  const [lastDeletedChatId, setLastDeletedChatId] = useState<string | null>(
+    null
+  );
 
   // Notes state
   const [notes, setNotes] = useState<any>(null);
@@ -278,6 +304,133 @@ export default function ChatsPage() {
     }
   };
 
+  // Archive chat handler
+  const handleArchiveChat = useCallback(
+    async (chatId: string) => {
+      try {
+        await backendApi.chats.archive(chatId);
+        // Remove from local chats list
+        chatState.setChats((prev) => prev.filter((c) => c.chatId !== chatId));
+        // If this was the selected chat, deselect it
+        if (chatState.selectedChatId === chatId) {
+          chatState.setSelectedChatId(null);
+        }
+        addNotification(t("chatList.chatArchived"), "success");
+      } catch (error) {
+        console.error("Failed to archive chat:", error);
+        addNotification(t("chatList.archiveFailed"), "error");
+      }
+    },
+    [chatState, t, addNotification]
+  );
+
+  // Unarchive chat handler
+  const handleUnarchiveChat = useCallback(
+    async (chatId: string) => {
+      try {
+        await backendApi.chats.unarchive(chatId);
+        // Fetch the unarchived chat and add it back to the list
+        const data = await backendApi.whatsapp.getChats(0, 50);
+        if (Array.isArray(data)) {
+          chatState.setChats(data);
+        }
+        addNotification(t("chatList.chatUnarchived"), "success");
+      } catch (error) {
+        console.error("Failed to unarchive chat:", error);
+        addNotification(t("chatList.unarchiveFailed"), "error");
+        throw error; // Re-throw so the drawer can handle it
+      }
+    },
+    [chatState, t, addNotification]
+  );
+
+  // Select an archived chat for viewing (without adding to main list)
+  const handleSelectArchivedChat = useCallback(
+    (archivedChat: ArchivedChat) => {
+      // Set the archived chat for viewing
+      setViewedArchivedChat(archivedChat);
+      // Set the selected chat ID so messages load
+      chatState.setSelectedChatId(archivedChat.chatId);
+    },
+    [chatState]
+  );
+
+  // Computed selected chat: use archived chat if viewing one, otherwise use regular selected chat
+  const effectiveSelectedChat = useMemo(() => {
+    if (
+      viewedArchivedChat &&
+      chatState.selectedChatId === viewedArchivedChat.chatId
+    ) {
+      // Convert ArchivedChat to Chat format for display
+      return {
+        ...viewedArchivedChat,
+        unreadCount: viewedArchivedChat.unreadCount ?? 0,
+        isActive: true,
+        isArchived: true,
+      } as Chat;
+    }
+    // Clear viewed archived chat if we selected a different chat
+    if (
+      viewedArchivedChat &&
+      chatState.selectedChatId !== viewedArchivedChat.chatId
+    ) {
+      setViewedArchivedChat(null);
+    }
+    return chatState.selectedChat;
+  }, [viewedArchivedChat, chatState.selectedChatId, chatState.selectedChat]);
+
+  // Open delete chat confirmation
+  const handleDeleteChatClick = useCallback(
+    (chatId: string, participantName?: string) => {
+      // First check regular chats
+      const chat = chatState.chats.find((c) => c.chatId === chatId);
+      // If not found and we have a viewed archived chat with matching ID, use that
+      const archivedChat =
+        viewedArchivedChat?.chatId === chatId ? viewedArchivedChat : null;
+      const effectiveChat = chat || archivedChat;
+
+      setDeleteChatId(chatId);
+      // Use passed participantName, or fall back to chat data, or phone number
+      setDeleteChatName(
+        participantName ||
+          effectiveChat?.participantName ||
+          effectiveChat?.participantPhone
+      );
+    },
+    [chatState.chats, viewedArchivedChat]
+  );
+
+  // Confirm delete chat
+  const handleConfirmDeleteChat = useCallback(async () => {
+    if (!deleteChatId) return;
+
+    try {
+      await backendApi.chats.delete(deleteChatId);
+      // Track deleted chat ID for archived drawer to react
+      setLastDeletedChatId(deleteChatId);
+      // Clear it after a short delay so it can be used again for the same ID
+      setTimeout(() => setLastDeletedChatId(null), 100);
+      // Remove from local chats list
+      chatState.setChats((prev) =>
+        prev.filter((c) => c.chatId !== deleteChatId)
+      );
+      // If this was the selected chat, deselect it
+      if (chatState.selectedChatId === deleteChatId) {
+        chatState.setSelectedChatId(null);
+      }
+      // Clear viewed archived chat if it was deleted
+      if (viewedArchivedChat?.chatId === deleteChatId) {
+        setViewedArchivedChat(null);
+      }
+      setDeleteChatId(null);
+      setDeleteChatName(undefined);
+      addNotification(t("chatList.chatDeleted"), "success");
+    } catch (error) {
+      console.error("Failed to delete chat:", error);
+      addNotification(t("chatList.deleteFailed"), "error");
+    }
+  }, [deleteChatId, chatState, viewedArchivedChat, t, addNotification]);
+
   // Handle search result message selection
   const handleSearchSelectMessage = useCallback(
     async (messageId: string) => {
@@ -379,30 +532,44 @@ export default function ChatsPage() {
       {/* Main Content Area */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left Panel: Chat List */}
-        <div className="w-full lg:w-80 border-r flex flex-col bg-muted/30">
+        <div className="w-full lg:w-80 border-r flex flex-col bg-muted/30 relative">
           {/* Search Input */}
           <div className="p-4 border-b">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder={t("searchChats")}
-                value={chatSearch.searchQuery}
-                onChange={(e) => chatSearch.handleSearchChange(e.target.value)}
-                className="w-full pl-9 pr-9"
-              />
-              {chatSearch.searchQuery && (
-                <button
-                  onClick={chatSearch.clearSearch}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground hover:text-foreground transition-colors"
-                  aria-label="Clear search"
-                >
-                  {chatSearch.isSearching ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <X className="h-4 w-4" />
-                  )}
-                </button>
-              )}
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder={t("searchChats")}
+                  value={chatSearch.searchQuery}
+                  onChange={(e) =>
+                    chatSearch.handleSearchChange(e.target.value)
+                  }
+                  className="w-full pl-9 pr-9"
+                />
+                {chatSearch.searchQuery && (
+                  <button
+                    onClick={chatSearch.clearSearch}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground hover:text-foreground transition-colors"
+                    aria-label="Clear search"
+                  >
+                    {chatSearch.isSearching ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <X className="h-4 w-4" />
+                    )}
+                  </button>
+                )}
+              </div>
+              {/* Archived Chats Button */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setIsArchivedDrawerOpen(true)}
+                title={t("chatList.archivedChats")}
+                className="flex-shrink-0"
+              >
+                <Archive className="h-4 w-4" />
+              </Button>
             </div>
             {/* Search results count */}
             {chatSearch.isSearchMode && !chatSearch.isSearching && (
@@ -469,19 +636,33 @@ export default function ChatsPage() {
                     chats={senderChats}
                     selectedChatId={chatState.selectedChatId}
                     onSelectChat={chatState.handleSelectChat}
+                    onArchiveChat={handleArchiveChat}
+                    onDeleteChat={handleDeleteChatClick}
                   />
                 );
               })
             )}
           </div>
+
+          {/* Archived Chats Drawer */}
+          <ArchivedChatsDrawer
+            isOpen={isArchivedDrawerOpen}
+            onClose={() => setIsArchivedDrawerOpen(false)}
+            onUnarchiveChat={handleUnarchiveChat}
+            onDeleteChat={handleDeleteChatClick}
+            onSelectArchivedChat={handleSelectArchivedChat}
+            selectedChatId={chatState.selectedChatId}
+            deletedChatId={lastDeletedChatId}
+            senders={chatState.senders}
+          />
         </div>
 
         {/* Right Panel: Chat Detail + Notes/Search */}
         <div className="hidden lg:flex flex-1 flex-col bg-background overflow-hidden min-h-0">
-          {chatState.selectedChat ? (
+          {effectiveSelectedChat ? (
             <>
               <ChatHeader
-                chat={chatState.selectedChat}
+                chat={effectiveSelectedChat}
                 onSearchClick={messageSearch.toggleSearch}
                 isSearchOpen={messageSearch.isSearchOpen}
               />
@@ -496,7 +677,7 @@ export default function ChatsPage() {
                     <MessagesList
                       groupedMessages={groupedMessages}
                       messages={chatState.messages}
-                      selectedChat={chatState.selectedChat}
+                      selectedChat={effectiveSelectedChat}
                       isLoadingOlderMessages={chatState.isLoadingOlderMessages}
                       hasMoreMessages={chatState.hasMoreMessages}
                       pendingMediaUploads={mediaHandlers.pendingMediaUploads}
@@ -559,7 +740,7 @@ export default function ChatsPage() {
                     messageInputRef={messageInputRef}
                     addMoreInputRef={mediaHandlers.addMoreInputRef}
                     replyingToMessage={messageHandlers.replyingToMessage}
-                    selectedChat={chatState.selectedChat}
+                    selectedChat={effectiveSelectedChat}
                     currentAttachmentType={mediaHandlers.currentAttachmentType}
                     templateInput={messageHandlers.templateInput}
                     isUploading={isUploading}
@@ -702,7 +883,7 @@ export default function ChatsPage() {
                     // Search Panel - slides in from right
                     <MessageSearchPanel
                       chatId={chatState.selectedChatId!}
-                      participantName={chatState.selectedChat?.participantName}
+                      participantName={effectiveSelectedChat?.participantName}
                       isOpen={messageSearch.isSearchOpen}
                       onClose={messageSearch.closeSearch}
                       onSelectMessage={handleSearchSelectMessage}
@@ -721,11 +902,9 @@ export default function ChatsPage() {
                         onDeleteNote={handleDeleteNote}
                         onProfileUpdate={() => {}}
                         participantPhone={
-                          chatState.selectedChat?.participantPhone
+                          effectiveSelectedChat?.participantPhone
                         }
-                        participantName={
-                          chatState.selectedChat?.participantName
-                        }
+                        participantName={effectiveSelectedChat?.participantName}
                         onContactCreated={handleContactResolved}
                       />
                     )
@@ -765,6 +944,18 @@ export default function ChatsPage() {
           </p>
         </div>
       )}
+
+      {/* Delete Chat Confirmation Dialog */}
+      <DeleteChatDialog
+        isOpen={!!deleteChatId}
+        chatId={deleteChatId || ""}
+        participantName={deleteChatName}
+        onConfirm={handleConfirmDeleteChat}
+        onCancel={() => {
+          setDeleteChatId(null);
+          setDeleteChatName(undefined);
+        }}
+      />
     </div>
   );
 }

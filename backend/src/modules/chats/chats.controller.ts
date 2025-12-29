@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -66,6 +67,20 @@ export class ChatsController {
   }
 
   /**
+   * Get all archived chats for the current user
+   * GET /chats/archived?skip=0&take=20
+   */
+  @Get('archived')
+  async getArchivedChats(
+    @Req() req: any,
+    @Query('skip') skip: number = 0,
+    @Query('take') take: number = 20,
+  ) {
+    const userId = req.user.userId;
+    return this.chatsService.getArchivedChats(userId, skip, take);
+  }
+
+  /**
    * Search chats by participant name or phone number
    * GET /chats/search?query=text&skip=0&take=50
    *
@@ -93,6 +108,36 @@ export class ChatsController {
   @Post(':id/close')
   async close(@Param('id') id: string) {
     return this.chatsService.close(id);
+  }
+
+  /**
+   * Archive a chat
+   * POST /chats/:id/archive
+   */
+  @Post(':id/archive')
+  async archiveChat(@Param('id') id: string) {
+    return this.chatsService.archiveChat(id);
+  }
+
+  /**
+   * Unarchive a chat
+   * POST /chats/:id/unarchive
+   */
+  @Post(':id/unarchive')
+  async unarchiveChat(@Param('id') id: string) {
+    return this.chatsService.unarchiveChat(id);
+  }
+
+  /**
+   * Delete a chat and all associated data
+   * DELETE /chats/:id
+   * WARNING: This permanently deletes the chat, all messages, and media files
+   */
+  @Delete(':id')
+  async deleteChat(@Req() req: any, @Param('id') id: string) {
+    const userId = req.user.userId;
+    await this.chatsService.deleteChat(id, userId);
+    return { success: true, message: 'Chat deleted successfully' };
   }
 
   /**
