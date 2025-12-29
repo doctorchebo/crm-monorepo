@@ -224,8 +224,63 @@ export function useChatState(): UseChatStateReturn {
   const selectedChat = chats.find((c) => c.chatId === selectedChatId) || null;
 
   // Get chat notifications context
-  const { setActiveChatId, resetUnreadCount, chatUpdates, setAllUnreadCounts } =
-    useChatNotifications();
+  const {
+    setActiveChatId,
+    resetUnreadCount,
+    chatUpdates,
+    setAllUnreadCounts,
+    onNewChat,
+  } = useChatNotifications();
+
+  // Subscribe to new chat events and add them to the chat list
+  useEffect(() => {
+    const unsubscribe = onNewChat((newChat: NewChatEvent) => {
+      console.log(
+        `[useChatState] 🆕 Received new chat event: ${newChat.chatId}`
+      );
+
+      // Add the new chat to the top of the list (most recent first)
+      setChats((prevChats) => {
+        // Check if chat already exists (avoid duplicates)
+        const exists = prevChats.some((c) => c.chatId === newChat.chatId);
+        if (exists) {
+          console.log(
+            `[useChatState] Chat ${newChat.chatId} already exists, skipping`
+          );
+          return prevChats;
+        }
+
+        // Transform the event to match the Chat type
+        const chatToAdd: Chat = {
+          id: 0, // Will be set by backend
+          chatId: newChat.chatId,
+          businessPhone: newChat.businessPhone,
+          participantPhone: newChat.participantPhone,
+          participantName: newChat.participantName,
+          senderId: newChat.senderId,
+          userId: newChat.userId,
+          isActive: newChat.isActive,
+          unreadCount: newChat.unreadCount,
+          lastMessage: newChat.lastMessage || null,
+          lastMessageType: newChat.lastMessageType || null,
+          lastMessageTime: newChat.lastMessageTime || null,
+          createdAt: newChat.createdAt,
+          updatedAt: newChat.createdAt,
+        };
+
+        console.log(
+          `[useChatState] Adding new chat to list: ${chatToAdd.chatId}`
+        );
+
+        // Add to beginning of list (newest first)
+        return [chatToAdd, ...prevChats];
+      });
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [onNewChat]);
 
   // Initialize unread counts in the context when chats are loaded
   useEffect(() => {

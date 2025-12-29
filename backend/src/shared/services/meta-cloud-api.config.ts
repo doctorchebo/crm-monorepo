@@ -69,11 +69,20 @@ export class MetaCloudAPIConfigService {
 
   /**
    * Build a complete Graph API endpoint URL
+   * Always includes appsecret_proof if app secret is configured
    * @param path - The path after version (e.g., "123456/phone_numbers" or "media-id")
-   * @returns Complete URL with base, version, and path
+   * @returns Complete URL with base, version, path, and appsecret_proof
    */
   buildEndpoint(path: string): string {
-    return `${this.baseUrl}/${this.apiVersion}/${path}`;
+    const baseUrl = `${this.baseUrl}/${this.apiVersion}/${path}`;
+
+    // Always include appsecret_proof if app secret is configured
+    const appSecretProof = this.getAppSecretProof();
+    if (appSecretProof) {
+      return `${baseUrl}?appsecret_proof=${appSecretProof}`;
+    }
+
+    return baseUrl;
   }
 
   /**

@@ -27,9 +27,9 @@ interface Chat {
   businessPhone?: string;
   participantPhone: string;
   participantName?: string;
-  lastMessage?: string;
-  lastMessageType?: string;
-  lastMessageTime?: string;
+  lastMessage?: string | null;
+  lastMessageType?: string | null;
+  lastMessageTime?: string | null;
   unreadCount?: number;
 }
 

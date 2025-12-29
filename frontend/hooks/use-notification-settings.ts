@@ -14,6 +14,7 @@
 "use client";
 
 import { backendApi } from "@/lib/api/endpoints";
+import { TokenManager } from "@/lib/auth/token-manager";
 import type {
   NotificationSettings,
   UpdateNotificationSettingsDto,
@@ -62,8 +63,12 @@ export interface UseNotificationSettingsReturn {
  * Hook to manage user notification settings
  */
 export function useNotificationSettings(): UseNotificationSettingsReturn {
+  // Only fetch settings if user is authenticated
+  const isAuthenticated = TokenManager.isAccessTokenValid();
+
   const { data, error, isLoading, mutate } = useSWR<NotificationSettings>(
-    NOTIFICATION_SETTINGS_KEY,
+    // Use null key to disable fetching when not authenticated
+    isAuthenticated ? NOTIFICATION_SETTINGS_KEY : null,
     fetchNotificationSettings,
     {
       // Keep settings cached and don't refetch too often

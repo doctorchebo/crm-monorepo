@@ -20,6 +20,7 @@
 
 "use client";
 
+import { TokenManager } from "@/lib/auth/token-manager";
 import {
   createContext,
   ReactNode,
@@ -45,6 +46,22 @@ export interface ChatUpdateEvent {
   participantName?: string;
 }
 
+// Interface for new chat events from WebSocket (customer initiated conversation)
+export interface NewChatEvent {
+  chatId: string;
+  businessPhone: string;
+  participantPhone: string;
+  participantName: string;
+  senderId: number;
+  userId?: number;
+  isActive: boolean;
+  unreadCount: number;
+  lastMessage?: string;
+  lastMessageType?: string;
+  lastMessageTime?: string;
+  createdAt: string;
+}
+
 // Interface for new message events
 interface NewMessageEvent {
   chatId: string;
@@ -54,6 +71,9 @@ interface NewMessageEvent {
   type: string;
   participantName?: string;
 }
+
+// Callback type for new chat events
+type NewChatCallback = (chat: NewChatEvent) => void;
 
 // Interface for the context value
 interface ChatNotificationsContextValue {
@@ -74,6 +94,8 @@ interface ChatNotificationsContextValue {
   // Currently active chat (to avoid notifications for active chat)
   activeChatId: string | null;
   setActiveChatId: (chatId: string | null) => void;
+  // Register callback for new chat events
+  onNewChat: (callback: NewChatCallback) => () => void;
 }
 
 const ChatNotificationsContext =
@@ -116,6 +138,9 @@ export function ChatNotificationsProvider({
 
   // Refs to track current values without causing effect re-runs
   const activeChatIdRef = useRef<string | null>(null);
+
+  // Callbacks for new chat events - allows components to subscribe
+  const newChatCallbacksRef = useRef<Set<NewChatCallback>>(new Set());
 
   // Get notification settings from user preferences
   const { settings, isLoading: isLoadingSettings } = useNotificationSettings();
@@ -283,17 +308,87 @@ export function ChatNotificationsProvider({
     }
   }, []);
 
+  /**
+   * Handle incoming new chat from WebSocket (customer initiated conversation)
+   */
+  const handleNewChat = useCallback((chat: NewChatEvent) => {
+    console.log(
+      `[ChatNotifications] 🆕 New chat created: ${chat.chatId}, participant: ${chat.participantPhone}`
+    );
+
+    // Initialize unread count for the new chat
+    setUnreadCounts((prev) => {
+      const next = new Map(prev);
+      next.set(chat.chatId, chat.unreadCount);
+      return next;
+    });
+
+    // Notify all registered callbacks about the new chat
+    newChatCallbacksRef.current.forEach((callback) => {
+      try {
+        callback(chat);
+      } catch (error) {
+        console.error("[ChatNotifications] Error in new chat callback:", error);
+      }
+    });
+
+    // Play sound and show notification for new chat (always notify for new conversations)
+    const currentSettings = settingsRef.current;
+
+    if (currentSettings.soundEnabled) {
+      playSoundRef.current();
+    }
+
+    if (currentSettings.browserNotificationsEnabled && isGrantedRef.current) {
+      const senderName = chat.participantName || chat.participantPhone;
+      const messagePreview = chat.lastMessage || "Started a new conversation";
+
+      showNotificationRef.current({
+        title: `New conversation from ${senderName}`,
+        body: messagePreview,
+        tag: `chat-${chat.chatId}`,
+        data: {
+          chatId: chat.chatId,
+        },
+      });
+    }
+  }, []);
+
+  /**
+   * Register a callback for new chat events
+   * Returns a cleanup function to unregister the callback
+   */
+  const onNewChat = useCallback((callback: NewChatCallback): (() => void) => {
+    newChatCallbacksRef.current.add(callback);
+    return () => {
+      newChatCallbacksRef.current.delete(callback);
+    };
+  }, []);
+
   // Store handlers in refs for the WebSocket effect
   const handleChatUpdateRef = useRef(handleChatUpdate);
   const handleNewMessageRef = useRef(handleNewMessage);
+  const handleNewChatRef = useRef(handleNewChat);
   useEffect(() => {
     handleChatUpdateRef.current = handleChatUpdate;
     handleNewMessageRef.current = handleNewMessage;
-  }, [handleChatUpdate, handleNewMessage]);
+    handleNewChatRef.current = handleNewChat;
+  }, [handleChatUpdate, handleNewMessage, handleNewChat]);
 
   // Connect to WebSocket and listen for chat updates
   // This effect should only run once on mount and cleanup on unmount
+  // Only connect if user is authenticated
   useEffect(() => {
+    // Check if user is authenticated before connecting
+    const isAuthenticated = TokenManager.isAccessTokenValid();
+
+    if (!isAuthenticated) {
+      console.log(
+        "[ChatNotifications] User not authenticated, skipping WebSocket connection"
+      );
+      return;
+    }
+
     console.log("[ChatNotifications] Connecting to WebSocket...");
 
     const socket = io(
@@ -329,6 +424,11 @@ export function ChatNotificationsProvider({
       handleNewMessageRef.current(message);
     });
 
+    // Listen for new chats (customer initiated conversations) - use ref to always get latest handler
+    socket.on("chat:new", (chat: NewChatEvent) => {
+      handleNewChatRef.current(chat);
+    });
+
     return () => {
       console.log("[ChatNotifications] Cleaning up WebSocket connection");
       socket.disconnect();
@@ -347,6 +447,7 @@ export function ChatNotificationsProvider({
       isConnected,
       activeChatId,
       setActiveChatId,
+      onNewChat,
     }),
     [
       unreadCounts,
@@ -358,6 +459,7 @@ export function ChatNotificationsProvider({
       isConnected,
       activeChatId,
       setActiveChatId,
+      onNewChat,
     ]
   );
 

@@ -271,6 +271,42 @@ export class WhatsAppGateway
   }
 
   /**
+   * Emit chat created event to all connected clients
+   * Called when a new chat is created from an inbound message (customer initiated conversation)
+   *
+   * @param chat - The newly created chat data
+   */
+  emitChatCreated(chat: {
+    chatId: string;
+    businessPhone: string;
+    participantPhone: string;
+    participantName: string;
+    senderId: number;
+    userId?: number;
+    isActive: boolean;
+    unreadCount: number;
+    lastMessage?: string;
+    lastMessageType?: string;
+    lastMessageTime?: Date;
+    createdAt: Date;
+  }): void {
+    if (this.connectedClients.size === 0) {
+      return; // No clients connected
+    }
+
+    console.log(
+      `📡 Emitting chat:new for ${chat.chatId} (participant: ${chat.participantPhone}) to ${this.connectedClients.size} clients`,
+    );
+
+    // Emit to all connected clients
+    this.server.emit('chat:new', {
+      ...chat,
+      lastMessageTime: chat.lastMessageTime?.toISOString(),
+      createdAt: chat.createdAt.toISOString(),
+    });
+  }
+
+  /**
    * Get number of connected clients (for monitoring)
    */
   getConnectedClientsCount(): number {

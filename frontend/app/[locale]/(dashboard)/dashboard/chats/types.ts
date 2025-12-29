@@ -22,13 +22,16 @@ export interface Chat {
   chatId: string;
   participantPhone: string;
   participantName?: string;
-  lastMessage?: string;
-  lastMessageType?: string;
-  lastMessageTime?: string;
+  businessPhone?: string;
+  lastMessage?: string | null;
+  lastMessageType?: string | null;
+  lastMessageTime?: string | null;
   unreadCount: number;
   isActive: boolean;
   senderId: number;
-  businessPhone?: string;
+  userId?: number;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface ReplyPreview {

@@ -422,13 +422,13 @@ export class WhatsAppService {
       // Generate chat ID using the sender's phone number
       const chatId = generateChatId(senderPhoneNumber, recipientPhone);
 
-      // Ensure chat exists with the correct sender
+      // Ensure chat exists with the correct sender (outbound message - no notification needed)
       await this.getOrCreateChat(
         chatId,
         senderPhoneNumber,
         recipientPhone,
         senderId,
-      );
+      ).then(({ chat }) => chat);
 
       // ========================================================================
       // CRITICAL: Enforce 24-hour conversation window rule
@@ -884,7 +884,14 @@ export class WhatsAppService {
   ): Promise<CloudAPISendMessageResponse> {
     // Use provided phoneNumberId, or fall back to default (for backward compatibility)
     const actualPhoneNumberId = phoneNumberId!;
-    const url = buildCloudAPIUrl(actualPhoneNumberId, 'messages');
+    // Include appsecret_proof in URL when app secret is available (required by Meta)
+    const url = buildCloudAPIUrl(
+      actualPhoneNumberId,
+      'messages',
+      'v20.0',
+      this.metaAccessToken,
+      this.metaAppSecret,
+    );
     const headers = getCloudAPIHeaders(this.metaAccessToken);
 
     const result = await withRetry(
@@ -1083,8 +1090,8 @@ export class WhatsAppService {
       const chatId = generateChatId(businessPhone, senderPhone);
       console.log('Generated chat ID:', chatId);
 
-      // Ensure chat exists
-      const chat = await this.getOrCreateChat(
+      // Ensure chat exists - capture if this is a newly created chat (customer initiated)
+      const { chat, isNewChat } = await this.getOrCreateChat(
         chatId,
         businessPhone,
         senderPhone,
@@ -1094,7 +1101,24 @@ export class WhatsAppService {
         chatId: chat.chatId,
         id: chat.id,
         senderId: chat.senderId,
+        isNewChat,
       });
+
+      // If this is a new chat (customer initiated conversation), emit chat:new event
+      // This notifies the frontend to add the chat to the list and show notifications
+      if (isNewChat && whatsAppGatewayInstance) {
+        whatsAppGatewayInstance.emitChatCreated({
+          chatId: chat.chatId,
+          businessPhone: chat.businessPhone,
+          participantPhone: chat.participantPhone,
+          participantName: chat.participantName || chat.participantPhone,
+          senderId: chat.senderId!,
+          userId: chat.userId || undefined,
+          isActive: chat.isActive ?? true,
+          unreadCount: 0, // Will be updated by updateChatLastMessage
+          createdAt: chat.createdAt || new Date(),
+        });
+      }
 
       // Determine message type and extract content
       const messageType = mapCloudAPIMessageType(message.type);
@@ -1784,6 +1808,7 @@ export class WhatsAppService {
 
   /**
    * Get or create a chat for two participants
+   * Returns both the chat and whether it was newly created
    * @private
    */
   private async getOrCreateChat(
@@ -1791,7 +1816,7 @@ export class WhatsAppService {
     businessPhone: string,
     participantPhone: string,
     senderId?: number,
-  ): Promise<Chat> {
+  ): Promise<{ chat: Chat; isNewChat: boolean }> {
     try {
       // Validate that senderId is provided - we MUST know which sender this chat belongs to
       if (!senderId) {
@@ -1806,6 +1831,10 @@ export class WhatsAppService {
       });
 
       if (!chat) {
+        const sender = await db.query.senders.findFirst({
+          where: eq(senders.id, senderId),
+        });
+
         const [newChat] = await db
           .insert(chats)
           .values({
@@ -1814,20 +1843,16 @@ export class WhatsAppService {
             participantPhone,
             participantName: participantPhone,
             senderId,
-            userId: (
-              await db.query.senders.findFirst({
-                where: eq(senders.id, senderId),
-              })
-            )?.userId,
+            userId: sender?.userId,
             isActive: true,
           })
           .returning();
 
         this.logger.log(`Chat created: ${chatId} for sender ${senderId}`);
-        return newChat;
+        return { chat: newChat, isNewChat: true };
       }
 
-      return chat;
+      return { chat, isNewChat: false };
     } catch (error) {
       this.logger.error(`Error getting or creating chat: ${error.message}`);
       throw error;
@@ -2407,13 +2432,13 @@ export class WhatsAppService {
       // Generate chat ID
       const chatId = generateChatId(senderPhoneNumber, recipientPhone);
 
-      // Ensure chat exists
+      // Ensure chat exists (outbound message - no notification needed for outbound-initiated chats)
       await this.getOrCreateChat(
         chatId,
         senderPhoneNumber,
         recipientPhone,
         senderRecord.id,
-      );
+      ).then(({ chat }) => chat);
 
       // ========================================================================
       // CRITICAL: Enforce 24-hour conversation window rule for contact messages

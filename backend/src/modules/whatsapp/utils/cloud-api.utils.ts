@@ -6,6 +6,25 @@
 import * as crypto from 'crypto';
 
 /**
+ * Generate appsecret_proof for Meta Graph API requests
+ * This is required when "Require App Secret" is enabled in your Meta app settings.
+ * The proof is an HMAC SHA256 hash of the access token using the app secret as the key.
+ *
+ * @param accessToken - META_ACCESS_TOKEN
+ * @param appSecret - META_APP_SECRET
+ * @returns HMAC SHA256 hash as hex string
+ */
+export function generateAppSecretProof(
+  accessToken: string,
+  appSecret: string,
+): string {
+  return crypto
+    .createHmac('sha256', appSecret)
+    .update(accessToken)
+    .digest('hex');
+}
+
+/**
  * Verify webhook signature from Meta
  * Meta sends X-Hub-Signature-256 header with HMAC SHA256 signature
  *
@@ -43,19 +62,32 @@ export function getCloudAPIHeaders(
 
 /**
  * Build Cloud API endpoint URL
+ * Includes appsecret_proof query parameter when appSecret is provided
  *
  * @param phoneNumberId - META_PHONE_NUMBER_ID
  * @param endpoint - API endpoint (e.g., 'messages', 'media', 'contacts')
  * @param apiVersion - Cloud API version (default: v20.0)
- * @returns Full endpoint URL
+ * @param accessToken - Optional access token for generating appsecret_proof
+ * @param appSecret - Optional app secret for generating appsecret_proof
+ * @returns Full endpoint URL with appsecret_proof if credentials provided
  */
 export function buildCloudAPIUrl(
   phoneNumberId: string,
   endpoint: string,
   apiVersion: string = 'v20.0',
+  accessToken?: string,
+  appSecret?: string,
 ): string {
   const baseUrl = 'https://graph.facebook.com';
-  return `${baseUrl}/${apiVersion}/${phoneNumberId}/${endpoint}`;
+  let url = `${baseUrl}/${apiVersion}/${phoneNumberId}/${endpoint}`;
+
+  // Add appsecret_proof if both accessToken and appSecret are provided
+  if (accessToken && appSecret) {
+    const proof = generateAppSecretProof(accessToken, appSecret);
+    url += `?appsecret_proof=${proof}`;
+  }
+
+  return url;
 }
 
 /**
