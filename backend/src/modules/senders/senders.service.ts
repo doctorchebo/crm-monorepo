@@ -300,23 +300,20 @@ export class SendersService {
   }
 
   /**
-   * Get all senders for a user
+   * Get all active senders for a user (excludes soft-deleted)
    */
   async findAll(userId: number): Promise<Sender[]> {
     return db.query.senders.findMany({
-      where: eq(senders.userId, userId),
+      where: and(eq(senders.userId, userId), eq(senders.isActive, true)),
       orderBy: (senders, { desc }) => desc(senders.createdAt),
     });
   }
 
   /**
-   * Get all active senders for a user
+   * Get all active senders for a user (alias for findAll)
    */
   async findAllActive(userId: number): Promise<Sender[]> {
-    return db.query.senders.findMany({
-      where: and(eq(senders.userId, userId), eq(senders.isActive, true)),
-      orderBy: (senders, { desc }) => desc(senders.createdAt),
-    });
+    return this.findAll(userId);
   }
 
   /**

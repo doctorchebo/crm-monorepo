@@ -2,20 +2,26 @@
  * SelectSenderModal
  * Modal dialog for selecting which sender number to initiate a chat with
  * Shows available sender numbers and lets user choose before starting conversation
+ * Features search functionality for filtering senders by name or number
  */
 
 "use client";
 
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import { useEffect, useState } from "react";
+import { Search } from "lucide-react";
+import { useTranslations } from "next-intl";
+import { useEffect, useMemo, useState } from "react";
 
 interface Sender {
   id: number;
@@ -46,7 +52,17 @@ export function SelectSenderModal({
   senders = [],
   isLoading = false,
 }: SelectSenderModalProps) {
+  const t = useTranslations("contacts.selectSender");
   const [selectedSenderId, setSelectedSenderId] = useState<string>("");
+  const [searchQuery, setSearchQuery] = useState<string>("");
+
+  // Reset search when modal opens/closes
+  useEffect(() => {
+    if (!isOpen) {
+      setSearchQuery("");
+      setSelectedSenderId("");
+    }
+  }, [isOpen]);
 
   // Set initial selection when senders load
   useEffect(() => {
@@ -54,6 +70,29 @@ export function SelectSenderModal({
       setSelectedSenderId(senders[0].id.toString());
     }
   }, [isOpen, senders, selectedSenderId]);
+
+  // Performant filtering using useMemo - only recalculates when dependencies change
+  const filteredSenders = useMemo(() => {
+    if (!searchQuery.trim()) {
+      return senders;
+    }
+    const query = searchQuery.toLowerCase().trim();
+    return senders.filter((sender) => {
+      const phoneMatch = sender.phoneNumber.toLowerCase().includes(query);
+      const nameMatch = sender.displayName?.toLowerCase().includes(query);
+      return phoneMatch || nameMatch;
+    });
+  }, [senders, searchQuery]);
+
+  // Update selection if current selection is filtered out
+  useEffect(() => {
+    if (
+      filteredSenders.length > 0 &&
+      !filteredSenders.find((s) => s.id.toString() === selectedSenderId)
+    ) {
+      setSelectedSenderId(filteredSenders[0].id.toString());
+    }
+  }, [filteredSenders, selectedSenderId]);
 
   const handleSelect = () => {
     if (!selectedSenderId) return;
@@ -72,13 +111,16 @@ export function SelectSenderModal({
   const displayPhone = contact?.phoneNumber || "Unknown";
 
   return (
-    <Sheet open={isOpen} onOpenChange={(open: boolean) => !open && onClose()}>
-      <SheetContent side="bottom" className="sm:max-w-[425px]">
-        <SheetHeader>
-          <SheetTitle>Select Sender Number</SheetTitle>
-        </SheetHeader>
+    <Dialog open={isOpen} onOpenChange={(open: boolean) => !open && onClose()}>
+      <DialogContent className="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>{t("title")}</DialogTitle>
+          <DialogDescription>
+            {t("description", { name: displayName })}
+          </DialogDescription>
+        </DialogHeader>
 
-        <div className="space-y-4 py-4">
+        <div className="space-y-4 py-2">
           {/* Contact Info */}
           <div className="rounded-lg bg-muted p-3 text-sm">
             <p className="font-medium">{displayName}</p>
@@ -87,58 +129,81 @@ export function SelectSenderModal({
 
           {/* Sender Selection */}
           {senders.length === 0 ? (
-            <div className="rounded-md bg-amber-50 p-3 text-sm text-amber-700">
-              No sender numbers available. Please add a sender number first.
+            <div className="rounded-md bg-amber-50 dark:bg-amber-950/50 p-3 text-sm text-amber-700 dark:text-amber-400">
+              {t("noSenders")}
             </div>
           ) : (
             <div className="space-y-3">
-              <p className="text-sm font-medium">
-                Choose a sender number to initiate this conversation:
-              </p>
-              <RadioGroup
-                value={selectedSenderId}
-                onValueChange={setSelectedSenderId}
-              >
-                {senders.map((sender) => (
-                  <div
-                    key={sender.id}
-                    className="flex items-center space-x-2 rounded-lg border p-3 hover:bg-muted"
-                  >
-                    <RadioGroupItem
-                      value={sender.id.toString()}
-                      id={`sender-${sender.id}`}
-                    />
-                    <Label
-                      htmlFor={`sender-${sender.id}`}
-                      className="flex flex-1 cursor-pointer flex-col"
-                    >
-                      <span className="font-medium">{sender.phoneNumber}</span>
-                      {sender.displayName && (
-                        <span className="text-xs text-muted-foreground">
-                          {sender.displayName}
-                        </span>
-                      )}
-                    </Label>
-                  </div>
-                ))}
-              </RadioGroup>
+              {/* Search Input */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  type="text"
+                  placeholder={t("searchPlaceholder")}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+
+              {/* Scrollable sender list */}
+              <div className="max-h-[240px] overflow-y-auto">
+                <RadioGroup
+                  value={selectedSenderId}
+                  onValueChange={setSelectedSenderId}
+                  className="space-y-2"
+                >
+                  {filteredSenders.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-4">
+                      {t("noResults")}
+                    </p>
+                  ) : (
+                    filteredSenders.map((sender) => (
+                      <div
+                        key={sender.id}
+                        className="flex items-center space-x-2 rounded-lg border p-3 hover:bg-muted transition-colors"
+                      >
+                        <RadioGroupItem
+                          value={sender.id.toString()}
+                          id={`sender-${sender.id}`}
+                        />
+                        <Label
+                          htmlFor={`sender-${sender.id}`}
+                          className="flex flex-1 cursor-pointer flex-col"
+                        >
+                          <span className="font-medium">
+                            {sender.phoneNumber}
+                          </span>
+                          {sender.displayName && (
+                            <span className="text-xs text-muted-foreground">
+                              {sender.displayName}
+                            </span>
+                          )}
+                        </Label>
+                      </div>
+                    ))
+                  )}
+                </RadioGroup>
+              </div>
             </div>
           )}
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex justify-end gap-3 pt-4">
-          <Button variant="outline" onClick={onClose}>
-            Cancel
-          </Button>
+        {/* Action Button */}
+        <DialogFooter>
           <Button
             onClick={handleSelect}
-            disabled={!selectedSenderId || isLoading || senders.length === 0}
+            disabled={
+              !selectedSenderId ||
+              isLoading ||
+              senders.length === 0 ||
+              filteredSenders.length === 0
+            }
           >
-            {isLoading ? "Starting chat..." : "Select"}
+            {isLoading ? t("startingChat") : t("select")}
           </Button>
-        </div>
-      </SheetContent>
-    </Sheet>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

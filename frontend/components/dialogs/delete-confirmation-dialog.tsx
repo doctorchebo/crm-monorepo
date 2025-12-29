@@ -2,12 +2,13 @@
 
 import { Button } from "@/components/ui/button";
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useTranslations } from "next-intl";
 
 interface DeleteConfirmationDialogProps {
@@ -27,29 +28,26 @@ export function DeleteConfirmationDialog({
   onCancel,
   isLoading = false,
 }: DeleteConfirmationDialogProps) {
-  const t = useTranslations("contacts");
+  const t = useTranslations("common");
 
   return (
-    <Sheet open={isOpen} onOpenChange={onCancel}>
-      <SheetContent side="bottom" className="sm:max-w-[400px]">
-        <SheetHeader>
-          <SheetTitle>{title}</SheetTitle>
-          <SheetDescription>{description}</SheetDescription>
-        </SheetHeader>
-        <div className="flex gap-2 justify-end mt-6">
-          <Button variant="outline" onClick={onCancel} disabled={isLoading}>
-            {t("confirmCancel")}
-          </Button>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onCancel()}>
+      <DialogContent className="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription className="pt-2">{description}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="pt-4">
           <Button
             variant="destructive"
             onClick={onConfirm}
             disabled={isLoading}
-            className="bg-red-600 hover:bg-red-700"
+            className="w-full sm:w-auto"
           >
             {isLoading ? `${t("delete")}...` : t("delete")}
           </Button>
-        </div>
-      </SheetContent>
-    </Sheet>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

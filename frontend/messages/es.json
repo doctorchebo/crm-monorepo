@@ -304,7 +304,16 @@
     "searchContacts": "Buscar contactos...",
     "error": "Error al procesar contacto",
     "invalidCountryCode": "Código de país inválido",
-    "invalidPhoneNumber": "Número de teléfono inválido"
+    "invalidPhoneNumber": "Número de teléfono inválido",
+    "selectSender": {
+      "title": "Seleccionar Número de Envío",
+      "description": "Elige qué número de teléfono usar para iniciar una conversación con {name}.",
+      "noSenders": "No hay números de envío disponibles. Por favor, agrega un número de envío primero.",
+      "searchPlaceholder": "Buscar por nombre o número...",
+      "noResults": "Ningún remitente coincide con tu búsqueda.",
+      "select": "Seleccionar",
+      "startingChat": "Iniciando chat..."
+    }
   },
   "kanban": {
     "title": "Tablero Kanban",
@@ -467,7 +476,7 @@
     "verifySuccess": "Remitente verificado exitosamente",
     "verifyFailed": "Error al verificar el remitente",
     "deleteTitle": "Eliminar Remitente",
-    "deleteDescription": "¿Estás seguro de que deseas eliminar {name}? Los contactos asociados permanecerán pero perderán esta asociación de remitente.",
+    "deleteDescription": "¿Estás seguro de que deseas eliminar {name}?",
     "deletedSuccessfully": "eliminado exitosamente",
     "failedToDelete": "Error al eliminar el remitente",
     "failedToLoad": "Error al cargar los detalles del remitente",

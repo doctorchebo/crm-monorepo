@@ -304,7 +304,16 @@
     "contactDeleted": "Contact deleted successfully",
     "contactCreated": "Contact created successfully",
     "contactUpdated": "Contact updated successfully",
-    "error": "An error occurred. Please try again."
+    "error": "An error occurred. Please try again.",
+    "selectSender": {
+      "title": "Select Sender Number",
+      "description": "Choose which phone number to use for starting a conversation with {name}.",
+      "noSenders": "No sender numbers available. Please add a sender number first.",
+      "searchPlaceholder": "Search by name or number...",
+      "noResults": "No senders match your search.",
+      "select": "Select",
+      "startingChat": "Starting chat..."
+    }
   },
   "kanban": {
     "title": "Kanban Board",
@@ -467,7 +476,7 @@
     "verifySuccess": "Sender verified successfully",
     "verifyFailed": "Failed to verify sender",
     "deleteTitle": "Delete Sender",
-    "deleteDescription": "Are you sure you want to delete {name}? Associated contacts will remain but lose this sender association.",
+    "deleteDescription": "Are you sure you want to delete {name}?",
     "deletedSuccessfully": "deleted successfully",
     "failedToDelete": "Failed to delete sender",
     "failedToLoad": "Failed to load sender details",
