@@ -9,20 +9,7 @@ async function bootstrap() {
 
   // Parse incoming cookies so they're available in req.cookies
 
-  console.log('[Main] Cookie parser middleware installed');
   app.use(cookieParser());
-
-  // Middleware to log incoming cookies on protected routes
-  app.use((req, res, next) => {
-    if (req.url.includes('/senders') || req.url.includes('/templates')) {
-      console.log(`[Cookies] ${req.method} ${req.url}`, {
-        cookies: req.cookies || 'no cookies',
-        cookieKeys: req.cookies ? Object.keys(req.cookies) : [],
-        headerCookie: req.headers.cookie || 'no cookie header',
-      });
-    }
-    next();
-  });
 
   // Set request size limits for file uploads
   app.use((req, res, next) => {
