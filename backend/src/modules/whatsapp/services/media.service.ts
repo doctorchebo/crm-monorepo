@@ -951,6 +951,25 @@ export class MediaService {
             `Updated message ${messageId} with attachment: ${file.originalname}, s3Key: ${mergedAttachment.s3Key}`,
           );
 
+          // Emit socket event so frontend can update cached message
+          try {
+            const { whatsAppGatewayInstance } =
+              await import('../whatsapp.gateway');
+            if (whatsAppGatewayInstance) {
+              whatsAppGatewayInstance.emitAttachmentUpdated({
+                messageId,
+                chatId: message.chatId || '',
+                attachmentId: uploadId,
+                s3Key: mergedAttachment.s3Key,
+                thumbnailStatus: mergedAttachment.thumbnailStatus,
+              });
+            }
+          } catch (gatewayError) {
+            this.logger.warn(
+              `Could not emit attachment update: ${gatewayError.message}`,
+            );
+          }
+
           // Queue thumbnail generation for supported media types
           if (
             this.thumbnailQueueService &&

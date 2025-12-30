@@ -353,6 +353,34 @@ export class WhatsAppGateway
   }
 
   /**
+   * Emit attachment updated event to all connected clients
+   * Called when an attachment's s3Key is updated after upload completes
+   *
+   * @param data - The attachment update data
+   */
+  emitAttachmentUpdated(data: {
+    messageId: string;
+    chatId: string;
+    attachmentId: string;
+    s3Key: string;
+    thumbnailStatus?: string;
+  }): void {
+    if (this.connectedClients.size === 0) {
+      return; // No clients connected
+    }
+
+    console.log(
+      `📡 Emitting attachment:updated for message ${data.messageId}, attachment ${data.attachmentId} to ${this.connectedClients.size} clients`,
+    );
+
+    // Emit to all connected clients
+    this.server.emit('attachment:updated', {
+      ...data,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /**
    * Get number of connected clients (for monitoring)
    */
   getConnectedClientsCount(): number {

@@ -174,6 +174,16 @@ export function useMediaUrl(
       return;
     }
 
+    // Skip loading if attachment exists but has no s3Key yet (pending upload)
+    // This prevents "Attachment not found" errors during upload
+    if (attachment && (!attachment.s3Key || attachment.s3Key === "")) {
+      console.log(
+        `[useMediaUrl] Skipping fetch for ${attachmentId} - s3Key is empty (pending upload)`
+      );
+      setLoading(false);
+      return;
+    }
+
     // Check module-level cache first - if we have cached URLs, skip the fetch
     const cached = getCachedEntry(messageId, attachmentId);
     if (cached && (cached.thumbnailUrl || cached.fullUrl)) {
@@ -209,6 +219,7 @@ export function useMediaUrl(
       hasThumbnail,
       thumbnailStatus,
       thumbnailKey: attachment?.thumbnailKey,
+      s3Key: attachment?.s3Key,
     });
 
     const loadUrl = async () => {
@@ -345,6 +356,8 @@ export function useMediaUrl(
     // Include thumbnailKey to re-run when thumbnail becomes ready via WebSocket
     attachment?.thumbnailKey,
     attachment?.thumbnailStatus,
+    // Include s3Key to re-fetch when attachment upload completes
+    attachment?.s3Key,
   ]);
 
   return {

@@ -21,6 +21,7 @@ import {
   FileIcon,
   Film,
   Music,
+  Pencil,
   Plus,
   Send,
   X,
@@ -41,6 +42,7 @@ interface MediaStagingPanelProps {
   onSend: (caption: string) => void;
   onAddMore: () => void;
   onRemove: (id: string) => void;
+  onEditImage?: (file: StagedFile) => void;
   disabled?: boolean;
   sendButtonText?: string;
 }
@@ -52,6 +54,7 @@ export function MediaStagingPanel({
   onSend,
   onAddMore,
   onRemove,
+  onEditImage,
   disabled = false,
   sendButtonText = "Send",
 }: MediaStagingPanelProps) {
@@ -178,13 +181,25 @@ export function MediaStagingPanel({
         )}
 
         {/* Preview Content */}
-        <div className="max-w-full max-h-full flex items-center justify-center">
+        <div className="max-w-full max-h-full flex items-center justify-center relative">
           {currentFile.type === "image" && currentFile.previewUrl ? (
-            <img
-              src={currentFile.previewUrl}
-              alt={currentFile.file.name}
-              className="max-h-[300px] max-w-full object-contain rounded-lg shadow-md"
-            />
+            <div className="relative group">
+              <img
+                src={currentFile.previewUrl}
+                alt={currentFile.file.name}
+                className="max-h-[300px] max-w-full object-contain rounded-lg shadow-md"
+              />
+              {/* Edit Button - shows on hover for images */}
+              {onEditImage && (
+                <button
+                  onClick={() => onEditImage(currentFile)}
+                  className="absolute top-2 right-2 p-2 bg-black/60 hover:bg-black/80 rounded-full transition-opacity opacity-0 group-hover:opacity-100"
+                  title="Edit image"
+                >
+                  <Pencil className="w-4 h-4 text-white" />
+                </button>
+              )}
+            </div>
           ) : currentFile.type === "video" && currentFile.previewUrl ? (
             <video
               src={currentFile.previewUrl}

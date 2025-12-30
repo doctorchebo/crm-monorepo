@@ -25,17 +25,19 @@ export type AttachmentType =
 interface AttachmentMenuProps {
   onFilesSelected: (files: File[], type: AttachmentType) => void;
   onContactsClick?: () => void;
+  /** Called when camera option is selected - opens camera capture panel */
+  onCameraClick?: () => void;
   disabled?: boolean;
 }
 
 export function AttachmentMenu({
   onFilesSelected,
   onContactsClick,
+  onCameraClick,
   disabled = false,
 }: AttachmentMenuProps) {
   const photoVideoInputRef = useRef<HTMLInputElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
-  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   // Accepted file types
   const photoVideoTypes = [
@@ -68,7 +70,10 @@ export function AttachmentMenu({
         documentInputRef.current?.click();
         break;
       case "camera":
-        cameraInputRef.current?.click();
+        // Camera capture - open camera panel with permission request
+        if (onCameraClick) {
+          onCameraClick();
+        }
         break;
       case "contact":
         // Contact sharing - trigger the contacts modal
@@ -102,15 +107,6 @@ export function AttachmentMenu({
         disabled={disabled}
         multiple
         accept={documentTypes}
-        className="hidden"
-      />
-      <input
-        ref={cameraInputRef}
-        type="file"
-        onChange={(e) => handleFileChange(e, "camera")}
-        disabled={disabled}
-        accept="image/*"
-        capture="environment"
         className="hidden"
       />
 

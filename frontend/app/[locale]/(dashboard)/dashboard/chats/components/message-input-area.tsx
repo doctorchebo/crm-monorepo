@@ -34,6 +34,7 @@ interface MessageInputAreaProps {
   onCancelReply: () => void;
   onFilesSelected: (files: File[], type: AttachmentType) => void;
   onContactsClick: () => void;
+  onCameraClick: () => void;
   /**
    * Conversation window status - determines if free-form messaging is allowed
    * When outside the window, UI should guide users to use approved templates
@@ -57,6 +58,7 @@ export function MessageInputArea({
   onCancelReply,
   onFilesSelected,
   onContactsClick,
+  onCameraClick,
   conversationWindow,
 }: MessageInputAreaProps) {
   // Determine if free-form messaging is blocked
@@ -209,6 +211,7 @@ export function MessageInputArea({
             <AttachmentMenu
               onFilesSelected={onFilesSelected}
               onContactsClick={onContactsClick}
+              onCameraClick={onCameraClick}
               disabled={
                 isUploading ||
                 pendingMediaUploadsLength > 0 ||

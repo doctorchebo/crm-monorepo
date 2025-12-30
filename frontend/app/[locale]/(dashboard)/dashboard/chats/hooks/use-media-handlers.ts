@@ -66,6 +66,17 @@ interface UseMediaHandlersReturn {
     } | null>
   >;
 
+  // Camera capture state
+  cameraOpen: boolean;
+  setCameraOpen: React.Dispatch<React.SetStateAction<boolean>>;
+
+  // Image editor state
+  imageEditorOpen: boolean;
+  setImageEditorOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  imageToEdit: string | null;
+  imageEditorSource: "camera" | "attachment" | "staged" | null;
+  editingStagedFileId: string | null;
+
   // Refs
   addMoreInputRef: React.RefObject<HTMLInputElement | null>;
 
@@ -94,6 +105,19 @@ interface UseMediaHandlersReturn {
   handleDownloadSingle: () => Promise<void>;
   handleDownloadPack: () => Promise<void>;
   handleDownloadById: (messageId: string) => void;
+
+  // Camera handlers
+  handleCameraClick: () => void;
+  handleCameraCapture: (imageDataUrl: string) => void;
+  handleCameraClose: () => void;
+
+  // Image editor handlers
+  handleImageEditorSend: (imageBlob: Blob, caption: string) => Promise<void>;
+  handleImageEditorRetake: () => void;
+  handleImageEditorClose: () => void;
+  handleEditAttachedImage: (imageUrl: string) => void;
+  handleEditStagedImage: (file: StagedFile) => void;
+  handleStagedImageEdited: (imageBlob: Blob) => void;
 }
 
 export function useMediaHandlers(
@@ -153,6 +177,19 @@ export function useMediaHandlers(
     url: string;
     title?: string;
   } | null>(null);
+
+  // Camera capture state
+  const [cameraOpen, setCameraOpen] = useState(false);
+
+  // Image editor state
+  const [imageEditorOpen, setImageEditorOpen] = useState(false);
+  const [imageToEdit, setImageToEdit] = useState<string | null>(null);
+  const [imageEditorSource, setImageEditorSource] = useState<
+    "camera" | "attachment" | "staged" | null
+  >(null);
+  const [editingStagedFileId, setEditingStagedFileId] = useState<string | null>(
+    null
+  );
 
   // Handle files selected from attachment menu
   const handleFilesSelected = useCallback(
@@ -751,6 +788,300 @@ export function useMediaHandlers(
     [messages]
   );
 
+  // Camera handlers
+  const handleCameraClick = useCallback(() => {
+    setCameraOpen(true);
+  }, []);
+
+  const handleCameraCapture = useCallback((imageDataUrl: string) => {
+    setImageToEdit(imageDataUrl);
+    setImageEditorSource("camera");
+    setCameraOpen(false);
+    setImageEditorOpen(true);
+  }, []);
+
+  const handleCameraClose = useCallback(() => {
+    setCameraOpen(false);
+  }, []);
+
+  // Image editor handlers
+  const handleImageEditorSend = useCallback(
+    async (imageBlob: Blob, caption: string) => {
+      if (!selectedChatId) return;
+
+      try {
+        setError(null);
+        const selectedChat = chats.find((c) => c.chatId === selectedChatId);
+        if (!selectedChat) return;
+
+        // Create a temporary message ID for optimistic update
+        const tempId = `temp-${Date.now()}-${Math.random()
+          .toString(36)
+          .substring(7)}`;
+        const previewUrl = URL.createObjectURL(imageBlob);
+
+        // Create File from Blob for upload
+        const file = new File([imageBlob], `camera-${Date.now()}.jpg`, {
+          type: "image/jpeg",
+        });
+
+        // Add pending upload for UI feedback
+        const pendingUpload: PendingMediaUpload = {
+          id: tempId,
+          file,
+          type: "image",
+          previewUrl,
+          status: "uploading",
+          progress: 0,
+        };
+        setPendingMediaUploads((prev) => [...prev, pendingUpload]);
+
+        // Auto-scroll when sending
+        setShouldAutoScroll(true);
+        const cancelScroll = scrollHelperRequestScroll(true);
+
+        // First, create a message record to get an ID (matching existing pattern)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const messagePayload: any = {
+          to: selectedChat.participantPhone,
+          senderId: selectedChat.senderId,
+          attachments: [
+            {
+              id: tempId,
+              type: "image" as const,
+              fileName: file.name,
+              mimeType: file.type || "image/jpeg",
+              size: file.size,
+              s3Key: "",
+              status: "pending",
+              uploadedAt: new Date().toISOString(),
+            },
+          ],
+        };
+
+        if (caption.trim()) {
+          messagePayload.body = caption;
+        }
+
+        if (replyingToMessage?.messageId) {
+          messagePayload.replyToMessageId = replyingToMessage.messageId;
+        }
+
+        const sentMessage = (await backendApi.whatsapp.sendMessage(
+          messagePayload
+        )) as { messageId?: string };
+
+        if (!sentMessage?.messageId) {
+          throw new Error("Failed to get message ID");
+        }
+
+        const messageId = sentMessage.messageId;
+
+        // Upload the file
+        const result = await mediaApi.uploadFileToBackend(
+          file,
+          selectedChat.senderId,
+          selectedChatId,
+          messageId,
+          (progress) => {
+            setPendingMediaUploads((prev) =>
+              prev.map((u) => (u.id === tempId ? { ...u, progress } : u))
+            );
+          },
+          tempId
+        );
+
+        // Get download URL and send via WhatsApp
+        const downloadUrl = (await backendApi.whatsapp.getDownloadUrl(
+          messageId,
+          result.uploadId
+        )) as { url?: string };
+
+        if (downloadUrl?.url) {
+          await backendApi.whatsapp.sendMedia({
+            to: selectedChat.participantPhone,
+            mediaType: "image",
+            mediaUrl: downloadUrl.url,
+            caption: caption || undefined,
+            senderId: selectedChat.senderId,
+            fileName: file.name,
+            originalMessageId: messageId,
+          });
+        }
+
+        // Update pending upload status
+        setPendingMediaUploads((prev) =>
+          prev.map((upload) =>
+            upload.id === tempId
+              ? { ...upload, status: "completed" as const, progress: 100 }
+              : upload
+          )
+        );
+
+        // Refresh messages to get the newly sent message from the server
+        // This ensures the message persists in the UI after the pending upload is cleared
+        if (currentMessagesChatIdRef.current === selectedChatId) {
+          try {
+            const response = await backendApi.whatsapp.getChatMessages(
+              selectedChatId,
+              0,
+              PAGE_SIZE
+            );
+
+            if (
+              response &&
+              response.messages &&
+              currentMessagesChatIdRef.current === selectedChatId
+            ) {
+              const sorted = [...response.messages].sort(
+                (a, b) =>
+                  new Date(a.timestamp).getTime() -
+                  new Date(b.timestamp).getTime()
+              );
+              const cachedData = messagesCacheRef.current.get(selectedChatId);
+              let combined = sorted;
+              if (cachedData && cachedData.cursor > PAGE_SIZE) {
+                const existingIds = new Set(sorted.map((m) => m.messageId));
+                const olderMessages = cachedData.messages.filter(
+                  (m) => !existingIds.has(m.messageId)
+                );
+                combined = [...olderMessages, ...sorted].sort(
+                  (a, b) =>
+                    new Date(a.timestamp).getTime() -
+                    new Date(b.timestamp).getTime()
+                );
+              }
+              setMessages(combined);
+              setMessageCount(combined.length);
+              messagesCacheRef.current.set(selectedChatId, {
+                messages: combined,
+                hasMore: cachedData?.hasMore ?? response.hasMore,
+                cursor: cachedData?.cursor ?? response.nextCursor,
+              });
+            }
+          } catch (refreshErr) {
+            console.error("Failed to refresh messages after send:", refreshErr);
+          }
+        }
+
+        // Remove pending upload after a short delay
+        setTimeout(() => {
+          setPendingMediaUploads((prev) =>
+            prev.filter((upload) => upload.id !== tempId)
+          );
+          URL.revokeObjectURL(previewUrl);
+        }, 2000);
+
+        // Clear reply state
+        if (replyingToMessage) {
+          setReplyingToMessage(null);
+        }
+
+        // Close image editor
+        setImageEditorOpen(false);
+        setImageToEdit(null);
+        setImageEditorSource(null);
+
+        cancelScroll?.();
+      } catch (err) {
+        console.error("Failed to send camera image:", err);
+        setError("Failed to send image. Please try again.");
+
+        // Update pending upload to show error
+        setPendingMediaUploads((prev) =>
+          prev.map((upload) =>
+            upload.id.startsWith("temp-")
+              ? { ...upload, status: "error" as const, error: "Upload failed" }
+              : upload
+          )
+        );
+      }
+    },
+    [
+      selectedChatId,
+      chats,
+      setError,
+      setMessages,
+      setMessageCount,
+      setShouldAutoScroll,
+      scrollHelperRequestScroll,
+      replyingToMessage,
+      setReplyingToMessage,
+      currentMessagesChatIdRef,
+      messagesCacheRef,
+    ]
+  );
+
+  const handleImageEditorRetake = useCallback(() => {
+    setImageEditorOpen(false);
+    setImageToEdit(null);
+    setEditingStagedFileId(null);
+    setCameraOpen(true);
+  }, []);
+
+  const handleImageEditorClose = useCallback(() => {
+    setImageEditorOpen(false);
+    setImageToEdit(null);
+    setImageEditorSource(null);
+    setEditingStagedFileId(null);
+  }, []);
+
+  const handleEditAttachedImage = useCallback((imageUrl: string) => {
+    setImageToEdit(imageUrl);
+    setImageEditorSource("attachment");
+    setImageEditorOpen(true);
+  }, []);
+
+  // Handler to edit a staged image from the staging panel
+  const handleEditStagedImage = useCallback((file: StagedFile) => {
+    if (file.previewUrl) {
+      setImageToEdit(file.previewUrl);
+      setEditingStagedFileId(file.id);
+      setImageEditorSource("staged");
+      setImageEditorOpen(true);
+    }
+  }, []);
+
+  // Handler when a staged image has been edited - replace the file in staging
+  const handleStagedImageEdited = useCallback(
+    (imageBlob: Blob) => {
+      if (!editingStagedFileId) return;
+
+      // Create a new File from the edited blob
+      const editedFile = new File([imageBlob], `edited-${Date.now()}.jpg`, {
+        type: "image/jpeg",
+      });
+
+      // Create new preview URL
+      const newPreviewUrl = URL.createObjectURL(imageBlob);
+
+      // Update the staged file
+      setStagedFiles((prev) =>
+        prev.map((sf) => {
+          if (sf.id === editingStagedFileId) {
+            // Revoke old preview URL
+            if (sf.previewUrl) {
+              URL.revokeObjectURL(sf.previewUrl);
+            }
+            return {
+              ...sf,
+              file: editedFile,
+              previewUrl: newPreviewUrl,
+            };
+          }
+          return sf;
+        })
+      );
+
+      // Close editor and reset state
+      setImageEditorOpen(false);
+      setImageToEdit(null);
+      setImageEditorSource(null);
+      setEditingStagedFileId(null);
+    },
+    [editingStagedFileId]
+  );
+
   // Close download menu on click outside or Escape key
   useEffect(() => {
     if (!downloadMenuOpen) return;
@@ -814,5 +1145,23 @@ export function useMediaHandlers(
     handleDownloadSingle,
     handleDownloadPack,
     handleDownloadById,
+    // Camera state and handlers
+    cameraOpen,
+    setCameraOpen,
+    handleCameraClick,
+    handleCameraCapture,
+    handleCameraClose,
+    // Image editor state and handlers
+    imageEditorOpen,
+    setImageEditorOpen,
+    imageToEdit,
+    imageEditorSource,
+    editingStagedFileId,
+    handleImageEditorSend,
+    handleImageEditorRetake,
+    handleImageEditorClose,
+    handleEditAttachedImage,
+    handleEditStagedImage,
+    handleStagedImageEdited,
   };
 }

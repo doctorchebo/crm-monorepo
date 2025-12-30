@@ -209,6 +209,54 @@ export function useRealtimeChat(chatId?: string) {
       });
     });
 
+    // Listen for attachment updated (s3Key populated after upload)
+    socket.on(
+      "attachment:updated",
+      (update: {
+        messageId: string;
+        chatId: string;
+        attachmentId: string;
+        s3Key: string;
+        thumbnailStatus?: string;
+      }) => {
+        console.log(
+          `[RealtimeChat] 📎 Attachment updated: ${update.attachmentId} for message ${update.messageId}`
+        );
+
+        const currentChatId = chatIdRef.current;
+
+        // Only update if it's for the current chat
+        if (!currentChatId || update.chatId !== currentChatId) {
+          return;
+        }
+
+        // Update the message's attachment with the new s3Key
+        setMessages((prev) =>
+          prev.map((msg) => {
+            if (msg.messageId !== update.messageId) return msg;
+
+            // Update the attachment's s3Key
+            const updatedAttachments = msg.attachments?.map((att: any) => {
+              if (att.id === update.attachmentId) {
+                return {
+                  ...att,
+                  s3Key: update.s3Key,
+                  thumbnailStatus:
+                    update.thumbnailStatus || att.thumbnailStatus,
+                };
+              }
+              return att;
+            });
+
+            return {
+              ...msg,
+              attachments: updatedAttachments,
+            };
+          })
+        );
+      }
+    );
+
     // Connection errors
     socket.on("error", (error: any) => {
       console.error("[RealtimeChat] ❌ WebSocket error:", error);

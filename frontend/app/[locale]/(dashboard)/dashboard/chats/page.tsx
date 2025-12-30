@@ -754,6 +754,7 @@ export default function ChatsPage() {
                     onCancelReply={messageHandlers.handleCancelReply}
                     onFilesSelected={mediaHandlers.handleFilesSelected}
                     onContactsClick={contactHandlers.handleContactsClick}
+                    onCameraClick={mediaHandlers.handleCameraClick}
                     conversationWindow={conversationWindow}
                   />
 
@@ -770,6 +771,7 @@ export default function ChatsPage() {
                     }
                     onAddMoreMedia={mediaHandlers.handleAddMoreMedia}
                     onRemoveStagedFile={mediaHandlers.handleRemoveStagedFile}
+                    onEditStagedImage={mediaHandlers.handleEditStagedImage}
                     // Media preview
                     previewModalOpen={mediaHandlers.previewModalOpen}
                     previewAttachments={mediaHandlers.previewAttachments}
@@ -802,6 +804,18 @@ export default function ChatsPage() {
                     onCloseVideoPreview={() =>
                       mediaHandlers.setVideoPreview(null)
                     }
+                    // Camera capture
+                    cameraOpen={mediaHandlers.cameraOpen}
+                    onCameraCapture={mediaHandlers.handleCameraCapture}
+                    onCameraClose={mediaHandlers.handleCameraClose}
+                    // Image editor
+                    imageEditorOpen={mediaHandlers.imageEditorOpen}
+                    imageToEdit={mediaHandlers.imageToEdit}
+                    imageEditorSource={mediaHandlers.imageEditorSource}
+                    onImageEditorSend={mediaHandlers.handleImageEditorSend}
+                    onImageEditorRetake={mediaHandlers.handleImageEditorRetake}
+                    onImageEditorClose={mediaHandlers.handleImageEditorClose}
+                    onStagedImageEdited={mediaHandlers.handleStagedImageEdited}
                     // Contact modals
                     sendContactsModalOpen={
                       contactHandlers.sendContactsModalOpen

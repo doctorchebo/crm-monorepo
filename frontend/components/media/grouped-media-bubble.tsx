@@ -4,12 +4,13 @@
  * Grouped Media Message Bubble
  * Displays multiple media items from consecutive messages in a single WhatsApp-style bubble
  * Shows up to 4 items in a grid with +N overlay for additional items
+ * Includes expand chevron to view all media in a grid
  */
 
 import { useMediaUrl } from "@/hooks/use-media-url";
 import { Attachment } from "@/lib/media/types";
-import { Film, Play } from "lucide-react";
-import { memo } from "react";
+import { ChevronDown, ChevronUp, Film, Play } from "lucide-react";
+import { memo, useState } from "react";
 
 interface Message {
   id?: number;
@@ -126,6 +127,8 @@ export const GroupedMediaBubble = memo(function GroupedMediaBubble({
   statusIcon,
   timeString,
 }: GroupedMediaBubbleProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
   // Flatten all attachments from all messages
   const allMedia: {
     attachment: Attachment;
@@ -146,6 +149,7 @@ export const GroupedMediaBubble = memo(function GroupedMediaBubble({
 
   const displayCount = Math.min(allMedia.length, 4);
   const extraCount = allMedia.length - 4;
+  const hasMoreThanFour = allMedia.length > 4;
 
   // Determine grid layout
   const getGridClass = () => {
@@ -172,7 +176,7 @@ export const GroupedMediaBubble = memo(function GroupedMediaBubble({
         {/* Media Grid */}
         <div className={`grid ${getGridClass()} gap-0.5`}>
           {allMedia.slice(0, 4).map((item, index) => {
-            const isLastWithMore = index === 3 && extraCount > 0;
+            const isLastWithMore = index === 3 && extraCount > 0 && !isExpanded;
 
             return (
               <div
@@ -196,6 +200,52 @@ export const GroupedMediaBubble = memo(function GroupedMediaBubble({
             );
           })}
         </div>
+
+        {/* Expanded Grid - Shows all items when expanded */}
+        {isExpanded && hasMoreThanFour && (
+          <div className="grid grid-cols-3 gap-0.5 mt-0.5">
+            {allMedia.slice(4).map((item) => (
+              <div
+                key={`expanded-${item.messageId}-${item.attachment.id}`}
+                className="aspect-square"
+              >
+                <MediaThumbnail
+                  attachment={item.attachment}
+                  messageId={item.messageId}
+                  onClick={() =>
+                    onImageClick?.(
+                      firstMessageId,
+                      allAttachments,
+                      item.originalIndex
+                    )
+                  }
+                />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Expand/Collapse Chevron - Only show when more than 4 items */}
+        {hasMoreThanFour && (
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="w-full py-1 flex items-center justify-center gap-1 hover:bg-white/10 transition-colors text-primary-foreground/80 hover:text-primary-foreground"
+          >
+            {isExpanded ? (
+              <>
+                <ChevronUp className="w-4 h-4" />
+                <span className="text-xs">Show less</span>
+              </>
+            ) : (
+              <>
+                <ChevronDown className="w-4 h-4" />
+                <span className="text-xs">
+                  Show all {allMedia.length} items
+                </span>
+              </>
+            )}
+          </button>
+        )}
 
         {/* Timestamp & Status */}
         <div className="px-3 py-1 flex items-center justify-end gap-1.5 text-xs text-primary-foreground/70">

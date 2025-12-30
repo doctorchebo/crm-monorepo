@@ -6,6 +6,10 @@ import { QuickContactFormModal } from "@/components/dialogs/quick-contact-form-m
 import { SelectSenderModal } from "@/components/dialogs/select-sender-modal";
 import { SendContactsModal } from "@/components/dialogs/send-contacts-modal";
 import { ViewContactsModal } from "@/components/dialogs/view-contacts-modal";
+import {
+  CameraCapturePanel,
+  ImageEditorPanel,
+} from "@/components/image-editor";
 import { MediaDownloadMenu } from "@/components/media/media-download-menu";
 import { MediaPreviewModal } from "@/components/media/media-preview-modal";
 import {
@@ -30,6 +34,7 @@ interface ChatsModalsProps {
   onSendMediaFromStaging: (caption: string) => void;
   onAddMoreMedia: () => void;
   onRemoveStagedFile: (id: string) => void;
+  onEditStagedImage: (file: StagedFile) => void;
 
   // Media preview
   previewModalOpen: boolean;
@@ -56,6 +61,20 @@ interface ChatsModalsProps {
   // Video preview
   videoPreview: { videoId: string; url: string; title?: string } | null;
   onCloseVideoPreview: () => void;
+
+  // Camera capture
+  cameraOpen: boolean;
+  onCameraCapture: (imageDataUrl: string) => void;
+  onCameraClose: () => void;
+
+  // Image editor
+  imageEditorOpen: boolean;
+  imageToEdit: string | null;
+  imageEditorSource: "camera" | "attachment" | "staged" | null;
+  onImageEditorSend: (imageBlob: Blob, caption: string) => Promise<void>;
+  onImageEditorRetake: () => void;
+  onImageEditorClose: () => void;
+  onStagedImageEdited?: (imageBlob: Blob) => void;
 
   // Contact modals
   sendContactsModalOpen: boolean;
@@ -107,6 +126,7 @@ export function ChatsModals({
   onSendMediaFromStaging,
   onAddMoreMedia,
   onRemoveStagedFile,
+  onEditStagedImage,
   previewModalOpen,
   previewAttachments,
   previewMessageId,
@@ -125,6 +145,16 @@ export function ChatsModals({
   onConfirmDelete,
   videoPreview,
   onCloseVideoPreview,
+  cameraOpen,
+  onCameraCapture,
+  onCameraClose,
+  imageEditorOpen,
+  imageToEdit,
+  imageEditorSource,
+  onImageEditorSend,
+  onImageEditorRetake,
+  onImageEditorClose,
+  onStagedImageEdited,
   sendContactsModalOpen,
   contactPreviewModalOpen,
   viewContactsModalOpen,
@@ -152,6 +182,20 @@ export function ChatsModals({
   onCloseSenderSelectModal,
   onSenderSelectedForContact,
 }: ChatsModalsProps) {
+  // Handler for image editor completion - different behavior based on source
+  const handleImageEditorComplete = async (
+    imageBlob: Blob,
+    caption: string
+  ) => {
+    if (imageEditorSource === "staged" && onStagedImageEdited) {
+      // For staged images, just replace the file and don't send
+      onStagedImageEdited(imageBlob);
+    } else {
+      // For camera/attachment, send the message
+      await onImageEditorSend(imageBlob, caption);
+    }
+  };
+
   return (
     <>
       {/* Media Staging Panel */}
@@ -162,6 +206,7 @@ export function ChatsModals({
         onSend={onSendMediaFromStaging}
         onAddMore={onAddMoreMedia}
         onRemove={onRemoveStagedFile}
+        onEditImage={onEditStagedImage}
         disabled={isUploading}
         sendButtonText={sendButtonText}
       />
@@ -201,6 +246,28 @@ export function ChatsModals({
           url={videoPreview.url}
           title={videoPreview.title}
           onClose={onCloseVideoPreview}
+        />
+      )}
+
+      {/* Camera Capture Panel */}
+      {cameraOpen && (
+        <CameraCapturePanel
+          onCapture={onCameraCapture}
+          onCancel={onCameraClose}
+        />
+      )}
+
+      {/* Image Editor Panel */}
+      {imageEditorOpen && imageToEdit && (
+        <ImageEditorPanel
+          image={imageToEdit}
+          isFromCamera={imageEditorSource === "camera"}
+          isFromStaged={imageEditorSource === "staged"}
+          onComplete={handleImageEditorComplete}
+          onCancel={onImageEditorClose}
+          onRetake={
+            imageEditorSource === "camera" ? onImageEditorRetake : undefined
+          }
         />
       )}
 
