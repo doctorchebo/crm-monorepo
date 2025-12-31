@@ -2,6 +2,7 @@ export { ChatHeader } from "./chat-header";
 export { ChatSearchResults } from "./chat-search-results";
 export { ChatsModals } from "./chats-modals";
 export { DateSeparator } from "./date-separator";
+export { MessageBubble } from "./message-bubble";
 export { MessageInputArea } from "./message-input-area";
 export { MessageSearchPanel } from "./message-search-panel";
 export { MessagesList } from "./messages-list";

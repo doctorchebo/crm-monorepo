@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef } from "react";
 import type { Message } from "../types";
 import {
   scrollContainerToBottom,
-  scrollDebug,
   isNearBottom as sharedIsNearBottom,
 } from "./scroll-utils";
 
@@ -15,10 +14,7 @@ import {
 interface UseScrollToBottomDeps {
   messages: Message[];
   selectedChatId: string | null;
-  isInitialLoad: boolean;
   shouldAutoScroll: boolean;
-  /** Optional: Check if scroll position restoration should be skipped */
-  skipScrollToBottom?: (chatId: string) => boolean;
 }
 
 interface ScrollSession {
@@ -87,13 +83,7 @@ export function useScrollToBottom(
   containerRef: React.RefObject<HTMLDivElement | null>,
   deps: UseScrollToBottomDeps
 ) {
-  const {
-    messages,
-    selectedChatId,
-    isInitialLoad,
-    shouldAutoScroll,
-    skipScrollToBottom,
-  } = deps;
+  const { messages, selectedChatId, shouldAutoScroll } = deps;
 
   // Tracking refs for the automatic scroll effect
   const lastChatIdRef = useRef<string | null>(null);
@@ -565,104 +555,62 @@ export function useScrollToBottom(
   // ============================================================
 
   /**
-   * Main effect that triggers scroll-to-bottom based on state changes.
+   * Effect to handle auto-scrolling for NEW messages arriving while viewing a chat.
    *
-   * This handles:
-   * - Opening a new chat (always scroll to bottom, UNLESS skipScrollToBottom returns true)
-   * - Initial message load for a chat (always scroll to bottom, UNLESS skipScrollToBottom returns true)
-   * - New messages arriving (only if user was at bottom)
+   * IMPORTANT: This effect does NOT handle initial scroll-to-bottom on first load.
+   * First load scroll is handled DIRECTLY by use-chat-state.ts when messages are fetched.
+   * This eliminates race conditions between effects.
+   *
+   * This effect ONLY handles:
+   * - New messages arriving while user is at bottom → auto-scroll to show new message
+   * - Reset tracking when chat changes
    */
   useEffect(() => {
-    // DEBUG: Log every invocation
-    console.log("[ScrollToBottom Effect] Running:", {
-      selectedChatId,
-      messagesLength: messages.length,
-      isInitialLoad,
-      shouldAutoScroll,
-      lastChatIdRef: lastChatIdRef.current,
-      hasScrolledForChatRef: hasScrolledForChatRef.current,
-      lastMessageCountRef: lastMessageCountRef.current,
-    });
-
     // Skip if no chat selected
     if (!selectedChatId) {
-      console.log("[ScrollToBottom Effect] SKIP: no chat selected");
       lastChatIdRef.current = null;
+      lastMessageCountRef.current = 0;
       hasScrolledForChatRef.current = null;
       return;
     }
 
-    // Skip if no messages
-    if (messages.length === 0) {
-      console.log("[ScrollToBottom Effect] SKIP: no messages");
+    // Detect chat change and reset tracking
+    const isNewChat = lastChatIdRef.current !== selectedChatId;
+    if (isNewChat) {
+      console.log(
+        "[ScrollToBottom Effect] Chat changed, resetting tracking refs"
+      );
       lastMessageCountRef.current = 0;
+      hasScrolledForChatRef.current = null;
+      userScrolledAwayRef.current = false;
+      lastScrollTopRef.current = 0;
+      lastChatIdRef.current = selectedChatId;
+    }
+
+    // Skip if no messages yet
+    if (messages.length === 0) {
       return;
     }
 
-    // Detect state changes
-    const isNewChat = lastChatIdRef.current !== selectedChatId;
-    const isFirstMessagesForChat =
-      hasScrolledForChatRef.current !== selectedChatId;
-    const isNewMessages = messages.length !== lastMessageCountRef.current;
+    // Check if this is new messages arriving (not first load)
+    const previousMessageCount = lastMessageCountRef.current;
+    const isNewMessages =
+      previousMessageCount > 0 && messages.length > previousMessageCount;
 
-    console.log("[ScrollToBottom Effect] State analysis:", {
-      isNewChat,
-      isFirstMessagesForChat,
-      isNewMessages,
-      isInitialLoad,
-    });
-
-    // Update tracking refs
-    lastChatIdRef.current = selectedChatId;
+    // Update message count tracking
     lastMessageCountRef.current = messages.length;
 
-    // Determine if we should scroll
-    const shouldScrollToBottomForNewChat =
-      isNewChat || isFirstMessagesForChat || (isInitialLoad && isNewMessages);
-
-    console.log(
-      "[ScrollToBottom Effect] Should scroll for new chat:",
-      shouldScrollToBottomForNewChat
-    );
-
-    if (shouldScrollToBottomForNewChat) {
-      hasScrolledForChatRef.current = selectedChatId;
-
-      // CRITICAL: Check if we should skip scrolling to bottom
-      // This allows scroll position restoration to work
-      if (skipScrollToBottom && skipScrollToBottom(selectedChatId)) {
-        console.log(
-          "[ScrollToBottom Effect] SKIP: skipScrollToBottom returned true"
-        );
-        scrollDebug(
-          "[ScrollToBottom] Skipping scroll - position will be restored by manager"
-        );
-        return;
-      }
-
-      console.log("[ScrollToBottom Effect] CALLING requestScrollToBottom");
-      return requestScrollToBottom(false);
-    }
-
-    // After initial load, only scroll if user was at bottom
-    if (
-      !isInitialLoad &&
-      shouldAutoScroll &&
-      isNewMessages &&
-      isAtBottom(100)
-    ) {
+    // Auto-scroll for new messages only if user was at bottom
+    if (isNewMessages && shouldAutoScroll && isAtBottom(100)) {
       console.log(
-        "[ScrollToBottom Effect] Scrolling for new messages (user was at bottom)"
+        "[ScrollToBottom Effect] New message arrived, user at bottom, scrolling"
       );
       scrollToBottom(false);
     }
   }, [
     messages.length,
     selectedChatId,
-    isInitialLoad,
     shouldAutoScroll,
-    skipScrollToBottom,
-    requestScrollToBottom,
     scrollToBottom,
     isAtBottom,
   ]);
@@ -724,11 +672,11 @@ export function useScrollToBottom(
     };
   }, [containerRef, cancelPendingScroll]);
 
-  // Reset user scroll intent when chat changes
-  useEffect(() => {
-    userScrolledAwayRef.current = false;
-    lastScrollTopRef.current = 0;
-  }, [selectedChatId]);
+  // NOTE: User scroll intent and message count reset is now handled INSIDE the main
+  // scroll effect when it detects a new chat. This ensures proper ordering:
+  // 1. Main effect runs, detects isNewChat
+  // 2. Resets refs immediately
+  // 3. Continues with scroll logic using fresh state
 
   // ============================================================
   // PUBLIC API

@@ -1,24 +1,20 @@
 "use client";
 
 import { ContactMessageBubble } from "@/components/contacts/contact-message-bubble";
-import { AttachmentGallery } from "@/components/media/attachment-display";
 import { GroupedMediaBubble } from "@/components/media/grouped-media-bubble";
 import {
   PendingMediaUpload,
   PendingUploadGroup,
 } from "@/components/media/pending-upload-bubble";
 import { StickerMessageBubble } from "@/components/media/sticker-message-bubble";
-import { MessageActionsMenu } from "@/components/message-actions-menu";
-import { QuotedMessage } from "@/components/quoted-message";
-import { MessageText } from "@/components/ui/message-text";
-import { WhatsAppStatusIcon } from "@/components/whatsapp-status-icon";
 import { Attachment } from "@/lib/media/types";
 import { ReceivedContact } from "@/lib/types/contact-message.types";
 import { getDateKey } from "@/lib/utils/date-formatter";
 import { Loader } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import type { Chat, GroupedMessage, Message } from "../types";
+import type { Chat, GroupedMessage, Message, MessageReaction } from "../types";
 import { DateSeparator } from "./date-separator";
+import { MessageBubble } from "./message-bubble";
 import { StickyDateHeader } from "./sticky-date-header";
 
 // ============================================================
@@ -164,6 +160,15 @@ interface MessagesListProps {
   ) => void;
   handleVideoPlay: (videoId: string, url: string) => void;
   highlightedMessageId?: string | null;
+  // Reactions
+  /** Map of message ID to reactions */
+  reactionsMap?: Record<string, MessageReaction[]>;
+  /** Current user's ID for identifying own reactions */
+  currentUserId?: number;
+  /** Handler when a reaction is selected */
+  handleReactionSelect?: (messageId: string, emoji: string) => void;
+  /** Set of message IDs that just had reaction changes (for animation) */
+  animatingReactionIds?: Set<string>;
 }
 
 export function MessagesList({
@@ -190,6 +195,10 @@ export function MessagesList({
   handleShowDownloadMenu,
   handleVideoPlay,
   highlightedMessageId,
+  reactionsMap = {},
+  currentUserId,
+  handleReactionSelect,
+  animatingReactionIds = new Set(),
 }: MessagesListProps) {
   // Track previous chat ID to detect chat switches (for GIF auto-play on chat open)
   const previousChatIdRef = useRef<string | undefined>(undefined);
@@ -473,6 +482,16 @@ export function MessagesList({
             }
 
             const isHighlighted = highlightedMessageId === message.messageId;
+
+            // Get reactions for this message
+            const messageReactions = reactionsMap[message.messageId] || [];
+            const userReaction = currentUserId
+              ? messageReactions.find((r) => r.userId === currentUserId)
+              : undefined;
+            const isReactionAnimating = animatingReactionIds.has(
+              message.messageId
+            );
+
             return (
               <React.Fragment key={message.messageId || message.id}>
                 {separatorDate && <DateSeparator date={separatorDate} />}
@@ -491,160 +510,31 @@ export function MessagesList({
                       : ""
                   } transition-colors duration-500 -mx-2 px-2 rounded`}
                 >
-                  <div
-                    className={`group px-3 py-1 rounded-lg text-xs relative ${
-                      // For image-only or gif-only messages, use standard image width
-                      message.attachments?.length === 1 &&
-                      (message.attachments[0].type === "image" ||
-                        message.attachments[0].type === "gif") &&
-                      !message.text &&
-                      !isDeleted
-                        ? "max-w-md"
-                        : "max-w-xs"
-                    } ${
-                      isOutbound
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted"
-                    }`}
-                  >
-                    {/* Chevron positioned in top-right corner - visible on hover */}
-                    {!isDeleted && (
-                      <div className="absolute -top-1 -right-1 opacity-0 group-hover:opacity-100 transition-opacity z-20">
-                        <MessageActionsMenu
-                          messageId={message.messageId}
-                          messageTimestamp={message.timestamp}
-                          isOutbound={isOutbound}
-                          hasDownloadableMedia={message.attachments?.some(
-                            (a) =>
-                              a.type === "image" ||
-                              a.type === "video" ||
-                              a.type === "gif"
-                          )}
-                          onReply={handleReplyById}
-                          onDelete={
-                            isOutbound ? handleDeleteMessage : undefined
-                          }
-                          onDownload={handleDownloadById}
-                        />
-                      </div>
-                    )}
-
-                    {isDeleted ? (
-                      <p className="text-xs italic opacity-60">
-                        {t("thisMessageWasDeleted")}
-                      </p>
-                    ) : (
-                      <>
-                        {/* Quoted message block for replies */}
-                        {message.replyPreview && (
-                          <QuotedMessage
-                            replyPreview={{
-                              ...message.replyPreview,
-                              senderName:
-                                message.replyPreview.senderType === "customer"
-                                  ? selectedChat?.participantName ||
-                                    message.replyPreview.senderName
-                                  : message.replyPreview.senderName,
-                            }}
-                            originalMessageId={message.replyPreview.messageId}
-                            isOutbound={isOutbound}
-                            onClick={() => {
-                              if (
-                                message.replyPreview?.messageId &&
-                                !message.replyPreview?.unavailable
-                              ) {
-                                handleScrollToMessage(
-                                  message.replyPreview.messageId
-                                );
-                              }
-                            }}
-                          />
-                        )}
-                        {/* Display attachments first, then text below */}
-                        {message.attachments &&
-                          message.attachments.length > 0 && (
-                            <div className={message.text ? "mb-2" : ""}>
-                              <AttachmentGallery
-                                attachments={message.attachments}
-                                messageId={
-                                  message.messageId ||
-                                  message.id?.toString() ||
-                                  ""
-                                }
-                                onImageClick={(index) =>
-                                  handleImageClick(
-                                    message.messageId ||
-                                      message.id?.toString() ||
-                                      "",
-                                    message.attachments || [],
-                                    index
-                                  )
-                                }
-                                onShowDownloadMenu={(position) =>
-                                  handleShowDownloadMenu(
-                                    message.messageId ||
-                                      message.id?.toString() ||
-                                      "",
-                                    message.attachments || [],
-                                    position
-                                  )
-                                }
-                                isOutbound={isOutbound}
-                                onMessageDelete={handleDeleteMessage}
-                                senderName={
-                                  isOutbound
-                                    ? "You"
-                                    : selectedChat?.participantName ||
-                                      selectedChat?.participantPhone
-                                }
-                                autoPlayGifs={
-                                  message.messageId
-                                    ? combinedAutoPlayGifIds.has(
-                                        message.messageId
-                                      )
-                                    : false
-                                }
-                              />
-                            </div>
-                          )}
-
-                        {/* Text shown below media with link previews */}
-                        {message.text && (
-                          <MessageText
-                            text={message.text}
-                            isOutbound={isOutbound}
-                            showPreviews={!message.attachments?.length}
-                            onVideoPlay={handleVideoPlay}
-                          />
-                        )}
-                      </>
-                    )}
-
-                    <div
-                      className={`text-xs mt-0.5 flex items-center justify-between gap-1 ${
-                        isOutbound
-                          ? "text-primary-foreground/70"
-                          : "text-muted-foreground"
-                      }`}
-                    >
-                      <span>
-                        {timeString}
-                        {message.editedAt && (
-                          <span className="ml-1 opacity-60">
-                            ({t("messageEdited")})
-                          </span>
-                        )}
-                      </span>
-                      {isOutbound && !isDeleted && (
-                        <WhatsAppStatusIcon
-                          status={message.status || "pending"}
-                          deliveredAt={message.deliveredAt}
-                          readAt={message.readAt}
-                          className="ml-1"
-                        />
-                      )}
-                    </div>
-                  </div>
+                  <MessageBubble
+                    message={message}
+                    isOutbound={isOutbound}
+                    isDeleted={isDeleted}
+                    isHighlighted={isHighlighted}
+                    timeString={timeString}
+                    selectedChat={selectedChat}
+                    autoPlayGifs={
+                      message.messageId
+                        ? combinedAutoPlayGifIds.has(message.messageId)
+                        : false
+                    }
+                    userReaction={userReaction}
+                    reactions={messageReactions}
+                    reactionAnimating={isReactionAnimating}
+                    onReply={handleReplyById}
+                    onDelete={isOutbound ? handleDeleteMessage : undefined}
+                    onDownload={handleDownloadById}
+                    onImageClick={handleImageClick}
+                    onShowDownloadMenu={handleShowDownloadMenu}
+                    onVideoPlay={handleVideoPlay}
+                    onScrollToMessage={handleScrollToMessage}
+                    onReactionSelect={handleReactionSelect}
+                    t={t}
+                  />
                 </div>
               </React.Fragment>
             );

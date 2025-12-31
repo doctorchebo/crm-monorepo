@@ -560,4 +560,44 @@ export const userSettingsRelations = relations(userSettings, ({ one }) => ({
 // Users relations (settings and other user-related data)
 export const usersRelations = relations(users, ({ many }) => ({
   settings: many(userSettings),
+  reactions: many(messageReactions),
 }));
+
+// ==================== Message Reactions ====================
+
+/**
+ * Message Reactions table - stores emoji reactions on messages
+ * Each user can have one reaction per message (similar to WhatsApp)
+ */
+export const messageReactions = pgTable(
+  'message_reactions',
+  {
+    id: serial('id').primaryKey(),
+    messageId: varchar('message_id').notNull(),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    emoji: varchar('emoji', { length: 50 }).notNull(),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (table) => ({
+    uniqueUserMessageReaction: unique().on(table.messageId, table.userId),
+    messageIdIndex: index('idx_reactions_message_id').on(table.messageId),
+    userIdIndex: index('idx_reactions_user_id').on(table.userId),
+  }),
+);
+
+export type MessageReaction = typeof messageReactions.$inferSelect;
+export type NewMessageReaction = typeof messageReactions.$inferInsert;
+
+// Message Reactions relations
+export const messageReactionsRelations = relations(
+  messageReactions,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [messageReactions.userId],
+      references: [users.id],
+    }),
+  }),
+);

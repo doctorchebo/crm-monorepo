@@ -53,6 +53,7 @@ import {
   useMediaHandlers,
   useMessageHandlers,
   useMessageSearch,
+  useReactions,
 } from "./hooks";
 import type { Chat, Template } from "./types";
 import { calculateConversationWindow, groupMessages } from "./utils";
@@ -96,6 +97,9 @@ export default function ChatsPage() {
   const [notes, setNotes] = useState<any>(null);
   const [notesLoading, setNotesLoading] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+  const [currentUserName, setCurrentUserName] = useState<string | undefined>(
+    undefined
+  );
   const [notesPanelWidth, setNotesPanelWidth] = useState(320);
   const [selectedContactId, setSelectedContactId] = useState<string | null>(
     null
@@ -211,12 +215,33 @@ export default function ChatsPage() {
       try {
         const user = await backendApi.user.getProfile();
         setCurrentUserId(user.id);
+        setCurrentUserName(user.name || user.email);
       } catch (error) {
         console.error("Failed to fetch current user:", error);
       }
     };
     fetchCurrentUser();
   }, []);
+
+  // Reactions hook - manages reactions state, WebSocket updates, and API calls
+  const reactions = useReactions({
+    currentUserId: currentUserId || undefined,
+    currentUserName,
+    enabled: !!currentUserId,
+  });
+
+  // Load reactions when messages change
+  useEffect(() => {
+    if (chatState.messages.length > 0) {
+      const messageIds = chatState.messages.map((m) => m.messageId);
+      reactions.loadReactionsForMessages(messageIds);
+    }
+  }, [chatState.messages, reactions.loadReactionsForMessages]);
+
+  // Clear reactions when chat changes
+  useEffect(() => {
+    reactions.clearReactions();
+  }, [chatState.selectedChatId, reactions.clearReactions]);
 
   // Fetch notes when chat changes
   useEffect(() => {
@@ -708,6 +733,10 @@ export default function ChatsPage() {
                       }
                       handleVideoPlay={mediaHandlers.handleVideoPlay}
                       highlightedMessageId={messageSearch.highlightedMessageId}
+                      reactionsMap={reactions.reactionsMap}
+                      currentUserId={currentUserId || undefined}
+                      handleReactionSelect={reactions.handleReactionSelect}
+                      animatingReactionIds={reactions.animatingReactionIds}
                     />
 
                     {/* Scroll to Bottom Button */}

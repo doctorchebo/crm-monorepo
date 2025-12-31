@@ -59,6 +59,19 @@ export interface ReplyPreview {
   unavailable?: boolean;
 }
 
+/**
+ * Reaction on a message
+ */
+export interface MessageReaction {
+  id: number;
+  messageId: string;
+  userId: number;
+  emoji: string;
+  userName?: string;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
 export interface Message {
   id?: number;
   messageId: string;
@@ -78,6 +91,8 @@ export interface Message {
   editedAt?: string;
   replyToMessageId?: string | null;
   replyPreview?: ReplyPreview | null;
+  /** Reactions on this message */
+  reactions?: MessageReaction[];
 }
 
 export interface InboundMessage {

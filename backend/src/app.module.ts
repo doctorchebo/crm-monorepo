@@ -1,4 +1,5 @@
 import { NotesModule } from '@modules/notes/notes.module';
+import { ReactionsModule } from '@modules/reactions/reactions.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
@@ -35,6 +36,7 @@ import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
     WhatsAppModule,
     MessagingModule,
     NotesModule,
+    ReactionsModule,
     ChatsModule,
     AutomationModule,
     KanbanModule,

@@ -11,5 +11,6 @@ export { useMediaHandlers } from "./use-media-handlers";
 export { useMessageHandlers } from "./use-message-handlers";
 export { useMessageSearch } from "./use-message-search";
 export { useMessagesPagination } from "./use-messages-pagination";
+export { useReactions } from "./use-reactions";
 export { useScrollPositionManager } from "./use-scroll-position-manager";
 export { useScrollToBottom } from "./use-scroll-to-bottom";

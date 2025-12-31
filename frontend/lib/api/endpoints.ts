@@ -151,6 +151,29 @@ export interface VariableDefinitionsResponse {
   categories: string[];
 }
 
+// ==================== Reaction Types ====================
+
+/**
+ * Reaction response from API
+ */
+export interface ReactionResponse {
+  id: number;
+  messageId: string;
+  userId: number;
+  emoji: string;
+  userName?: string;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+/**
+ * Grouped reactions for a message
+ */
+export interface MessageReactionsResponse {
+  messageId: string;
+  reactions: ReactionResponse[];
+}
+
 // Template Approval Types
 export type TemplateApprovalStatusValue =
   | "draft"
@@ -1024,6 +1047,46 @@ export const backendApi = {
     getMessageNotes: (messageId: string) =>
       apiClient.get(`/notes/message/${messageId}`),
     delete: (noteId: number) => apiClient.delete(`/notes/${noteId}`),
+  },
+
+  // Reactions endpoints
+  reactions: {
+    /**
+     * Add or update a reaction to a message
+     * If user already has a reaction, it will be replaced
+     */
+    add: (data: {
+      messageId: string;
+      emoji: string;
+    }): Promise<ReactionResponse> => apiClient.post("/reactions", data),
+
+    /**
+     * Remove a reaction from a message
+     */
+    remove: (messageId: string): Promise<{ success: boolean }> =>
+      apiClient.delete(`/reactions/${messageId}`),
+
+    /**
+     * Get all reactions for a specific message
+     */
+    getForMessage: (messageId: string): Promise<ReactionResponse[]> =>
+      apiClient.get(`/reactions/${messageId}`),
+
+    /**
+     * Get reactions for multiple messages in batch
+     */
+    getForMessages: (
+      messageIds: string[]
+    ): Promise<{ messageId: string; reactions: ReactionResponse[] }[]> =>
+      apiClient.get(
+        `/reactions/batch/messages?messageIds=${messageIds.join(",")}`
+      ),
+
+    /**
+     * Get current user's reaction on a message
+     */
+    getMine: (messageId: string): Promise<ReactionResponse | null> =>
+      apiClient.get(`/reactions/${messageId}/mine`),
   },
 
   // Link Preview endpoints

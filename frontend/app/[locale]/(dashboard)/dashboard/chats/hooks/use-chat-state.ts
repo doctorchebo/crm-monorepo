@@ -161,53 +161,9 @@ export function useChatState(): UseChatStateReturn {
     saveDebounceMs: 100,
   });
 
-  // Callback to check if scroll-to-bottom should be skipped
-  // This is passed to useScrollToBottom to prevent it from overriding restored positions
-  const skipScrollToBottom = useCallback(
-    (chatId: string): boolean => {
-      console.log("[skipScrollToBottom] CALLED for chatId:", chatId);
-
-      // Check if this chat has had its initial scroll done
-      const hasInitialScrollDone = initialScrollDoneRef.current.has(chatId);
-      const hasCachedMessages = messagesCacheRef.current.has(chatId);
-
-      console.log("[skipScrollToBottom] State check:", {
-        chatId,
-        hasInitialScrollDone,
-        hasCachedMessages,
-        initialScrollDoneChats: Array.from(initialScrollDoneRef.current),
-        cacheKeys: Array.from(messagesCacheRef.current.keys()),
-      });
-
-      // KEY FIX: Only skip for chats that have ALREADY had their initial scroll done
-      // This distinguishes between:
-      // - First load (cache exists but no initial scroll yet) -> DON'T skip, scroll to bottom
-      // - Return to cached chat (cache exists AND initial scroll done) -> SKIP, restore position
-      if (hasInitialScrollDone && hasCachedMessages) {
-        console.log(
-          "[skipScrollToBottom] Returning TRUE (returning to previously scrolled cached chat)"
-        );
-        scrollDebug(
-          "[useChatState] skipScrollToBottom: YES (cached + scrolled)",
-          { chatId }
-        );
-        return true;
-      }
-
-      // For first-time chats, check if we have a saved scroll position that's NOT at bottom
-      const savedPosition = scrollPositionManager.getSavedPosition(chatId);
-      const shouldSkip = savedPosition !== null && !savedPosition.wasAtBottom;
-      console.log("[skipScrollToBottom] First-time chat check:", {
-        savedPosition,
-        shouldSkip,
-      });
-      console.log("[skipScrollToBottom] Returning:", shouldSkip);
-      return shouldSkip;
-    },
-    [scrollPositionManager]
-  );
-
   // Initialize the scroll-to-bottom hook
+  // NOTE: First load scroll is handled DIRECTLY when messages are fetched
+  // This hook only handles new messages arriving while viewing
   const {
     scrollToBottom: scrollHelperToBottom,
     requestScrollToBottom: scrollHelperRequestScroll,
@@ -215,9 +171,7 @@ export function useChatState(): UseChatStateReturn {
   } = useScrollToBottom(messagesContainerRef, {
     messages,
     selectedChatId,
-    isInitialLoad,
     shouldAutoScroll,
-    skipScrollToBottom,
   });
 
   // Memoize selectedChat
@@ -1105,19 +1059,28 @@ export function useChatState(): UseChatStateReturn {
           });
 
           console.log(
-            "[Fetch Messages:UNCACHED] Setting shouldAutoScroll=true. Messages set. Scroll-to-bottom should trigger."
+            "[Fetch Messages:UNCACHED] Setting shouldAutoScroll=true. Messages set."
           );
           setShouldAutoScroll(true);
-          // The scroll hook will automatically scroll to bottom when messages arrive
-          // No need to call scrollHelperRequestScroll here - the hook effect handles it
-          console.log(
-            "[Fetch Messages:UNCACHED] NOTE: Scroll-to-bottom is handled by useScrollToBottom effect reacting to messages.length change"
-          );
 
-          // Mark initial scroll as done for this chat (after a brief delay to let scroll effect run)
-          // This must happen AFTER scroll-to-bottom completes so subsequent visits restore position
+          // CRITICAL: Wait for React to render the messages, then scroll to bottom
+          // We use double RAF to ensure React has flushed and the DOM is ready
           requestAnimationFrame(() => {
             requestAnimationFrame(() => {
+              // Check if user switched chats while waiting
+              if (lastFetchedChatIdRef.current !== chatToLoad) {
+                console.log(
+                  "[Fetch Messages:UNCACHED] ABORT scroll: chat changed during RAF wait"
+                );
+                return;
+              }
+
+              console.log(
+                "[Fetch Messages:UNCACHED] Calling scrollHelperRequestScroll for reliable scroll"
+              );
+              scrollHelperRequestScroll(false);
+
+              // Mark initial scroll as done for this chat
               console.log(
                 "[Fetch Messages:UNCACHED] Marking initial scroll done for:",
                 chatToLoad
