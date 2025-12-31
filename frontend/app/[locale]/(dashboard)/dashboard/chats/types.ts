@@ -72,6 +72,50 @@ export interface MessageReaction {
   updatedAt?: string | null;
 }
 
+/**
+ * Pin duration options (in hours)
+ */
+export enum PinDuration {
+  HOURS_24 = 24,
+  DAYS_7 = 168,
+  DAYS_30 = 720,
+}
+
+/**
+ * Pinned message data
+ */
+export interface PinnedMessage {
+  id: number;
+  messageId: string;
+  chatId: string;
+  pinnedBy: number;
+  pinnedByName?: string;
+  pinnedAt: string;
+  expiresAt: string;
+  /** Embedded message data for display */
+  message?: {
+    messageId: string;
+    text?: string | null;
+    type: string;
+    direction: string;
+    timestamp: string;
+    sender: string;
+    attachments?: Attachment[];
+    senderName?: string;
+  };
+}
+
+/**
+ * Pin count response
+ */
+export interface PinCountInfo {
+  chatId: string;
+  count: number;
+  maxPins: number;
+  canPinMore: boolean;
+  oldestPin?: PinnedMessage;
+}
+
 export interface Message {
   id?: number;
   messageId: string;

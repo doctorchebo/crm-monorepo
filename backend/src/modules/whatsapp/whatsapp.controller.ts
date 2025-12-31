@@ -136,6 +136,28 @@ export class WhatsAppController {
   }
 
   /**
+   * Get newer messages for a specific chat (messages after a given timestamp)
+   * Used for bidirectional infinite scroll when viewing pinned message context
+   * GET /whatsapp/chats/:chatId/messages/newer
+   */
+  @Get('chats/:chatId/messages/newer')
+  async getNewerMessages(
+    @Param('chatId') chatId: string,
+    @Query('afterTimestamp') afterTimestamp: string,
+    @Query('take') take: string = '50',
+  ) {
+    this.logger.log(
+      `Get newer messages for chat: ${chatId}, after: ${afterTimestamp}`,
+    );
+    const takeNum = parseInt(take, 10) || 50;
+    return this.whatsAppService.getNewerMessages(
+      chatId,
+      afterTimestamp,
+      takeNum,
+    );
+  }
+
+  /**
    * Save a note to a message
    * POST /whatsapp/notes
    */

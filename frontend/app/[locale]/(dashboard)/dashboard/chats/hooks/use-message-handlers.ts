@@ -18,6 +18,7 @@ import type {
   Message,
   MessagesCacheEntry,
 } from "../types";
+import { scrollContainerToAbsoluteBottom } from "./scroll-utils";
 
 interface UseMessageHandlersProps {
   selectedChatId: string | null;
@@ -63,7 +64,21 @@ interface UseMessageHandlersReturn {
   handleReplyById: (messageId: string) => void;
   handleCancelReply: () => void;
   handleTemplateUsed: () => void;
-  handleScrollToMessage: (messageId: string) => void;
+  /**
+   * Scroll to a specific message with proper alignment.
+   * For the last message, scrolls to bottom; for others, centers in viewport.
+   *
+   * @param messageId - The ID of the message to scroll to
+   * @param messagesContainerRef - Optional ref to the messages container for better scrolling
+   * @param contextMessages - Optional messages array to use for "is last message" check.
+   *                          Use this when messages were just updated and the hook's
+   *                          internal messages array might be stale.
+   */
+  handleScrollToMessage: (
+    messageId: string,
+    messagesContainerRef?: React.RefObject<HTMLDivElement | null>,
+    contextMessages?: Array<{ messageId: string }>
+  ) => void;
   handleSendMessage: (messageText: string) => Promise<void>;
   handleDeleteMessage: (messageId: string) => void;
   handleConfirmDeleteMessage: (messageId: string) => Promise<void>;
@@ -153,17 +168,104 @@ export function useMessageHandlers(
     setTemplateInput("");
   }, []);
 
-  // Handler for scrolling to a replied message
-  const handleScrollToMessage = useCallback((messageId: string) => {
-    const messageElement = messageRefs.current.get(messageId);
-    if (messageElement) {
-      messageElement.scrollIntoView({ behavior: "smooth", block: "center" });
-      messageElement.classList.add("bg-primary/10", "transition-colors");
-      setTimeout(() => {
-        messageElement.classList.remove("bg-primary/10");
-      }, 1500);
-    }
-  }, []);
+  /**
+   * Handler for scrolling to a specific message (e.g., when navigating to pinned messages or replies).
+   * Uses a polling approach to wait for the element to appear in the DOM.
+   * This is necessary because React may not have rendered the element yet after state updates.
+   *
+   * For messages at the bottom of the list, scrolls the container to bottom since
+   * scrollIntoView({ block: "center" }) can't center the last message.
+   *
+   * @param messageId - The ID of the message to scroll to
+   * @param messagesContainerRef - Optional ref to the messages container
+   * @param contextMessages - Optional messages array to use for "is last message" check
+   */
+  const handleScrollToMessage = useCallback(
+    (
+      messageId: string,
+      messagesContainerRef?: React.RefObject<HTMLDivElement | null>,
+      contextMessages?: Array<{ messageId: string }>
+    ) => {
+      // Use provided context messages if available, otherwise fall back to hook's messages
+      const messagesForCheck = contextMessages || messages;
+
+      /**
+       * Check if the message is the last message in the messages array.
+       */
+      const isLastMessage = (targetMessageId: string): boolean => {
+        if (messagesForCheck.length === 0) return false;
+        const lastMessage = messagesForCheck[messagesForCheck.length - 1];
+        return lastMessage.messageId === targetMessageId;
+      };
+
+      /**
+       * Perform the scroll to make the message visible.
+       * For the last message, we scroll the container to absolute bottom.
+       * For other messages, we center them in the viewport.
+       */
+      const performScroll = (element: HTMLElement) => {
+        const isLast = isLastMessage(messageId);
+        const container = messagesContainerRef?.current;
+
+        if (isLast && container) {
+          // For the last message: scroll container to absolute bottom
+          // Uses shared utility with retry mechanism
+          scrollContainerToAbsoluteBottom(container, true);
+        } else if (isLast) {
+          // Fallback if no container ref
+          element.scrollIntoView({
+            behavior: "smooth",
+            block: "end",
+          });
+        } else {
+          // For other messages, center them in the viewport
+          element.scrollIntoView({
+            behavior: "smooth",
+            block: "center",
+          });
+        }
+
+        // Add highlight effect
+        element.classList.add("bg-primary/10", "transition-colors");
+        setTimeout(() => {
+          element.classList.remove("bg-primary/10");
+        }, 1500);
+      };
+
+      /**
+       * Poll for the element to appear in DOM.
+       * Returns true if element found and scroll initiated.
+       */
+      const tryScroll = () => {
+        const messageElement = messageRefs.current.get(messageId);
+        if (messageElement) {
+          performScroll(messageElement);
+          return true;
+        }
+        return false;
+      };
+
+      // Try immediately
+      if (tryScroll()) return;
+
+      // If not found, poll for the element (DOM may not be updated yet)
+      let attempts = 0;
+      const maxAttempts = 30; // Max 1.5 seconds (30 * 50ms)
+      const intervalId = setInterval(() => {
+        attempts++;
+        if (tryScroll() || attempts >= maxAttempts) {
+          clearInterval(intervalId);
+          if (attempts >= maxAttempts) {
+            console.warn(
+              `[handleScrollToMessage] Message element not found after ${maxAttempts} attempts:`,
+              messageId
+            );
+          }
+        }
+      }, 50);
+    },
+    [messages]
+  );
 
   // Send text message
   const handleSendMessage = useCallback(

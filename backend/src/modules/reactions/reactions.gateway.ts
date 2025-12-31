@@ -90,6 +90,32 @@ export class ReactionsGateway
     });
   }
 
+  /**
+   * Emit customer reaction event to all connected clients
+   * Customer reactions come from the WhatsApp user (the contact),
+   * not from CRM users, so they have different payload structure.
+   */
+  emitCustomerReaction(data: {
+    chatId: string;
+    messageId: string;
+    emoji: string | null;
+    senderPhone: string;
+    action: 'added' | 'removed';
+  }): void {
+    if (this.connectedClients.size === 0) {
+      return;
+    }
+
+    this.logger.debug(
+      `📡 Emitting customer-reaction for message ${data.messageId} to ${this.connectedClients.size} clients`,
+    );
+
+    this.server.emit('customer-reaction', {
+      ...data,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   getConnectedClientsCount(): number {
     return this.connectedClients.size;
   }

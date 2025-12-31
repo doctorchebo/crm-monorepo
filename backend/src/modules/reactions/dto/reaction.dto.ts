@@ -43,3 +43,17 @@ export interface MessageReactionsDto {
   messageId: string;
   reactions: ReactionResponseDto[];
 }
+
+/**
+ * Response DTO for a customer reaction (from WhatsApp user)
+ */
+export interface CustomerReactionResponseDto {
+  id: number;
+  messageId: string;
+  waMessageId?: string;
+  chatId: string;
+  senderPhone: string;
+  emoji?: string;
+  createdAt: Date | null;
+  updatedAt: Date | null;
+}

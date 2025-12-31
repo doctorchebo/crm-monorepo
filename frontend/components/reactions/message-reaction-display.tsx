@@ -22,15 +22,18 @@ interface MessageReactionDisplayProps {
   isOwnReaction?: boolean;
   /** Whether to animate the pop effect */
   animate?: boolean;
+  /** Whether this is a customer reaction (from WhatsApp user) */
+  isCustomerReaction?: boolean;
 }
 
 /**
  * Displays a single reaction on a message bubble
  * Features:
- * - Positioned at bottom corner of bubble
+ * - Positioned at bottom corner of bubble (via parent container)
  * - Circular background for contrast
  * - Pop animation on new reactions
  * - Click to change/remove reaction
+ * - Visual distinction for customer reactions
  */
 export const MessageReactionDisplay = memo(function MessageReactionDisplay({
   emoji,
@@ -39,6 +42,7 @@ export const MessageReactionDisplay = memo(function MessageReactionDisplay({
   onClick,
   isOwnReaction,
   animate = false,
+  isCustomerReaction = false,
 }: MessageReactionDisplayProps) {
   const [showPop, setShowPop] = useState(false);
 
@@ -56,27 +60,35 @@ export const MessageReactionDisplay = memo(function MessageReactionDisplay({
       type="button"
       onClick={onClick}
       className={cn(
-        // Base styles - positioned further down to not overlap timestamp/status
-        "absolute -bottom-5 z-10",
+        // Base styles
+        "z-10",
         "flex items-center justify-center",
         "w-7 h-7 rounded-full",
         // Background with border for contrast against chat background
-        "bg-background border-2 border-border shadow-sm",
+        "bg-background border-2 shadow-sm",
+        // Customer reactions have a slightly different border color
+        isCustomerReaction
+          ? "border-green-300 dark:border-green-600"
+          : "border-border",
         // Hover state
         "hover:scale-110 transition-transform duration-150",
         // Focus styles
         "focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1",
-        // Position based on message direction
-        isOutbound ? "-right-1" : "-left-1",
         // Pop animation
         showPop && "animate-reaction-pop"
       )}
       title={
-        userName ? `${userName} reacted with ${emoji}` : `Reacted with ${emoji}`
+        isCustomerReaction
+          ? `${userName || "Customer"} reacted with ${emoji}`
+          : userName
+          ? `${userName} reacted with ${emoji}`
+          : `Reacted with ${emoji}`
       }
       aria-label={
         isOwnReaction
           ? `Your reaction: ${emoji}. Click to change.`
+          : isCustomerReaction
+          ? `Customer reaction: ${emoji}`
           : `Reaction: ${emoji}`
       }
     >

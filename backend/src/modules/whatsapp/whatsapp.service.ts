@@ -3,6 +3,7 @@ import {
   Chat,
   chats,
   contacts,
+  customerReactions,
   Message,
   messages,
   senders,
@@ -12,7 +13,8 @@ import { ConfigService } from '@nestjs/config';
 import { MetaCloudAPIConfigService } from '@shared/services/meta-cloud-api.config';
 import { S3Service } from '@shared/services/s3.service';
 import { withRetry } from '@shared/utils/retry.util';
-import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, or, sql } from 'drizzle-orm';
+import { reactionsGatewayInstance } from '../reactions/reactions.gateway';
 import { ThumbnailQueueService } from '../thumbnail/thumbnail-queue.service';
 import {
   supportsThumbnail,
@@ -583,6 +585,95 @@ export class WhatsAppService {
     } catch (error) {
       this.logger.error(`Error sending message: ${error.message}`, error);
       throw new Error(`Failed to send WhatsApp message: ${error.message}`);
+    }
+  }
+
+  /**
+   * Send a reaction to a message via WhatsApp Cloud API
+   *
+   * IMPORTANT LIMITATION (from Meta's official documentation):
+   * "Use the POST endpoint to apply an emoji reaction on a message you have
+   * received from a WhatsApp user."
+   *
+   * This means the Cloud API ONLY supports reactions on INBOUND messages
+   * (messages sent by customers TO the business). The API will accept requests
+   * for outbound messages without error, but the reaction will NOT be delivered
+   * to the customer's WhatsApp app.
+   *
+   * Reference: https://developers.facebook.com/docs/whatsapp/cloud-api/messages/reaction-messages
+   *
+   * The caller (ReactionsService) should check message direction before calling
+   * this method to avoid unnecessary API calls.
+   *
+   * To remove a reaction, pass an empty string as the emoji.
+   *
+   * @param senderId - The sender ID to determine which phoneNumberId to use
+   * @param recipientPhone - The WhatsApp user's phone number
+   * @param targetMessageWaId - The WhatsApp message ID (wamid) to react to
+   * @param emoji - The emoji to use for the reaction (empty string to remove)
+   * @returns Response with the reaction message ID
+   */
+  async sendReaction(
+    senderId: number,
+    recipientPhone: string,
+    targetMessageWaId: string,
+    emoji: string,
+  ): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    try {
+      const cleanedPhone = cleanPhoneNumber(recipientPhone);
+
+      // Look up sender's phoneNumberId
+      const senderRecord = await db.query.senders.findFirst({
+        where: eq(senders.id, senderId),
+      });
+
+      if (!senderRecord) {
+        throw new Error(`Sender with ID ${senderId} not found`);
+      }
+
+      if (!senderRecord.phoneNumberId) {
+        throw new Error(
+          `Sender ${senderId} does not have a phoneNumberId set. ` +
+            `Please verify the sender in the UI and try again.`,
+        );
+      }
+
+      this.logger.log(
+        `Sending reaction ${emoji || '(remove)'} to message ${targetMessageWaId} for recipient ${cleanedPhone}`,
+      );
+
+      // Build reaction message payload
+      const message = {
+        messaging_product: 'whatsapp' as const,
+        recipient_type: 'individual' as const,
+        to: cleanedPhone,
+        type: 'reaction' as const,
+        reaction: {
+          message_id: targetMessageWaId,
+          emoji: emoji, // Empty string removes the reaction
+        },
+      };
+
+      // Send via Cloud API
+      const response = await this.sendCloudAPIMessage(
+        message,
+        senderRecord.phoneNumberId,
+      );
+
+      this.logger.log(
+        `Reaction sent successfully. Response message ID: ${response.messages?.[0]?.id}`,
+      );
+
+      return {
+        success: true,
+        messageId: response.messages?.[0]?.id,
+      };
+    } catch (error) {
+      this.logger.error(`Error sending reaction: ${error.message}`, error);
+      return {
+        success: false,
+        error: error.message,
+      };
     }
   }
 
@@ -1276,6 +1367,17 @@ export class WhatsAppService {
             })),
           };
           break;
+        case 'reaction':
+          // Reactions are handled separately - they don't create new messages
+          // They react to existing messages from the customer
+          await this.handleInboundReaction(
+            message,
+            chatId,
+            senderPhone,
+            sender,
+          );
+          // Return early - reactions don't follow the normal message flow
+          return;
         default:
           textContent = '[Unsupported message type]';
       }
@@ -1418,6 +1520,293 @@ export class WhatsAppService {
     } catch (error) {
       this.logger.error('Error handling inbound message:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Handle incoming reaction from a customer via WhatsApp webhook
+   *
+   * When a customer reacts to a message in their WhatsApp chat:
+   * 1. We receive a webhook with type='reaction'
+   * 2. The reaction.message_id is the wamid of the message being reacted to
+   * 3. The reaction.emoji is the emoji (empty string means reaction removed)
+   * 4. We store the reaction and emit a WebSocket event for real-time UI updates
+   *
+   * Note: Customer reactions are stored with userId=null to distinguish them
+   * from CRM user reactions. The sender phone is stored in the userName field
+   * for display purposes.
+   *
+   * @param message - The inbound message object with reaction data
+   * @param chatId - The chat ID for this conversation
+   * @param senderPhone - The customer's phone number
+   * @param sender - The sender (business) record
+   * @private
+   */
+  /**
+   * Extract the unique message identifier (hex) from a WhatsApp wamid
+   *
+   * WhatsApp wamid format: wamid.<base64>
+   * The base64 decodes to: header + phone_number + unique_message_id
+   * The unique_message_id is typically the last 16 bytes (32 hex chars)
+   *
+   * Note: Base64 encoding shifts based on byte alignment, so we must decode
+   * to raw bytes and extract the hex representation for reliable comparison.
+   */
+  private extractWamidUniqueId(wamid: string): string | null {
+    if (!wamid.startsWith('wamid.')) {
+      return null;
+    }
+
+    try {
+      const base64Part = wamid.slice(6); // Remove 'wamid.' prefix
+      const buffer = Buffer.from(base64Part, 'base64');
+
+      // The unique message ID is the last 16 bytes (128-bit UUID-like identifier)
+      // Convert to uppercase hex for consistent comparison
+      const uniqueBytes = buffer.slice(-16);
+      return uniqueBytes.toString('hex').toUpperCase();
+    } catch (error) {
+      this.logger.warn(`Failed to extract unique ID from wamid: ${wamid}`);
+      return null;
+    }
+  }
+
+  private async handleInboundReaction(
+    message: CloudAPIInboundMessage,
+    chatId: string,
+    senderPhone: string,
+    sender: any,
+  ): Promise<void> {
+    try {
+      const reactionData = message.reaction;
+
+      if (!reactionData) {
+        this.logger.warn(
+          `Reaction message received but no reaction data found: ${message.id}`,
+        );
+        return;
+      }
+
+      // reaction.message_id is the WhatsApp wamid of the message being reacted to
+      // IMPORTANT: The wamid encodes the phone number from the perspective of the sender.
+      // The same logical message has different wamid representations depending on perspective!
+      // We extract the unique message identifier (last 16 bytes as hex) for reliable matching.
+      const targetWamid = reactionData.message_id;
+      const emoji = reactionData.emoji;
+
+      this.logger.log(
+        `[CustomerReaction] Received: ${emoji || '(removed)'} from ${senderPhone}`,
+      );
+      this.logger.log(`[CustomerReaction] Target wamid: ${targetWamid}`);
+      this.logger.log(`[CustomerReaction] Chat: ${chatId}`);
+
+      // Extract the unique message identifier from the wamid
+      const targetUniqueId = this.extractWamidUniqueId(targetWamid);
+      this.logger.log(
+        `[CustomerReaction] Target unique ID (hex): ${targetUniqueId}`,
+      );
+
+      // Find the target message in our database
+      let targetMessage: { messageId: string; chatId: true } | undefined;
+
+      // Strategy 1: Exact messageId match (unlikely due to wamid perspective differences)
+      targetMessage = await db.query.messages.findFirst({
+        where: and(
+          eq(messages.chatId, chatId),
+          eq(messages.messageId, targetWamid),
+        ),
+        columns: { messageId: true, chatId: true },
+      });
+
+      if (targetMessage) {
+        this.logger.log(
+          `[CustomerReaction] ✅ Found by exact messageId: ${targetMessage.messageId}`,
+        );
+      }
+
+      // Strategy 2: Match by mediaUrl with wa: prefix
+      if (!targetMessage) {
+        targetMessage = await db.query.messages.findFirst({
+          where: and(
+            eq(messages.chatId, chatId),
+            eq(messages.mediaUrl, `wa:${targetWamid}`),
+          ),
+          columns: { messageId: true, chatId: true },
+        });
+
+        if (targetMessage) {
+          this.logger.log(
+            `[CustomerReaction] ✅ Found by exact mediaUrl: ${targetMessage.messageId}`,
+          );
+        }
+      }
+
+      // Strategy 3: Match by unique message ID (hex comparison)
+      // This is the most reliable method as it handles wamid perspective differences
+      if (!targetMessage && targetUniqueId) {
+        // Get recent messages in this chat and compare unique IDs
+        const recentMessages = await db.query.messages.findMany({
+          where: eq(messages.chatId, chatId),
+          columns: { messageId: true, chatId: true, mediaUrl: true },
+          limit: 100, // Check last 100 messages
+          orderBy: (messages, { desc }) => [desc(messages.timestamp)],
+        });
+
+        for (const msg of recentMessages) {
+          // Check messageId (for inbound messages stored with wamid)
+          const msgUniqueId = this.extractWamidUniqueId(msg.messageId);
+          if (msgUniqueId === targetUniqueId) {
+            targetMessage = { messageId: msg.messageId, chatId: true };
+            this.logger.log(
+              `[CustomerReaction] ✅ Found by unique ID match (messageId): ${msg.messageId}`,
+            );
+            break;
+          }
+
+          // Check mediaUrl (for outbound messages with wa: prefix)
+          if (msg.mediaUrl?.startsWith('wa:')) {
+            const mediaWamid = msg.mediaUrl.slice(3); // Remove 'wa:' prefix
+            const mediaUniqueId = this.extractWamidUniqueId(mediaWamid);
+            if (mediaUniqueId === targetUniqueId) {
+              targetMessage = { messageId: msg.messageId, chatId: true };
+              this.logger.log(
+                `[CustomerReaction] ✅ Found by unique ID match (mediaUrl): ${msg.messageId}`,
+              );
+              break;
+            }
+          }
+        }
+      }
+
+      // If still not found, log for debugging and return
+      if (!targetMessage) {
+        const recentMessages = await db.query.messages.findMany({
+          where: eq(messages.chatId, chatId),
+          columns: { messageId: true, mediaUrl: true },
+          limit: 5,
+          orderBy: (messages, { desc }) => [desc(messages.timestamp)],
+        });
+
+        // Log with unique IDs for debugging
+        const debugInfo = recentMessages.map((m) => ({
+          id: m.messageId.substring(0, 30) + '...',
+          uniqueId: this.extractWamidUniqueId(m.messageId),
+          mediaUniqueId: m.mediaUrl?.startsWith('wa:')
+            ? this.extractWamidUniqueId(m.mediaUrl.slice(3))
+            : null,
+        }));
+
+        this.logger.warn(
+          `[CustomerReaction] ❌ Message not found. Target unique ID: ${targetUniqueId}`,
+        );
+        this.logger.warn(
+          `[CustomerReaction] Recent messages: ${JSON.stringify(debugInfo)}`,
+        );
+        return; // Don't store orphan reactions
+      }
+
+      // Use our internal messageId for storage and frontend
+      const internalMessageId = targetMessage.messageId;
+
+      if (emoji === '' || !emoji) {
+        // Customer removed their reaction
+        this.logger.log(
+          `[CustomerReaction] Removing reaction from message: ${internalMessageId}`,
+        );
+
+        await db
+          .update(customerReactions)
+          .set({
+            emoji: null,
+            isActive: false,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(customerReactions.messageId, internalMessageId),
+              eq(customerReactions.senderPhone, senderPhone),
+            ),
+          );
+
+        // Emit WebSocket event
+        this.emitCustomerReactionEvent(
+          chatId,
+          internalMessageId,
+          null,
+          senderPhone,
+          'removed',
+        );
+
+        this.logger.log(
+          `[CustomerReaction] ✅ Removed reaction for message ${internalMessageId}`,
+        );
+      } else {
+        // Customer added/updated their reaction
+        this.logger.log(
+          `[CustomerReaction] Adding ${emoji} to message: ${internalMessageId}`,
+        );
+
+        // Upsert the reaction
+        await db
+          .insert(customerReactions)
+          .values({
+            messageId: internalMessageId,
+            waMessageId: targetWamid,
+            chatId,
+            senderPhone,
+            emoji,
+            isActive: true,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .onConflictDoUpdate({
+            target: [
+              customerReactions.messageId,
+              customerReactions.senderPhone,
+            ],
+            set: {
+              emoji,
+              waMessageId: targetWamid,
+              isActive: true,
+              updatedAt: new Date(),
+            },
+          });
+
+        // Emit WebSocket event
+        this.emitCustomerReactionEvent(
+          chatId,
+          internalMessageId,
+          emoji,
+          senderPhone,
+          'added',
+        );
+
+        this.logger.log(
+          `[CustomerReaction] ✅ Saved reaction ${emoji} for message ${internalMessageId}`,
+        );
+      }
+    } catch (error) {
+      this.logger.error(`[CustomerReaction] Error: ${error.message}`, error);
+    }
+  }
+
+  /**
+   * Emit customer reaction event via WebSocket
+   */
+  private emitCustomerReactionEvent(
+    chatId: string,
+    messageId: string,
+    emoji: string | null,
+    senderPhone: string,
+    action: 'added' | 'removed',
+  ): void {
+    const event = { chatId, messageId, emoji, senderPhone, action };
+
+    if (reactionsGatewayInstance) {
+      reactionsGatewayInstance.emitCustomerReaction(event);
+    }
+    if (whatsAppGatewayInstance) {
+      whatsAppGatewayInstance.emitCustomerReaction(event);
     }
   }
 
@@ -2083,6 +2472,50 @@ export class WhatsAppService {
     } catch (error) {
       this.logger.error(`Error retrieving chat messages: ${error.message}`);
       throw new Error(`Failed to retrieve chat messages: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get newer messages for a specific chat (messages after a given timestamp)
+   * Used for bidirectional infinite scroll when viewing pinned message context
+   */
+  async getNewerMessages(
+    chatId: string,
+    afterTimestamp: string,
+    take: number = 50,
+  ): Promise<{
+    messages: Message[];
+    hasMore: boolean;
+  }> {
+    try {
+      const afterDate = new Date(afterTimestamp);
+
+      // Get messages with timestamp > afterTimestamp, ordered by timestamp ASC (oldest first)
+      // We want the NEXT batch of messages after the given timestamp
+      const newerMessages = await db.query.messages.findMany({
+        where: and(
+          eq(messages.chatId, chatId),
+          gt(messages.timestamp, afterDate),
+        ),
+        orderBy: asc(messages.timestamp),
+        limit: take + 1,
+      });
+
+      // Check if there are more messages beyond this batch
+      const hasMore = newerMessages.length > take;
+
+      // Remove the extra message if it exists
+      const resultMessages = hasMore
+        ? newerMessages.slice(0, take)
+        : newerMessages;
+
+      return {
+        messages: resultMessages,
+        hasMore,
+      };
+    } catch (error) {
+      this.logger.error(`Error retrieving newer messages: ${error.message}`);
+      throw new Error(`Failed to retrieve newer messages: ${error.message}`);
     }
   }
 

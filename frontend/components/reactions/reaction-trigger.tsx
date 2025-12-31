@@ -12,6 +12,11 @@ import {
   DEFAULT_QUICK_REACTIONS,
   Emoji,
 } from "@/components/emoji-picker/types";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { SmilePlus } from "lucide-react";
 import {
@@ -35,6 +40,16 @@ interface ReactionTriggerProps {
   containerRef?: React.RefObject<HTMLElement | null>;
   /** Additional class names */
   className?: string;
+  /**
+   * Whether the reaction trigger is disabled
+   * Used when outside the 24-hour conversation window
+   */
+  disabled?: boolean;
+  /**
+   * Tooltip text to show when the trigger is disabled
+   * Explains why reactions are not available
+   */
+  disabledTooltip?: string;
 }
 
 interface QuickReactionsPosition {
@@ -53,6 +68,8 @@ export const ReactionTrigger = memo(function ReactionTrigger({
   currentReaction,
   containerRef,
   className,
+  disabled = false,
+  disabledTooltip,
 }: ReactionTriggerProps) {
   const [showQuickReactions, setShowQuickReactions] = useState(false);
   const [showFullPicker, setShowFullPicker] = useState(false);
@@ -180,6 +197,8 @@ export const ReactionTrigger = memo(function ReactionTrigger({
   }, [showQuickReactions, showFullPicker]);
 
   const handleTriggerClick = useCallback(() => {
+    // Don't open picker if disabled (outside conversation window)
+    if (disabled) return;
     setShowQuickReactions((prev) => !prev);
     setShowFullPicker(false);
   }, []);
@@ -211,37 +230,62 @@ export const ReactionTrigger = memo(function ReactionTrigger({
     setShowQuickReactions(false);
   }, []);
 
+  // Button element - extracted for reuse with/without tooltip wrapper
+  const triggerButton = (
+    <button
+      ref={triggerRef}
+      type="button"
+      onClick={handleTriggerClick}
+      disabled={disabled}
+      className={cn(
+        // Base styles
+        "flex items-center justify-center",
+        "w-8 h-8 rounded-full",
+        // Colors
+        "text-muted-foreground hover:text-foreground",
+        "hover:bg-muted/80",
+        // Transition
+        "transition-all duration-150",
+        // Focus styles
+        "focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1",
+        // Active state
+        showQuickReactions && "bg-muted/80 text-foreground",
+        // Disabled state - keep visible but with reduced opacity
+        disabled && "opacity-50 cursor-not-allowed hover:bg-transparent",
+        className
+      )}
+      aria-label={
+        disabled
+          ? disabledTooltip || "Reactions unavailable"
+          : currentReaction
+          ? "Change reaction"
+          : "Add reaction"
+      }
+      aria-expanded={showQuickReactions}
+      aria-haspopup="true"
+      aria-disabled={disabled}
+    >
+      <SmilePlus className="h-5 w-5" />
+    </button>
+  );
+
   return (
     <>
-      {/* Trigger button */}
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={handleTriggerClick}
-        className={cn(
-          // Base styles
-          "flex items-center justify-center",
-          "w-8 h-8 rounded-full",
-          // Colors
-          "text-muted-foreground hover:text-foreground",
-          "hover:bg-muted/80",
-          // Transition
-          "transition-all duration-150",
-          // Focus styles
-          "focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1",
-          // Active state
-          showQuickReactions && "bg-muted/80 text-foreground",
-          className
-        )}
-        aria-label={currentReaction ? "Change reaction" : "Add reaction"}
-        aria-expanded={showQuickReactions}
-        aria-haspopup="true"
-      >
-        <SmilePlus className="h-5 w-5" />
-      </button>
+      {/* Trigger button - with tooltip when disabled */}
+      {disabled && disabledTooltip ? (
+        <Tooltip>
+          <TooltipTrigger asChild>{triggerButton}</TooltipTrigger>
+          <TooltipContent side="top" className="max-w-xs">
+            {disabledTooltip}
+          </TooltipContent>
+        </Tooltip>
+      ) : (
+        triggerButton
+      )}
 
       {/* Quick reactions bar (portal to body) */}
       {showQuickReactions &&
+        !disabled &&
         quickReactionsPosition &&
         isMounted &&
         createPortal(

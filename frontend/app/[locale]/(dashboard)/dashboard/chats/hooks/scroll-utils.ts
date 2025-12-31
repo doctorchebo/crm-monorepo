@@ -101,6 +101,78 @@ export function scrollContainerToBottom(
 }
 
 /**
+ * Scroll a container to the absolute bottom with retry mechanism.
+ * This ensures the scroll completes even if content is still rendering.
+ *
+ * Uses double RAF after each scroll attempt to verify we're at the bottom.
+ * If scrollHeight changed or we're not at bottom, retries up to maxRetries times.
+ *
+ * @param container - The scrollable container element
+ * @param smooth - Whether to use smooth scrolling
+ * @param maxRetries - Maximum number of retry attempts (default: 3)
+ * @param onComplete - Optional callback when scroll is confirmed complete
+ */
+export function scrollContainerToAbsoluteBottom(
+  container: HTMLElement | null,
+  smooth = false,
+  maxRetries = 3,
+  onComplete?: () => void
+): void {
+  if (!container) {
+    onComplete?.();
+    return;
+  }
+
+  const performScrollWithRetry = (retriesLeft: number) => {
+    const maxScrollBefore = container.scrollHeight - container.clientHeight;
+
+    // Perform the scroll
+    if (smooth) {
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: "smooth",
+      });
+    } else {
+      container.scrollTop = container.scrollHeight;
+    }
+
+    // Verify scroll completed after browser paint cycles
+    if (retriesLeft > 0) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const maxScrollAfter =
+            container.scrollHeight - container.clientHeight;
+          const currentScroll = container.scrollTop;
+          const tolerance = 5;
+
+          // Check if scrollHeight changed (content still rendering)
+          // or if we're not at the bottom
+          const scrollHeightChanged = maxScrollAfter !== maxScrollBefore;
+          const notAtBottom = currentScroll < maxScrollAfter - tolerance;
+
+          if (scrollHeightChanged || notAtBottom) {
+            scrollDebug("[scrollContainerToAbsoluteBottom] Retrying scroll", {
+              scrollHeightChanged,
+              notAtBottom,
+              retriesLeft,
+            });
+            performScrollWithRetry(retriesLeft - 1);
+          } else {
+            scrollDebug("[scrollContainerToAbsoluteBottom] Scroll complete");
+            onComplete?.();
+          }
+        });
+      });
+    } else {
+      // No retries left, call complete anyway
+      onComplete?.();
+    }
+  };
+
+  performScrollWithRetry(maxRetries);
+}
+
+/**
  * Execute a function after multiple animation frames.
  * This ensures React has committed state changes and browser has painted.
  *

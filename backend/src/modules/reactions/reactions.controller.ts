@@ -75,4 +75,25 @@ export class ReactionsController {
     const userId = req.user.userId;
     return this.reactionsService.getUserReaction(userId, messageId);
   }
+
+  /**
+   * Get customer reactions for a chat
+   * GET /reactions/customer/:chatId
+   */
+  @Get('customer/:chatId')
+  async getCustomerReactionsForChat(@Param('chatId') chatId: string) {
+    return this.reactionsService.getCustomerReactionsForChat(chatId);
+  }
+
+  /**
+   * Get customer reactions for multiple messages (batch)
+   * GET /reactions/customer/batch?messageIds=id1,id2,id3
+   */
+  @Get('customer/batch/messages')
+  async getCustomerReactionsForMessages(
+    @Query('messageIds') messageIds: string,
+  ) {
+    const ids = messageIds.split(',').filter(Boolean);
+    return this.reactionsService.getCustomerReactionsForMessages(ids);
+  }
 }

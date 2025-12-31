@@ -601,3 +601,103 @@ export const messageReactionsRelations = relations(
     }),
   }),
 );
+
+// ==================== Pinned Messages ====================
+
+/**
+ * Pinned Messages table - stores pinned messages per chat
+ * Each chat can have up to 3 pinned messages at a time
+ * Pins have an expiration time (24h, 7d, or 30d from creation)
+ */
+export const pinnedMessages = pgTable(
+  'pinned_messages',
+  {
+    id: serial('id').primaryKey(),
+    messageId: varchar('message_id').notNull(),
+    chatId: varchar('chat_id').notNull(),
+    pinnedBy: integer('pinned_by')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    pinnedAt: timestamp('pinned_at').defaultNow().notNull(),
+    expiresAt: timestamp('expires_at').notNull(),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (table) => ({
+    // Each message can only be pinned once per chat
+    uniqueMessagePin: unique().on(table.messageId, table.chatId),
+    chatIdIndex: index('idx_pinned_messages_chat_id').on(table.chatId),
+    messageIdIndex: index('idx_pinned_messages_message_id').on(table.messageId),
+    expiresAtIndex: index('idx_pinned_messages_expires_at').on(table.expiresAt),
+  }),
+);
+
+export type PinnedMessage = typeof pinnedMessages.$inferSelect;
+export type NewPinnedMessage = typeof pinnedMessages.$inferInsert;
+
+// Pinned Messages relations
+export const pinnedMessagesRelations = relations(pinnedMessages, ({ one }) => ({
+  user: one(users, {
+    fields: [pinnedMessages.pinnedBy],
+    references: [users.id],
+  }),
+  chat: one(chats, {
+    fields: [pinnedMessages.chatId],
+    references: [chats.chatId],
+  }),
+  message: one(messages, {
+    fields: [pinnedMessages.messageId],
+    references: [messages.messageId],
+  }),
+}));
+
+// ==================== Customer Reactions ====================
+
+/**
+ * Customer Reactions table - stores reactions from WhatsApp customers
+ *
+ * These are different from CRM user reactions (messageReactions table).
+ * Customers can react to ANY message in the conversation (both inbound and outbound).
+ * Each customer can have one reaction per message (WhatsApp behavior).
+ *
+ * IMPORTANT: WhatsApp wamid encoding differs between sender and receiver.
+ * When we send a message, the wamid encodes the customer's phone.
+ * When the customer reacts, their reaction references a wamid with our business phone.
+ * We store our internal messageId (from messages table) to enable frontend lookups.
+ */
+export const customerReactions = pgTable(
+  'customer_reactions',
+  {
+    id: serial('id').primaryKey(),
+    // Our internal message ID (matches messages.message_id) - used for frontend lookups
+    messageId: varchar('message_id').notNull(),
+    // The WhatsApp wamid from the reaction webhook (may differ from stored message wamid due to phone encoding)
+    waMessageId: varchar('wa_message_id'),
+    // Chat ID for filtering
+    chatId: varchar('chat_id').notNull(),
+    // Customer's phone number who reacted
+    senderPhone: varchar('sender_phone').notNull(),
+    // The emoji reaction (null if removed)
+    emoji: varchar('emoji', { length: 50 }),
+    // Whether the reaction is currently active (false if removed)
+    isActive: boolean('is_active').default(true),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (table) => ({
+    // Each customer can have one reaction per message
+    uniqueCustomerMessageReaction: unique().on(
+      table.messageId,
+      table.senderPhone,
+    ),
+    messageIdIndex: index('idx_customer_reactions_message_id').on(
+      table.messageId,
+    ),
+    chatIdIndex: index('idx_customer_reactions_chat_id').on(table.chatId),
+    senderPhoneIndex: index('idx_customer_reactions_sender_phone').on(
+      table.senderPhone,
+    ),
+  }),
+);
+
+export type CustomerReaction = typeof customerReactions.$inferSelect;
+export type NewCustomerReaction = typeof customerReactions.$inferInsert;

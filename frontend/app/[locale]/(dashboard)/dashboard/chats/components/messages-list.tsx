@@ -7,6 +7,7 @@ import {
   PendingUploadGroup,
 } from "@/components/media/pending-upload-bubble";
 import { StickerMessageBubble } from "@/components/media/sticker-message-bubble";
+import { WhatsAppStatusIcon } from "@/components/whatsapp-status-icon";
 import { Attachment } from "@/lib/media/types";
 import { ReceivedContact } from "@/lib/types/contact-message.types";
 import { getDateKey } from "@/lib/utils/date-formatter";
@@ -128,6 +129,14 @@ function shouldShowDateSeparatorForGroup(
   return null;
 }
 
+/**
+ * Conversation window status for determining if reactions are allowed
+ */
+interface ConversationWindowStatus {
+  /** Whether we're within the 24-hour window */
+  isWithinWindow: boolean;
+}
+
 interface MessagesListProps {
   groupedMessages: GroupedMessage[];
   messages: Message[];
@@ -163,12 +172,35 @@ interface MessagesListProps {
   // Reactions
   /** Map of message ID to reactions */
   reactionsMap?: Record<string, MessageReaction[]>;
+  /** Map of message ID to customer reactions (from WhatsApp user) */
+  customerReactionsMap?: Record<
+    string,
+    {
+      messageId: string;
+      emoji: string;
+      senderPhone: string;
+      timestamp?: string;
+    } | null
+  >;
   /** Current user's ID for identifying own reactions */
   currentUserId?: number;
   /** Handler when a reaction is selected */
   handleReactionSelect?: (messageId: string, emoji: string) => void;
   /** Set of message IDs that just had reaction changes (for animation) */
   animatingReactionIds?: Set<string>;
+  // Pins
+  /** Set of pinned message IDs for this chat */
+  pinnedMessageIds?: Set<string>;
+  /** Handler when pin is requested */
+  handlePinMessage?: (messageId: string) => void;
+  /** Handler when unpin is requested */
+  handleUnpinMessage?: (messageId: string) => void;
+  // Conversation window (for reaction availability)
+  /**
+   * Conversation window status - determines if reactions are allowed
+   * When outside the 24-hour window, reactions should be disabled
+   */
+  conversationWindow?: ConversationWindowStatus;
 }
 
 export function MessagesList({
@@ -196,10 +228,25 @@ export function MessagesList({
   handleVideoPlay,
   highlightedMessageId,
   reactionsMap = {},
+  customerReactionsMap = {},
   currentUserId,
   handleReactionSelect,
   animatingReactionIds = new Set(),
+  pinnedMessageIds = new Set(),
+  handlePinMessage,
+  handleUnpinMessage,
+  conversationWindow,
 }: MessagesListProps) {
+  // Determine if reactions should be disabled (outside 24-hour window)
+  const isReactionDisabled =
+    conversationWindow !== undefined && !conversationWindow.isWithinWindow;
+
+  // Tooltip text for disabled reactions
+  const reactionDisabledTooltip = isReactionDisabled
+    ? t("reactions.disabledOutsideWindow") ||
+      "Reactions are only available within the 24-hour conversation window"
+    : undefined;
+
   // Track previous chat ID to detect chat switches (for GIF auto-play on chat open)
   const previousChatIdRef = useRef<string | undefined>(undefined);
 
@@ -410,7 +457,7 @@ export function MessagesList({
               hour: "2-digit",
               minute: "2-digit",
             });
-            const isDeleted = message.isDeleted;
+            const isDeleted = message.isDeleted ?? false;
 
             // Handle contact message type
             if (message.type === "contacts" && !isDeleted) {
@@ -488,6 +535,9 @@ export function MessagesList({
             const userReaction = currentUserId
               ? messageReactions.find((r) => r.userId === currentUserId)
               : undefined;
+            const customerReaction =
+              customerReactionsMap[message.messageId] || undefined;
+
             const isReactionAnimating = animatingReactionIds.has(
               message.messageId
             );
@@ -522,9 +572,18 @@ export function MessagesList({
                         ? combinedAutoPlayGifIds.has(message.messageId)
                         : false
                     }
+                    currentUserId={currentUserId}
                     userReaction={userReaction}
+                    customerReaction={customerReaction}
                     reactions={messageReactions}
                     reactionAnimating={isReactionAnimating}
+                    isPinned={
+                      message.messageId
+                        ? pinnedMessageIds.has(message.messageId)
+                        : false
+                    }
+                    isReactionDisabled={isReactionDisabled}
+                    reactionDisabledTooltip={reactionDisabledTooltip}
                     onReply={handleReplyById}
                     onDelete={isOutbound ? handleDeleteMessage : undefined}
                     onDownload={handleDownloadById}
@@ -533,6 +592,8 @@ export function MessagesList({
                     onVideoPlay={handleVideoPlay}
                     onScrollToMessage={handleScrollToMessage}
                     onReactionSelect={handleReactionSelect}
+                    onPin={handlePinMessage}
+                    onUnpin={handleUnpinMessage}
                     t={t}
                   />
                 </div>

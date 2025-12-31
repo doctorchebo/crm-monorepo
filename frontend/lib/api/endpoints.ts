@@ -167,11 +167,66 @@ export interface ReactionResponse {
 }
 
 /**
+ * Customer reaction response from API (from WhatsApp user)
+ */
+export interface CustomerReactionResponse {
+  id: number;
+  messageId: string;
+  waMessageId?: string;
+  chatId: string;
+  senderPhone: string;
+  emoji?: string;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+/**
  * Grouped reactions for a message
  */
 export interface MessageReactionsResponse {
   messageId: string;
   reactions: ReactionResponse[];
+}
+
+// ==================== Pinned Messages Types ====================
+
+/**
+ * Pin duration options (in hours)
+ */
+export type PinDurationValue = 24 | 168 | 720;
+
+/**
+ * Pinned message response from API
+ */
+export interface PinnedMessageResponse {
+  id: number;
+  messageId: string;
+  chatId: string;
+  pinnedBy: number;
+  pinnedByName?: string;
+  pinnedAt: string;
+  expiresAt: string;
+  message?: {
+    messageId: string;
+    text?: string | null;
+    type: string;
+    direction: string;
+    timestamp: string;
+    sender: string;
+    attachments?: any[];
+    senderName?: string;
+  };
+}
+
+/**
+ * Pin count response
+ */
+export interface PinCountResponse {
+  chatId: string;
+  count: number;
+  maxPins: number;
+  canPinMore: boolean;
+  oldestPin?: PinnedMessageResponse;
 }
 
 // Template Approval Types
@@ -632,6 +687,23 @@ export const backendApi = {
           take || 50
         }`
       ),
+    /**
+     * Get newer messages for bidirectional infinite scroll.
+     * Used when viewing pinned message context to load messages AFTER the current window.
+     */
+    getNewerMessages: (
+      chatId: string,
+      afterTimestamp: string,
+      take?: number
+    ): Promise<{
+      messages: any[];
+      hasMore: boolean;
+    }> =>
+      apiClient.get(
+        `/whatsapp/chats/${chatId}/messages/newer?afterTimestamp=${encodeURIComponent(
+          afterTimestamp
+        )}&take=${take || 50}`
+      ),
     saveNote: (data: { messageId: string; note: string }) =>
       apiClient.post("/whatsapp/notes", data),
     getMessageNotes: (messageId: string) =>
@@ -1087,6 +1159,99 @@ export const backendApi = {
      */
     getMine: (messageId: string): Promise<ReactionResponse | null> =>
       apiClient.get(`/reactions/${messageId}/mine`),
+
+    /**
+     * Get customer reactions for a chat
+     */
+    getCustomerReactionsForChat: (
+      chatId: string
+    ): Promise<CustomerReactionResponse[]> =>
+      apiClient.get(`/reactions/customer/${chatId}`),
+
+    /**
+     * Get customer reactions for multiple messages in batch
+     */
+    getCustomerReactionsForMessages: (
+      messageIds: string[]
+    ): Promise<CustomerReactionResponse[]> =>
+      apiClient.get(
+        `/reactions/customer/batch/messages?messageIds=${messageIds.join(",")}`
+      ),
+  },
+
+  // Pins endpoints - Pinned messages management
+  pins: {
+    /**
+     * Get all pinned messages for a chat
+     */
+    getForChat: (chatId: string): Promise<PinnedMessageResponse[]> =>
+      apiClient.get(`/pins/${chatId}`),
+
+    /**
+     * Get pin count for a chat
+     */
+    getCount: (chatId: string): Promise<PinCountResponse> =>
+      apiClient.get(`/pins/${chatId}/count`),
+
+    /**
+     * Pin a message
+     * Duration options: 24 (24h), 168 (7 days), 720 (30 days)
+     */
+    pin: (data: {
+      messageId: string;
+      chatId: string;
+      duration: 24 | 168 | 720;
+    }): Promise<PinnedMessageResponse> => apiClient.post("/pins", data),
+
+    /**
+     * Unpin a message
+     */
+    unpin: (data: {
+      messageId: string;
+      chatId: string;
+    }): Promise<{ success: boolean }> =>
+      apiClient.delete(`/pins/${data.chatId}/${data.messageId}`),
+
+    /**
+     * Check if a message is pinned
+     */
+    isPinned: (
+      chatId: string,
+      messageId: string
+    ): Promise<{ isPinned: boolean }> =>
+      apiClient.get(`/pins/${chatId}/check/${messageId}`),
+
+    /**
+     * Get pinned status for multiple messages
+     */
+    getPinnedIds: (
+      chatId: string,
+      messageIds: string[]
+    ): Promise<{ pinnedMessageIds: string[] }> =>
+      apiClient.get(`/pins/${chatId}/batch?messageIds=${messageIds.join(",")}`),
+
+    /**
+     * Get message context for scrolling to a pinned message
+     * Returns the target message and surrounding messages for efficient loading
+     */
+    getMessageContext: (
+      chatId: string,
+      messageId: string,
+      windowSize?: number
+    ): Promise<{
+      found: boolean;
+      message?: any;
+      surroundingMessages: any[];
+      hasMoreBefore: boolean;
+      hasMoreAfter: boolean;
+      position: number;
+      total: number;
+    }> =>
+      apiClient.get(
+        `/pins/${chatId}/context/${messageId}${
+          windowSize ? `?windowSize=${windowSize}` : ""
+        }`
+      ),
   },
 
   // Link Preview endpoints

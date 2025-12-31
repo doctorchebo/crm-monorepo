@@ -6,7 +6,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ChevronDown, Download, Reply } from "lucide-react";
+import { ChevronDown, Download, Pin, PinOff, Reply } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { memo, useRef } from "react";
 
@@ -15,9 +15,12 @@ interface MessageActionsMenuProps {
   messageTimestamp: string;
   isOutbound: boolean;
   hasDownloadableMedia?: boolean;
+  isPinned?: boolean;
   onDelete?: (messageId: string) => void;
   onDownload?: (messageId: string) => void;
   onReply?: (messageId: string) => void;
+  onPin?: (messageId: string) => void;
+  onUnpin?: (messageId: string) => void;
 }
 
 export const MessageActionsMenu = memo(function MessageActionsMenu({
@@ -25,9 +28,12 @@ export const MessageActionsMenu = memo(function MessageActionsMenu({
   messageTimestamp,
   isOutbound,
   hasDownloadableMedia,
+  isPinned = false,
   onDelete,
   onDownload,
   onReply,
+  onPin,
+  onUnpin,
 }: MessageActionsMenuProps) {
   const t = useTranslations("chats");
   // Track if reply was clicked to prevent focus return to trigger
@@ -63,6 +69,20 @@ export const MessageActionsMenu = memo(function MessageActionsMenu({
             {t("replyMessage")}
           </DropdownMenuItem>
         )}
+        {/* Pin/Unpin option */}
+        {isPinned
+          ? onUnpin && (
+              <DropdownMenuItem onClick={() => onUnpin(messageId)}>
+                <PinOff className="h-4 w-4 mr-2" />
+                {t("unpinMessage")}
+              </DropdownMenuItem>
+            )
+          : onPin && (
+              <DropdownMenuItem onClick={() => onPin(messageId)}>
+                <Pin className="h-4 w-4 mr-2" />
+                {t("pinMessage")}
+              </DropdownMenuItem>
+            )}
         {hasDownloadableMedia && onDownload && (
           <DropdownMenuItem onClick={() => onDownload(messageId)}>
             <Download className="h-4 w-4 mr-2" />

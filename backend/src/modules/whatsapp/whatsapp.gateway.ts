@@ -381,6 +381,34 @@ export class WhatsAppGateway
   }
 
   /**
+   * Emit customer reaction event to all connected clients
+   * Called when a WhatsApp customer reacts to a message
+   *
+   * @param data - The customer reaction data
+   */
+  emitCustomerReaction(data: {
+    chatId: string;
+    messageId: string;
+    emoji: string | null;
+    senderPhone: string;
+    action: 'added' | 'removed';
+  }): void {
+    if (this.connectedClients.size === 0) {
+      return; // No clients connected
+    }
+
+    console.log(
+      `📡 Emitting customer-reaction for message ${data.messageId} (${data.action}: ${data.emoji || 'removed'}) to ${this.connectedClients.size} clients`,
+    );
+
+    // Emit to all connected clients
+    this.server.emit('customer-reaction', {
+      ...data,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /**
    * Get number of connected clients (for monitoring)
    */
   getConnectedClientsCount(): number {

@@ -1,4 +1,5 @@
 import { NotesModule } from '@modules/notes/notes.module';
+import { PinsModule } from '@modules/pins/pins.module';
 import { ReactionsModule } from '@modules/reactions/reactions.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
@@ -37,6 +38,7 @@ import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
     MessagingModule,
     NotesModule,
     ReactionsModule,
+    PinsModule,
     ChatsModule,
     AutomationModule,
     KanbanModule,

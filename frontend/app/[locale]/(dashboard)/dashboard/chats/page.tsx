@@ -43,6 +43,9 @@ import {
   MessageInputArea,
   MessageSearchPanel,
   MessagesList,
+  PinDurationModal,
+  PinnedMessagesSection,
+  PinReplaceModal,
   TemplatesPanel,
 } from "./components";
 import {
@@ -53,9 +56,11 @@ import {
   useMediaHandlers,
   useMessageHandlers,
   useMessageSearch,
+  usePins,
   useReactions,
 } from "./hooks";
 import type { Chat, Template } from "./types";
+import { PinDuration } from "./types";
 import { calculateConversationWindow, groupMessages } from "./utils";
 
 export default function ChatsPage() {
@@ -228,7 +233,21 @@ export default function ChatsPage() {
     currentUserId: currentUserId || undefined,
     currentUserName,
     enabled: !!currentUserId,
+    chatId: chatState.selectedChatId || undefined,
   });
+
+  // Pins hook - manages pinned messages state, WebSocket updates, and API calls
+  const pins = usePins({
+    chatId: chatState.selectedChatId,
+    enabled: !!chatState.selectedChatId,
+  });
+
+  // Pin modal state
+  const [pinDurationModalOpen, setPinDurationModalOpen] = useState(false);
+  const [pinReplaceModalOpen, setPinReplaceModalOpen] = useState(false);
+  const [pendingPinMessageId, setPendingPinMessageId] = useState<string | null>(
+    null
+  );
 
   // Load reactions when messages change
   useEffect(() => {
@@ -328,6 +347,118 @@ export default function ChatsPage() {
       alert("Failed to delete note. Please try again.");
     }
   };
+
+  // Pin handlers
+  const handlePinMessage = useCallback(
+    (messageId: string) => {
+      // Check if already at pin limit (3)
+      if (pins.pinCount.count >= 3) {
+        // Show replace modal
+        setPendingPinMessageId(messageId);
+        setPinReplaceModalOpen(true);
+      } else {
+        // Show duration modal
+        setPendingPinMessageId(messageId);
+        setPinDurationModalOpen(true);
+      }
+    },
+    [pins.pinCount.count]
+  );
+
+  const handleUnpinMessage = useCallback(
+    async (messageId: string) => {
+      try {
+        await pins.unpinMessage(messageId);
+      } catch (error) {
+        console.error("Failed to unpin message:", error);
+        addNotification(t("unpinFailed"), "error");
+      }
+    },
+    [pins, addNotification, t]
+  );
+
+  const handlePinDurationSelect = useCallback(
+    async (duration: PinDuration) => {
+      if (!pendingPinMessageId) return;
+      try {
+        // Check if we need to replace an existing pin (when at limit)
+        if (pins.pinCount.count >= 3) {
+          const oldestPin = pins.pinnedMessages[0];
+          if (oldestPin) {
+            // First unpin the oldest message
+            await pins.unpinMessage(oldestPin.messageId);
+          }
+        }
+        // Pin the new message with selected duration
+        await pins.pinMessage(pendingPinMessageId, duration);
+        setPinDurationModalOpen(false);
+        setPendingPinMessageId(null);
+      } catch (error) {
+        console.error("Failed to pin message:", error);
+        addNotification(t("pinFailed"), "error");
+      }
+    },
+    [pendingPinMessageId, pins, addNotification, t]
+  );
+
+  const handlePinReplace = useCallback(() => {
+    // Close replace modal and show duration modal
+    // The actual replacement happens in handlePinDurationSelect
+    setPinReplaceModalOpen(false);
+    setPinDurationModalOpen(true);
+  }, []);
+
+  const handleNavigateToPinnedMessage = useCallback(
+    async (messageId: string) => {
+      // First try to scroll to message if it exists in current messages
+      const existingMessage = chatState.messages.find(
+        (m) => m.messageId === messageId
+      );
+      if (existingMessage) {
+        // Pass container ref and current messages for "is last" check
+        messageHandlers.handleScrollToMessage(
+          messageId,
+          chatState.messagesContainerRef,
+          chatState.messages
+        );
+        return;
+      }
+
+      // Message not in current view, need to fetch context
+      try {
+        const context = await pins.getMessageContext(messageId);
+        if (context && context.messages.length > 0) {
+          // Use navigateToPinnedContext to properly handle bidirectional scroll
+          // This REPLACES messages (not merges) for better performance
+          await chatState.navigateToPinnedContext(
+            messageId,
+            context.messages,
+            context.hasMoreBefore,
+            context.hasMoreAfter
+          );
+
+          // Wait for DOM to update with new messages before scrolling
+          // Triple RAF ensures: 1) React commits, 2) Browser layouts, 3) Safe to scroll
+          // Pass context.messages directly to avoid stale closure issues
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                messageHandlers.handleScrollToMessage(
+                  messageId,
+                  chatState.messagesContainerRef,
+                  context.messages // Pass the fresh context messages
+                );
+              });
+            });
+          });
+        }
+      } catch (error) {
+        console.error("Failed to navigate to pinned message:", error);
+        addNotification(t("navigationFailed"), "error");
+      }
+    },
+    [chatState, messageHandlers, pins, addNotification, t]
+  );
 
   // Archive chat handler
   const handleArchiveChat = useCallback(
@@ -696,6 +827,18 @@ export default function ChatsPage() {
               <div className="flex flex-1 overflow-hidden" ref={containerRef}>
                 {/* Messages Area */}
                 <div className="flex-1 flex flex-col overflow-hidden min-h-0 relative">
+                  {/* Pinned Messages Section */}
+                  {pins.pinnedMessages.length > 0 && (
+                    <PinnedMessagesSection
+                      pinnedMessages={pins.pinnedMessages}
+                      currentIndex={pins.currentPinIndex}
+                      onPinClick={handleNavigateToPinnedMessage}
+                      onUnpin={handleUnpinMessage}
+                      onGoToMessage={handleNavigateToPinnedMessage}
+                      onIndexChange={pins.setCurrentPinIndex}
+                    />
+                  )}
+
                   {/* Messages scroll container wrapper */}
                   <div className="relative flex-1 min-h-0 overflow-hidden">
                     {/* Show messages list - don't block on initial sync */}
@@ -734,21 +877,35 @@ export default function ChatsPage() {
                       handleVideoPlay={mediaHandlers.handleVideoPlay}
                       highlightedMessageId={messageSearch.highlightedMessageId}
                       reactionsMap={reactions.reactionsMap}
+                      customerReactionsMap={reactions.customerReactionsMap}
                       currentUserId={currentUserId || undefined}
                       handleReactionSelect={reactions.handleReactionSelect}
                       animatingReactionIds={reactions.animatingReactionIds}
+                      pinnedMessageIds={pins.pinnedMessageIds}
+                      handlePinMessage={handlePinMessage}
+                      handleUnpinMessage={handleUnpinMessage}
+                      conversationWindow={conversationWindow}
                     />
 
-                    {/* Scroll to Bottom Button */}
-                    {chatState.hasNewMessages && (
+                    {/* Scroll to Bottom Button - shows when viewing old messages or when there are new messages */}
+                    {(chatState.hasNewMessages || chatState.hasMoreAfter) && (
                       <div className="absolute bottom-4 right-4 z-20">
                         <Button
                           onClick={chatState.handleScrollToBottom}
                           size="sm"
                           className="rounded-full shadow-lg bg-primary hover:bg-primary/90"
-                          title="Scroll to latest message"
+                          title={
+                            chatState.hasMoreAfter
+                              ? t("returnToLatest")
+                              : "Scroll to latest message"
+                          }
                         >
                           <ArrowDown className="h-4 w-4" />
+                          {chatState.hasMoreAfter && (
+                            <span className="ml-1 text-xs">
+                              {t("returnToLatest")}
+                            </span>
+                          )}
                         </Button>
                       </div>
                     )}
@@ -998,6 +1155,27 @@ export default function ChatsPage() {
           setDeleteChatId(null);
           setDeleteChatName(undefined);
         }}
+      />
+
+      {/* Pin Duration Selection Modal */}
+      <PinDurationModal
+        isOpen={pinDurationModalOpen}
+        onClose={() => {
+          setPinDurationModalOpen(false);
+          setPendingPinMessageId(null);
+        }}
+        onConfirm={handlePinDurationSelect}
+      />
+
+      {/* Pin Replace Modal (when at 3 pin limit) */}
+      <PinReplaceModal
+        isOpen={pinReplaceModalOpen}
+        onClose={() => {
+          setPinReplaceModalOpen(false);
+          setPendingPinMessageId(null);
+        }}
+        onConfirm={handlePinReplace}
+        oldestPinMessage={pins.pinnedMessages[0]?.message?.text || null}
       />
     </div>
   );

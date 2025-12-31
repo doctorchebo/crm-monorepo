@@ -3,6 +3,7 @@
 import { backendApi } from "@/lib/api/endpoints";
 import { useCallback, useRef, useState } from "react";
 import type { Message, MessagesCacheEntry } from "../types";
+import { scrollContainerToAbsoluteBottom } from "./scroll-utils";
 
 interface UseMessageSearchReturn {
   // State
@@ -60,6 +61,94 @@ export function useMessageSearch(): UseMessageSearchReturn {
   }, []);
 
   /**
+   * Helper to scroll to a message element with proper alignment.
+   * For the last message, scrolls container to absolute bottom using shared utility.
+   * For other messages, centers them in the viewport.
+   */
+  const scrollToElement = useCallback(
+    (
+      element: HTMLDivElement,
+      messageId: string,
+      messagesContainerRef: React.RefObject<HTMLDivElement | null>,
+      allMessages: Message[]
+    ) => {
+      // Check if this is the last message
+      const isLastMessage =
+        allMessages.length > 0 &&
+        allMessages[allMessages.length - 1].messageId === messageId;
+
+      const container = messagesContainerRef?.current;
+
+      if (isLastMessage && container) {
+        // For the last message: scroll container to absolute bottom with retry
+        scrollContainerToAbsoluteBottom(container, true);
+      } else if (isLastMessage) {
+        // Fallback if no container ref
+        element.scrollIntoView({
+          behavior: "smooth",
+          block: "end",
+        });
+      } else {
+        // For other messages, center them in the viewport
+        element.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+        });
+      }
+
+      // Highlight the message
+      setHighlightedMessageId(messageId);
+
+      // Clear highlight after animation
+      highlightTimeoutRef.current = setTimeout(() => {
+        setHighlightedMessageId(null);
+      }, 2000);
+    },
+    []
+  );
+
+  /**
+   * Wait for an element to appear in the DOM using polling
+   * More reliable than setTimeout as it actually waits for the element
+   */
+  const waitForElement = useCallback(
+    (
+      messageId: string,
+      messageRefs: React.MutableRefObject<Map<string, HTMLDivElement>>,
+      maxAttempts = 50,
+      intervalMs = 20
+    ): Promise<HTMLDivElement | null> => {
+      return new Promise((resolve) => {
+        let attempts = 0;
+
+        const checkElement = () => {
+          const element = messageRefs.current.get(messageId);
+          if (element) {
+            resolve(element);
+            return;
+          }
+
+          attempts++;
+          if (attempts >= maxAttempts) {
+            console.warn(
+              "[useMessageSearch] Element not found after polling:",
+              messageId
+            );
+            resolve(null);
+            return;
+          }
+
+          requestAnimationFrame(checkElement);
+        };
+
+        // Start polling after a RAF to let React commit
+        requestAnimationFrame(checkElement);
+      });
+    },
+    []
+  );
+
+  /**
    * Scroll to a specific message by ID
    * If the message is not loaded, fetches the messages around it first
    */
@@ -86,19 +175,12 @@ export function useMessageSearch(): UseMessageSearchReturn {
         // Message is already loaded, scroll to it
         const messageElement = messageRefs.current.get(messageId);
         if (messageElement && messagesContainerRef.current) {
-          // Scroll the message into view
-          messageElement.scrollIntoView({
-            behavior: "smooth",
-            block: "center",
-          });
-
-          // Highlight the message
-          setHighlightedMessageId(messageId);
-
-          // Clear highlight after animation
-          highlightTimeoutRef.current = setTimeout(() => {
-            setHighlightedMessageId(null);
-          }, 2000);
+          scrollToElement(
+            messageElement,
+            messageId,
+            messagesContainerRef,
+            currentMessages
+          );
         }
         return;
       }
@@ -121,6 +203,8 @@ export function useMessageSearch(): UseMessageSearchReturn {
         // Only update if we're still on the same chat
         if (currentMessagesChatIdRef.current === chatId) {
           // Merge new messages with existing ones, avoiding duplicates
+          let mergedMessages: Message[] = [];
+
           setMessages((prev) => {
             const existingIds = new Set(prev.map((m) => m.messageId));
             const uniqueNewMessages = newMessages.filter(
@@ -128,13 +212,13 @@ export function useMessageSearch(): UseMessageSearchReturn {
             );
 
             // Combine and sort by timestamp
-            const combined = [...prev, ...uniqueNewMessages].sort(
+            mergedMessages = [...prev, ...uniqueNewMessages].sort(
               (a, b) =>
                 new Date(a.timestamp).getTime() -
                 new Date(b.timestamp).getTime()
             );
 
-            return combined;
+            return mergedMessages;
           });
 
           // Update cache
@@ -160,30 +244,23 @@ export function useMessageSearch(): UseMessageSearchReturn {
             });
           }
 
-          // Wait for DOM to update, then scroll to the message
-          setTimeout(() => {
-            const messageElement = messageRefs.current.get(messageId);
-            if (messageElement && messagesContainerRef.current) {
-              messageElement.scrollIntoView({
-                behavior: "smooth",
-                block: "center",
-              });
-
-              // Highlight the message
-              setHighlightedMessageId(messageId);
-
-              // Clear highlight after animation
-              highlightTimeoutRef.current = setTimeout(() => {
-                setHighlightedMessageId(null);
-              }, 2000);
-            }
-          }, 100);
+          // Wait for DOM to update using polling, then scroll
+          const element = await waitForElement(messageId, messageRefs);
+          if (element && messagesContainerRef.current) {
+            // Use the merged messages for the "is last" check
+            scrollToElement(
+              element,
+              messageId,
+              messagesContainerRef,
+              mergedMessages.length > 0 ? mergedMessages : newMessages
+            );
+          }
         }
       } catch (error) {
         console.error("Error scrolling to message:", error);
       }
     },
-    [clearHighlight]
+    [clearHighlight, scrollToElement, waitForElement]
   );
 
   return {

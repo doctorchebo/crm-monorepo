@@ -6,5 +6,7 @@ export { MessageBubble } from "./message-bubble";
 export { MessageInputArea } from "./message-input-area";
 export { MessageSearchPanel } from "./message-search-panel";
 export { MessagesList } from "./messages-list";
+export { PinDurationModal, PinReplaceModal } from "./pin-modals";
+export { PinnedMessagesSection } from "./pinned-messages-section";
 export { StickyDateHeader } from "./sticky-date-header";
 export { TemplatesPanel } from "./templates-panel";

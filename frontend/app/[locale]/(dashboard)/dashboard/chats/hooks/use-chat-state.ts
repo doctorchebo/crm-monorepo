@@ -1,11 +1,11 @@
 "use client";
 
-import { useChatNotifications } from "@/hooks/use-chat-notifications";
+import { NewChatEvent, useChatNotifications } from "@/hooks/use-chat-notifications";
 import { backendApi } from "@/lib/api/endpoints";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PAGE_SIZE } from "../constants";
 import type { Chat, Message, MessagesCacheEntry, Sender } from "../types";
-import { scrollDebug } from "./scroll-utils";
+import { scrollContainerToAbsoluteBottom, scrollDebug } from "./scroll-utils";
 import { useScrollPositionManager } from "./use-scroll-position-manager";
 import { useScrollToBottom } from "./use-scroll-to-bottom";
 
@@ -15,7 +15,9 @@ import { useScrollToBottom } from "./use-scroll-to-bottom";
  */
 interface PaginationState {
   hasMore: boolean;
+  hasMoreAfter: boolean; // For bidirectional scroll when in pinned context
   isLoading: boolean;
+  isLoadingNewer: boolean; // For loading newer messages
   cursor: number;
   chatId: string | null;
 }
@@ -46,8 +48,24 @@ interface UseChatStateReturn {
   // Infinite scroll
   hasMoreMessages: boolean;
   setHasMoreMessages: React.Dispatch<React.SetStateAction<boolean>>;
+  hasMoreAfter: boolean;
+  setHasMoreAfter: React.Dispatch<React.SetStateAction<boolean>>;
   isLoadingOlderMessages: boolean;
+  isLoadingNewerMessages: boolean;
   loadOlderMessages: () => Promise<void>;
+  loadNewerMessages: () => Promise<void>;
+
+  /**
+   * Navigate to a pinned message context.
+   * Replaces current messages with a window around the target message.
+   * Returns the message ID to scroll to after messages are loaded.
+   */
+  navigateToPinnedContext: (
+    messageId: string,
+    contextMessages: Message[],
+    hasMoreBefore: boolean,
+    hasMoreAfter: boolean
+  ) => Promise<void>;
 
   // Scroll management
   shouldAutoScroll: boolean;
@@ -90,7 +108,9 @@ export function useChatState(): UseChatStateReturn {
 
   // Infinite scroll state (React state for UI reactivity)
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const [hasMoreAfter, setHasMoreAfter] = useState(false); // For bidirectional scroll when viewing pinned context
   const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
+  const [isLoadingNewerMessages, setIsLoadingNewerMessages] = useState(false);
 
   /**
    * CRITICAL: Pagination state ref for synchronous access
@@ -107,7 +127,9 @@ export function useChatState(): UseChatStateReturn {
    */
   const paginationRef = useRef<PaginationState>({
     hasMore: true,
+    hasMoreAfter: false,
     isLoading: false,
+    isLoadingNewer: false,
     cursor: 0,
     chatId: null,
   });
@@ -472,9 +494,11 @@ export function useChatState(): UseChatStateReturn {
       // CRITICAL: Update pagination ref with new values
       // IMPORTANT: Ensure cursor is a number to prevent string concatenation bugs
       const nextCursor = Number(response.nextCursor) || 0;
-      const newPaginationState = {
+      const newPaginationState: PaginationState = {
         hasMore: response.hasMore,
+        hasMoreAfter: paginationRef.current.hasMoreAfter, // Preserve bidirectional state
         isLoading: false,
+        isLoadingNewer: paginationRef.current.isLoadingNewer, // Preserve loading state
         cursor: nextCursor,
         chatId: chatId,
       };
@@ -511,12 +535,320 @@ export function useChatState(): UseChatStateReturn {
     }
   }, []); // No dependencies - uses refs for all state
 
-  // Handle scroll to bottom button click
-  const handleScrollToBottom = useCallback(() => {
-    scrollHelperToBottom(true); // smooth scroll
+  /**
+   * Load newer messages for bidirectional infinite scroll.
+   * Used when user scrolls DOWN while viewing pinned message context.
+   * Only active when hasMoreAfter is true (i.e., not viewing the latest messages).
+   */
+  const loadNewerMessages = useCallback(async () => {
+    const currentState = paginationRef.current;
+    const {
+      chatId,
+      hasMoreAfter: hasMoreAfterRef,
+      isLoadingNewer,
+    } = currentState;
+
+    scrollDebug("[loadNewerMessages] Entry state:", {
+      chatId,
+      isLoadingNewer,
+      hasMoreAfter: hasMoreAfterRef,
+    });
+
+    // Guard: no chat selected
+    if (!chatId) {
+      scrollDebug("[loadNewerMessages] SKIP: No chat selected");
+      return;
+    }
+
+    // Guard: no more newer messages to load (use ref for synchronous check)
+    if (!hasMoreAfterRef) {
+      scrollDebug("[loadNewerMessages] SKIP: hasMoreAfter is false");
+      return;
+    }
+
+    // Guard: already loading (prevent concurrent requests)
+    if (isLoadingNewer) {
+      scrollDebug("[loadNewerMessages] SKIP: Already loading");
+      return;
+    }
+
+    const container = messagesContainerRef.current;
+    if (!container) {
+      scrollDebug("[loadNewerMessages] SKIP: No container ref");
+      return;
+    }
+
+    // CRITICAL: Set loading state in ref FIRST (synchronous)
+    paginationRef.current.isLoadingNewer = true;
+    setIsLoadingNewerMessages(true);
+
+    scrollDebug("[loadNewerMessages] STARTING fetch");
+
+    // Get the newest message's timestamp to fetch messages after it
+    const currentMessages =
+      messagesCacheRef.current.get(chatId)?.messages || [];
+    if (currentMessages.length === 0) {
+      scrollDebug("[loadNewerMessages] SKIP: No current messages");
+      paginationRef.current.isLoadingNewer = false;
+      setIsLoadingNewerMessages(false);
+      return;
+    }
+
+    // Find the newest message (last in array since sorted ascending by timestamp)
+    const newestMessage = currentMessages[currentMessages.length - 1];
+    const afterTimestamp = newestMessage.timestamp;
+
+    try {
+      const response = await backendApi.whatsapp.getNewerMessages(
+        chatId,
+        afterTimestamp,
+        PAGE_SIZE
+      );
+
+      // Race condition check: user may have switched chats during fetch
+      if (paginationRef.current.chatId !== chatId) {
+        scrollDebug("[loadNewerMessages] ABORT: Chat changed during fetch");
+        paginationRef.current.isLoadingNewer = false;
+        setIsLoadingNewerMessages(false);
+        return;
+      }
+
+      scrollDebug("[loadNewerMessages] RESPONSE received:", {
+        messageCount: response.messages?.length || 0,
+        hasMore: response.hasMore,
+      });
+
+      // Handle empty response
+      if (!response.messages || response.messages.length === 0) {
+        scrollDebug(
+          "[loadNewerMessages] COMPLETE: No more messages (empty response)"
+        );
+        paginationRef.current.hasMoreAfter = false;
+        paginationRef.current.isLoadingNewer = false;
+        setHasMoreAfter(false);
+        setIsLoadingNewerMessages(false);
+        return;
+      }
+
+      // Sort newer messages by timestamp (ascending for display)
+      const sortedNewerMessages = [...response.messages].sort(
+        (a, b) =>
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      );
+
+      // Update messages state with deduplication - append to end
+      setMessages((prevMessages) => {
+        const existingIds = new Set(prevMessages.map((m) => m.messageId));
+        const newMessages = sortedNewerMessages.filter(
+          (m) => !existingIds.has(m.messageId)
+        );
+        const combined = [...prevMessages, ...newMessages];
+
+        // Update cache with new state
+        messagesCacheRef.current.set(chatId, {
+          messages: combined,
+          hasMore: paginationRef.current.hasMore,
+          cursor: paginationRef.current.cursor,
+        });
+
+        scrollDebug("[loadNewerMessages] Messages updated:", {
+          prevCount: prevMessages.length,
+          newCount: newMessages.length,
+          combinedCount: combined.length,
+        });
+
+        return combined;
+      });
+
+      // Update pagination ref and React state
+      paginationRef.current.hasMoreAfter = response.hasMore;
+      paginationRef.current.isLoadingNewer = false;
+      setHasMoreAfter(response.hasMore);
+      setIsLoadingNewerMessages(false);
+
+      scrollDebug(
+        "[loadNewerMessages] COMPLETE - hasMoreAfter:",
+        response.hasMore
+      );
+    } catch (err) {
+      console.error("[loadNewerMessages] ERROR:", err);
+      paginationRef.current.isLoadingNewer = false;
+      setIsLoadingNewerMessages(false);
+    }
+  }, []); // No dependencies - uses refs for all state
+
+  /**
+   * Navigate to a pinned message context.
+   * REPLACES current messages with a window around the target message.
+   * This is critical for performance - don't keep thousands of messages in memory.
+   *
+   * @param messageId - The ID of the pinned message to navigate to
+   * @param contextMessages - Messages window from getMessageContext
+   * @param hasMoreBefore - Whether there are older messages to load
+   * @param hasMoreAfter - Whether there are newer messages to load
+   */
+  const navigateToPinnedContext = useCallback(
+    async (
+      messageId: string,
+      contextMessages: Message[],
+      contextHasMoreBefore: boolean,
+      contextHasMoreAfter: boolean
+    ) => {
+      const chatId = paginationRef.current.chatId;
+      if (!chatId) {
+        scrollDebug("[navigateToPinnedContext] SKIP: No chat selected");
+        return;
+      }
+
+      scrollDebug("[navigateToPinnedContext] Navigating to:", {
+        messageId,
+        contextMessageCount: contextMessages.length,
+        hasMoreBefore: contextHasMoreBefore,
+        hasMoreAfter: contextHasMoreAfter,
+      });
+
+      // Sort context messages by timestamp (ascending)
+      const sortedMessages = [...contextMessages].sort(
+        (a, b) =>
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      );
+
+      // CRITICAL: REPLACE messages, don't merge
+      // This prevents memory bloat when navigating to old pinned messages
+      setMessages(sortedMessages);
+
+      // Calculate cursor for older messages pagination
+      // The cursor should be the index position for offset-based pagination
+      // Since we're in the middle of the conversation, we need to track position
+      const oldestMessage = sortedMessages[0];
+      const newestMessage = sortedMessages[sortedMessages.length - 1];
+
+      // Update cache with the new window
+      // Note: We use a special cursor value to indicate we're in pinned context mode
+      messagesCacheRef.current.set(chatId, {
+        messages: sortedMessages,
+        hasMore: contextHasMoreBefore,
+        cursor: 0, // Will be recalculated if user loads older messages
+      });
+
+      // Update pagination ref with all fields including bidirectional scroll state
+      paginationRef.current = {
+        hasMore: contextHasMoreBefore,
+        hasMoreAfter: contextHasMoreAfter,
+        isLoading: false,
+        isLoadingNewer: false,
+        cursor: 0,
+        chatId: chatId,
+      };
+
+      // Update React state for UI
+      setHasMoreMessages(contextHasMoreBefore);
+      setHasMoreAfter(contextHasMoreAfter);
+
+      scrollDebug("[navigateToPinnedContext] State updated:", {
+        messageCount: sortedMessages.length,
+        hasMoreBefore: contextHasMoreBefore,
+        hasMoreAfter: contextHasMoreAfter,
+        oldestTimestamp: oldestMessage?.timestamp,
+        newestTimestamp: newestMessage?.timestamp,
+      });
+    },
+    []
+  );
+
+  /**
+   * Handle scroll to bottom button click.
+   * If viewing pinned message context (hasMoreAfter = true), this will
+   * refetch the latest messages to return to the normal view.
+   *
+   * Uses scrollContainerToAbsoluteBottom with retry mechanism to ensure
+   * the scroll completes even if content is still rendering.
+   */
+  const handleScrollToBottom = useCallback(async () => {
+    const chatId = paginationRef.current.chatId;
+    const hasMoreAfterRef = paginationRef.current.hasMoreAfter;
+
+    /**
+     * Scroll to absolute bottom with retry mechanism.
+     * Waits for DOM to update before initiating scroll.
+     */
+    const scrollToAbsoluteBottom = () => {
+      // Use triple RAF to ensure React has committed and browser has painted
+      // RAF1: React state flush, RAF2: Browser layout, RAF3: Safe to scroll
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            scrollContainerToAbsoluteBottom(
+              messagesContainerRef.current,
+              true // smooth
+            );
+          });
+        });
+      });
+    };
+
+    // If we're in pinned context mode (hasMoreAfter is true),
+    // we need to refetch the latest messages
+    if (hasMoreAfterRef && chatId) {
+      scrollDebug("[handleScrollToBottom] Returning to latest messages");
+
+      try {
+        // Fetch the latest messages (same as initial load)
+        const response = await backendApi.whatsapp.getChatMessages(
+          chatId,
+          0,
+          PAGE_SIZE
+        );
+
+        if (response.messages && response.messages.length > 0) {
+          // Sort messages ascending by timestamp
+          const sortedMessages = [...response.messages].sort(
+            (a, b) =>
+              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+          );
+
+          // Update state
+          setMessages(sortedMessages);
+          setHasMoreMessages(response.hasMore);
+          setHasMoreAfter(false); // No longer in pinned context mode
+
+          // Update cache
+          messagesCacheRef.current.set(chatId, {
+            messages: sortedMessages,
+            hasMore: response.hasMore,
+            cursor: Number(response.nextCursor) || 0,
+          });
+
+          // Update pagination ref with all fields
+          paginationRef.current = {
+            hasMore: response.hasMore,
+            hasMoreAfter: false,
+            isLoading: false,
+            isLoadingNewer: false,
+            cursor: Number(response.nextCursor) || 0,
+            chatId: chatId,
+          };
+          currentCursorRef.current = Number(response.nextCursor) || 0;
+
+          // Wait for DOM to update with new messages, then scroll with retry
+          scrollToAbsoluteBottom();
+        }
+      } catch (err) {
+        console.error(
+          "[handleScrollToBottom] Error fetching latest messages:",
+          err
+        );
+        // Even on error, try to scroll to current bottom
+        scrollContainerToAbsoluteBottom(messagesContainerRef.current, true);
+      }
+    } else {
+      // Not in pinned context mode - just scroll to bottom with retry mechanism
+      scrollContainerToAbsoluteBottom(messagesContainerRef.current, true);
+    }
+
     setHasNewMessages(false);
     setShouldAutoScroll(true);
-  }, [scrollHelperToBottom]);
+  }, []); // No dependencies - uses refs for all mutable values
 
   // Handle scroll position tracking and infinite scroll trigger
   useEffect(() => {
@@ -567,6 +899,17 @@ export function useChatState(): UseChatStateReturn {
         loadOlderMessages();
       }
 
+      // Bidirectional scroll: Check if user is near bottom and has more newer messages
+      // This only triggers when viewing pinned message context (hasMoreAfter is true)
+      const scrollHeight = messagesContainer.scrollHeight;
+      const clientHeight = messagesContainer.clientHeight;
+      const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+
+      if (distanceFromBottom < threshold && !isTransitioningRef.current) {
+        scrollDebug("[Scroll Handler] >>> TRIGGERING loadNewerMessages <<<");
+        loadNewerMessages();
+      }
+
       // Save scroll position via the centralized manager
       // The manager handles all the guards (transitioning, save enabled, etc.)
       if (selectedChatId) {
@@ -587,6 +930,7 @@ export function useChatState(): UseChatStateReturn {
   }, [
     selectedChatId,
     loadOlderMessages,
+    loadNewerMessages,
     scrollHelperIsAtBottom,
     scrollPositionManager,
   ]);
@@ -638,7 +982,9 @@ export function useChatState(): UseChatStateReturn {
         // Sync pagination ref with cached data
         paginationRef.current = {
           hasMore: cachedData.hasMore,
+          hasMoreAfter: false, // Reset when switching chats
           isLoading: false,
+          isLoadingNewer: false,
           cursor: cachedData.cursor,
           chatId: toChat,
         };
@@ -659,7 +1005,9 @@ export function useChatState(): UseChatStateReturn {
         // Reset pagination ref for fresh fetch
         paginationRef.current = {
           hasMore: true,
+          hasMoreAfter: false, // Reset when switching chats
           isLoading: false,
+          isLoadingNewer: false,
           cursor: 0,
           chatId: toChat,
         };
@@ -669,6 +1017,8 @@ export function useChatState(): UseChatStateReturn {
 
       // Common state updates for both paths
       setIsLoadingOlderMessages(false);
+      setIsLoadingNewerMessages(false);
+      setHasMoreAfter(false); // Reset bidirectional scroll state when switching chats
       isTransitioningRef.current = true;
       setIsScrollRestoring(true);
       previousChatIdRef.current = toChat;
@@ -1041,7 +1391,9 @@ export function useChatState(): UseChatStateReturn {
           // CRITICAL: Sync pagination ref with initial fetch
           paginationRef.current = {
             hasMore: response.hasMore,
+            hasMoreAfter: false, // Initial fetch always starts at latest messages
             isLoading: false,
+            isLoadingNewer: false,
             cursor: nextCursor,
             chatId: chatToLoad,
           };
@@ -1133,8 +1485,13 @@ export function useChatState(): UseChatStateReturn {
     setIsInitialLoad,
     hasMoreMessages,
     setHasMoreMessages,
+    hasMoreAfter,
+    setHasMoreAfter,
     isLoadingOlderMessages,
+    isLoadingNewerMessages,
     loadOlderMessages,
+    loadNewerMessages,
+    navigateToPinnedContext,
     shouldAutoScroll,
     setShouldAutoScroll,
     hasNewMessages,

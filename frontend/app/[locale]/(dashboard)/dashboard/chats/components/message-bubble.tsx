@@ -2,22 +2,27 @@
 
 /**
  * Message Bubble Component
- * A complete message bubble with reaction support
- * Handles inbound/outbound styling, actions menu, and reaction display/trigger
+ * A complete message bubble with unified reaction support
+ * Handles inbound/outbound styling, actions menu, and aggregated reaction display
  */
 
 import { AttachmentGallery } from "@/components/media/attachment-display";
 import { MessageActionsMenu } from "@/components/message-actions-menu";
 import { QuotedMessage } from "@/components/quoted-message";
 import {
-  MessageReactionDisplay,
+  ReactionsDetailsOverlay,
+  ReactionsSummary,
   ReactionTrigger,
+  toCrmReaction,
+  toCustomerReaction,
+  type UnifiedReaction,
 } from "@/components/reactions";
 import { MessageText } from "@/components/ui/message-text";
 import { WhatsAppStatusIcon } from "@/components/whatsapp-status-icon";
 import { Attachment } from "@/lib/media/types";
 import { cn } from "@/lib/utils";
-import { memo, useCallback, useRef, useState } from "react";
+import { Pin } from "lucide-react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import type { Chat, Message, MessageReaction } from "../types";
 
 interface MessageBubbleProps {
@@ -25,19 +30,39 @@ interface MessageBubbleProps {
   isOutbound: boolean;
   isDeleted: boolean;
   isHighlighted: boolean;
+  isPinned?: boolean;
   timeString: string;
   selectedChat: Chat | null;
   autoPlayGifs: boolean;
+  /** Current user's ID for identifying own reactions */
+  currentUserId?: number;
   /** Current user's reaction on this message */
   userReaction?: MessageReaction;
-  /** All reactions on this message */
+  /** Customer's reaction on this message (from WhatsApp user) */
+  customerReaction?: {
+    messageId: string;
+    emoji: string;
+    senderPhone: string;
+    timestamp?: string;
+  };
+  /** All CRM reactions on this message */
   reactions?: MessageReaction[];
   /** Whether reaction just changed (for animation) */
   reactionAnimating?: boolean;
+  /**
+   * Whether reactions are disabled (outside 24-hour window)
+   */
+  isReactionDisabled?: boolean;
+  /**
+   * Tooltip text explaining why reactions are disabled
+   */
+  reactionDisabledTooltip?: string;
   // Event handlers
   onReply?: (messageId: string) => void;
   onDelete?: (messageId: string) => void;
   onDownload?: (messageId: string) => void;
+  onPin?: (messageId: string) => void;
+  onUnpin?: (messageId: string) => void;
   onImageClick?: (
     messageId: string,
     attachments: Attachment[],
@@ -60,15 +85,22 @@ export const MessageBubble = memo(function MessageBubble({
   isOutbound,
   isDeleted,
   isHighlighted,
+  isPinned = false,
   timeString,
   selectedChat,
   autoPlayGifs,
+  currentUserId,
   userReaction,
+  customerReaction,
   reactions,
   reactionAnimating = false,
+  isReactionDisabled = false,
+  reactionDisabledTooltip,
   onReply,
   onDelete,
   onDownload,
+  onPin,
+  onUnpin,
   onImageClick,
   onShowDownloadMenu,
   onVideoPlay,
@@ -77,7 +109,35 @@ export const MessageBubble = memo(function MessageBubble({
   t,
 }: MessageBubbleProps) {
   const bubbleRef = useRef<HTMLDivElement>(null);
+  const reactionSummaryRef = useRef<HTMLDivElement>(null);
   const [isHovered, setIsHovered] = useState(false);
+  const [showReactionsOverlay, setShowReactionsOverlay] = useState(false);
+
+  // Convert all reactions to unified format
+  const unifiedReactions = useMemo((): UnifiedReaction[] => {
+    const result: UnifiedReaction[] = [];
+
+    // Add CRM user reactions
+    if (reactions && reactions.length > 0) {
+      for (const r of reactions) {
+        result.push(toCrmReaction(r));
+      }
+    }
+
+    // Add customer reaction
+    if (customerReaction) {
+      result.push(
+        toCustomerReaction(
+          customerReaction,
+          selectedChat?.participantName || "Customer"
+        )
+      );
+    }
+
+    return result;
+  }, [reactions, customerReaction, selectedChat?.participantName]);
+
+  const hasReactionsToDisplay = unifiedReactions.length > 0;
 
   const handleReactionSelect = useCallback(
     (emoji: string) => {
@@ -88,19 +148,28 @@ export const MessageBubble = memo(function MessageBubble({
     [message.messageId, onReactionSelect]
   );
 
-  const handleReactionClick = useCallback(() => {
-    // When clicking on existing reaction, allow changing it
-    // This is handled by opening the reaction trigger picker
+  const handleOpenReactionsOverlay = useCallback(() => {
+    setShowReactionsOverlay(true);
   }, []);
+
+  const handleCloseReactionsOverlay = useCallback(() => {
+    setShowReactionsOverlay(false);
+  }, []);
+
+  const handleRemoveReaction = useCallback(
+    (emoji: string) => {
+      // Removing a reaction is done by selecting the same emoji again
+      if (message.messageId && onReactionSelect) {
+        onReactionSelect(message.messageId, emoji);
+      }
+    },
+    [message.messageId, onReactionSelect]
+  );
 
   // Determine if message has downloadable media
   const hasDownloadableMedia = message.attachments?.some(
     (a) => a.type === "image" || a.type === "video" || a.type === "gif"
   );
-
-  // Get the first (and typically only) reaction to display
-  // In WhatsApp-style, we show the user's own reaction prominently
-  const displayReaction = userReaction || (reactions && reactions[0]);
 
   // Check if this is a single image/gif message (affects width)
   const isSingleMediaMessage =
@@ -119,10 +188,10 @@ export const MessageBubble = memo(function MessageBubble({
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      {/* Reaction trigger - positioned outside bubble on opposite side */}
-      {/* For outbound: trigger on LEFT (order-last with flex-row-reverse puts it left) */}
+      {/* Reaction trigger - only shown for INBOUND messages (customer messages) */}
+      {/* WhatsApp Cloud API only supports reactions on messages received from customers */}
       {/* For inbound: trigger on RIGHT (order-last with flex-row puts it right) */}
-      {!isDeleted && (
+      {!isDeleted && !isOutbound && (
         <div
           className={cn(
             "flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity duration-150",
@@ -133,6 +202,8 @@ export const MessageBubble = memo(function MessageBubble({
             isOutbound={isOutbound}
             onReactionSelect={handleReactionSelect}
             currentReaction={userReaction?.emoji}
+            disabled={isReactionDisabled}
+            disabledTooltip={reactionDisabledTooltip}
           />
         </div>
       )}
@@ -147,7 +218,7 @@ export const MessageBubble = memo(function MessageBubble({
           // Colors
           isOutbound ? "bg-primary text-primary-foreground" : "bg-muted",
           // Add margin at bottom if there's a reaction to make room for overflow
-          displayReaction && "mb-5"
+          hasReactionsToDisplay && "mb-5"
         )}
       >
         {/* Actions menu - positioned in top-right corner */}
@@ -158,6 +229,7 @@ export const MessageBubble = memo(function MessageBubble({
               messageTimestamp={message.timestamp}
               isOutbound={isOutbound}
               hasDownloadableMedia={hasDownloadableMedia}
+              isPinned={isPinned}
               onReply={onReply ? () => onReply(message.messageId) : undefined}
               onDelete={
                 isOutbound && onDelete
@@ -167,6 +239,8 @@ export const MessageBubble = memo(function MessageBubble({
               onDownload={
                 onDownload ? () => onDownload(message.messageId) : undefined
               }
+              onPin={onPin ? () => onPin(message.messageId) : undefined}
+              onUnpin={onUnpin ? () => onUnpin(message.messageId) : undefined}
             />
           </div>
         )}
@@ -255,7 +329,9 @@ export const MessageBubble = memo(function MessageBubble({
             isOutbound ? "text-primary-foreground/70" : "text-muted-foreground"
           )}
         >
-          <span>
+          <span className="flex items-center gap-1">
+            {/* Pin icon shown on pinned messages */}
+            {isPinned && <Pin className="h-3 w-3 inline-block" />}
             {timeString}
             {message.editedAt && (
               <span className="ml-1 opacity-60">({t("messageEdited")})</span>
@@ -271,17 +347,36 @@ export const MessageBubble = memo(function MessageBubble({
           )}
         </div>
 
-        {/* Reaction display - positioned at bottom corner */}
-        {displayReaction && (
-          <MessageReactionDisplay
-            emoji={displayReaction.emoji}
-            isOutbound={isOutbound}
-            userName={displayReaction.userName}
-            onClick={handleReactionClick}
-            isOwnReaction={displayReaction.userId === userReaction?.userId}
-            animate={reactionAnimating}
-          />
+        {/* Reaction display - unified reactions summary */}
+        {hasReactionsToDisplay && (
+          <div
+            ref={reactionSummaryRef}
+            className={cn(
+              "absolute -bottom-4",
+              // Position based on message direction
+              isOutbound ? "-right-1" : "-left-1"
+            )}
+          >
+            <ReactionsSummary
+              reactions={unifiedReactions}
+              isOutbound={isOutbound}
+              animate={reactionAnimating}
+              onClick={handleOpenReactionsOverlay}
+            />
+          </div>
         )}
+
+        {/* Reactions details overlay */}
+        <ReactionsDetailsOverlay
+          reactions={unifiedReactions}
+          currentUserId={currentUserId}
+          customerName={selectedChat?.participantName || "Customer"}
+          isOpen={showReactionsOverlay}
+          onClose={handleCloseReactionsOverlay}
+          onRemoveReaction={handleRemoveReaction}
+          anchorRef={reactionSummaryRef as React.RefObject<HTMLElement>}
+          isOutbound={isOutbound}
+        />
       </div>
     </div>
   );

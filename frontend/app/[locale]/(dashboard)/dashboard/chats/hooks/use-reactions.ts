@@ -33,6 +33,19 @@ interface ReactionRemovedEvent {
   timestamp: string;
 }
 
+/**
+ * Event for customer reactions (from WhatsApp user)
+ * These are different from CRM user reactions
+ */
+interface CustomerReactionEvent {
+  chatId: string;
+  messageId: string;
+  emoji: string | null;
+  senderPhone: string;
+  action: "added" | "removed";
+  timestamp: string;
+}
+
 type ReactionsMap = Record<string, MessageReaction[]>;
 
 interface UseReactionsOptions {
@@ -42,17 +55,39 @@ interface UseReactionsOptions {
   currentUserName?: string;
   /** Whether the hook is enabled */
   enabled?: boolean;
+  /** Current chat ID (for filtering customer reactions) */
+  chatId?: string;
 }
+
+/**
+ * Customer reaction representation (from WhatsApp users)
+ * Distinguished from CRM user reactions by having senderPhone instead of userId
+ */
+interface CustomerReaction {
+  messageId: string;
+  emoji: string;
+  senderPhone: string;
+  timestamp: string;
+}
+
+/**
+ * Map of message ID to customer reactions (from WhatsApp users)
+ */
+type CustomerReactionsMap = Record<string, CustomerReaction | null>;
 
 interface UseReactionsReturn {
   /** Map of message ID to reactions */
   reactionsMap: ReactionsMap;
+  /** Map of message ID to customer reaction (from WhatsApp user) */
+  customerReactionsMap: CustomerReactionsMap;
   /** Set of message IDs currently animating */
   animatingReactionIds: Set<string>;
   /** Handle reaction selection (add/update/remove) */
   handleReactionSelect: (messageId: string, emoji: string) => Promise<void>;
   /** Load reactions for given messages */
   loadReactionsForMessages: (messageIds: string[]) => Promise<void>;
+  /** Load customer reactions for a chat */
+  loadCustomerReactionsForChat: (chatId: string) => Promise<void>;
   /** Whether the socket is connected */
   isConnected: boolean;
   /** Clear all reactions (on chat change) */
@@ -65,10 +100,12 @@ interface UseReactionsReturn {
 export function useReactions(
   options: UseReactionsOptions = {}
 ): UseReactionsReturn {
-  const { currentUserId, currentUserName, enabled = true } = options;
+  const { currentUserId, currentUserName, enabled = true, chatId } = options;
 
   const socketRef = useRef<Socket | null>(null);
   const [reactionsMap, setReactionsMap] = useState<ReactionsMap>({});
+  const [customerReactionsMap, setCustomerReactionsMap] =
+    useState<CustomerReactionsMap>({});
   const [animatingReactionIds, setAnimatingReactionIds] = useState<Set<string>>(
     new Set()
   );
@@ -76,6 +113,20 @@ export function useReactions(
 
   // Track loaded message IDs to avoid re-fetching
   const loadedMessageIdsRef = useRef<Set<string>>(new Set());
+
+  // Use refs for values that change but shouldn't cause socket reconnection
+  // This prevents stale closures in socket event handlers
+  const chatIdRef = useRef<string | undefined>(chatId);
+  const currentUserIdRef = useRef<number | undefined>(currentUserId);
+
+  // Keep refs in sync with props
+  useEffect(() => {
+    chatIdRef.current = chatId;
+  }, [chatId]);
+
+  useEffect(() => {
+    currentUserIdRef.current = currentUserId;
+  }, [currentUserId]);
 
   // Connect to WebSocket for real-time updates
   useEffect(() => {
@@ -111,7 +162,8 @@ export function useReactions(
       console.log("[useReactions] Reaction added:", event);
 
       // Skip if this is our own reaction (we already applied optimistically)
-      if (event.userId === currentUserId) {
+      // Use ref to get current value to avoid stale closure
+      if (event.userId === currentUserIdRef.current) {
         return;
       }
 
@@ -162,7 +214,8 @@ export function useReactions(
       console.log("[useReactions] Reaction removed:", event);
 
       // Skip if this is our own reaction (we already applied optimistically)
-      if (event.userId === currentUserId) {
+      // Use ref to get current value to avoid stale closure
+      if (event.userId === currentUserIdRef.current) {
         return;
       }
 
@@ -178,11 +231,47 @@ export function useReactions(
       });
     });
 
+    // Handle customer reaction (from WhatsApp user)
+    // These are different from CRM user reactions - they come from the contact
+    socket.on("customer-reaction", (event: CustomerReactionEvent) => {
+      // Use ref to get current chatId to avoid stale closure
+      const currentChatId = chatIdRef.current;
+
+      // Only process reactions for the current chat
+      // Use ref value to get the current chatId (not stale closure)
+      if (currentChatId && event.chatId !== currentChatId) {
+        return;
+      }
+
+      if (event.action === "removed" || !event.emoji) {
+        // Customer removed their reaction
+        setCustomerReactionsMap((prev) => ({
+          ...prev,
+          [event.messageId]: null,
+        }));
+      } else {
+        // Customer added/updated their reaction
+        // At this point, event.emoji is guaranteed to be non-null
+        const emoji = event.emoji;
+        setCustomerReactionsMap((prev) => ({
+          ...prev,
+          [event.messageId]: {
+            messageId: event.messageId,
+            emoji,
+            senderPhone: event.senderPhone,
+            timestamp: event.timestamp,
+          },
+        }));
+
+        // Trigger animation
+        triggerAnimation(event.messageId);
+      }
+    });
+
     return () => {
-      console.log("[useReactions] Cleaning up...");
       socket.disconnect();
     };
-  }, [enabled, currentUserId]);
+  }, [enabled]); // Only depend on enabled - use refs for other values to avoid stale closures
 
   /**
    * Trigger pop animation for a message's reaction
@@ -352,18 +441,63 @@ export function useReactions(
   );
 
   /**
+   * Load customer reactions for a chat
+   * Called when chat is opened or switched
+   */
+  const loadCustomerReactionsForChat = useCallback(
+    async (targetChatId: string) => {
+      try {
+        const customerReactionsList =
+          await backendApi.reactions.getCustomerReactionsForChat(targetChatId);
+
+        // Convert array to map by messageId
+        setCustomerReactionsMap((prev) => {
+          const updated = { ...prev };
+          for (const reaction of customerReactionsList) {
+            if (reaction.emoji) {
+              updated[reaction.messageId] = {
+                messageId: reaction.messageId,
+                emoji: reaction.emoji,
+                senderPhone: reaction.senderPhone,
+                timestamp: reaction.updatedAt || new Date().toISOString(),
+              };
+            }
+          }
+          return updated;
+        });
+      } catch (error) {
+        console.error(
+          "[useReactions] Failed to load customer reactions:",
+          error
+        );
+      }
+    },
+    []
+  );
+
+  // Load customer reactions when chat changes
+  useEffect(() => {
+    if (chatId) {
+      loadCustomerReactionsForChat(chatId);
+    }
+  }, [chatId, loadCustomerReactionsForChat]);
+
+  /**
    * Clear all reactions (e.g., when switching chats)
    */
   const clearReactions = useCallback(() => {
     setReactionsMap({});
+    setCustomerReactionsMap({});
     loadedMessageIdsRef.current.clear();
   }, []);
 
   return {
     reactionsMap,
+    customerReactionsMap,
     animatingReactionIds,
     handleReactionSelect,
     loadReactionsForMessages,
+    loadCustomerReactionsForChat,
     isConnected,
     clearReactions,
   };
