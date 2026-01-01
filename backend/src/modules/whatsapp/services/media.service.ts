@@ -954,7 +954,7 @@ export class MediaService {
           // Emit socket event so frontend can update cached message
           try {
             const { whatsAppGatewayInstance } =
-              await import('../whatsapp.gateway');
+              await import('../whatsapp.gateway.js');
             if (whatsAppGatewayInstance) {
               whatsAppGatewayInstance.emitAttachmentUpdated({
                 messageId,

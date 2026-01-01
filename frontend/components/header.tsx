@@ -1,114 +1,19 @@
 "use client";
 
-import { signOut } from "@/app/[locale]/(login)/actions";
-import { logoutClient } from "@/app/[locale]/(login)/logout";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { User } from "@/lib/db/schema";
-import { CircleIcon, Home, LogOut } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { UserMenu } from "@/components/user-menu";
+import { CircleIcon } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Suspense } from "react";
-import useSWR from "swr";
 
-const fetcher = async (url: string) => {
-  const res = await fetch(url);
-  if (res.status === 401) {
-    return null;
-  }
-  if (!res.ok) {
-    throw new Error("Failed to fetch");
-  }
-  return res.json();
-};
-
-function UserMenu() {
-  const { data: user, mutate: mutateUser } = useSWR<User | null>(
-    "/api/user",
-    fetcher,
-    {
-      revalidateOnFocus: true,
-      revalidateOnReconnect: true,
-    }
-  );
-  const t = useTranslations("header");
-  const router = useRouter();
-
-  async function handleSignOut() {
-    try {
-      await signOut();
-      // Clean up JWT token from client-side cookies
-      logoutClient();
-      // Clear the user data immediately
-      await mutateUser(undefined, false);
-    } catch (error) {
-      console.error("Sign out error:", error);
-    } finally {
-      // Redirect after a short delay to ensure UI updates
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      router.push("/");
-    }
-  }
-
-  if (!user) {
-    return (
-      <>
-        <Link
-          href="/pricing"
-          className="text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
-        >
-          {t("pricing")}
-        </Link>
-        <Button asChild className="rounded-full">
-          <Link href="/sign-up">{t("signUp")}</Link>
-        </Button>
-      </>
-    );
-  }
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Avatar className="cursor-pointer size-9">
-          <AvatarImage alt={user.name || ""} />
-          <AvatarFallback>
-            {user && user.email
-              ? user.email
-                  .split(" ")
-                  .map((n) => n[0])
-                  .join("")
-              : "U"}
-          </AvatarFallback>
-        </Avatar>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="flex flex-col gap-1">
-        <DropdownMenuItem className="cursor-pointer">
-          <Link href="/dashboard" className="flex w-full items-center">
-            <Home className="mr-2 h-4 w-4" />
-            <span>Dashboard</span>
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={handleSignOut}
-          className="cursor-pointer w-full"
-        >
-          <LogOut className="mr-2 h-4 w-4" />
-          <span>Sign out</span>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
+/**
+ * Header component for the landing page.
+ * Includes branding, theme toggle, language switcher, and user menu.
+ *
+ * Uses the shared UserMenu component which handles authentication state
+ * via JWT tokens from the backend.
+ */
 export function Header() {
   return (
     <header className="border-b border-gray-200 dark:border-gray-800">
@@ -122,7 +27,7 @@ export function Header() {
         <div className="flex items-center space-x-2">
           <ThemeToggle />
           <LanguageSwitcher />
-          <Suspense fallback={<div className="h-9" />}>
+          <Suspense fallback={<div className="h-9 w-9" />}>
             <UserMenu />
           </Suspense>
         </div>

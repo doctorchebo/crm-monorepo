@@ -54,12 +54,10 @@ export class ContactsController {
     @Req() req: any,
     @Query('skip') skip: number = 0,
     @Query('take') take: number = 50,
-    @Query('phoneNumberId') phoneNumberId?: string,
   ) {
     const userId = req.user?.userId;
     this.logger.log(`Get all contacts for user ${userId}`);
-    const phoneNumId = phoneNumberId ? parseInt(phoneNumberId, 10) : undefined;
-    return this.contactsService.findAll(userId, skip, take, phoneNumId);
+    return this.contactsService.findAll(userId, skip, take);
   }
 
   /**

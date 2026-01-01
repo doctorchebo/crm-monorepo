@@ -8,7 +8,13 @@ import {
   messages,
   senders,
 } from '@database/schema';
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { MessageMemoryIntegration } from '@modules/ai-memory/services/message-memory-integration.service';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  Optional,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MetaCloudAPIConfigService } from '@shared/services/meta-cloud-api.config';
 import { S3Service } from '@shared/services/s3.service';
@@ -74,6 +80,7 @@ export class WhatsAppService {
     private audioConverterService: AudioConverterService,
     private s3Service: S3Service,
     private conversationWindowService: ConversationWindowService,
+    @Optional() private memoryIntegration: MessageMemoryIntegration,
   ) {
     this.metaAccessToken =
       this.configService.getOrThrow<string>('META_ACCESS_TOKEN');
@@ -1457,6 +1464,9 @@ export class WhatsAppService {
         status: 'delivered',
         timestamp: new Date(parseInt(message.timestamp) * 1000),
         waPhoneNumberId: businessPhone,
+        // AI memory context
+        userId: chat.userId ?? undefined,
+        senderId: senderId,
         replyToMessageId,
         replyPreview,
       });
@@ -1607,7 +1617,7 @@ export class WhatsAppService {
       );
 
       // Find the target message in our database
-      let targetMessage: { messageId: string; chatId: true } | undefined;
+      let targetMessage: { messageId: string; chatId: string } | undefined;
 
       // Strategy 1: Exact messageId match (unlikely due to wamid perspective differences)
       targetMessage = await db.query.messages.findFirst({
@@ -1656,7 +1666,7 @@ export class WhatsAppService {
           // Check messageId (for inbound messages stored with wamid)
           const msgUniqueId = this.extractWamidUniqueId(msg.messageId);
           if (msgUniqueId === targetUniqueId) {
-            targetMessage = { messageId: msg.messageId, chatId: true };
+            targetMessage = { messageId: msg.messageId, chatId: msg.chatId };
             this.logger.log(
               `[CustomerReaction] ✅ Found by unique ID match (messageId): ${msg.messageId}`,
             );
@@ -1668,7 +1678,7 @@ export class WhatsAppService {
             const mediaWamid = msg.mediaUrl.slice(3); // Remove 'wa:' prefix
             const mediaUniqueId = this.extractWamidUniqueId(mediaWamid);
             if (mediaUniqueId === targetUniqueId) {
-              targetMessage = { messageId: msg.messageId, chatId: true };
+              targetMessage = { messageId: msg.messageId, chatId: msg.chatId };
               this.logger.log(
                 `[CustomerReaction] ✅ Found by unique ID match (mediaUrl): ${msg.messageId}`,
               );
@@ -1998,6 +2008,26 @@ export class WhatsAppService {
       console.log(
         `💾 Outbound message stored with pending status: ${messageData.waMessageId}`,
       );
+
+      // Store message in AI memory for long-term context (non-blocking)
+      if (this.memoryIntegration && messageData.body) {
+        this.memoryIntegration
+          .storeMessage({
+            userId: messageData.userId!,
+            senderId: messageData.senderId,
+            chatId: messageData.chatId,
+            messageId: messageData.waMessageId,
+            content: messageData.body,
+            direction: 'outbound',
+            participantPhone: messageData.to,
+            timestamp: now,
+          })
+          .catch((err) => {
+            this.logger.warn(
+              `AI memory storage failed (outbound): ${err.message}`,
+            );
+          });
+      }
     } catch (error) {
       this.logger.error(`Error storing outbound message: ${error.message}`);
       // Don't throw - message already sent
@@ -2166,10 +2196,84 @@ export class WhatsAppService {
         }
       }
 
+      // Store message in AI memory for long-term context (non-blocking)
+      if (this.memoryIntegration && messageData.text) {
+        this.memoryIntegration
+          .storeMessage({
+            userId: messageData.userId!,
+            senderId: messageData.senderId,
+            chatId: messageData.chatId,
+            messageId: messageData.waMessageId,
+            content: messageData.text,
+            direction: 'inbound',
+            participantPhone: messageData.sender,
+            timestamp: messageData.timestamp,
+          })
+          .catch((err) => {
+            this.logger.warn(
+              `AI memory storage failed (inbound): ${err.message}`,
+            );
+          });
+      }
+
+      // Store media attachment in AI memory for document/image processing (non-blocking)
+      if (this.memoryIntegration && s3Key && messageData.mediaMetadata) {
+        const contentType = this.mapMediaTypeToContentType(
+          messageData.mediaMetadata.type,
+        );
+        if (contentType) {
+          this.memoryIntegration
+            .storeMediaAttachment({
+              userId: messageData.userId!,
+              senderId: messageData.senderId,
+              chatId: messageData.chatId,
+              messageId: messageData.waMessageId,
+              s3Key: s3Key,
+              mimeType:
+                messageData.mediaMetadata.mimeType ||
+                'application/octet-stream',
+              filename: messageData.mediaMetadata.filename,
+              fileSize: messageData.mediaMetadata.fileSize,
+              contentType: contentType,
+            })
+            .catch((err) => {
+              this.logger.warn(
+                `AI memory media storage failed: ${err.message}`,
+              );
+            });
+        }
+      }
+
       this.logger.debug('Inbound message stored', messageData.waMessageId);
     } catch (error) {
       this.logger.error(`Error storing inbound message: ${error.message}`);
       throw error;
+    }
+  }
+
+  /**
+   * Map WhatsApp media type to AI memory content type
+   * Returns null for types that shouldn't be processed by AI memory
+   * @private
+   */
+  private mapMediaTypeToContentType(
+    mediaType: string,
+  ): 'document' | 'image' | 'audio' | 'video' | null {
+    switch (mediaType) {
+      case 'document':
+        return 'document';
+      case 'image':
+        return 'image';
+      case 'audio':
+        return 'audio';
+      case 'video':
+        return 'video';
+      case 'gif':
+      case 'sticker':
+        // GIFs and stickers are not processed for AI memory
+        return null;
+      default:
+        return null;
     }
   }
 

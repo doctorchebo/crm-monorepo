@@ -50,10 +50,12 @@ export async function setSession(user: NewUser) {
     expires: expiresInOneDay.toISOString(),
   };
   const encryptedSession = await signToken(session);
+  const isProduction = process.env.NODE_ENV === "production";
   (await cookies()).set("session", encryptedSession, {
     expires: expiresInOneDay,
     httpOnly: true,
-    secure: true,
+    secure: isProduction,
     sameSite: "lax",
+    path: "/",
   });
 }

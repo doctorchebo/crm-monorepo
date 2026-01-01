@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ModuleRef } from '@nestjs/core';
 import { MetaCloudAPIConfigService } from '@shared/services/meta-cloud-api.config';
 import { S3Service } from '@shared/services/s3.service';
+import { AiMemoryModule } from '../ai-memory/ai-memory.module';
 import { ThumbnailQueueService } from '../thumbnail/thumbnail-queue.service';
 import { ThumbnailModule } from '../thumbnail/thumbnail.module';
 import { MediaController } from './controllers/media.controller';
@@ -40,7 +41,7 @@ import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
  * - AWS_S3_BUCKET_NAME: S3 bucket name for media storage
  */
 @Module({
-  imports: [ConfigModule, forwardRef(() => ThumbnailModule)],
+  imports: [ConfigModule, forwardRef(() => ThumbnailModule), AiMemoryModule],
   controllers: [WhatsAppController, WhatsAppWebhookController, MediaController],
   providers: [
     WhatsAppService,

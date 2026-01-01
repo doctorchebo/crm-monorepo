@@ -1,0 +1,30 @@
+-- Migration: Vector index configuration
+-- Description: Documentation for vector search optimization
+--
+-- IMPORTANT: pgvector indexes (HNSW and IVFFlat) have a 2000 dimension limit.
+-- Your embeddings use 3072 dimensions (text-embedding-3-large).
+--
+-- OPTIONS:
+--
+-- 1. Use without index (current approach)
+--    - Queries use sequential scan with exact results
+--    - Good for < 100k vectors
+--    - No configuration needed
+--
+-- 2. Switch to text-embedding-3-small (1536 dimensions)
+--    - Update AI_MEMORY_EMBEDDING_MODEL=text-embedding-3-small
+--    - Update AI_MEMORY_EMBEDDING_DIMENSIONS=1536
+--    - Re-embed existing content
+--    - Then indexes can be created
+--
+-- 3. Use dimensionality reduction (advanced)
+--    - OpenAI embeddings support native dimension reduction
+--    - Set dimensions parameter in API call to 2000
+--    - Update AI_MEMORY_EMBEDDING_DIMENSIONS=2000
+--
+-- For now, we're proceeding without indexes.
+-- Vector search will still work using exact nearest neighbor search.
+-- This is performant for datasets under 100k vectors.
+
+-- Placeholder to mark migration as complete
+SELECT 1;

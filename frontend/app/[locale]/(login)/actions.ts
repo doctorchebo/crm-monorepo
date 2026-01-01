@@ -189,6 +189,7 @@ export const signIn = validatedAction(signInSchema, async (data, formData) => {
     httpOnly: false, // Client needs to read this
     secure: isProduction,
     sameSite: "lax",
+    path: "/",
     expires: accessTokenExpiry,
   });
 
@@ -199,6 +200,7 @@ export const signIn = validatedAction(signInSchema, async (data, formData) => {
       httpOnly: false, // Client needs to read this
       secure: isProduction,
       sameSite: "lax",
+      path: "/",
       expires: refreshTokenExpiry,
     }
   );
@@ -329,8 +331,76 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
     role: userRole,
   };
 
-  // Get JWT token from backend
-  const jwtToken = await authenticateWithBackend(email, password);
+  // Get JWT tokens from backend
+  console.log("[SignUp] Authenticating with backend...");
+  const authResult = await authenticateWithBackend(email, password);
+
+  if (!authResult || !authResult.expiresAt) {
+    console.error("[SignUp] Backend auth failed:", authResult);
+    return {
+      error: "Failed to authenticate with backend",
+      email,
+      password,
+    };
+  }
+
+  console.log("[SignUp] Backend auth successful", {
+    hasAccessToken: !!authResult.access_token,
+    hasRefreshToken: !!authResult.refresh_token,
+    expiresAt: authResult.expiresAt,
+  });
+
+  // Set JWT cookies the same way as signIn
+  const isProduction = process.env.NODE_ENV === "production";
+  const cookieJar = await cookies();
+  const accessTokenExpiry = new Date(Date.now() + 60 * 60 * 1000);
+  const refreshTokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+  // Set the actual JWT tokens as HTTP-only cookies
+  if (authResult.access_token) {
+    cookieJar.set("jwt_token", authResult.access_token, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: "lax",
+      path: "/",
+      expires: accessTokenExpiry,
+    });
+    console.log("[SignUp] jwt_token cookie set");
+  }
+
+  if (authResult.refresh_token) {
+    cookieJar.set("jwt_refresh_token", authResult.refresh_token, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: "lax",
+      path: "/",
+      expires: refreshTokenExpiry,
+    });
+    console.log("[SignUp] jwt_refresh_token cookie set");
+  }
+
+  // Set tracking cookies for client-side expiration awareness
+  cookieJar.set("jwt_token_expires_at", accessTokenExpiry.toISOString(), {
+    httpOnly: false,
+    secure: isProduction,
+    sameSite: "lax",
+    path: "/",
+    expires: accessTokenExpiry,
+  });
+
+  cookieJar.set(
+    "jwt_refresh_token_expires_at",
+    refreshTokenExpiry.toISOString(),
+    {
+      httpOnly: false,
+      secure: isProduction,
+      sameSite: "lax",
+      path: "/",
+      expires: refreshTokenExpiry,
+    }
+  );
+
+  console.log("[SignUp] All JWT cookies set successfully");
 
   await Promise.all([
     db.insert(teamMembers).values(newTeamMember),
@@ -344,8 +414,8 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
     return createCheckoutSession({ team: createdTeam, priceId });
   }
 
-  // Return JWT token to client so it can be stored in cookies
-  return { jwtToken };
+  // Return expiration times to client so it can initialize TokenManager
+  return { expiresAt: authResult.expiresAt };
 });
 
 const updatePasswordSchema = z.object({

@@ -402,6 +402,9 @@ export interface NormalizedCloudAPIMessage {
   timestamp: Date;
   waPhoneNumberId?: string;
   conversationId?: string;
+  // AI memory context - used for storing message embeddings
+  userId?: number;
+  senderId?: number;
   // Reply context for inbound messages that are replies
   replyToMessageId?: string;
   replyPreview?: {

@@ -1,6 +1,7 @@
 import { relations } from 'drizzle-orm';
 import {
   boolean,
+  customType,
   index,
   integer,
   jsonb,
@@ -12,6 +13,30 @@ import {
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
+
+/**
+ * Custom pgvector type for storing vector embeddings
+ * Supports any dimension size
+ */
+const vector = customType<{
+  data: number[];
+  driverData: string;
+  config: { dimensions: number };
+}>({
+  dataType(config) {
+    return `vector(${config?.dimensions ?? 3072})`;
+  },
+  toDriver(value: number[]): string {
+    return `[${value.join(',')}]`;
+  },
+  fromDriver(value: string): number[] {
+    // Parse pgvector format: [1,2,3,...]
+    return value
+      .slice(1, -1)
+      .split(',')
+      .map((v) => parseFloat(v));
+  },
+});
 
 /**
  * Drizzle ORM Schema
@@ -711,3 +736,191 @@ export const customerReactions = pgTable(
 
 export type CustomerReaction = typeof customerReactions.$inferSelect;
 export type NewCustomerReaction = typeof customerReactions.$inferInsert;
+
+// ==================== AI Memory Tables ====================
+
+/**
+ * AI Memories table - stores vector embeddings using pgvector
+ * Links to existing chats and messages tables as source of truth
+ * Vector similarity search is performed directly in PostgreSQL
+ */
+export const aiMemories = pgTable(
+  'ai_memories',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    // References to source data
+    chatId: varchar('chat_id').notNull(),
+    messageId: varchar('message_id'), // Nullable if memory is derived from uploaded content
+    // Vector embedding stored directly in PostgreSQL using pgvector
+    embedding: vector('embedding', { dimensions: 3072 }),
+    // Legacy: pinecone_id kept for backward compatibility during migration
+    pineconeId: varchar('pinecone_id', { length: 255 }),
+    // Content used for embedding generation
+    content: text('content').notNull(),
+    contentHash: varchar('content_hash', { length: 64 }), // SHA-256 hash
+    // Metadata for filtering and context
+    metadata: jsonb('metadata').notNull().default({}),
+    // Embedding metadata
+    embeddingModel: varchar('embedding_model', { length: 100 })
+      .notNull()
+      .default('text-embedding-3-large'),
+    embeddingDimensions: integer('embedding_dimensions')
+      .notNull()
+      .default(3072),
+    // Timestamps
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (table) => ({
+    chatIdIndex: index('idx_ai_memories_chat_id').on(table.chatId),
+    messageIdIndex: index('idx_ai_memories_message_id').on(table.messageId),
+    contentHashIndex: index('idx_ai_memories_content_hash').on(
+      table.contentHash,
+    ),
+    createdAtIndex: index('idx_ai_memories_created_at').on(table.createdAt),
+    // Note: Vector index (HNSW) is created in migration SQL, not here
+    // as Drizzle doesn't natively support pgvector index types
+  }),
+);
+
+export type AiMemory = typeof aiMemories.$inferSelect;
+export type NewAiMemory = typeof aiMemories.$inferInsert;
+
+/**
+ * AI Uploaded Content table - stores embeddings for user-uploaded content
+ * Supports documents, images, audio, and video with extracted text content
+ * Vector similarity search is performed directly in PostgreSQL
+ */
+export const aiUploadedContent = pgTable(
+  'ai_uploaded_content',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    // Owner reference
+    userId: integer('user_id').notNull(),
+    // Optional chat context
+    chatId: varchar('chat_id'),
+    // Content type classification
+    type: varchar('type', { length: 50 }).notNull(), // 'document', 'image', 'audio', 'video'
+    // Original file information
+    fileName: varchar('file_name', { length: 500 }),
+    fileUrl: text('file_url'),
+    fileSize: integer('file_size'),
+    mimeType: varchar('mime_type', { length: 100 }),
+    // Vector embedding stored directly in PostgreSQL using pgvector
+    embedding: vector('embedding', { dimensions: 3072 }),
+    // Legacy: pinecone_id kept for backward compatibility during migration
+    pineconeId: varchar('pinecone_id', { length: 255 }),
+    // Extracted content for embedding
+    extractedContent: text('extracted_content').notNull(),
+    contentHash: varchar('content_hash', { length: 64 }),
+    // Processing metadata
+    metadata: jsonb('metadata').notNull().default({}),
+    // Embedding metadata
+    embeddingModel: varchar('embedding_model', { length: 100 })
+      .notNull()
+      .default('text-embedding-3-large'),
+    embeddingDimensions: integer('embedding_dimensions')
+      .notNull()
+      .default(3072),
+    // Status tracking
+    status: varchar('status', { length: 20 }).notNull().default('pending'),
+    errorMessage: text('error_message'),
+    // Timestamps
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (table) => ({
+    userIdIndex: index('idx_ai_uploaded_content_user_id').on(table.userId),
+    chatIdIndex: index('idx_ai_uploaded_content_chat_id').on(table.chatId),
+    typeIndex: index('idx_ai_uploaded_content_type').on(table.type),
+    statusIndex: index('idx_ai_uploaded_content_status').on(table.status),
+    // Note: Vector index (HNSW) is created in migration SQL, not here
+  }),
+);
+
+export type AiUploadedContent = typeof aiUploadedContent.$inferSelect;
+export type NewAiUploadedContent = typeof aiUploadedContent.$inferInsert;
+
+/**
+ * AI Memory Logs table - audit and tracking for all AI memory operations
+ * Used for debugging, billing, and monitoring
+ */
+export const aiMemoryLogs = pgTable(
+  'ai_memory_logs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    // Operation tracking
+    operation: varchar('operation', { length: 50 }).notNull(), // 'embed', 'store', 'retrieve', 'update', 'delete'
+    status: varchar('status', { length: 20 }).notNull(), // 'success', 'failed', 'partial'
+    // Context references
+    userId: integer('user_id'),
+    chatId: varchar('chat_id'),
+    memoryId: uuid('memory_id'),
+    uploadedContentId: uuid('uploaded_content_id'),
+    // Operation details
+    requestMetadata: jsonb('request_metadata').default({}),
+    responseMetadata: jsonb('response_metadata').default({}),
+    // Error tracking
+    errorCode: varchar('error_code', { length: 50 }),
+    errorMessage: text('error_message'),
+    errorStack: text('error_stack'),
+    // Performance metrics
+    latencyMs: integer('latency_ms'),
+    tokensUsed: integer('tokens_used'),
+    // Billing tracking
+    costUsd: varchar('cost_usd', { length: 20 }), // Store as string for precision
+    // Timestamp
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (table) => ({
+    operationIndex: index('idx_ai_memory_logs_operation').on(table.operation),
+    statusIndex: index('idx_ai_memory_logs_status').on(table.status),
+    userIdIndex: index('idx_ai_memory_logs_user_id').on(table.userId),
+    chatIdIndex: index('idx_ai_memory_logs_chat_id').on(table.chatId),
+    createdAtIndex: index('idx_ai_memory_logs_created_at').on(table.createdAt),
+  }),
+);
+
+export type AiMemoryLog = typeof aiMemoryLogs.$inferSelect;
+export type NewAiMemoryLog = typeof aiMemoryLogs.$inferInsert;
+
+// AI Memory Relations
+export const aiMemoriesRelations = relations(aiMemories, ({ one }) => ({
+  chat: one(chats, {
+    fields: [aiMemories.chatId],
+    references: [chats.chatId],
+  }),
+  message: one(messages, {
+    fields: [aiMemories.messageId],
+    references: [messages.messageId],
+  }),
+}));
+
+export const aiUploadedContentRelations = relations(
+  aiUploadedContent,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [aiUploadedContent.userId],
+      references: [users.id],
+    }),
+    chat: one(chats, {
+      fields: [aiUploadedContent.chatId],
+      references: [chats.chatId],
+    }),
+  }),
+);
+
+export const aiMemoryLogsRelations = relations(aiMemoryLogs, ({ one }) => ({
+  user: one(users, {
+    fields: [aiMemoryLogs.userId],
+    references: [users.id],
+  }),
+  memory: one(aiMemories, {
+    fields: [aiMemoryLogs.memoryId],
+    references: [aiMemories.id],
+  }),
+  uploadedContent: one(aiUploadedContent, {
+    fields: [aiMemoryLogs.uploadedContentId],
+    references: [aiUploadedContent.id],
+  }),
+}));

@@ -3,21 +3,28 @@
  * These functions work in the browser via document.cookie
  */
 
+const isProduction =
+  typeof window !== "undefined" && window.location.protocol === "https:";
+
 export function setCookie(
   name: string,
   value: string,
   expiresInSeconds: number = 3600
 ) {
   const expiresAt = new Date(Date.now() + expiresInSeconds * 1000);
-  const cookieString = [
+  const cookieParts = [
     `${encodeURIComponent(name)}=${encodeURIComponent(value)}`,
     `expires=${expiresAt.toUTCString()}`,
     `path=/`,
-    `secure`,
     `samesite=lax`,
-  ].join(";");
+  ];
 
-  document.cookie = cookieString;
+  // Only add secure flag in production (HTTPS)
+  if (isProduction) {
+    cookieParts.push("secure");
+  }
+
+  document.cookie = cookieParts.join(";");
 }
 
 export function getCookie(name: string): string | null {
