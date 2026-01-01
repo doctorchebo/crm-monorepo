@@ -26,6 +26,11 @@ export interface Chat {
   lastMessage?: string | null;
   lastMessageType?: string | null;
   lastMessageTime?: string | null;
+  // Last activity tracking for reactions
+  lastActivityType?: string | null; // 'message' or 'reaction'
+  lastReactionEmoji?: string | null;
+  lastReactionIsOwn?: boolean | null; // true = CRM user reacted, false = customer
+  lastReactedMessagePreview?: string | null;
   unreadCount: number;
   isActive: boolean;
   isArchived?: boolean;

@@ -76,6 +76,13 @@ export const chats = pgTable(
     lastMessage: text('last_message'), // Preview of last message
     lastMessageType: varchar('last_message_type'), // 'text', 'image', 'video', 'audio', 'gif', 'sticker', etc
     lastMessageTime: timestamp('last_message_time'),
+    // Last activity tracking - enables "Reacted 👍 to: <message>" previews in chat list
+    lastActivityType: varchar('last_activity_type', { length: 20 }).default(
+      'message',
+    ), // 'message' or 'reaction'
+    lastReactionEmoji: varchar('last_reaction_emoji', { length: 50 }), // Emoji when last activity was a reaction
+    lastReactionIsOwn: boolean('last_reaction_is_own').default(false), // true = CRM user reacted, false = customer
+    lastReactedMessagePreview: text('last_reacted_message_preview'), // Preview of the reacted-to message
     unreadCount: integer('unread_count').default(0).notNull(), // Count of unread inbound messages
     isActive: boolean('is_active').default(true),
     isArchived: boolean('is_archived').default(false), // Whether the chat is archived
@@ -86,6 +93,9 @@ export const chats = pgTable(
   (table) => ({
     chatIdUnique: unique().on(table.chatId),
     isArchivedIndex: index('idx_chats_is_archived').on(table.isArchived),
+    lastActivityTypeIndex: index('idx_chats_last_activity_type').on(
+      table.lastActivityType,
+    ),
   }),
 );
 

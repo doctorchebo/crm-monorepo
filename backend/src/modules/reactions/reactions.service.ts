@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import { and, eq, inArray } from 'drizzle-orm';
 import { ConversationWindowService } from '../whatsapp/services/conversation-window.service';
+import { whatsAppGatewayInstance } from '../whatsapp/whatsapp.gateway';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import {
   CreateReactionDto,
@@ -129,6 +130,113 @@ export class ReactionsService {
       .limit(1);
 
     return message[0]?.chatId ?? null;
+  }
+
+  /**
+   * Get the message text preview for displaying in chat list
+   * @param messageId - The message ID
+   * @returns Text preview or type-based placeholder
+   */
+  private async getMessagePreview(messageId: string): Promise<string> {
+    const message = await db
+      .select({
+        text: messages.text,
+        type: messages.type,
+      })
+      .from(messages)
+      .where(eq(messages.messageId, messageId))
+      .limit(1);
+
+    if (!message[0]) return '';
+
+    // Return text content if available
+    if (message[0].text?.trim()) {
+      // Truncate to reasonable preview length
+      const preview = message[0].text.trim();
+      return preview.length > 50 ? preview.substring(0, 50) + '...' : preview;
+    }
+
+    // Otherwise return type-based placeholder
+    switch (message[0].type) {
+      case 'image':
+        return '📷 Photo';
+      case 'video':
+        return '🎥 Video';
+      case 'audio':
+      case 'voice':
+        return '🎤 Voice message';
+      case 'document':
+        return '📄 Document';
+      case 'sticker':
+        return '🏷️ Sticker';
+      case 'gif':
+        return 'GIF';
+      default:
+        return 'Message';
+    }
+  }
+
+  /**
+   * Update chat's last activity to show a reaction in the chat list
+   *
+   * This updates the chat's preview to show:
+   * - "You reacted 👍 to: <message>" for CRM user reactions
+   * - "Reacted 👍 to: <message>" for customer reactions
+   *
+   * @param chatId - The chat ID
+   * @param messageId - The message that was reacted to
+   * @param emoji - The reaction emoji
+   * @param isOwnReaction - True if CRM user reacted, false if customer
+   */
+  async updateChatLastActivity(
+    chatId: string,
+    messageId: string,
+    emoji: string,
+    isOwnReaction: boolean,
+  ): Promise<void> {
+    try {
+      // Get the message preview for the reacted-to message
+      const messagePreview = await this.getMessagePreview(messageId);
+
+      // Update the chat's last activity
+      const [updatedChat] = await db
+        .update(chats)
+        .set({
+          lastActivityType: 'reaction',
+          lastReactionEmoji: emoji,
+          lastReactionIsOwn: isOwnReaction,
+          lastReactedMessagePreview: messagePreview,
+          lastMessageTime: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(chats.chatId, chatId))
+        .returning();
+
+      // Emit chat update via WebSocket for real-time UI updates
+      if (updatedChat && whatsAppGatewayInstance) {
+        whatsAppGatewayInstance.emitChatUpdate({
+          chatId,
+          unreadCount: updatedChat.unreadCount,
+          lastMessage: updatedChat.lastMessage || undefined,
+          lastMessageType: updatedChat.lastMessageType || undefined,
+          lastMessageTime: updatedChat.lastMessageTime || undefined,
+          lastActivityType: 'reaction',
+          lastReactionEmoji: emoji,
+          lastReactionIsOwn: isOwnReaction,
+          lastReactedMessagePreview: messagePreview,
+        });
+      }
+
+      this.logger.log(
+        `Updated chat ${chatId} last activity: ${isOwnReaction ? 'CRM' : 'Customer'} reacted ${emoji} to "${messagePreview}"`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error updating chat last activity: ${error.message}`,
+        error,
+      );
+      // Don't throw - not critical
+    }
   }
 
   /**
@@ -349,6 +457,19 @@ export class ReactionsService {
         `Failed to send reaction to WhatsApp: ${error.message}`,
       );
     });
+
+    // Update chat's last activity to show the reaction in chat list
+    // This is a CRM user reaction, so isOwnReaction = true
+    const chatId = await this.getChatIdForMessage(messageId);
+    if (chatId) {
+      this.updateChatLastActivity(chatId, messageId, emoji, true).catch(
+        (error) => {
+          this.logger.error(
+            `Failed to update chat last activity: ${error.message}`,
+          );
+        },
+      );
+    }
 
     // Emit WebSocket event for real-time updates
     if (reactionsGatewayInstance) {

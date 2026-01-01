@@ -244,7 +244,7 @@ export class WhatsAppGateway
 
   /**
    * Emit chat update event to all connected clients
-   * Called when chat metadata changes (unread count, last message, etc.)
+   * Called when chat metadata changes (unread count, last message, reactions, etc.)
    *
    * @param chatUpdate - The chat update data
    */
@@ -254,13 +254,18 @@ export class WhatsAppGateway
     lastMessage?: string;
     lastMessageType?: string;
     lastMessageTime?: Date;
+    // Last activity tracking for reactions
+    lastActivityType?: string;
+    lastReactionEmoji?: string | null;
+    lastReactionIsOwn?: boolean;
+    lastReactedMessagePreview?: string | null;
   }): void {
     if (this.connectedClients.size === 0) {
       return; // No clients connected
     }
 
     console.log(
-      `📡 Emitting chat:update for ${chatUpdate.chatId} (unread: ${chatUpdate.unreadCount}, type: ${chatUpdate.lastMessageType || 'text'}) to ${this.connectedClients.size} clients`,
+      `📡 Emitting chat:update for ${chatUpdate.chatId} (unread: ${chatUpdate.unreadCount}, type: ${chatUpdate.lastMessageType || chatUpdate.lastActivityType || 'text'}) to ${this.connectedClients.size} clients`,
     );
 
     // Emit to all connected clients

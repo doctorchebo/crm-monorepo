@@ -1781,6 +1781,13 @@ export class WhatsAppService {
           'added',
         );
 
+        // Update chat's last activity to show the reaction in chat list
+        await this.updateChatLastActivityForReaction(
+          chatId,
+          internalMessageId,
+          emoji,
+        );
+
         this.logger.log(
           `[CustomerReaction] ✅ Saved reaction ${emoji} for message ${internalMessageId}`,
         );
@@ -2279,6 +2286,11 @@ export class WhatsAppService {
         lastMessage,
         lastMessageType: lastMessageType || 'text',
         lastMessageTime: new Date(),
+        // Reset to message activity (in case previous activity was a reaction)
+        lastActivityType: 'message',
+        lastReactionEmoji: null,
+        lastReactionIsOwn: false,
+        lastReactedMessagePreview: null,
         updatedAt: new Date(),
         // Auto-unarchive: any new message activity (inbound or outbound) restores the chat
         isArchived: false,
@@ -2304,6 +2316,10 @@ export class WhatsAppService {
           lastMessage: updatedChat.lastMessage || undefined,
           lastMessageType: updatedChat.lastMessageType || undefined,
           lastMessageTime: updatedChat.lastMessageTime || undefined,
+          lastActivityType: 'message',
+          lastReactionEmoji: null,
+          lastReactionIsOwn: false,
+          lastReactedMessagePreview: null,
         });
 
         // If the chat was archived, also emit the unarchive event
@@ -2313,6 +2329,102 @@ export class WhatsAppService {
       }
     } catch (error) {
       this.logger.error(`Error updating chat last message: ${error.message}`);
+      // Don't throw - not critical
+    }
+  }
+
+  /**
+   * Update chat's last activity to show a customer reaction in the chat list
+   * Shows: "Reacted 👍 to: <message>"
+   * @private
+   */
+  private async updateChatLastActivityForReaction(
+    chatId: string,
+    messageId: string,
+    emoji: string,
+  ): Promise<void> {
+    try {
+      // Get message preview for the reacted-to message
+      const message = await db
+        .select({
+          text: messages.text,
+          type: messages.type,
+        })
+        .from(messages)
+        .where(eq(messages.messageId, messageId))
+        .limit(1);
+
+      let messagePreview = '';
+      if (message[0]) {
+        if (message[0].text?.trim()) {
+          const text = message[0].text.trim();
+          messagePreview =
+            text.length > 50 ? text.substring(0, 50) + '...' : text;
+        } else {
+          // Type-based placeholder
+          switch (message[0].type) {
+            case 'image':
+              messagePreview = '📷 Photo';
+              break;
+            case 'video':
+              messagePreview = '🎥 Video';
+              break;
+            case 'audio':
+            case 'voice':
+              messagePreview = '🎤 Voice message';
+              break;
+            case 'document':
+              messagePreview = '📄 Document';
+              break;
+            case 'sticker':
+              messagePreview = '🏷️ Sticker';
+              break;
+            case 'gif':
+              messagePreview = 'GIF';
+              break;
+            default:
+              messagePreview = 'Message';
+          }
+        }
+      }
+
+      // Update the chat's last activity
+      const [updatedChat] = await db
+        .update(chats)
+        .set({
+          lastActivityType: 'reaction',
+          lastReactionEmoji: emoji,
+          lastReactionIsOwn: false, // Customer reaction, not CRM user
+          lastReactedMessagePreview: messagePreview,
+          lastMessageTime: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(chats.chatId, chatId))
+        .returning();
+
+      // Emit chat update via WebSocket for real-time UI updates
+      if (updatedChat && whatsAppGatewayInstance) {
+        whatsAppGatewayInstance.emitChatUpdate({
+          chatId,
+          unreadCount: updatedChat.unreadCount,
+          lastMessage: updatedChat.lastMessage || undefined,
+          lastMessageType: updatedChat.lastMessageType || undefined,
+          lastMessageTime: updatedChat.lastMessageTime || undefined,
+          lastActivityType: 'reaction',
+          lastReactionEmoji: emoji,
+          lastReactionIsOwn: false,
+          lastReactedMessagePreview: messagePreview,
+        });
+      }
+
+      this.logger.log(
+        `[CustomerReaction] Updated chat ${chatId} last activity: Customer reacted ${emoji} to "${messagePreview}"`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `[CustomerReaction] Error updating chat last activity: ${error.message}`,
+        error,
+      );
       // Don't throw - not critical
     }
   }

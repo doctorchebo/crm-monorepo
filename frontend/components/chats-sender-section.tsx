@@ -41,6 +41,11 @@ interface Chat {
   lastMessage?: string | null;
   lastMessageType?: string | null;
   lastMessageTime?: string | null;
+  // Last activity tracking for reactions
+  lastActivityType?: string | null; // 'message' or 'reaction'
+  lastReactionEmoji?: string | null;
+  lastReactionIsOwn?: boolean | null; // true = CRM user reacted, false = customer
+  lastReactedMessagePreview?: string | null;
   unreadCount?: number;
   isArchived?: boolean;
 }
@@ -222,6 +227,34 @@ function getMessageTypePreview(
   }
 }
 
+/**
+ * Get the chat preview display based on last activity
+ * Returns either a message preview or a reaction preview
+ */
+function getChatPreview(
+  chat: Chat,
+  t: ReturnType<typeof useTranslations>
+): { text: string; icon: React.ReactNode } {
+  // Check if last activity was a reaction
+  if (
+    chat.lastActivityType === "reaction" &&
+    chat.lastReactionEmoji &&
+    chat.lastReactedMessagePreview
+  ) {
+    const reactionPrefix = chat.lastReactionIsOwn
+      ? t("reactionPreview.youReacted", { emoji: chat.lastReactionEmoji })
+      : t("reactionPreview.theyReacted", { emoji: chat.lastReactionEmoji });
+
+    const previewText = `${reactionPrefix} "${chat.lastReactedMessagePreview}"`;
+    return { text: previewText, icon: null };
+  }
+
+  // Otherwise, show regular message preview
+  const icon = getMessageTypeIcon(chat.lastMessageType);
+  const text = getMessageTypePreview(chat.lastMessageType, chat.lastMessage, t);
+  return { text, icon };
+}
+
 function ChatListItem({
   chat,
   isSelected,
@@ -235,12 +268,9 @@ function ChatListItem({
   const [isHovered, setIsHovered] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const hasUnread = (chat.unreadCount || 0) > 0;
-  const icon = getMessageTypeIcon(chat.lastMessageType);
-  const previewText = getMessageTypePreview(
-    chat.lastMessageType,
-    chat.lastMessage,
-    t
-  );
+
+  // Get the appropriate preview based on last activity type
+  const { text: previewText, icon } = getChatPreview(chat, t);
 
   const showMenu = isHovered || isMenuOpen;
 

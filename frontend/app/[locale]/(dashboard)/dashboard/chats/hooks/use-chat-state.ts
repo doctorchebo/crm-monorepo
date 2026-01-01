@@ -1,6 +1,9 @@
 "use client";
 
-import { NewChatEvent, useChatNotifications } from "@/hooks/use-chat-notifications";
+import {
+  NewChatEvent,
+  useChatNotifications,
+} from "@/hooks/use-chat-notifications";
 import { backendApi } from "@/lib/api/endpoints";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PAGE_SIZE } from "../constants";
@@ -311,6 +314,26 @@ export function useChatState(): UseChatStateReturn {
             lastMessage: update.lastMessage || chat.lastMessage,
             lastMessageType: update.lastMessageType || chat.lastMessageType,
             lastMessageTime: update.lastMessageTime || chat.lastMessageTime,
+            // Reaction activity tracking fields
+            lastActivityType: update.lastActivityType ?? chat.lastActivityType,
+            lastReactionEmoji:
+              update.lastActivityType === "reaction"
+                ? update.lastReactionEmoji
+                : update.lastActivityType === "message"
+                ? null
+                : chat.lastReactionEmoji,
+            lastReactionIsOwn:
+              update.lastActivityType === "reaction"
+                ? update.lastReactionIsOwn
+                : update.lastActivityType === "message"
+                ? null
+                : chat.lastReactionIsOwn,
+            lastReactedMessagePreview:
+              update.lastActivityType === "reaction"
+                ? update.lastReactedMessagePreview
+                : update.lastActivityType === "message"
+                ? null
+                : chat.lastReactedMessagePreview,
           };
         }
         return chat;

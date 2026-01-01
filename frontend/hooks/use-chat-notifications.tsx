@@ -44,6 +44,11 @@ export interface ChatUpdateEvent {
   lastMessageType?: string;
   lastMessageTime?: string;
   participantName?: string;
+  // Last activity tracking for reactions
+  lastActivityType?: string;
+  lastReactionEmoji?: string | null;
+  lastReactionIsOwn?: boolean;
+  lastReactedMessagePreview?: string | null;
 }
 
 // Interface for new chat events from WebSocket (customer initiated conversation)

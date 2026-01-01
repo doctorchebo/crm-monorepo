@@ -167,7 +167,11 @@ export const ReactionsDetailsOverlay = memo(function ReactionsDetailsOverlay({
   isOutbound,
 }: ReactionsDetailsOverlayProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
-  const [position, setPosition] = useState({ top: 0, left: 0 });
+  const [position, setPosition] = useState<{
+    top: number;
+    left: number;
+  } | null>(null);
+  const [isPositionReady, setIsPositionReady] = useState(false);
   const [activeTab, setActiveTab] = useState<string>("all");
   const [isMounted, setIsMounted] = useState(false);
 
@@ -198,20 +202,28 @@ export const ReactionsDetailsOverlay = memo(function ReactionsDetailsOverlay({
     return () => setIsMounted(false);
   }, []);
 
+  // Reset position when overlay closes so it recalculates on next open
+  useEffect(() => {
+    if (!isOpen) {
+      setPosition(null);
+      setIsPositionReady(false);
+    }
+  }, [isOpen]);
+
   // Calculate position based on anchor element
   useLayoutEffect(() => {
-    if (!isOpen || !anchorRef.current || !overlayRef.current) return;
+    if (!isOpen || !anchorRef.current) return;
 
     const anchor = anchorRef.current;
-    const overlay = overlayRef.current;
     const anchorRect = anchor.getBoundingClientRect();
-    const overlayRect = overlay.getBoundingClientRect();
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
 
     const padding = 8;
     const overlayWidth = Math.min(280, viewportWidth - padding * 2);
-    const overlayHeight = overlayRect.height || 300;
+    // Use estimated height for initial calculation (overlay might not be mounted yet)
+    const overlayHeight =
+      overlayRef.current?.getBoundingClientRect().height || 300;
 
     // Calculate initial position (above the anchor, aligned based on message direction)
     let top = anchorRect.top - overlayHeight - padding;
@@ -236,6 +248,10 @@ export const ReactionsDetailsOverlay = memo(function ReactionsDetailsOverlay({
     }
 
     setPosition({ top, left });
+    // Mark position as ready in the next frame to ensure DOM has updated
+    requestAnimationFrame(() => {
+      setIsPositionReady(true);
+    });
   }, [isOpen, anchorRef, isOutbound]);
 
   // Handle click outside
@@ -286,6 +302,7 @@ export const ReactionsDetailsOverlay = memo(function ReactionsDetailsOverlay({
     [currentUserId, onRemoveReaction, onClose]
   );
 
+  // Don't render until mounted
   if (!isOpen || !isMounted) return null;
 
   const overlayContent = (
@@ -294,11 +311,15 @@ export const ReactionsDetailsOverlay = memo(function ReactionsDetailsOverlay({
       className={cn(
         "fixed z-50 w-[280px] max-h-[320px] overflow-hidden",
         "bg-popover border border-border rounded-xl shadow-lg",
-        "animate-in fade-in-0 zoom-in-95 duration-150"
+        // Only apply animation when position is ready to avoid animating from 0,0
+        isPositionReady && "animate-in fade-in-0 zoom-in-95 duration-150"
       )}
       style={{
-        top: position.top,
-        left: position.left,
+        top: position?.top ?? 0,
+        left: position?.left ?? 0,
+        // Hide until position is calculated to prevent flash at 0,0
+        visibility: isPositionReady ? "visible" : "hidden",
+        opacity: isPositionReady ? 1 : 0,
       }}
       role="dialog"
       aria-label="Reaction details"

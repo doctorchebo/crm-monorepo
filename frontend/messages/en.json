@@ -203,6 +203,10 @@
         "video": "Video",
         "voiceMessage": "Voice message",
         "document": "Document"
+      },
+      "reactionPreview": {
+        "youReacted": "You reacted {emoji} to:",
+        "theyReacted": "Reacted {emoji} to:"
       }
     }
   },
