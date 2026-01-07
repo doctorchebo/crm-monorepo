@@ -570,9 +570,15 @@ export default function ChatsPage() {
       chatState.setChats((prev) =>
         prev.filter((c) => c.chatId !== deleteChatId)
       );
-      // If this was the selected chat, deselect it
+      // Clear messages cache for deleted chat to free memory
+      if (chatState.messagesCacheRef.current.has(deleteChatId)) {
+        chatState.messagesCacheRef.current.delete(deleteChatId);
+      }
+      // If this was the selected chat, deselect it and clear messages
       if (chatState.selectedChatId === deleteChatId) {
         chatState.setSelectedChatId(null);
+        chatState.setMessages([]);
+        chatState.setMessageCount(0);
       }
       // Clear viewed archived chat if it was deleted
       if (viewedArchivedChat?.chatId === deleteChatId) {
@@ -958,14 +964,18 @@ export default function ChatsPage() {
                     onAddMoreMedia={mediaHandlers.handleAddMoreMedia}
                     onRemoveStagedFile={mediaHandlers.handleRemoveStagedFile}
                     onEditStagedImage={mediaHandlers.handleEditStagedImage}
-                    // Media preview
+                    // Media preview - enhanced version with all batch media items
                     previewModalOpen={mediaHandlers.previewModalOpen}
-                    previewAttachments={mediaHandlers.previewAttachments}
-                    previewMessageId={mediaHandlers.previewMessageId}
+                    previewMediaItems={mediaHandlers.previewMediaItems}
                     previewInitialIndex={mediaHandlers.previewInitialIndex}
                     onClosePreviewModal={() =>
                       mediaHandlers.setPreviewModalOpen(false)
                     }
+                    // Preview action handlers
+                    onPreviewGoToMessage={messageHandlers.handleScrollToMessage}
+                    onPreviewReply={messageHandlers.handleReplyById}
+                    onPreviewPin={handlePinMessage}
+                    onPreviewReact={reactions.handleReactionSelect}
                     // Download menu
                     downloadMenuOpen={mediaHandlers.downloadMenuOpen}
                     downloadMenuPosition={mediaHandlers.downloadMenuPosition}

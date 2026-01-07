@@ -1,5 +1,7 @@
 import {
   Activity,
+  BookOpen,
+  Bot,
   FileText,
   Home,
   LayoutGrid,
@@ -71,6 +73,12 @@ export const navigationConfig: NavItem[] = [
     href: "/dashboard/kanban",
   },
   {
+    id: "knowledge-base",
+    labelKey: "dashboard.knowledgeBase",
+    icon: BookOpen,
+    href: "/dashboard/knowledge-base",
+  },
+  {
     id: "team",
     labelKey: "dashboard.team",
     icon: Users,
@@ -86,6 +94,12 @@ export const navigationConfig: NavItem[] = [
         labelKey: "dashboard.general",
         icon: Settings,
         href: "/dashboard/general",
+      },
+      {
+        id: "settings-ai",
+        labelKey: "dashboard.settingsAi",
+        icon: Bot,
+        href: "/dashboard/settings/ai",
       },
       {
         id: "settings-chats",

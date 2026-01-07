@@ -176,7 +176,16 @@ export class AiMemoryService {
         memoryId: memory.id,
       };
     } catch (error) {
-      this.logger.error('Failed to store memory:', error);
+      // Only log at error level for unexpected failures
+      // CONFIG_MISSING is expected when AI is not configured
+      if (error.code === 'CONFIG_MISSING') {
+        this.logger.debug(
+          'AI memory service not configured - skipping memory storage',
+        );
+      } else {
+        this.logger.error('Failed to store memory:');
+        this.logger.error(error);
+      }
 
       await this.logOperation({
         operation: 'store',
@@ -587,14 +596,29 @@ export class AiMemoryService {
   // ==================== Memory Management ====================
 
   /**
-   * Delete memories for a chat
+   * Delete all AI data for a chat
+   * This includes:
+   * - AI memories (message embeddings)
+   * - Uploaded content associated with the chat
+   *
+   * Called when a chat is permanently deleted to ensure AI starts fresh
+   * if the customer initiates a new conversation.
    */
   async deleteMemoriesForChat(userId: number, chatId: string): Promise<void> {
     const startTime = Date.now();
 
     try {
-      // Delete from PostgreSQL (vectors are deleted automatically with the rows)
-      const deletedCount = await this.repository.deleteMemoriesByChatId(chatId);
+      // Delete AI memories (message embeddings)
+      const deletedMemoriesCount =
+        await this.repository.deleteMemoriesByChatId(chatId);
+
+      // Delete uploaded content associated with the chat
+      const deletedContentCount =
+        await this.repository.deleteUploadedContentByChatId(chatId);
+
+      this.logger.log(
+        `Deleted AI data for chat ${chatId}: ${deletedMemoriesCount} memories, ${deletedContentCount} uploaded content items`,
+      );
 
       await this.logOperation({
         operation: 'delete',
@@ -602,12 +626,13 @@ export class AiMemoryService {
         userId,
         chatId,
         responseMetadata: {
-          deletedCount,
+          deletedMemoriesCount,
+          deletedContentCount,
         },
         latencyMs: Date.now() - startTime,
       });
     } catch (error) {
-      this.logger.error('Failed to delete memories for chat:', error);
+      this.logger.error('Failed to delete AI data for chat:', error);
       throw error;
     }
   }

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ChatDeletedEvent,
   NewChatEvent,
   useChatNotifications,
 } from "@/hooks/use-chat-notifications";
@@ -209,6 +210,7 @@ export function useChatState(): UseChatStateReturn {
     chatUpdates,
     setAllUnreadCounts,
     onNewChat,
+    onChatDeleted,
   } = useChatNotifications();
 
   // Subscribe to new chat events and add them to the chat list
@@ -260,6 +262,68 @@ export function useChatState(): UseChatStateReturn {
       unsubscribe();
     };
   }, [onNewChat]);
+
+  // Subscribe to chat deleted events and clean up local state
+  useEffect(() => {
+    const unsubscribe = onChatDeleted((event: ChatDeletedEvent) => {
+      console.log(
+        `[useChatState] 🗑️ Received chat deleted event: ${event.chatId}`
+      );
+
+      const deletedChatId = event.chatId;
+
+      // 1. Remove chat from the chat list
+      setChats((prevChats) => {
+        const filtered = prevChats.filter((c) => c.chatId !== deletedChatId);
+        if (filtered.length !== prevChats.length) {
+          console.log(
+            `[useChatState] Removed chat ${deletedChatId} from chat list`
+          );
+        }
+        return filtered;
+      });
+
+      // 2. Clear messages cache for this chat
+      if (messagesCacheRef.current.has(deletedChatId)) {
+        messagesCacheRef.current.delete(deletedChatId);
+        console.log(
+          `[useChatState] Cleared messages cache for chat ${deletedChatId}`
+        );
+      }
+
+      // 3. Clear initial scroll done tracking
+      if (initialScrollDoneRef.current.has(deletedChatId)) {
+        initialScrollDoneRef.current.delete(deletedChatId);
+      }
+
+      // 4. If this was the currently selected chat, deselect it and clear messages
+      if (selectedChatIdRef.current === deletedChatId) {
+        console.log(
+          `[useChatState] Deleted chat was selected, deselecting and clearing messages`
+        );
+        setSelectedChatId(null);
+        setMessages([]);
+        setMessageCount(0);
+        currentMessagesChatIdRef.current = null;
+
+        // Reset pagination state
+        paginationRef.current = {
+          hasMore: true,
+          hasMoreAfter: false,
+          isLoading: false,
+          isLoadingNewer: false,
+          cursor: 0,
+          chatId: null,
+        };
+        setHasMoreMessages(true);
+        setHasMoreAfter(false);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [onChatDeleted]);
 
   // Initialize unread counts in the context when chats are loaded
   useEffect(() => {

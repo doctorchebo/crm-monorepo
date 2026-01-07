@@ -17,6 +17,7 @@ import {
   toCustomerReaction,
   type UnifiedReaction,
 } from "@/components/reactions";
+import { AIMessageIndicator } from "@/components/ui/ai-message-indicator";
 import { MessageText } from "@/components/ui/message-text";
 import { WhatsAppStatusIcon } from "@/components/whatsapp-status-icon";
 import { Attachment } from "@/lib/media/types";
@@ -332,6 +333,16 @@ export const MessageBubble = memo(function MessageBubble({
           <span className="flex items-center gap-1">
             {/* Pin icon shown on pinned messages */}
             {isPinned && <Pin className="h-3 w-3 inline-block" />}
+            {/* AI indicator for AI-generated messages */}
+            {message.isAiGenerated && (
+              <AIMessageIndicator
+                isAiGenerated={message.isAiGenerated}
+                aiModel={message.aiModel}
+                aiProvider={message.aiProvider}
+                wasManuallyOverridden={message.wasManuallyOverridden}
+                isOutbound={isOutbound}
+              />
+            )}
             {timeString}
             {message.editedAt && (
               <span className="ml-1 opacity-60">({t("messageEdited")})</span>

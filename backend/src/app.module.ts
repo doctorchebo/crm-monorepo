@@ -1,6 +1,8 @@
+import { KnowledgeBaseModule } from '@modules/knowledge-base/knowledge-base.module';
 import { NotesModule } from '@modules/notes/notes.module';
 import { PinsModule } from '@modules/pins/pins.module';
 import { ReactionsModule } from '@modules/reactions/reactions.module';
+import { WorkflowModule } from '@modules/workflow/workflow.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
@@ -8,6 +10,7 @@ import { AppService } from './app.service';
 import { aiMemoryConfig } from './config/ai-memory.config';
 import { DatabaseModule } from './database/drizzle.module';
 import { AiMemoryModule } from './modules/ai-memory/ai-memory.module';
+import { AIReplyModule } from './modules/ai-reply/ai-reply.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { AutomationModule } from './modules/automation/automation.module';
 import { BillingModule } from './modules/billing/billing.module';
@@ -50,6 +53,9 @@ import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
     ThumbnailModule,
     LinkPreviewModule,
     AiMemoryModule,
+    AIReplyModule,
+    KnowledgeBaseModule,
+    WorkflowModule,
     DatabaseModule,
   ],
   controllers: [AppController],

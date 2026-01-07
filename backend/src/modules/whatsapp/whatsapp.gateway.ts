@@ -419,6 +419,25 @@ export class WhatsAppGateway
   getConnectedClientsCount(): number {
     return this.connectedClients.size;
   }
+
+  /**
+   * Generic method to emit any event to all connected clients
+   * Used by services that need to broadcast custom events
+   *
+   * @param eventName - The event name to emit
+   * @param data - The data payload to send
+   */
+  emitToAllClients(eventName: string, data: unknown): void {
+    if (this.connectedClients.size === 0) {
+      return; // No clients connected
+    }
+
+    this.logger.debug(
+      `📡 Emitting ${eventName} to ${this.connectedClients.size} clients`,
+    );
+
+    this.server.emit(eventName, data);
+  }
 }
 
 /**

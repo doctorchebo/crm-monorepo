@@ -84,14 +84,56 @@ export class ProviderRegistry implements OnModuleInit {
    * Initialize OpenAI provider
    */
   private async initializeOpenAI(): Promise<void> {
-    const apiKey =
-      this.configService.get<string>('aiMemory.provider.apiKey') ||
-      this.configService.get<string>('OPENAI_API_KEY');
+    const apiKeyFromConfig = this.configService.get<string>(
+      'aiMemory.provider.apiKey',
+    );
+    const apiKeyFromEnv = this.configService.get<string>('OPENAI_API_KEY');
+    const apiKeyFromMemoryEnv = this.configService.get<string>(
+      'AI_MEMORY_PROVIDER_API_KEY',
+    );
 
-    if (!apiKey) {
-      this.logger.warn('OpenAI API key not configured');
+    // Use LOG level instead of debug so we can see what's happening
+    this.logger.log(
+      `[API Key Check] From config (aiMemory.provider.apiKey): ${apiKeyFromConfig ? `${apiKeyFromConfig.substring(0, 15)}... (${apiKeyFromConfig.length} chars)` : 'NOT SET'}`,
+    );
+    this.logger.log(
+      `[API Key Check] From env (OPENAI_API_KEY): ${apiKeyFromEnv ? `${apiKeyFromEnv.substring(0, 15)}... (${apiKeyFromEnv.length} chars)` : 'NOT SET'}`,
+    );
+    this.logger.log(
+      `[API Key Check] From env (AI_MEMORY_PROVIDER_API_KEY): ${apiKeyFromMemoryEnv ? `${apiKeyFromMemoryEnv.substring(0, 15)}... (${apiKeyFromMemoryEnv.length} chars)` : 'NOT SET'}`,
+    );
+
+    // Support multiple API key sources for flexibility
+    const apiKey = apiKeyFromConfig || apiKeyFromEnv || apiKeyFromMemoryEnv;
+
+    // Log which source was selected
+    const source = apiKeyFromConfig
+      ? 'config'
+      : apiKeyFromEnv
+        ? 'OPENAI_API_KEY'
+        : apiKeyFromMemoryEnv
+          ? 'AI_MEMORY_PROVIDER_API_KEY'
+          : 'none';
+    this.logger.log(`[API Key Check] Selected source: ${source}`);
+
+    if (!apiKey || apiKey.trim() === '') {
+      this.logger.warn(
+        'OpenAI API key not configured (checked aiMemory.provider.apiKey, OPENAI_API_KEY, and AI_MEMORY_PROVIDER_API_KEY) - AI features will be disabled',
+      );
       return;
     }
+
+    // Basic validation - OpenAI keys start with 'sk-'
+    if (!apiKey.startsWith('sk-')) {
+      this.logger.warn(
+        `OpenAI API key appears invalid (should start with "sk-", got "${apiKey.substring(0, 5)}...") - AI memory features will be disabled`,
+      );
+      return;
+    }
+
+    this.logger.log(
+      `[API Key Check] API key validated, proceeding with initialization...`,
+    );
 
     const config: OpenAIProviderConfig = {
       apiKey,
@@ -119,16 +161,38 @@ export class ProviderRegistry implements OnModuleInit {
       maxRetries: 3,
     };
 
-    const provider = new OpenAIProvider(config);
-    await provider.initialize();
+    try {
+      this.logger.log('[Provider Init] Creating OpenAI provider instance...');
+      const provider = new OpenAIProvider(config);
 
-    // Register as all capability providers
-    this.registerEmbeddingProvider('openai', provider, true);
-    this.registerChatProvider('openai', provider, true);
-    this.registerVisionProvider('openai', provider, true);
-    this.registerTranscriptionProvider('openai', provider, true);
+      this.logger.log('[Provider Init] Initializing OpenAI provider...');
+      await provider.initialize();
 
-    this.logger.log('OpenAI provider registered for all capabilities');
+      // Verify the provider actually works with a health check
+      this.logger.log('[Provider Init] Running health check...');
+      const isHealthy = await provider.healthCheck();
+      if (!isHealthy) {
+        this.logger.warn(
+          'OpenAI provider health check failed - API key may be invalid or rate limited. AI memory features will be disabled.',
+        );
+        return;
+      }
+
+      // Register as all capability providers
+      this.logger.log(
+        '[Provider Init] Health check passed! Registering providers...',
+      );
+      this.registerEmbeddingProvider('openai', provider, true);
+      this.registerChatProvider('openai', provider, true);
+      this.registerVisionProvider('openai', provider, true);
+      this.registerTranscriptionProvider('openai', provider, true);
+
+      this.logger.log('OpenAI provider registered for all capabilities');
+    } catch (error) {
+      this.logger.warn(
+        `Failed to initialize OpenAI provider: ${error.message}. AI memory features will be disabled.`,
+      );
+    }
   }
 
   /**

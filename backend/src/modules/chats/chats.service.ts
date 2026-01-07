@@ -21,6 +21,7 @@ import {
   or,
   sql,
 } from 'drizzle-orm';
+import { AiMemoryService } from '../ai-memory/services/ai-memory.service';
 import { CreateChatDto } from './dto/create-chat.dto';
 import {
   SearchChatsDto,
@@ -60,6 +61,7 @@ export class ChatsService {
 
   constructor(
     private readonly s3Service: S3Service,
+    private readonly aiMemoryService: AiMemoryService,
     @Optional()
     @Inject(CHAT_UPDATE_GATEWAY)
     private readonly chatUpdateGateway?: IChatUpdateGateway,
@@ -573,6 +575,7 @@ export class ChatsService {
    * - The chat record
    * - All messages in the chat
    * - All media files in S3 associated with the chat
+   * - All AI memory data (embeddings, uploaded content)
    *
    * @param chatId - The chat ID to delete
    * @param userId - The user ID (for authorization)
@@ -625,6 +628,18 @@ export class ChatsService {
 
       if (allErrors.length > 0) {
         this.logger.warn(`S3 deletion errors: ${allErrors.join('; ')}`);
+      }
+
+      // Delete AI memory data (embeddings, uploaded content)
+      // This ensures AI starts fresh if customer initiates a new conversation
+      try {
+        await this.aiMemoryService.deleteMemoriesForChat(userId, chatId);
+        this.logger.log(`Deleted AI memory data for chat ${chatId}`);
+      } catch (error) {
+        // Log but don't fail the deletion if AI memory cleanup fails
+        this.logger.warn(
+          `Failed to delete AI memory data for chat ${chatId}: ${error.message}`,
+        );
       }
 
       // Delete all messages for the chat

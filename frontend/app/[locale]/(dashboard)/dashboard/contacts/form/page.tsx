@@ -12,7 +12,7 @@ import { extractPhoneNumberParts } from "@/lib/utils/phone-number";
 import { ArrowLeft } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 
 interface Contact {
   id: string;
@@ -30,7 +30,31 @@ interface Contact {
   updatedAt: string;
 }
 
-export default function ContactFormPage() {
+function ContactFormPageSkeleton() {
+  return (
+    <div className="flex-1 space-y-4 p-4 md:p-8">
+      <div className="space-y-2">
+        <Skeleton className="h-10 w-40" />
+        <Skeleton className="h-4 w-60" />
+      </div>
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-6 w-32" />
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="space-y-2">
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function ContactFormContent() {
   const router = useRouter();
   const params = useParams();
   const searchParams = useSearchParams();
@@ -314,5 +338,13 @@ export default function ContactFormPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function ContactFormPage() {
+  return (
+    <Suspense fallback={<ContactFormPageSkeleton />}>
+      <ContactFormContent />
+    </Suspense>
   );
 }

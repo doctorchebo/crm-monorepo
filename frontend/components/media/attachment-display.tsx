@@ -14,10 +14,16 @@
 
 import { useMediaUrl } from "@/hooks/use-media-url";
 import { mediaApi } from "@/lib/media/api";
-import { Attachment, formatDuration, formatFileSize } from "@/lib/media/types";
+import {
+  Attachment,
+  formatDuration,
+  formatFileSize,
+  hasAccessibleMediaSource,
+} from "@/lib/media/types";
 import {
   Download,
   FileText,
+  ImageOff,
   Pause,
   Play,
   Volume2,
@@ -50,7 +56,11 @@ export function ImageAttachment({
   isSquare = false,
   onPreview,
 }: AttachmentDisplayProps) {
+  // Check if attachment has accessible media source
+  const isAccessible = hasAccessibleMediaSource(attachment);
+
   // Use enhanced hook for media loading with thumbnail support
+  // Only fetch if accessible
   const {
     url: imageUrl,
     thumbnailUrl,
@@ -64,7 +74,26 @@ export function ImageAttachment({
     loadThumbnail: true,
     handleCloudApi: true,
     attachment,
+    enabled: isAccessible,
   });
+
+  // If not accessible, show unavailable state
+  if (!isAccessible) {
+    return (
+      <div
+        className={`relative ${
+          isSquare ? "w-full h-full" : "max-w-xs"
+        } bg-gray-200 dark:bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center ${
+          isSquare ? "" : "min-h-[100px]"
+        }`}
+      >
+        <div className="flex flex-col items-center text-gray-400 dark:text-gray-500 p-4">
+          <ImageOff className="w-8 h-8 mb-2" />
+          <span className="text-sm text-center">Media unavailable</span>
+        </div>
+      </div>
+    );
+  }
 
   // Show skeleton while thumbnail is being generated or loading
   // Also show skeleton for any case where we don't have a displayable URL yet
@@ -175,7 +204,11 @@ export function VideoAttachment({
   onDelete,
   onPreview,
 }: AttachmentDisplayProps) {
+  // Check if attachment has accessible media source
+  const isAccessible = hasAccessibleMediaSource(attachment);
+
   // Use enhanced hook for media loading with thumbnail support
+  // Only fetch if accessible
   const {
     url: videoUrl,
     thumbnailUrl,
@@ -188,7 +221,20 @@ export function VideoAttachment({
     loadThumbnail: true,
     handleCloudApi: true,
     attachment,
+    enabled: isAccessible,
   });
+
+  // If not accessible, show unavailable state
+  if (!isAccessible) {
+    return (
+      <div className="relative max-w-xs bg-gray-200 dark:bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center min-h-[100px]">
+        <div className="flex flex-col items-center text-gray-400 dark:text-gray-500 p-4">
+          <ImageOff className="w-8 h-8 mb-2" />
+          <span className="text-sm text-center">Video unavailable</span>
+        </div>
+      </div>
+    );
+  }
 
   // Show skeleton while thumbnail is being generated or loading
   // For videos, we wait for thumbnail instead of downloading full video
@@ -828,6 +874,15 @@ export const AttachmentGallery = memo(function AttachmentGallery({
     return null;
   }
 
+  // Generate a stable unique key for each attachment
+  // Prioritizes: id > url > filename > index-based fallback
+  const getAttachmentKey = (attachment: Attachment, index: number): string => {
+    if (attachment.id) return attachment.id;
+    if (attachment.url) return `${messageId}-url-${attachment.url}`;
+    if (attachment.filename) return `${messageId}-file-${attachment.filename}`;
+    return `${messageId}-idx-${index}`;
+  };
+
   // Separate attachments by type
   const images = attachments.filter((a) => a.type === "image");
   const videos = attachments.filter((a) => a.type === "video");
@@ -868,9 +923,9 @@ export const AttachmentGallery = memo(function AttachmentGallery({
       {/* GIFs - displayed inline with play/pause functionality */}
       {gifs.length > 0 && (
         <div className="space-y-2">
-          {gifs.map((attachment) => (
+          {gifs.map((attachment, idx) => (
             <GifAttachment
-              key={attachment.id}
+              key={getAttachmentKey(attachment, idx)}
               attachment={attachment}
               messageId={messageId}
               isOutbound={isOutbound}
@@ -884,9 +939,9 @@ export const AttachmentGallery = memo(function AttachmentGallery({
       {/* Stickers - displayed without bubble background */}
       {stickers.length > 0 && (
         <div className="space-y-2">
-          {stickers.map((attachment) => (
+          {stickers.map((attachment, idx) => (
             <StickerAttachment
-              key={attachment.id}
+              key={getAttachmentKey(attachment, idx)}
               attachment={attachment}
               messageId={messageId}
               isOutbound={isOutbound}
@@ -903,7 +958,10 @@ export const AttachmentGallery = memo(function AttachmentGallery({
             const isVideo = attachment.type === "video";
 
             return (
-              <div key={attachment.id} className="relative">
+              <div
+                key={getAttachmentKey(attachment, index)}
+                className="relative"
+              >
                 {/* Show +N badge for additional media */}
                 {isLastWithMore && (
                   <div
@@ -967,9 +1025,9 @@ export const AttachmentGallery = memo(function AttachmentGallery({
       {/* Voice Notes (WhatsApp-style) */}
       {voiceNotes.length > 0 && (
         <div className="space-y-2">
-          {voiceNotes.map((attachment) => (
+          {voiceNotes.map((attachment, idx) => (
             <VoiceNoteAttachment
-              key={attachment.id}
+              key={getAttachmentKey(attachment, idx)}
               attachment={attachment}
               messageId={messageId}
               isOutbound={isOutbound}
@@ -983,9 +1041,9 @@ export const AttachmentGallery = memo(function AttachmentGallery({
       {/* Documents and Audio Files (download on click) */}
       {downloadableFiles.length > 0 && (
         <div className="space-y-2">
-          {downloadableFiles.map((attachment) => (
+          {downloadableFiles.map((attachment, idx) => (
             <DocumentAttachment
-              key={attachment.id}
+              key={getAttachmentKey(attachment, idx)}
               attachment={attachment}
               messageId={messageId}
               onDelete={onDelete}

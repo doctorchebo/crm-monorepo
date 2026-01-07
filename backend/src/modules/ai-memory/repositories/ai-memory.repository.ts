@@ -63,7 +63,7 @@ export class AiMemoryRepository {
           ${contentHash},
           ${JSON.stringify(recordData.metadata)}::jsonb,
           ${recordData.embeddingModel || 'text-embedding-3-large'},
-          ${recordData.embeddingDimensions || 3072},
+          ${recordData.embeddingDimensions || 1536},
           ${vectorString}::vector
         )
         RETURNING *
@@ -355,7 +355,7 @@ export class AiMemoryRepository {
           ${JSON.stringify(recordData.metadata)}::jsonb,
           ${recordData.status || 'completed'},
           ${recordData.embeddingModel || 'text-embedding-3-large'},
-          ${recordData.embeddingDimensions || 3072},
+          ${recordData.embeddingDimensions || 1536},
           ${vectorString}::vector
         )
         RETURNING *
@@ -552,6 +552,19 @@ export class AiMemoryRepository {
     const result = await db
       .delete(aiUploadedContent)
       .where(eq(aiUploadedContent.userId, userId))
+      .returning({ id: aiUploadedContent.id });
+
+    return result.length;
+  }
+
+  /**
+   * Delete uploaded content by chat ID
+   * Used when a chat is deleted to clean up associated AI content
+   */
+  async deleteUploadedContentByChatId(chatId: string): Promise<number> {
+    const result = await db
+      .delete(aiUploadedContent)
+      .where(eq(aiUploadedContent.chatId, chatId))
       .returning({ id: aiUploadedContent.id });
 
     return result.length;

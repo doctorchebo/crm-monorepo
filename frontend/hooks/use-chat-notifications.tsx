@@ -77,8 +77,17 @@ interface NewMessageEvent {
   participantName?: string;
 }
 
+// Interface for chat deleted events
+export interface ChatDeletedEvent {
+  chatId: string;
+  timestamp: string;
+}
+
 // Callback type for new chat events
 type NewChatCallback = (chat: NewChatEvent) => void;
+
+// Callback type for chat deleted events
+type ChatDeletedCallback = (event: ChatDeletedEvent) => void;
 
 // Interface for the context value
 interface ChatNotificationsContextValue {
@@ -92,8 +101,12 @@ interface ChatNotificationsContextValue {
   resetUnreadCount: (chatId: string) => void;
   // Set all unread counts (for initial load)
   setAllUnreadCounts: (counts: Map<string, number>) => void;
+  // Remove unread count entry for a deleted chat
+  removeUnreadCount: (chatId: string) => void;
   // Latest chat updates (for UI updates)
   chatUpdates: Map<string, ChatUpdateEvent>;
+  // Remove chat update entry for a deleted chat
+  removeChatUpdate: (chatId: string) => void;
   // Connection status
   isConnected: boolean;
   // Currently active chat (to avoid notifications for active chat)
@@ -101,6 +114,8 @@ interface ChatNotificationsContextValue {
   setActiveChatId: (chatId: string | null) => void;
   // Register callback for new chat events
   onNewChat: (callback: NewChatCallback) => () => void;
+  // Register callback for chat deleted events
+  onChatDeleted: (callback: ChatDeletedCallback) => () => void;
 }
 
 const ChatNotificationsContext =
@@ -146,6 +161,9 @@ export function ChatNotificationsProvider({
 
   // Callbacks for new chat events - allows components to subscribe
   const newChatCallbacksRef = useRef<Set<NewChatCallback>>(new Set());
+
+  // Callbacks for chat deleted events - allows components to subscribe
+  const chatDeletedCallbacksRef = useRef<Set<ChatDeletedCallback>>(new Set());
 
   // Get notification settings from user preferences
   const { settings, isLoading: isLoadingSettings } = useNotificationSettings();
@@ -215,6 +233,24 @@ export function ChatNotificationsProvider({
   // Set all unread counts (for initial load)
   const setAllUnreadCounts = useCallback((counts: Map<string, number>) => {
     setUnreadCounts(new Map(counts));
+  }, []);
+
+  // Remove unread count for a deleted chat
+  const removeUnreadCount = useCallback((chatId: string) => {
+    setUnreadCounts((prev) => {
+      const next = new Map(prev);
+      next.delete(chatId);
+      return next;
+    });
+  }, []);
+
+  // Remove chat update entry for a deleted chat
+  const removeChatUpdate = useCallback((chatId: string) => {
+    setChatUpdates((prev) => {
+      const next = new Map(prev);
+      next.delete(chatId);
+      return next;
+    });
   }, []);
 
   /**
@@ -375,15 +411,62 @@ export function ChatNotificationsProvider({
     };
   }, []);
 
+  /**
+   * Handle incoming chat deleted from WebSocket
+   * Cleans up local state and notifies registered callbacks
+   */
+  const handleChatDeleted = useCallback(
+    (event: ChatDeletedEvent) => {
+      console.log(
+        `[ChatNotifications] 🗑️ Chat deleted: ${event.chatId}, timestamp: ${event.timestamp}`
+      );
+
+      // Remove unread count for the deleted chat
+      removeUnreadCount(event.chatId);
+
+      // Remove chat update entry
+      removeChatUpdate(event.chatId);
+
+      // Notify all registered callbacks about the deleted chat
+      chatDeletedCallbacksRef.current.forEach((callback) => {
+        try {
+          callback(event);
+        } catch (error) {
+          console.error(
+            "[ChatNotifications] Error in chat deleted callback:",
+            error
+          );
+        }
+      });
+    },
+    [removeUnreadCount, removeChatUpdate]
+  );
+
+  /**
+   * Register a callback for chat deleted events
+   * Returns a cleanup function to unregister the callback
+   */
+  const onChatDeleted = useCallback(
+    (callback: ChatDeletedCallback): (() => void) => {
+      chatDeletedCallbacksRef.current.add(callback);
+      return () => {
+        chatDeletedCallbacksRef.current.delete(callback);
+      };
+    },
+    []
+  );
+
   // Store handlers in refs for the WebSocket effect
   const handleChatUpdateRef = useRef(handleChatUpdate);
   const handleNewMessageRef = useRef(handleNewMessage);
   const handleNewChatRef = useRef(handleNewChat);
+  const handleChatDeletedRef = useRef(handleChatDeleted);
   useEffect(() => {
     handleChatUpdateRef.current = handleChatUpdate;
     handleNewMessageRef.current = handleNewMessage;
     handleNewChatRef.current = handleNewChat;
-  }, [handleChatUpdate, handleNewMessage, handleNewChat]);
+    handleChatDeletedRef.current = handleChatDeleted;
+  }, [handleChatUpdate, handleNewMessage, handleNewChat, handleChatDeleted]);
 
   // Connect to WebSocket and listen for chat updates
   // This effect should only run once on mount and cleanup on unmount
@@ -439,6 +522,11 @@ export function ChatNotificationsProvider({
       handleNewChatRef.current(chat);
     });
 
+    // Listen for chat deletions - use ref to always get latest handler
+    socket.on("chat:deleted", (event: ChatDeletedEvent) => {
+      handleChatDeletedRef.current(event);
+    });
+
     return () => {
       console.log("[ChatNotifications] Cleaning up WebSocket connection");
       socket.disconnect();
@@ -453,11 +541,14 @@ export function ChatNotificationsProvider({
       updateUnreadCount,
       resetUnreadCount,
       setAllUnreadCounts,
+      removeUnreadCount,
       chatUpdates,
+      removeChatUpdate,
       isConnected,
       activeChatId,
       setActiveChatId,
       onNewChat,
+      onChatDeleted,
     }),
     [
       unreadCounts,
@@ -465,11 +556,14 @@ export function ChatNotificationsProvider({
       updateUnreadCount,
       resetUnreadCount,
       setAllUnreadCounts,
+      removeUnreadCount,
       chatUpdates,
+      removeChatUpdate,
       isConnected,
       activeChatId,
       setActiveChatId,
       onNewChat,
+      onChatDeleted,
     ]
   );
 

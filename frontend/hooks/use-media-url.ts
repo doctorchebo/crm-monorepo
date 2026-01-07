@@ -84,6 +84,8 @@ interface UseMediaUrlOptions {
   handleCloudApi?: boolean; // Convert cloud-api:// URLs to blob URLs
   /** Attachment data with thumbnail info */
   attachment?: Attachment;
+  /** Whether to enable fetching (default: true). When false, no API calls will be made */
+  enabled?: boolean;
 }
 
 interface UseMediaUrlResult {
@@ -118,13 +120,17 @@ export function useMediaUrl(
   attachmentId: string,
   options: UseMediaUrlOptions = {}
 ): UseMediaUrlResult {
-  const { loadThumbnail = false, handleCloudApi = true, attachment } = options;
+  const {
+    loadThumbnail = false,
+    handleCloudApi = true,
+    attachment,
+    enabled = true,
+  } = options;
 
   // Check module-level cache SYNCHRONOUSLY for initial state
   // This prevents loading flicker when component remounts
-  const cachedEntry = attachmentId
-    ? getCachedEntry(messageId, attachmentId)
-    : null;
+  const cachedEntry =
+    attachmentId && enabled ? getCachedEntry(messageId, attachmentId) : null;
   const hasCachedUrl =
     cachedEntry && (cachedEntry.thumbnailUrl || cachedEntry.fullUrl);
 
@@ -165,6 +171,15 @@ export function useMediaUrl(
   }, []);
 
   useEffect(() => {
+    // Skip loading if disabled
+    if (!enabled) {
+      setLoading(false);
+      setUrl(null);
+      setThumbnailUrl(null);
+      setFullUrl(null);
+      return;
+    }
+
     // Skip loading if no attachmentId is provided
     if (!attachmentId) {
       setLoading(false);
@@ -353,6 +368,7 @@ export function useMediaUrl(
     handleCloudApi,
     hasThumbnail,
     shouldLoadFull,
+    enabled,
     // Include thumbnailKey to re-run when thumbnail becomes ready via WebSocket
     attachment?.thumbnailKey,
     attachment?.thumbnailStatus,

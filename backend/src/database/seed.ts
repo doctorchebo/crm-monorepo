@@ -551,6 +551,8 @@ export async function getVariableDefinitionsByCategory(): Promise<
   return grouped;
 }
 
+import { seedKnowledgeBaseTemplates } from './knowledge-base.seed';
+
 /**
  * Main seed function - calls all seeders
  */
@@ -558,6 +560,7 @@ export async function seed(): Promise<void> {
   console.log('🚀 Starting database seeding...\n');
 
   await seedVariableDefinitions();
+  await seedKnowledgeBaseTemplates();
 
   console.log('\n✨ All seeding completed!');
 }

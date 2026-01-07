@@ -46,7 +46,7 @@ export class PgVectorStore implements VectorStore, OnModuleInit {
   constructor(private readonly configService: ConfigService) {
     this.dimensions = this.configService.get<number>(
       'aiMemory.embedding.dimensions',
-      3072,
+      1536,
     );
     this.batchSize = this.configService.get<number>(
       'aiMemory.vectorStore.batchSize',

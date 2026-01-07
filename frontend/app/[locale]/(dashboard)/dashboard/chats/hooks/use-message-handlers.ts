@@ -564,35 +564,50 @@ export function useMessageHandlers(
       addedCount = newMessages.length;
 
       const newMessageObjects: Message[] = newMessages.map(
-        (wsMsg: InboundMessage): Message => ({
-          id: undefined,
-          messageId: wsMsg.messageId,
-          text: wsMsg.text,
-          sender: wsMsg.sender,
-          direction: "inbound" as const,
-          timestamp: wsMsg.timestamp,
-          type: wsMsg.type,
-          status: "delivered" as const,
-          attachments: wsMsg.attachments
-            ? wsMsg.attachments.map((att: any) => ({
-                id: att.id || att.mediaId,
-                type: att.type as "image" | "video" | "audio" | "document",
-                mediaId: att.id || att.mediaId,
-                fileName: att.fileName || "",
-                mimeType: att.mimeType || "application/octet-stream",
-                size: att.size || 0,
-                s3Key: att.s3Key || att.id || att.mediaId,
-                thumbnailStatus: att.thumbnailStatus,
-                status: att.status || ("success" as const),
-                uploadedAt: wsMsg.timestamp,
-                isVoiceNote: att.isVoiceNote || false,
-              }))
-            : undefined,
-          sentAt: wsMsg.timestamp,
-          deliveredAt: new Date().toISOString(),
-          readAt: undefined,
-          isDeleted: false,
-        })
+        (wsMsg: InboundMessage): Message => {
+          // For outbound messages, use the status from WebSocket if provided, otherwise 'sent'
+          // For inbound messages, default to 'delivered'
+          const messageStatus = wsMsg.status
+            ? (wsMsg.status as
+                | "pending"
+                | "sent"
+                | "delivered"
+                | "read"
+                | "failed")
+            : wsMsg.direction === "outbound"
+            ? "sent"
+            : "delivered";
+
+          return {
+            id: undefined,
+            messageId: wsMsg.messageId,
+            text: wsMsg.text,
+            sender: wsMsg.sender,
+            direction: wsMsg.direction || "inbound",
+            timestamp: wsMsg.timestamp,
+            type: wsMsg.type,
+            status: messageStatus,
+            attachments: wsMsg.attachments
+              ? wsMsg.attachments.map((att: any) => ({
+                  id: att.id || att.mediaId,
+                  type: att.type as "image" | "video" | "audio" | "document",
+                  mediaId: att.id || att.mediaId,
+                  fileName: att.fileName || "",
+                  mimeType: att.mimeType || "application/octet-stream",
+                  size: att.size || 0,
+                  s3Key: att.s3Key || att.id || att.mediaId,
+                  thumbnailStatus: att.thumbnailStatus,
+                  status: att.status || ("success" as const),
+                  uploadedAt: wsMsg.timestamp,
+                  isVoiceNote: att.isVoiceNote || false,
+                }))
+              : undefined,
+            sentAt: wsMsg.timestamp,
+            deliveredAt: new Date().toISOString(),
+            readAt: undefined,
+            isDeleted: false,
+          };
+        }
       );
 
       const merged = [...prevMessages, ...newMessageObjects];

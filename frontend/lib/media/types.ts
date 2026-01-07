@@ -239,3 +239,33 @@ export function getMediaIcon(type: MediaType): string {
       return "📎";
   }
 }
+
+/**
+ * Check if an attachment has accessible media source.
+ * An attachment is accessible if it has either:
+ * - An s3Key (media stored in S3)
+ * - A mediaUrl starting with "cloud-api://" (Cloud API reference)
+ *
+ * Attachments without either of these cannot be downloaded or streamed.
+ * This can happen when:
+ * - Media was deleted from S3
+ * - Cloud API media expired and wasn't cached
+ * - Upload failed but attachment record was created
+ */
+export function hasAccessibleMediaSource(attachment: Attachment): boolean {
+  // Check for S3 key
+  if (attachment.s3Key && attachment.s3Key.trim().length > 0) {
+    return true;
+  }
+
+  // Check for Cloud API reference
+  if (
+    attachment.mediaUrl &&
+    attachment.mediaUrl.startsWith("cloud-api://") &&
+    attachment.mediaUrl.length > "cloud-api://".length
+  ) {
+    return true;
+  }
+
+  return false;
+}

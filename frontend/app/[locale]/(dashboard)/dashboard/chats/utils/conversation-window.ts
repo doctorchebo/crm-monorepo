@@ -6,25 +6,32 @@
  * According to Meta's WhatsApp Business Platform rules:
  * - A "conversation window" opens when a user sends a message to your business
  * - This window lasts for 24 hours from the user's last message
- * - Within the window: You can send any message type (free-form text, media, etc.)
+ * - Within the window: You can send any message type (free-form text, media, interactive messages)
  * - Outside the window: You can ONLY initiate conversations using approved templates
  *
- * CRITICAL: This implementation includes a 5-minute safety margin to prevent
- * edge-case violations that could result in WABA account bans.
+ * CRITICAL: Interactive messages (buttons/lists) can ONLY be sent within the 24-hour window.
+ * Unlike templates, they CANNOT be used to initiate conversations.
  *
  * @see https://developers.facebook.com/docs/whatsapp/conversation-types
+ * @see https://developers.facebook.com/docs/whatsapp/guides/interactive-messages/
  */
 
+import {
+  CONVERSATION_WINDOW_MS,
+  EFFECTIVE_WINDOW_MS,
+  WINDOW_SAFETY_MARGIN_MS,
+  canSendInteractiveMessage,
+} from "@/lib/constants/interactive-message.constants";
 import type { Message, Template } from "../types";
 
 // ============================================================================
-// Constants
+// Constants (re-exported from centralized location)
 // ============================================================================
 
 /**
  * Duration of the conversation window in milliseconds (24 hours)
  */
-export const CONVERSATION_WINDOW_DURATION_MS = 24 * 60 * 60 * 1000;
+export const CONVERSATION_WINDOW_DURATION_MS = CONVERSATION_WINDOW_MS;
 
 /**
  * Duration in hours for display purposes
@@ -42,13 +49,13 @@ export const CONVERSATION_WINDOW_DURATION_HOURS = 24;
  * IMPORTANT: The backend has the same safety margin. When in doubt,
  * use the backend's validation endpoints for authoritative status.
  */
-export const SAFETY_MARGIN_MS = 5 * 60 * 1000;
+export const SAFETY_MARGIN_MS = WINDOW_SAFETY_MARGIN_MS;
 
-/**
- * Effective window duration after safety margin
- */
-export const EFFECTIVE_WINDOW_MS =
-  CONVERSATION_WINDOW_DURATION_MS - SAFETY_MARGIN_MS;
+// Re-export for convenience
+export { EFFECTIVE_WINDOW_MS };
+
+// Re-export the interactive message check function
+export { canSendInteractiveMessage };
 
 // ============================================================================
 // Types

@@ -8,8 +8,8 @@
  */
 
 import { useMediaUrl } from "@/hooks/use-media-url";
-import { Attachment } from "@/lib/media/types";
-import { ChevronDown, ChevronUp, Film, Play } from "lucide-react";
+import { Attachment, hasAccessibleMediaSource } from "@/lib/media/types";
+import { ChevronDown, ChevronUp, Film, ImageOff, Play } from "lucide-react";
 import { memo, useState } from "react";
 
 interface Message {
@@ -48,24 +48,40 @@ function MediaThumbnail({
   onClick,
   showOverlay,
   overlayCount,
+  isAccessible,
 }: {
   attachment: Attachment;
   messageId: string;
   onClick?: () => void;
   showOverlay?: boolean;
   overlayCount?: number;
+  isAccessible: boolean;
 }) {
   // Use the enhanced useMediaUrl hook which now has module-level caching
   // No need for separate thumbnail loading effect - the hook handles it
+  // Only load media if it's accessible
   const { url, thumbnailUrl, loading } = useMediaUrl(messageId, attachment.id, {
     loadThumbnail: true,
     handleCloudApi: true,
     attachment, // Pass attachment for metadata (blurhash, dimensions, etc.)
+    enabled: isAccessible, // Only fetch if accessible
   });
   const isVideo = attachment.type === "video";
 
   // Prefer thumbnail URL over full URL
   const displayUrl = thumbnailUrl || url;
+
+  // If not accessible, show unavailable state
+  if (!isAccessible) {
+    return (
+      <div className="relative w-full h-full overflow-hidden bg-gray-200 dark:bg-gray-800 flex items-center justify-center">
+        <div className="flex flex-col items-center text-gray-400 dark:text-gray-500">
+          <ImageOff className="w-6 h-6 mb-1" />
+          <span className="text-xs">Unavailable</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -129,11 +145,12 @@ export const GroupedMediaBubble = memo(function GroupedMediaBubble({
 }: GroupedMediaBubbleProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
-  // Flatten all attachments from all messages
+  // Flatten all attachments from all messages, tracking accessibility
   const allMedia: {
     attachment: Attachment;
     messageId: string;
     originalIndex: number;
+    isAccessible: boolean;
   }[] = [];
   let globalIndex = 0;
 
@@ -141,11 +158,19 @@ export const GroupedMediaBubble = memo(function GroupedMediaBubble({
     const messageId = msg.messageId || msg.id?.toString() || "";
     msg.attachments?.forEach((attachment) => {
       if (attachment.type === "image" || attachment.type === "video") {
-        allMedia.push({ attachment, messageId, originalIndex: globalIndex });
+        allMedia.push({
+          attachment,
+          messageId,
+          originalIndex: globalIndex,
+          isAccessible: hasAccessibleMediaSource(attachment),
+        });
         globalIndex++;
       }
     });
   });
+
+  // Count only accessible media for display purposes
+  const accessibleMedia = allMedia.filter((m) => m.isAccessible);
 
   const displayCount = Math.min(allMedia.length, 4);
   const extraCount = allMedia.length - 4;
@@ -186,12 +211,16 @@ export const GroupedMediaBubble = memo(function GroupedMediaBubble({
                 <MediaThumbnail
                   attachment={item.attachment}
                   messageId={item.messageId}
-                  onClick={() =>
-                    onImageClick?.(
-                      firstMessageId,
-                      allAttachments,
-                      item.originalIndex
-                    )
+                  isAccessible={item.isAccessible}
+                  onClick={
+                    item.isAccessible
+                      ? () =>
+                          onImageClick?.(
+                            firstMessageId,
+                            allAttachments,
+                            item.originalIndex
+                          )
+                      : undefined
                   }
                   showOverlay={isLastWithMore}
                   overlayCount={extraCount}
@@ -212,12 +241,16 @@ export const GroupedMediaBubble = memo(function GroupedMediaBubble({
                 <MediaThumbnail
                   attachment={item.attachment}
                   messageId={item.messageId}
-                  onClick={() =>
-                    onImageClick?.(
-                      firstMessageId,
-                      allAttachments,
-                      item.originalIndex
-                    )
+                  isAccessible={item.isAccessible}
+                  onClick={
+                    item.isAccessible
+                      ? () =>
+                          onImageClick?.(
+                            firstMessageId,
+                            allAttachments,
+                            item.originalIndex
+                          )
+                      : undefined
                   }
                 />
               </div>

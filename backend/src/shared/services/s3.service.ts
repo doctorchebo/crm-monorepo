@@ -147,6 +147,51 @@ export class S3Service {
   }
 
   /**
+   * Generate a presigned URL for direct client upload using a custom S3 key.
+   * Use this when you have already generated the S3 key.
+   */
+  async generatePresignedUploadUrlForKey(
+    s3Key: string,
+    contentType: string,
+    options: PresignedUrlOptions = {},
+  ): Promise<{
+    url: string;
+    expiresIn: number;
+    s3Key: string;
+  }> {
+    try {
+      const expiresIn = options.expiresIn || this.presignedUrlExpiry;
+
+      const command = new PutObjectCommand({
+        Bucket: this.bucketName,
+        Key: s3Key,
+        ContentType: contentType,
+        ServerSideEncryption: 'AES256',
+      });
+
+      const url = await getSignedUrl(this.s3Client, command, {
+        expiresIn,
+      });
+
+      this.logger.log(
+        `Generated presigned upload URL for key: ${s3Key} (expires in ${expiresIn}s)`,
+      );
+
+      return {
+        url,
+        expiresIn,
+        s3Key,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Failed to generate presigned URL for key: ${error.message}`,
+        error,
+      );
+      throw new Error(`Failed to generate upload URL: ${error.message}`);
+    }
+  }
+
+  /**
    * Generate a presigned URL for downloading/viewing file from S3
    */
   async generatePresignedDownloadUrl(

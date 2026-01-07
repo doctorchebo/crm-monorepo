@@ -5,8 +5,8 @@ import { StagedFile } from "@/components/media/media-staging-panel";
 import { PendingMediaUpload } from "@/components/media/pending-upload-bubble";
 import { backendApi } from "@/lib/api/endpoints";
 import { mediaApi } from "@/lib/media/api";
-import { Attachment } from "@/lib/media/types";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Attachment, hasAccessibleMediaSource } from "@/lib/media/types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PAGE_SIZE } from "../constants";
 import type { Chat, Message, MessagesCacheEntry } from "../types";
 
@@ -29,6 +29,15 @@ interface UseMediaHandlersProps {
   setReplyingToMessage: React.Dispatch<React.SetStateAction<Message | null>>;
 }
 
+/**
+ * Previewable media item interface
+ */
+export interface PreviewableMediaItem {
+  attachment: Attachment;
+  messageId: string;
+  attachmentIndex: number;
+}
+
 interface UseMediaHandlersReturn {
   // Media staging state
   mediaStagingOpen: boolean;
@@ -44,8 +53,8 @@ interface UseMediaHandlersReturn {
   // Preview modal state
   previewModalOpen: boolean;
   setPreviewModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  previewAttachments: Attachment[];
-  previewMessageId: string;
+  /** All previewable media items from current messages batch */
+  previewMediaItems: PreviewableMediaItem[];
   previewInitialIndex: number;
 
   // Download menu state
@@ -153,11 +162,34 @@ export function useMediaHandlers(
 
   // Preview modal state
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
-  const [previewAttachments, setPreviewAttachments] = useState<Attachment[]>(
-    []
-  );
-  const [previewMessageId, setPreviewMessageId] = useState<string>("");
   const [previewInitialIndex, setPreviewInitialIndex] = useState(0);
+
+  // Build previewable media items from all messages in the current batch
+  // Only includes visual media (images/videos) that have accessible media sources
+  const previewMediaItems = useMemo<PreviewableMediaItem[]>(() => {
+    const items: PreviewableMediaItem[] = [];
+
+    for (const message of messages) {
+      if (!message.attachments) continue;
+
+      message.attachments.forEach((attachment, index) => {
+        // Only include visual media (images and videos)
+        // AND only if the attachment has accessible media source (s3Key or cloud-api reference)
+        if (
+          (attachment.type === "image" || attachment.type === "video") &&
+          hasAccessibleMediaSource(attachment)
+        ) {
+          items.push({
+            attachment,
+            messageId: message.messageId,
+            attachmentIndex: index,
+          });
+        }
+      });
+    }
+
+    return items;
+  }, [messages]);
 
   // Download menu state
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
@@ -670,16 +702,46 @@ export function useMediaHandlers(
   // Media preview modal handlers
   const handleImageClick = useCallback(
     (messageId: string, attachments: Attachment[], index: number) => {
-      const visualMedia = attachments.filter(
-        (a) => a.type === "image" || a.type === "video"
+      // Get the attachment at the clicked index (within the message)
+      const clickedAttachment = attachments[index];
+      if (!clickedAttachment) return;
+
+      // Only open preview for visual media
+      if (
+        clickedAttachment.type !== "image" &&
+        clickedAttachment.type !== "video"
+      ) {
+        return;
+      }
+
+      // Check if the attachment has accessible media source
+      // Don't open preview for inaccessible media (deleted, expired, etc.)
+      if (!hasAccessibleMediaSource(clickedAttachment)) {
+        console.warn(
+          `Cannot preview attachment ${clickedAttachment.id}: no accessible media source`
+        );
+        return;
+      }
+
+      // Find the index of this attachment in the previewMediaItems array
+      const previewIndex = previewMediaItems.findIndex(
+        (item) =>
+          item.messageId === messageId &&
+          item.attachment.id === clickedAttachment.id
       );
-      setPreviewAttachments(visualMedia);
-      setPreviewMessageId(messageId);
-      const adjustedIndex = Math.min(index, visualMedia.length - 1);
-      setPreviewInitialIndex(adjustedIndex >= 0 ? adjustedIndex : 0);
+
+      // If not found in preview items, don't open (shouldn't happen due to above check)
+      if (previewIndex < 0) {
+        console.warn(
+          `Attachment ${clickedAttachment.id} not found in preview items`
+        );
+        return;
+      }
+
+      setPreviewInitialIndex(previewIndex);
       setPreviewModalOpen(true);
     },
-    []
+    [previewMediaItems]
   );
 
   const handleShowDownloadMenu = useCallback(
@@ -1121,8 +1183,7 @@ export function useMediaHandlers(
     pendingCaption,
     previewModalOpen,
     setPreviewModalOpen,
-    previewAttachments,
-    previewMessageId,
+    previewMediaItems,
     previewInitialIndex,
     downloadMenuOpen,
     setDownloadMenuOpen,

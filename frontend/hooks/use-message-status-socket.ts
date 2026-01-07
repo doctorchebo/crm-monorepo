@@ -42,6 +42,8 @@ export interface InboundMessage {
   text: string;
   type: string;
   timestamp: string;
+  direction?: "inbound" | "outbound"; // Direction of the message (defaults to inbound for legacy compatibility)
+  status?: string;
   attachments?: Array<{
     type: string;
     mediaId: string;

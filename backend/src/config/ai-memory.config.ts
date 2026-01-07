@@ -32,8 +32,10 @@ export const aiMemoryConfig = registerAs('aiMemory', () => ({
 
   // Embedding configuration
   embedding: {
+    // Using 1536 dimensions (text-embedding-3-large with dimension reduction)
+    // This enables pgvector HNSW indexing (max 2000 dims) while maintaining quality
     dimensions: parseInt(
-      process.env.AI_MEMORY_EMBEDDING_DIMENSIONS || '3072',
+      process.env.AI_MEMORY_EMBEDDING_DIMENSIONS || '1536',
       10,
     ),
     maxInputTokens: 8191, // Max tokens for most embedding models
@@ -55,8 +57,9 @@ export const aiMemoryConfig = registerAs('aiMemory', () => ({
     topK: parseInt(process.env.AI_MEMORY_TOP_K || '5', 10),
 
     // Minimum similarity score threshold (0-1)
+    // Lower threshold for text-embedding-3-large with 1536-dim reduction
     minSimilarityScore: parseFloat(
-      process.env.AI_MEMORY_MIN_SIMILARITY || '0.7',
+      process.env.AI_MEMORY_MIN_SIMILARITY || '0.3',
     ),
 
     // Include memories from uploaded content

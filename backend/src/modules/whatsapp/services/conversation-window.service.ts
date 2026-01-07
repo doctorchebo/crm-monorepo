@@ -2,6 +2,11 @@ import { db } from '@database/db.connection';
 import { chats, messages } from '@database/schema';
 import { Injectable, Logger } from '@nestjs/common';
 import { and, desc, eq } from 'drizzle-orm';
+import {
+  CONVERSATION_WINDOW_MS,
+  EFFECTIVE_WINDOW_MS,
+  WINDOW_SAFETY_MARGIN_MS,
+} from '../constants';
 
 /**
  * WhatsApp Cloud API Conversation Window Service
@@ -9,35 +14,25 @@ import { and, desc, eq } from 'drizzle-orm';
  * Enforces Meta's 24-hour conversation window rules to prevent WABA bans:
  * - Business can only send free-form messages within 24 hours of customer's last message
  * - Outside the 24-hour window, only approved templates can be used to initiate conversations
+ * - IMPORTANT: Interactive messages (buttons/lists) can ONLY be sent within the 24-hour window
  *
  * CRITICAL: This service adds safety margins to prevent edge-case violations
  *
  * @see https://developers.facebook.com/docs/whatsapp/conversation-types
+ * @see https://developers.facebook.com/docs/whatsapp/guides/interactive-messages/
  */
 
 // ============================================================================
-// Constants
+// Constants (re-exported from centralized location for backwards compatibility)
 // ============================================================================
 
-/**
- * The official WhatsApp conversation window duration (24 hours)
- */
-export const CONVERSATION_WINDOW_MS = 24 * 60 * 60 * 1000;
+// Re-export for modules that import directly from this service
+export { CONVERSATION_WINDOW_MS, EFFECTIVE_WINDOW_MS };
 
 /**
- * Safety margin to subtract from the window to avoid edge-case violations
- * We use 5 minutes to account for:
- * - Clock drift between servers
- * - Network latency
- * - Processing delays
- * - Database timestamp precision
+ * Safety margin re-exported with original name for backwards compatibility
  */
-export const SAFETY_MARGIN_MS = 5 * 60 * 1000;
-
-/**
- * Effective window duration after safety margin
- */
-export const EFFECTIVE_WINDOW_MS = CONVERSATION_WINDOW_MS - SAFETY_MARGIN_MS;
+export const SAFETY_MARGIN_MS = WINDOW_SAFETY_MARGIN_MS;
 
 // ============================================================================
 // Types

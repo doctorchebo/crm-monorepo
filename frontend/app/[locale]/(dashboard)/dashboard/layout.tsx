@@ -48,7 +48,7 @@ export default function DashboardLayout({
               <div className="flex items-center gap-2 border-b px-4 py-3 md:hidden flex-shrink-0">
                 <SidebarTrigger />
               </div>
-              <main className="flex-1 overflow-hidden">{children}</main>
+              <main className="flex-1 overflow-auto">{children}</main>
             </div>
           </SidebarInset>
         </SidebarProvider>

@@ -6,6 +6,7 @@ import { S3Service } from '@shared/services/s3.service';
 import { AiMemoryModule } from '../ai-memory/ai-memory.module';
 import { ThumbnailQueueService } from '../thumbnail/thumbnail-queue.service';
 import { ThumbnailModule } from '../thumbnail/thumbnail.module';
+import { WorkflowModule } from '../workflow/workflow.module';
 import { MediaController } from './controllers/media.controller';
 import { AudioConverterService } from './services/audio-converter.service';
 import { ConversationWindowService } from './services/conversation-window.service';
@@ -41,7 +42,12 @@ import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
  * - AWS_S3_BUCKET_NAME: S3 bucket name for media storage
  */
 @Module({
-  imports: [ConfigModule, forwardRef(() => ThumbnailModule), AiMemoryModule],
+  imports: [
+    ConfigModule,
+    forwardRef(() => ThumbnailModule),
+    AiMemoryModule,
+    WorkflowModule,
+  ],
   controllers: [WhatsAppController, WhatsAppWebhookController, MediaController],
   providers: [
     WhatsAppService,

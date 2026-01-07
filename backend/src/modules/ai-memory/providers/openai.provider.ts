@@ -59,7 +59,9 @@ export class OpenAIProvider
     imageAnalysis: true,
     transcription: true,
     maxEmbeddingTokens: 8191,
-    embeddingDimensions: 3072,
+    // Using 1536 dimensions with text-embedding-3-large's native dimension reduction
+    // This enables pgvector HNSW indexing (max 2000 dims) while maintaining quality
+    embeddingDimensions: 1536,
     supportsBatching: true,
     maxBatchSize: 2048,
   };
@@ -80,7 +82,8 @@ export class OpenAIProvider
       this.embeddings = new OpenAIEmbeddings({
         openAIApiKey: this.config.apiKey,
         modelName: this.config.embeddingModel || 'text-embedding-3-large',
-        dimensions: this.config.embeddingDimensions || 3072,
+        // Using 1536 dimensions enables pgvector HNSW indexing while maintaining quality
+        dimensions: this.config.embeddingDimensions || 1536,
         maxRetries: this.config.maxRetries || 3,
       });
 
@@ -117,13 +120,19 @@ export class OpenAIProvider
   }
 
   async healthCheck(): Promise<boolean> {
-    if (!this.isReady()) return false;
+    if (!this.isReady()) {
+      this.logger.warn(
+        'Health check failed: Provider not ready (not initialized or embeddings is null)',
+      );
+      return false;
+    }
 
     try {
       // Simple embedding test
       await this.embeddings!.embedQuery('health check');
       return true;
-    } catch {
+    } catch (error) {
+      this.logger.error(`Health check failed with error: ${error.message}`);
       return false;
     }
   }

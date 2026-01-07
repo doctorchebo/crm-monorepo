@@ -11,7 +11,6 @@ import {
   ImageEditorPanel,
 } from "@/components/image-editor";
 import { MediaDownloadMenu } from "@/components/media/media-download-menu";
-import { MediaPreviewModal } from "@/components/media/media-preview-modal";
 import {
   MediaStagingPanel,
   StagedFile,
@@ -23,6 +22,7 @@ import {
   ReceivedContact,
 } from "@/lib/types/contact-message.types";
 import type { Sender } from "../types";
+import { EnhancedMediaPreviewModal } from "@/components/media/enhanced-media-preview-modal-standalone";
 
 interface ChatsModalsProps {
   // Media staging
@@ -36,12 +36,21 @@ interface ChatsModalsProps {
   onRemoveStagedFile: (id: string) => void;
   onEditStagedImage: (file: StagedFile) => void;
 
-  // Media preview
+  // Media preview - enhanced version with all media items from batch
   previewModalOpen: boolean;
-  previewAttachments: Attachment[];
-  previewMessageId: string;
+  /** All previewable media items from current message batch */
+  previewMediaItems: Array<{
+    attachment: Attachment;
+    messageId: string;
+    attachmentIndex: number;
+  }>;
   previewInitialIndex: number;
   onClosePreviewModal: () => void;
+  // Preview action handlers
+  onPreviewGoToMessage?: (messageId: string) => void;
+  onPreviewReply?: (messageId: string) => void;
+  onPreviewPin?: (messageId: string) => void;
+  onPreviewReact?: (messageId: string, emoji: string) => void;
 
   // Download menu
   downloadMenuOpen: boolean;
@@ -128,10 +137,13 @@ export function ChatsModals({
   onRemoveStagedFile,
   onEditStagedImage,
   previewModalOpen,
-  previewAttachments,
-  previewMessageId,
+  previewMediaItems,
   previewInitialIndex,
   onClosePreviewModal,
+  onPreviewGoToMessage,
+  onPreviewReply,
+  onPreviewPin,
+  onPreviewReact,
   downloadMenuOpen,
   downloadMenuPosition,
   currentMessageAttachments,
@@ -211,13 +223,16 @@ export function ChatsModals({
         sendButtonText={sendButtonText}
       />
 
-      {/* Media Preview Modal */}
-      <MediaPreviewModal
+      {/* Enhanced Media Preview Modal */}
+      <EnhancedMediaPreviewModal
         isOpen={previewModalOpen}
-        attachments={previewAttachments}
-        messageId={previewMessageId}
+        mediaItems={previewMediaItems}
         initialIndex={previewInitialIndex}
         onClose={onClosePreviewModal}
+        onGoToMessage={onPreviewGoToMessage}
+        onReply={onPreviewReply}
+        onPin={onPreviewPin}
+        onReact={onPreviewReact}
       />
 
       {/* Download Menu */}

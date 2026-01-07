@@ -43,7 +43,7 @@ export class EmbeddingService implements OnModuleInit {
   ) {
     this.dimensions = this.configService.get<number>(
       'aiMemory.embedding.dimensions',
-      3072,
+      1536,
     );
     this.maxInputTokens = this.configService.get<number>(
       'aiMemory.embedding.maxInputTokens',
