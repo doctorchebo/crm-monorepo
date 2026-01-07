@@ -228,7 +228,7 @@ export function useBrowserNotifications(): UseBrowserNotificationsReturn {
           const data = options.data;
           if (data?.chatId) {
             // Navigate to the chat
-            const chatUrl = `/dashboard/chats?chat=${data.chatId}`;
+            const chatUrl = `/dashboard/chats?selectedChatId=${data.chatId}`;
             if (window.location.pathname !== chatUrl) {
               window.location.href = chatUrl;
             }
