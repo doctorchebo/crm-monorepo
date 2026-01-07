@@ -1490,6 +1490,77 @@ export const backendApi = {
       apiClient.post("/workflow/throttle/pause-all", { reason }),
   },
 
+  // Workflow Stages
+  stages: {
+    // Get all stages for the user
+    getStages: (): Promise<WorkflowStage[]> =>
+      apiClient.get("/workflow/stages"),
+
+    // Get single stage
+    getStage: (stageId: string): Promise<WorkflowStage> =>
+      apiClient.get(`/workflow/stages/${stageId}`),
+
+    // Create new stage
+    createStage: (data: CreateStageDto): Promise<WorkflowStage> =>
+      apiClient.post("/workflow/stages", data),
+
+    // Update stage
+    updateStage: (
+      stageId: string,
+      data: UpdateStageDto
+    ): Promise<WorkflowStage> =>
+      apiClient.patch(`/workflow/stages/${stageId}`, data),
+
+    // Delete stage
+    deleteStage: (stageId: string): Promise<void> =>
+      apiClient.delete(`/workflow/stages/${stageId}`),
+
+    // Reorder stages
+    reorderStages: (stageIds: string[]): Promise<{ success: boolean }> =>
+      apiClient.post("/workflow/stages/reorder", { stageIds }),
+
+    // Initialize default stages
+    initializeDefaults: (): Promise<{ success: boolean }> =>
+      apiClient.post("/workflow/stages/initialize-defaults", {}),
+
+    // Get chats by stage
+    getChatsByStage: (
+      stageId: string,
+      limit?: number,
+      offset?: number
+    ): Promise<ChatStageAssignment[]> => {
+      const params = new URLSearchParams();
+      if (limit) params.append("limit", limit.toString());
+      if (offset) params.append("offset", offset.toString());
+      return apiClient.get(
+        `/workflow/stages/${stageId}/chats?${params.toString()}`
+      );
+    },
+
+    // Transition chat to new stage
+    transitionChat: (data: {
+      chatId: string;
+      toStageId: string;
+      reason?: string;
+      metadata?: Record<string, unknown>;
+    }): Promise<{ success: boolean; message: string }> =>
+      apiClient.post("/workflow/chat/transition", data),
+
+    // Get chat's current stage
+    getChatStatus: (chatId: string): Promise<ChatWorkflowStatus> =>
+      apiClient.get(`/workflow/chat/${chatId}/status`),
+
+    // Get stage history for chat
+    getStageHistory: (chatId: string): Promise<StageHistoryEntry[]> =>
+      apiClient.get(`/workflow/chat/${chatId}/history`),
+
+    // Get workflow summary
+    getWorkflowSummary: (senderId?: number): Promise<WorkflowSummary> => {
+      const params = senderId ? `?senderId=${senderId}` : "";
+      return apiClient.get(`/workflow/summary${params}`);
+    },
+  },
+
   // AI Configuration
   aiConfig: {
     // Get available options (tones, styles, formalities)
@@ -1597,6 +1668,109 @@ export interface UpdateAiConfigurationDto {
   preferredModel?: string | null;
   temperature?: number;
   metadata?: Record<string, unknown>;
+}
+
+// ==================== Workflow Stages Types ====================
+
+export interface WorkflowStage {
+  id: string;
+  name: string;
+  description?: string;
+  color: string;
+  icon?: string;
+  sortOrder: number;
+  isDefault: boolean;
+  isFinal: boolean;
+  aiAutoReply: boolean;
+  aiHandoffRequired: boolean;
+}
+
+export interface CreateStageDto {
+  name: string;
+  description?: string;
+  color?: string;
+  icon?: string;
+  sortOrder?: number;
+  isDefault?: boolean;
+  isFinal?: boolean;
+  aiAutoReply?: boolean;
+  aiHandoffRequired?: boolean;
+}
+
+export interface UpdateStageDto {
+  name?: string;
+  description?: string;
+  color?: string;
+  icon?: string;
+  sortOrder?: number;
+  isDefault?: boolean;
+  isFinal?: boolean;
+  aiAutoReply?: boolean;
+  aiHandoffRequired?: boolean;
+  isActive?: boolean;
+}
+
+/**
+ * Enriched chat stage assignment with full chat details for Kanban display
+ */
+export interface ChatStageAssignment {
+  // Assignment fields
+  id: string;
+  chatId: string;
+  stageId: string | null;
+  awaitingHandoff: boolean;
+  handoffRequestedAt: string | null;
+  handoffReason: string | null;
+  aiPaused: boolean;
+  aiPausedAt: string | null;
+  aiPausedBy: number | null;
+  aiPauseReason?: string | null;
+  assignedAt: string; // Time entered current stage
+  updatedAt: string;
+  // Enriched chat fields for Kanban card display
+  participantPhone: string;
+  participantName: string | null;
+  lastMessage: string | null;
+  lastMessageTime: string | null;
+  lastMessageType: string | null;
+  unreadCount: number;
+  isActive: boolean | null;
+}
+
+export interface ChatWorkflowStatus {
+  chatId: string;
+  currentStage: WorkflowStage | null;
+  awaitingHandoff: boolean;
+  aiPaused: boolean;
+  canTransition: boolean;
+  availableStages: WorkflowStage[];
+}
+
+export interface StageHistoryEntry {
+  id: string;
+  chatId: string;
+  fromStageId: string | null;
+  toStageId: string;
+  fromStageName: string | null;
+  toStageName: string;
+  triggerType: "ai" | "human" | "system" | "rule";
+  triggeredBy: number | null;
+  reason: string | null;
+  createdAt: string;
+}
+
+export interface WorkflowSummary {
+  totalChats: number;
+  stageDistribution: Array<{
+    stageId: string;
+    stageName: string;
+    stageColor: string;
+    chatCount: number;
+    percentage: number;
+  }>;
+  recentTransitions: StageHistoryEntry[];
+  handoffsPending: number;
+  aiPausedChats: number;
 }
 
 export interface ResolvedAiConfig {

@@ -12,6 +12,7 @@ import { db } from '@database/db.connection';
 import {
   chatStageAssignments,
   chatStageHistory,
+  chats,
   workflowStages,
 } from '@database/schema';
 import { Injectable, Logger } from '@nestjs/common';
@@ -495,18 +496,75 @@ export class StageService {
   }
 
   /**
-   * Get chats in a specific stage
+   * Get chats in a specific stage with full chat details
+   * Returns enriched data for Kanban cards including:
+   * - Participant name/phone
+   * - Last message preview
+   * - Last activity time
+   * - Unread count
+   * - AI status
+   * - Time entered current stage (assignedAt)
    */
   async getChatsByStage(
     stageId: string,
     limit: number = 50,
     offset: number = 0,
-  ): Promise<Array<typeof chatStageAssignments.$inferSelect>> {
-    return db
-      .select()
+  ): Promise<
+    Array<{
+      // Chat stage assignment fields
+      id: string;
+      chatId: string;
+      stageId: string | null;
+      awaitingHandoff: boolean | null;
+      handoffRequestedAt: Date | null;
+      handoffReason: string | null;
+      aiPaused: boolean | null;
+      aiPausedAt: Date | null;
+      aiPausedBy: number | null;
+      aiPauseReason: string | null;
+      assignedAt: Date | null;
+      updatedAt: Date | null;
+      // Chat details for Kanban card display
+      participantPhone: string;
+      participantName: string | null;
+      lastMessage: string | null;
+      lastMessageTime: Date | null;
+      lastMessageType: string | null;
+      unreadCount: number;
+      isActive: boolean | null;
+    }>
+  > {
+    const results = await db
+      .select({
+        // Assignment fields
+        id: chatStageAssignments.id,
+        chatId: chatStageAssignments.chatId,
+        stageId: chatStageAssignments.stageId,
+        awaitingHandoff: chatStageAssignments.awaitingHandoff,
+        handoffRequestedAt: chatStageAssignments.handoffRequestedAt,
+        handoffReason: chatStageAssignments.handoffReason,
+        aiPaused: chatStageAssignments.aiPaused,
+        aiPausedAt: chatStageAssignments.aiPausedAt,
+        aiPausedBy: chatStageAssignments.aiPausedBy,
+        aiPauseReason: chatStageAssignments.aiPauseReason,
+        assignedAt: chatStageAssignments.assignedAt,
+        updatedAt: chatStageAssignments.updatedAt,
+        // Chat fields for display
+        participantPhone: chats.participantPhone,
+        participantName: chats.participantName,
+        lastMessage: chats.lastMessage,
+        lastMessageTime: chats.lastMessageTime,
+        lastMessageType: chats.lastMessageType,
+        unreadCount: chats.unreadCount,
+        isActive: chats.isActive,
+      })
       .from(chatStageAssignments)
+      .innerJoin(chats, eq(chatStageAssignments.chatId, chats.chatId))
       .where(eq(chatStageAssignments.stageId, stageId))
+      .orderBy(desc(chats.lastMessageTime))
       .limit(limit)
       .offset(offset);
+
+    return results;
   }
 }
