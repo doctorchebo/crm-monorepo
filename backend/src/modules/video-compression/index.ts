@@ -15,11 +15,6 @@ export { VideoCompressionService } from './video-compression.service';
 export {
   COMPRESSION_EVENTS,
   COMPRESSION_PRESETS,
-  CompressionJobData,
-  CompressionPreset,
-  CompressionResult,
-  CompressionStatus,
-  CompressionStatusEvent,
   UPLOAD_FILE_SIZE_LIMITS,
   VIDEO_COMPRESSION_JOB_NAME,
   VIDEO_COMPRESSION_QUEUE_NAME,
@@ -27,4 +22,12 @@ export {
   getCompressionPreset,
   isWithinUploadLimits,
   needsCompression,
+} from './video-compression.types';
+
+export type {
+  CompressionJobData,
+  CompressionPreset,
+  CompressionResult,
+  CompressionStatus,
+  CompressionStatusEvent,
 } from './video-compression.types';

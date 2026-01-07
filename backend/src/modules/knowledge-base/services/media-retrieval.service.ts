@@ -469,6 +469,7 @@ export class MediaRetrievalService {
       caption: string | null;
       mimeType: string;
       extractedContent: string | null;
+      fileName: string;
     },
     object: {
       status: string | null;
@@ -512,6 +513,23 @@ export class MediaRetrievalService {
     // Check 4: Not already sent in this chat
     if (chatId && alreadySentMediaIds?.has(media.id)) {
       failures.push('already_sent_in_chat');
+    }
+
+    // Check 5: Language match (NEW - implements language filtering)
+    if (chatLanguage) {
+      // Only check language if chatLanguage is explicitly provided
+      // This prevents false negatives when language is unknown
+      const mediaLanguage = this.inferMediaLanguage(
+        media.fileName,
+        media.caption,
+      );
+
+      if (!this.languagesMatch(mediaLanguage, chatLanguage)) {
+        this.logger.warn(
+          `[Language Filter] Media ${media.id} (${media.fileName}) language (${mediaLanguage}) doesn't match chat language (${chatLanguage})`,
+        );
+        failures.push('language_mismatch');
+      }
     }
 
     // Build result
@@ -567,5 +585,88 @@ export class MediaRetrievalService {
     return (
       similarityScore + rolePriorityScore + templatePriorityScore + recencyScore
     );
+  }
+
+  /**
+   * Infer language from media filename or caption
+   * Looks for language codes in filename patterns like "-spa-", "-eng-", "-pt-", etc.
+   * Common patterns: flow_flyer-spa-02, document-eng-01, etc.
+   */
+  private inferMediaLanguage(
+    fileName: string,
+    caption: string | null,
+  ): string | null {
+    // Language code patterns in filenames
+    const languagePatterns: Record<string, string[]> = {
+      es: ['spa', '-es-', '-es_'],
+      en: ['eng', '-en-', '-en_'],
+      pt: ['pt', '-pt-', '-pt_', 'português', 'portugues'],
+      fr: ['fr', '-fr-', '-fr_', 'français', 'francais'],
+      de: ['de', '-de-', '-de_', 'deutsch'],
+      it: ['it', '-it-', '-it_', 'italiano'],
+      ja: ['jp', 'ja', '-jp-', '-ja-'],
+      zh: ['cn', 'zh', '-cn-', '-zh-', 'chinese'],
+      ru: ['ru', '-ru-', '-ru_', 'russian'],
+      ar: ['ar', '-ar-', '-ar_', 'arabic'],
+    };
+
+    // Check filename first (case-insensitive)
+    const lowerFileName = fileName.toLowerCase();
+    for (const [lang, patterns] of Object.entries(languagePatterns)) {
+      for (const pattern of patterns) {
+        if (lowerFileName.includes(pattern)) {
+          return lang;
+        }
+      }
+    }
+
+    // Check caption if available
+    if (caption) {
+      const lowerCaption = caption.toLowerCase();
+      for (const [lang, patterns] of Object.entries(languagePatterns)) {
+        for (const pattern of patterns) {
+          if (lowerCaption.includes(pattern)) {
+            return lang;
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Normalize language codes for comparison
+   * e.g., "en-US" -> "en", "ES" -> "es"
+   */
+  private normalizeLanguageCode(language: string | undefined): string | null {
+    if (!language) return null;
+    // Take first two characters and lowercase
+    const normalized = language.substring(0, 2).toLowerCase();
+    return normalized === '??' ? null : normalized;
+  }
+
+  /**
+   * Check if two language codes are compatible
+   * e.g., "en" matches "en-US", "es" matches "es-ES", etc.
+   */
+  private languagesMatch(
+    mediaLanguage: string | null,
+    chatLanguage: string | null,
+  ): boolean {
+    if (!mediaLanguage || !chatLanguage) {
+      // If either is unknown, allow it (pass the check)
+      return true;
+    }
+
+    const normalizedMedia = this.normalizeLanguageCode(mediaLanguage);
+    const normalizedChat = this.normalizeLanguageCode(chatLanguage);
+
+    if (!normalizedMedia || !normalizedChat) {
+      // If normalization failed, allow it
+      return true;
+    }
+
+    return normalizedMedia === normalizedChat;
   }
 }

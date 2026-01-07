@@ -163,6 +163,8 @@ export const messages = pgTable(
     aiProvider: varchar('ai_provider', { length: 50 }), // Provider used (e.g., 'openai')
     aiUsageLogId: uuid('ai_usage_log_id'), // Reference to AI usage log for billing
     wasManuallyOverridden: boolean('was_manually_overridden').default(false), // Human edited AI-generated message
+    // Interactive message and extensible metadata
+    metadata: jsonb('metadata').default({}), // Interactive buttons/lists and other metadata
   },
   (table) => ({
     messageIdUnique: unique().on(table.messageId),

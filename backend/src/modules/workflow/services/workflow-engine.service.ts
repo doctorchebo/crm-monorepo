@@ -29,8 +29,11 @@
  */
 
 import { db } from '@database/db.connection';
-import { chatStageAssignments, messages } from '@database/schema';
-import { AIReplyService } from '@modules/ai-reply/services';
+import { chatStageAssignments, contacts, messages } from '@database/schema';
+import {
+  AIReplyService,
+  InteractiveMessageService,
+} from '@modules/ai-reply/services';
 import { AIReplyInteractiveData } from '@modules/ai-reply/types';
 import { RetrievalService } from '@modules/knowledge-base/services';
 import { MediaOrchestratorService } from '@modules/knowledge-base/services/media-orchestrator.service';
@@ -163,10 +166,18 @@ export class WorkflowEngineService implements OnModuleInit {
     private readonly mediaOrchestratorService?: MediaOrchestratorService,
     @Optional()
     private readonly aiReplyService?: AIReplyService,
+    @Optional()
+    private readonly interactiveMessageService?: InteractiveMessageService,
   ) {}
 
   async onModuleInit(): Promise<void> {
     this.logger.log('Workflow Engine initialized');
+    this.logger.log(
+      `[Workflow Engine] MediaOrchestratorService: ${this.mediaOrchestratorService ? 'AVAILABLE' : 'NOT INJECTED'}`,
+    );
+    this.logger.log(
+      `[Workflow Engine] InteractiveMessageService: ${this.interactiveMessageService ? 'AVAILABLE' : 'NOT INJECTED'}`,
+    );
   }
 
   /**
@@ -378,10 +389,13 @@ export class WorkflowEngineService implements OnModuleInit {
               )
               .join('\n');
 
+            // Fetch contact's language preference
+            const contactLanguage = await this.getContactLanguage(chatId);
+
             if (this.mediaOrchestratorService) {
               try {
                 this.logger.debug(
-                  `[Media Pre-check] Checking media availability for chat ${chatId}`,
+                  `[Media Pre-check] Checking media availability for chat ${chatId} (language: ${contactLanguage || 'not set'})`,
                 );
 
                 const preCheckResult =
@@ -394,6 +408,7 @@ export class WorkflowEngineService implements OnModuleInit {
                       lastMessageHadMedia,
                       aiMessageCount,
                       conversationContext,
+                      chatLanguage: contactLanguage || undefined,
                     },
                   );
 
@@ -464,6 +479,7 @@ export class WorkflowEngineService implements OnModuleInit {
                     lastMessageHadMedia,
                     aiMessageCount,
                     conversationContext,
+                    chatLanguage: contactLanguage || undefined,
                   });
 
                 if (mediaResult.shouldSendMedia && mediaResult.selectedMedia) {
@@ -499,12 +515,80 @@ export class WorkflowEngineService implements OnModuleInit {
               }
             }
 
+            // STEP 4: Generate interactive CTAs for proactive engagement
+            // This creates dynamic follow-up suggestions like ChatGPT does after every response
+            let interactiveData: AIReplyInteractiveData | undefined;
+
+            if (this.interactiveMessageService) {
+              try {
+                this.logger.debug(
+                  `[Interactive CTAs] Generating CTAs for chat ${chatId}`,
+                );
+
+                // Get the customer's last message for context
+                const lastInboundMessage = recentMessages
+                  .filter((m) => m.direction === 'inbound')
+                  .sort(
+                    (a, b) =>
+                      new Date(b.timestamp).getTime() -
+                      new Date(a.timestamp).getTime(),
+                  )[0];
+
+                const ctaResult =
+                  await this.interactiveMessageService.generateInteractiveCTAs({
+                    chatId,
+                    userId,
+                    conversationContext,
+                    maxCTAs: 3,
+                    includeMediaCTAs: true,
+                    // Dynamic CTA options - enables AI-generated contextual CTAs
+                    aiResponseText: response,
+                    customerMessage: lastInboundMessage?.text ?? undefined,
+                    hasMediaAttachment: !!mediaAttachment,
+                    mediaType: mediaAttachment?.mediaType,
+                    businessContext: 'real estate',
+                  });
+
+                if (
+                  ctaResult.format !== 'none' &&
+                  ctaResult.buttons &&
+                  ctaResult.buttons.length > 0
+                ) {
+                  interactiveData = {
+                    enabled: true,
+                    buttons: ctaResult.buttons,
+                    footerText:
+                      ctaResult.footerText ||
+                      this.interactiveMessageService.generateFooterText(
+                        ctaResult.funnelAnalysis.currentStage,
+                      ),
+                    funnelStage: ctaResult.funnelAnalysis.currentStage,
+                    reasoning: ctaResult.reasoning,
+                  };
+
+                  this.logger.log(
+                    `[Interactive CTAs] Generated ${ctaResult.buttons.length} CTAs: ${ctaResult.buttons.map((b) => b.title).join(', ')}`,
+                  );
+                } else {
+                  this.logger.debug(
+                    `[Interactive CTAs] No CTAs generated: ${ctaResult.reasoning}`,
+                  );
+                }
+              } catch (ctaError) {
+                this.logger.warn(
+                  `[Interactive CTAs] Error generating CTAs (non-critical): ${ctaError.message}`,
+                );
+                // Continue without interactive CTAs - text response is still valid
+              }
+            }
+
             aiResponse = {
               content: response,
               confidence: classification.confidence,
               shouldSend: true,
               requiresHandoff: false,
               mediaAttachment,
+              interactiveData,
             };
           } catch (error) {
             // Check if AI is disabled for this chat (via chat_ai_overrides)
@@ -1456,6 +1540,40 @@ ${!mediaContext?.willHaveMedia ? "3. If the customer is asking for specific deta
     }
 
     return results;
+  }
+
+  /**
+   * Get contact's preferred language for a chat
+   * Fetches the contact by participant phone and returns their language preference
+   */
+  private async getContactLanguage(chatId: string): Promise<string | null> {
+    try {
+      // Get the most recent inbound message to find the contact's phone number
+      const recentInboundMsg = await db
+        .select({ sender: messages.sender })
+        .from(messages)
+        .where(eq(messages.chatId, chatId))
+        .orderBy(desc(messages.timestamp))
+        .limit(1);
+
+      if (!recentInboundMsg || recentInboundMsg.length === 0) {
+        return null;
+      }
+
+      // Fetch contact by phone number
+      const contactRecord = await db
+        .select({ language: contacts.language })
+        .from(contacts)
+        .where(eq(contacts.phoneNumber, recentInboundMsg[0].sender))
+        .limit(1);
+
+      return contactRecord?.[0]?.language || null;
+    } catch (error) {
+      this.logger.warn(
+        `[Contact Language] Failed to fetch language for chat ${chatId}: ${error.message}`,
+      );
+      return null;
+    }
   }
 
   /**

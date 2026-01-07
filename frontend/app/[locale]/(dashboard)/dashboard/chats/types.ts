@@ -148,6 +148,46 @@ export interface Message {
   aiModel?: string;
   aiProvider?: string;
   wasManuallyOverridden?: boolean;
+  /** Interactive message metadata (buttons, lists) */
+  metadata?: MessageMetadata | null;
+}
+
+/** Metadata for interactive messages (buttons, lists) */
+export interface MessageMetadata {
+  /** Type of interactive message */
+  interactiveType?: "button" | "list";
+  /** Interactive message data */
+  interactiveData?: InteractiveMessageData;
+}
+
+/** Interactive message button */
+export interface InteractiveButton {
+  id: string;
+  title: string;
+}
+
+/** Interactive list section */
+export interface InteractiveListSection {
+  title?: string;
+  rows: Array<{
+    id: string;
+    title: string;
+    description?: string;
+  }>;
+}
+
+/** Interactive message data structure */
+export interface InteractiveMessageData {
+  /** Buttons for button messages (max 3) */
+  buttons?: InteractiveButton[];
+  /** Button text for list messages */
+  buttonText?: string;
+  /** Sections for list messages */
+  sections?: InteractiveListSection[];
+  /** Footer text */
+  footerText?: string;
+  /** Header text */
+  headerText?: string;
 }
 
 export interface InboundMessage {

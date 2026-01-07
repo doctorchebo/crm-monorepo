@@ -180,10 +180,22 @@ export class ObjectService {
         objectId: object.id,
         fieldId: fv.fieldId,
         value: fv.value,
-        textValue: this.extractTextValue(fv.value, field?.fieldType),
-        numericValue: this.extractNumericValue(fv.value, field?.fieldType),
-        dateValue: this.extractDateValue(fv.value, field?.fieldType),
-        booleanValue: this.extractBooleanValue(fv.value, field?.fieldType),
+        textValue: this.extractTextValue(
+          fv.value as FieldValue,
+          field?.fieldType,
+        ),
+        numericValue: this.extractNumericValue(
+          fv.value as FieldValue,
+          field?.fieldType,
+        ),
+        dateValue: this.extractDateValue(
+          fv.value as FieldValue,
+          field?.fieldType,
+        ),
+        booleanValue: this.extractBooleanValue(
+          fv.value as FieldValue,
+          field?.fieldType,
+        ),
       };
     });
 
@@ -252,10 +264,22 @@ export class ObjectService {
           objectId,
           fieldId: fv.fieldId,
           value: fv.value,
-          textValue: this.extractTextValue(fv.value, field?.fieldType),
-          numericValue: this.extractNumericValue(fv.value, field?.fieldType),
-          dateValue: this.extractDateValue(fv.value, field?.fieldType),
-          booleanValue: this.extractBooleanValue(fv.value, field?.fieldType),
+          textValue: this.extractTextValue(
+            fv.value as FieldValue,
+            field?.fieldType,
+          ),
+          numericValue: this.extractNumericValue(
+            fv.value as FieldValue,
+            field?.fieldType,
+          ),
+          dateValue: this.extractDateValue(
+            fv.value as FieldValue,
+            field?.fieldType,
+          ),
+          booleanValue: this.extractBooleanValue(
+            fv.value as FieldValue,
+            field?.fieldType,
+          ),
         });
       }
 

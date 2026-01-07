@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils";
 import { Pin } from "lucide-react";
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 import type { Chat, Message, MessageReaction } from "../types";
+import { InteractiveButtonsDisplay } from "./interactive-buttons-display";
 
 interface MessageBubbleProps {
   message: Message;
@@ -320,6 +321,15 @@ export const MessageBubble = memo(function MessageBubble({
                 onVideoPlay={onVideoPlay}
               />
             )}
+
+            {/* Interactive buttons display for messages with reply options */}
+            {message.metadata?.interactiveType &&
+              message.metadata.interactiveData && (
+                <InteractiveButtonsDisplay
+                  metadata={message.metadata}
+                  isOutbound={isOutbound}
+                />
+              )}
           </>
         )}
 

@@ -350,7 +350,14 @@ export interface CloudAPIWebhookSignatureVerification {
  * Extracted from inbound message
  */
 export interface MediaMetadata {
-  type: 'image' | 'video' | 'audio' | 'document' | 'sticker' | 'gif';
+  type:
+    | 'image'
+    | 'video'
+    | 'audio'
+    | 'document'
+    | 'sticker'
+    | 'gif'
+    | 'interactive_response';
   mimeType: string;
   sha256: string;
   mediaId: string;
@@ -360,6 +367,9 @@ export interface MediaMetadata {
   downloadUrl?: string; // Generated URL for secure download
   isVoiceNote?: boolean; // For audio: true if voice note (PTT) vs file upload
   isAnimated?: boolean; // For stickers/gifs: true if animated
+  // Interactive response fields (for button_reply and list_reply)
+  interactiveType?: string;
+  interactiveData?: string;
 }
 
 /**

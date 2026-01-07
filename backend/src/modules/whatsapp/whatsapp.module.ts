@@ -46,7 +46,7 @@ import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
     ConfigModule,
     forwardRef(() => ThumbnailModule),
     AiMemoryModule,
-    WorkflowModule,
+    forwardRef(() => WorkflowModule),
   ],
   controllers: [WhatsAppController, WhatsAppWebhookController, MediaController],
   providers: [

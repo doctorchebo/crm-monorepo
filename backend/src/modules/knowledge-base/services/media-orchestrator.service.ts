@@ -150,11 +150,12 @@ export class MediaOrchestratorService {
     const userIntent = this.classifyIntent(request.query);
     const preferredMimeTypes = this.getPreferredMimeTypes(userIntent);
 
-    // Re-rank results based on user intent
+    // Re-rank results based on user intent AND AI instructions
     const rankedResults = this.rankResultsByIntent(
       retrievalResponse.results,
       preferredMimeTypes,
       userIntent,
+      request.query,
     );
 
     this.logger.debug(
@@ -249,22 +250,70 @@ export class MediaOrchestratorService {
    *
    * This ensures that when a user explicitly asks for a video, we
    * prioritize video results even if an image has slightly higher similarity.
+   *
+   * ALSO INCORPORATES:
+   * - AI instructions eligibility filtering
+   * - Studio/leaseback content prioritization based on user request
    */
   private rankResultsByIntent(
     results: MediaRetrievalResult[],
     preferredMimeTypes: string[] | null,
     intent: string,
+    userQuery?: string,
   ): MediaRetrievalResult[] {
+    // Log entry point for debugging
+    this.logger.log(
+      `[Instruction Filter] Starting filter with ${results.length} candidates`,
+    );
+    this.logger.log(
+      `[Instruction Filter] Full query: "${userQuery || 'NO QUERY'}"`,
+    );
+
+    // Step 1: Filter and score based on AI instructions and user query
+    const scoredResults = results.map((result) => {
+      const instructionMatch = userQuery
+        ? this.parseAiInstructionsEligibility(result.aiInstructions, userQuery)
+        : { isEligible: true, matchScore: 50, reason: 'No query provided' };
+
+      // Log instruction matching for transparency
+      if (!instructionMatch.isEligible && result.aiInstructions) {
+        this.logger.log(
+          `[Instruction Filter] INELIGIBLE: ${result.objectName}/${result.fileName} - ${instructionMatch.reason}`,
+        );
+      } else if (instructionMatch.matchScore > 50 && result.aiInstructions) {
+        this.logger.log(
+          `[Instruction Filter] STRONG MATCH: ${result.objectName}/${result.fileName} (score: ${instructionMatch.matchScore}) - ${instructionMatch.reason}`,
+        );
+      }
+
+      return {
+        result,
+        instructionScore: instructionMatch.matchScore,
+        isInstructionEligible: instructionMatch.isEligible,
+      };
+    });
+
+    // Remove ineligible results based on instructions
+    const eligibleResults = scoredResults
+      .filter((s) => s.isInstructionEligible)
+      .sort((a, b) => b.instructionScore - a.instructionScore);
+
+    const baseResults = eligibleResults.map((s) => s.result);
+
+    this.logger.log(
+      `[Instruction Filter] After filtering: ${baseResults.length}/${results.length} media items remain eligible`,
+    );
+
+    // Step 2: Apply MIME type preference (intent-based)
     if (!preferredMimeTypes || preferredMimeTypes.length === 0) {
-      // No preference - return original order
-      return results;
+      return baseResults; // No preference - return instruction-filtered order
     }
 
     // Separate results into preferred and non-preferred
     const preferred: MediaRetrievalResult[] = [];
     const nonPreferred: MediaRetrievalResult[] = [];
 
-    for (const result of results) {
+    for (const result of baseResults) {
       const isPreferred = preferredMimeTypes.some((type) =>
         type.endsWith('/')
           ? result.mimeType.startsWith(type)
@@ -279,7 +328,7 @@ export class MediaOrchestratorService {
     }
 
     this.logger.debug(
-      `[Media Selection] Intent "${intent}": ${preferred.length} preferred, ${nonPreferred.length} non-preferred`,
+      `[Media Selection] Intent "${intent}": ${preferred.length} preferred (instruction-filtered), ${nonPreferred.length} non-preferred`,
     );
 
     // Return preferred first (maintaining their relative ranking), then non-preferred
@@ -634,6 +683,7 @@ export class MediaOrchestratorService {
         retrievalResponse.results,
         preferredMimeTypes,
         userIntent,
+        request.query,
       );
 
       // Check eligibility of best candidate (after intent ranking)
@@ -743,5 +793,277 @@ export class MediaOrchestratorService {
     topBlockReasons: Array<{ reason: string; count: number }>;
   }> {
     return this.auditService.getDecisionStats(userId, startDate, endDate);
+  }
+
+  /**
+   * Parse AI instructions to extract eligibility conditions
+   * Examples:
+   * - "Send this video when the user asks about the studio apartment"
+   * - "Send this when the conversation is about financial conditions and when conversation is in spanish"
+   * - "Use only for apartment inquiries"
+   *
+   * Returns score 0-100 for how well this media matches the current context
+   */
+  /**
+   * Parse AI instructions and determine if media is eligible for this user query.
+   *
+   * CRITICAL LOGIC:
+   * - If media has SPECIFIC conditional instructions ("Send when X", "Use for Y"),
+   *   and the user request DOES NOT match those conditions, media is INELIGIBLE
+   * - If media has NO instructions, it's universally eligible (generic media)
+   * - If media has instructions that DO match, it gets a HIGHER score
+   *
+   * This prevents sending leaseback video when user asks for studio apartment,
+   * or Spanish-only video when conversation is in English.
+   */
+  private parseAiInstructionsEligibility(
+    aiInstructions: string | null,
+    userQuery: string,
+  ): { isEligible: boolean; matchScore: number; reason: string } {
+    if (!aiInstructions || aiInstructions.trim().length === 0) {
+      // No instructions = generic media, send in any context
+      return {
+        isEligible: true,
+        matchScore: 50,
+        reason: 'No eligibility constraints (universal media)',
+      };
+    }
+
+    const instructions = aiInstructions.toLowerCase();
+    const query = userQuery.toLowerCase();
+
+    this.logger.debug(
+      `[Instruction Filter] Instructions: "${instructions.substring(0, 80)}..."`,
+    );
+    this.logger.debug(`[Instruction Filter] Query: "${query}"`);
+
+    // Extract all conditional triggers from instructions
+    // Pattern: "Send (this|when) <condition>" or "<MEDIA> for <purpose>"
+    const triggers = this.extractInstructionTriggers(instructions, query);
+
+    // CRITICAL: If media has explicit triggers but NONE match, it's INELIGIBLE
+    if (triggers.hasExplicitTriggers && !triggers.anyTriggerMatches) {
+      return {
+        isEligible: false,
+        matchScore: 0,
+        reason: `Media has specific purpose constraints that don't match: ${triggers.unmatchedTriggers.join(', ')}`,
+      };
+    }
+
+    // If media has triggers and some DO match, boost the score
+    if (triggers.hasExplicitTriggers && triggers.anyTriggerMatches) {
+      const matchCount = triggers.matchedTriggers.length;
+      const score = 70 + matchCount * 15; // 70-100 based on how many triggers matched
+
+      return {
+        isEligible: true,
+        matchScore: Math.min(100, score),
+        reason: `Strong match: ${triggers.matchedTriggers.join(', ')}`,
+      };
+    }
+
+    // Check for exclusive constraints ("Spanish-only", "For English conversations")
+    const exclusiveConstraint = this.checkExclusiveConstraints(
+      instructions,
+      query,
+    );
+    if (exclusiveConstraint.isViolated) {
+      return {
+        isEligible: false,
+        matchScore: 0,
+        reason: exclusiveConstraint.reason,
+      };
+    }
+
+    // No explicit triggers and no violations = generic media with moderate score
+    return {
+      isEligible: true,
+      matchScore: 45,
+      reason: 'No specific constraints match, but no violations either',
+    };
+  }
+
+  /**
+   * Extract explicit instruction triggers from aiInstructions.
+   *
+   * Looks for patterns like:
+   * - "Send this when user asks about studio apartment"
+   * - "Use for leaseback inquiries"
+   * - "For properties in Argentina"
+   */
+  private extractInstructionTriggers(
+    instructions: string,
+    userQuery: string,
+  ): {
+    hasExplicitTriggers: boolean;
+    anyTriggerMatches: boolean;
+    matchedTriggers: string[];
+    unmatchedTriggers: string[];
+  } {
+    const triggers: string[] = [];
+    let hasExplicitTriggers = false;
+
+    // Pattern 1: Look for "about X" - this captures the actual subject
+    // Examples: "when user asks about studio apartment" -> "studio apartment"
+    //           "inquiries about two bedroom" -> "two bedroom"
+    const aboutPatterns = instructions.match(/\babout\s+(?:the\s+)?([^,.]+)/gi);
+    if (aboutPatterns) {
+      hasExplicitTriggers = true;
+      for (const pattern of aboutPatterns) {
+        // Extract what comes after "about" (and optional "the")
+        const topic = pattern.replace(/^about\s+(?:the\s+)?/i, '').trim();
+        if (topic.length > 0) {
+          triggers.push(topic);
+        }
+      }
+    }
+
+    // Pattern 2: "for X" where X is specific (leaseback, investment, inquiries, etc)
+    const forPatterns = instructions.match(/\bfor\s+([^,.]+)(?=[,.]\s|$)/gi);
+    if (forPatterns) {
+      for (const pattern of forPatterns) {
+        const topic = pattern.replace(/^for\s+/i, '').trim();
+        // Only consider "for X" as explicit if X is substantial (not generic "for users")
+        if (
+          topic.length > 3 &&
+          !['users', 'properties', 'people'].includes(topic)
+        ) {
+          hasExplicitTriggers = true;
+          triggers.push(topic);
+        }
+      }
+    }
+
+    // Pattern 3: "when X" - as fallback if no "about" found
+    // Only use this if we haven't found triggers yet
+    if (!hasExplicitTriggers) {
+      const whenPatterns = instructions.match(/\bwhen\s+([^,.]+)/gi);
+      if (whenPatterns) {
+        for (const pattern of whenPatterns) {
+          const topic = pattern.replace(/^when\s+/i, '').trim();
+          // Filter out common non-specific phrases like "the user asks" or "customer wants"
+          const isGeneric =
+            /^(the\s+)?(user|customer|client|they|someone|people)\s+(asks?|wants?|needs?|is|are)/i.test(
+              topic,
+            );
+          if (!isGeneric && topic.length > 5) {
+            hasExplicitTriggers = true;
+            triggers.push(topic);
+          }
+        }
+      }
+    }
+
+    if (!hasExplicitTriggers) {
+      return {
+        hasExplicitTriggers: false,
+        anyTriggerMatches: false,
+        matchedTriggers: [],
+        unmatchedTriggers: [],
+      };
+    }
+
+    // Now check which triggers match the user query
+    const matchedTriggers: string[] = [];
+    const unmatchedTriggers: string[] = [];
+
+    // Common stop words and action verbs to exclude from keyword matching
+    const stopWords = new Set([
+      'the',
+      'for',
+      'and',
+      'this',
+      'that',
+      'with',
+      'from',
+      'about',
+      'when',
+      'user',
+      'customer',
+      'client',
+      'asks',
+      'asks',
+      'asking',
+      'wants',
+      'needs',
+      'looking',
+      'inquires',
+      'inquiring',
+      'requests',
+    ]);
+
+    for (const trigger of triggers) {
+      // Normalize trigger for matching - extract only meaningful nouns/adjectives
+      const triggerKeywords = trigger
+        .split(/\s+/)
+        .filter(
+          (word) => word.length > 2 && !stopWords.has(word.toLowerCase()),
+        );
+
+      // Debug logging for keyword extraction
+      this.logger.debug(
+        `[Instruction Filter] Trigger: "${trigger}" → keywords: [${triggerKeywords.join(', ')}]`,
+      );
+
+      // Check if query contains ALL significant keywords from the trigger
+      const keywordMatches = triggerKeywords.map((keyword) => ({
+        keyword,
+        found: userQuery.includes(keyword.toLowerCase()),
+      }));
+
+      const allKeywordsMatch = keywordMatches.every((m) => m.found);
+
+      this.logger.debug(
+        `[Instruction Filter] Keyword matching: ${keywordMatches.map((m) => `${m.keyword}=${m.found ? '✓' : '✗'}`).join(', ')} → ${allKeywordsMatch ? 'MATCH' : 'NO MATCH'}`,
+      );
+
+      if (allKeywordsMatch) {
+        matchedTriggers.push(trigger);
+      } else {
+        unmatchedTriggers.push(trigger);
+      }
+    }
+
+    return {
+      hasExplicitTriggers: true,
+      anyTriggerMatches: matchedTriggers.length > 0,
+      matchedTriggers,
+      unmatchedTriggers,
+    };
+  }
+
+  /**
+   * Check for exclusive constraints like "Spanish-only" or "For English conversations".
+   *
+   * These are HARD blocks - if violated, media is completely ineligible.
+   */
+  private checkExclusiveConstraints(
+    instructions: string,
+    userQuery: string,
+  ): { isViolated: boolean; reason: string } {
+    // Check for language-exclusive constraints
+    if (instructions.includes('spanish') && instructions.includes('only')) {
+      // This video is Spanish-only, but user is likely not in Spanish
+      // We would need conversation language from context, for now check query language hints
+      if (!userQuery.includes('español') && !userQuery.includes('spanish')) {
+        return {
+          isViolated: true,
+          reason:
+            'Media is Spanish-only but conversation appears to be in different language',
+        };
+      }
+    }
+
+    if (instructions.includes('english') && instructions.includes('only')) {
+      if (userQuery.includes('español') || userQuery.includes('portugués')) {
+        return {
+          isViolated: true,
+          reason:
+            'Media is English-only but conversation is in different language',
+        };
+      }
+    }
+
+    return { isViolated: false, reason: '' };
   }
 }

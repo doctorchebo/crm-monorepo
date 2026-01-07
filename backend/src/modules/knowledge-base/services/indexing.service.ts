@@ -280,7 +280,7 @@ export class IndexingService {
           const formattedValue = this.formatFieldValue(
             value.value,
             field.fieldType,
-            field.fieldConfig,
+            field.fieldConfig as Record<string, any> | null | undefined,
           );
           if (formattedValue) {
             categoryParts.push(`- ${field.displayName}: ${formattedValue}`);
@@ -376,7 +376,7 @@ export class IndexingService {
         const formattedValue = this.formatFieldValue(
           value.value,
           field.fieldType,
-          field.fieldConfig,
+          field.fieldConfig as Record<string, any> | null | undefined,
         );
         if (formattedValue) {
           parts.push(`${field.displayName}: ${formattedValue}`);
