@@ -636,6 +636,29 @@ export const kbMediaApi = {
   },
 
   /**
+   * Check compression status (polls S3 if webhook failed)
+   *
+   * This is a fallback for when Lambda compression webhook fails
+   * (e.g., when backend runs locally). It checks S3 for the
+   * compressed file and updates the database if found.
+   */
+  async checkCompressionStatus(mediaId: string): Promise<{
+    status: string;
+    compressedFileSize?: number;
+    originalFileSize?: number;
+    compressionRatio?: number;
+    updated: boolean;
+  }> {
+    return apiClient.get<{
+      status: string;
+      compressedFileSize?: number;
+      originalFileSize?: number;
+      compressionRatio?: number;
+      updated: boolean;
+    }>(`/knowledge-base/media/${mediaId}/compression-status`);
+  },
+
+  /**
    * Get download URL for media
    */
   async getDownloadUrl(

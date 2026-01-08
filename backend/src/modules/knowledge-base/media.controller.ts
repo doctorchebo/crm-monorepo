@@ -188,6 +188,21 @@ export class KbMediaController {
   }
 
   /**
+   * Check compression status (polls S3 if webhook failed)
+   *
+   * This endpoint is a fallback for when Lambda compression webhook fails
+   * (e.g., when backend runs locally and Lambda can't reach localhost).
+   * It checks S3 for the compressed file and updates the database if found.
+   */
+  @Get('media/:id/compression-status')
+  async checkCompressionStatus(
+    @Request() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.mediaService.checkCompressionStatus(id);
+  }
+
+  /**
    * Get presigned download URL for media
    */
   @Get('media/:id/download')

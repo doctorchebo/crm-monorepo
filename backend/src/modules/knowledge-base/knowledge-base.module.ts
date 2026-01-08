@@ -11,6 +11,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ImageProcessingService } from '@shared/services/image-processing.service';
 import { S3Service } from '@shared/services/s3.service';
 import { AiMemoryModule } from '../ai-memory/ai-memory.module';
+import { MediaCompressionModule } from '../media-compression/media-compression.module';
 import { ThumbnailModule } from '../thumbnail/thumbnail.module';
 import { VideoCompressionModule } from '../video-compression/video-compression.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
@@ -38,7 +39,8 @@ import {
     ConfigModule,
     AiMemoryModule, // For EmbeddingService
     ThumbnailModule, // For ThumbnailProcessorService
-    VideoCompressionModule, // For video compression queue
+    VideoCompressionModule, // For video compression queue (fallback)
+    MediaCompressionModule, // For Lambda compression (primary)
     forwardRef(() => WhatsAppModule), // For ConversationWindowService
   ],
   controllers: [KnowledgeBaseController, KbMediaController],

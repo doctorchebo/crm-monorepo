@@ -1,4 +1,5 @@
 import { KnowledgeBaseModule } from '@modules/knowledge-base/knowledge-base.module';
+import { MediaCompressionModule } from '@modules/media-compression/media-compression.module';
 import { NotesModule } from '@modules/notes/notes.module';
 import { PinsModule } from '@modules/pins/pins.module';
 import { ReactionsModule } from '@modules/reactions/reactions.module';
@@ -56,6 +57,7 @@ import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
     AIReplyModule,
     KnowledgeBaseModule,
     WorkflowModule,
+    MediaCompressionModule,
     DatabaseModule,
   ],
   controllers: [AppController],

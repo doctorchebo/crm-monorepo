@@ -85,7 +85,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { mutate } from "swr";
 import { MediaUploadDialog } from "./media-upload-dialog";
 
@@ -753,11 +753,26 @@ export function ObjectMediaList({
 }: ObjectMediaListProps) {
   const t = useTranslations("knowledgeBase.media");
 
+  // Stable cache key - memoize to prevent SWR from re-fetching on every render
+  // SWR uses stable-hash internally, but we need the reference to be stable
+  // for our manual mutate() calls and useEffect dependencies
+  const cacheKey = useMemo(
+    () => (objectId ? ["object-media", objectId] : null),
+    [objectId]
+  );
+
   // Fetch media for object
-  const cacheKey = ["object-media", objectId];
+  // Disable automatic revalidation to prevent unnecessary refetches when:
+  // - Opening/closing dialogs (which might trigger focus events)
+  // - Switching browser tabs
+  // We manually trigger refresh via mutate() when data changes
   const { data: mediaList, isLoading } = useSWR<KbMedia[]>(
-    objectId ? cacheKey : null,
-    () => kbMediaApi.listObjectMedia(objectId)
+    cacheKey,
+    () => kbMediaApi.listObjectMedia(objectId),
+    {
+      revalidateOnFocus: false,
+      revalidateOnReconnect: false,
+    }
   );
 
   // Calculate media limit status from the media list
@@ -782,6 +797,57 @@ export function ObjectMediaList({
 
   // Track real-time compression progress for individual media items
   const { getProgress, getStatus } = useCompressionProgress();
+
+  // Poll for compression status when webhook might have failed (local dev)
+  // This is a fallback mechanism that checks S3 directly
+  useEffect(() => {
+    // Find media items that are pending or processing
+    const pendingMedia = mediaList?.filter(
+      (m) =>
+        m.compressionStatus === "pending" ||
+        m.compressionStatus === "processing"
+    );
+
+    if (!pendingMedia || pendingMedia.length === 0) {
+      return;
+    }
+
+    // Poll every 5 seconds for each pending item
+    const pollInterval = setInterval(async () => {
+      let anyUpdated = false;
+
+      for (const media of pendingMedia) {
+        try {
+          const result = await kbMediaApi.checkCompressionStatus(media.id);
+          if (result.updated) {
+            anyUpdated = true;
+            console.log(
+              `🎬 Compression completed for ${media.id}:`,
+              result.status,
+              result.compressionRatio
+                ? `(${result.compressionRatio.toFixed(1)}x reduction)`
+                : ""
+            );
+          }
+        } catch (err) {
+          console.error(
+            `Failed to check compression status for ${media.id}:`,
+            err
+          );
+        }
+      }
+
+      // If any status was updated, refresh the media list
+      // cacheKey is stable since it's memoized based on objectId
+      if (anyUpdated) {
+        mutate(cacheKey);
+      }
+    }, 5000); // Poll every 5 seconds
+
+    return () => clearInterval(pollInterval);
+    // Note: cacheKey is derived from objectId via useMemo, so we only need objectId here
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mediaList, objectId]);
 
   // Dialog states
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);

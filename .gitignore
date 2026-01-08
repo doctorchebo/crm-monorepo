@@ -1,2 +1,13 @@
 node_modules
 reference images
+
+# CDK
+infrastructure/cdk.out
+
+# Infrastructure
+infrastructure/.env
+infrastructure/layers/ffmpeg/bin/
+infrastructure/layers/ffmpeg-layer/
+infrastructure/**/*.js
+infrastructure/**/*.d.ts
+!infrastructure/cdk.json

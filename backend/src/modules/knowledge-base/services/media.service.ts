@@ -8,6 +8,7 @@
  * - S3 storage coordination
  * - Media metadata CRUD operations
  * - Image normalization for WhatsApp compatibility
+ * - Video compression via Lambda or local BullMQ (with automatic fallback)
  */
 
 import { db } from '@database/db.connection';
@@ -31,6 +32,7 @@ import {
   videoNeedsCompression,
 } from '@shared/constants/whatsapp-media-limits';
 import { ImageProcessingService } from '@shared/services/image-processing.service';
+import { LambdaCompressionService } from '@shared/services/lambda-compression.service';
 import { S3Service } from '@shared/services/s3.service';
 import { and, eq, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
@@ -177,6 +179,7 @@ export class KbMediaService {
     private readonly imageProcessingService: ImageProcessingService,
     private readonly kbThumbnailService: KbThumbnailService,
     private readonly compressionQueueService: CompressionQueueService,
+    private readonly lambdaCompressionService: LambdaCompressionService,
   ) {}
 
   // ============================================================================
@@ -434,6 +437,7 @@ export class KbMediaService {
 
   /**
    * Queue video for compression if it exceeds WhatsApp's send limit.
+   * Uses Lambda compression if configured, otherwise falls back to local BullMQ.
    * This is non-blocking - the video can still be used while compression runs.
    */
   private async queueVideoCompressionIfNeeded(
@@ -452,29 +456,79 @@ export class KbMediaService {
     }
 
     try {
-      const jobId = await this.compressionQueueService.queueCompression({
-        mediaId,
-        s3Key,
-        s3Bucket,
-        fileSize,
-        mimeType,
-        fileName,
-        userId,
-        objectId,
-      });
+      let jobId: string | null = null;
 
-      if (jobId) {
-        this.logger.log(
-          `[Video Compression] Queued compression job ${jobId} for media ${mediaId} ` +
-            `(${(fileSize / 1024 / 1024).toFixed(2)}MB video)`,
+      // Try Lambda compression first (if configured)
+      const lambdaEnabled =
+        this.lambdaCompressionService.isLambdaCompressionEnabled();
+      if (lambdaEnabled) {
+        this.logger.debug(
+          `[Video Compression] Attempting Lambda compression for ${fileName}`,
         );
 
+        jobId = await this.lambdaCompressionService.queueCompression({
+          mediaId,
+          s3Key,
+          s3Bucket,
+          fileSize,
+          mimeType,
+          fileName,
+          userId,
+          objectId,
+          mediaType: 'video',
+        });
+
+        if (jobId) {
+          this.logger.log(
+            `[Lambda Compression] ✓ Queued job ${jobId} for media ${mediaId} ` +
+              `(${(fileSize / 1024 / 1024).toFixed(2)}MB video)`,
+          );
+        } else {
+          this.logger.warn(
+            `[Lambda Compression] Returned null for ${fileName}, falling back to local compression`,
+          );
+        }
+      } else {
+        this.logger.debug(
+          `[Video Compression] Lambda compression not enabled, using local compression`,
+        );
+      }
+
+      // Fallback to local BullMQ compression if Lambda not available or failed
+      if (!jobId) {
+        jobId = await this.compressionQueueService.queueCompression({
+          mediaId,
+          s3Key,
+          s3Bucket,
+          fileSize,
+          mimeType,
+          fileName,
+          userId,
+          objectId,
+        });
+
+        if (jobId) {
+          this.logger.log(
+            `[Local Compression] Queued job ${jobId} for media ${mediaId} ` +
+              `(${(fileSize / 1024 / 1024).toFixed(2)}MB video) ` +
+              `[Lambda enabled: ${lambdaEnabled}]`,
+          );
+        }
+      }
+
+      if (jobId) {
+        // Calculate the expected compressed S3 key (same logic as Lambda uses)
+        const expectedCompressedKey =
+          this.lambdaCompressionService.generateCompressedKey(s3Key);
+
         // Update media record to indicate compression is pending
+        // Store the expected compressed key so we can poll S3 if webhook fails
         await db
           .update(kbObjectMedia)
           .set({
             compressionStatus: 'pending',
             originalFileSize: fileSize,
+            compressedS3Key: expectedCompressedKey,
             updatedAt: new Date(),
           })
           .where(eq(kbObjectMedia.id, mediaId));
@@ -695,6 +749,129 @@ export class KbMediaService {
       ...result[0],
       aiEnabled: result[0].aiEnabled ?? true,
     };
+  }
+
+  /**
+   * Check and update compression status by polling S3
+   *
+   * This is a fallback mechanism for when the Lambda webhook fails
+   * (e.g., when running locally and Lambda can't reach localhost).
+   *
+   * Checks if the expected compressed file exists in S3, and if so,
+   * updates the database to mark compression as complete.
+   *
+   * @returns Updated compression status info
+   */
+  async checkCompressionStatus(mediaId: string): Promise<{
+    status: string;
+    compressedFileSize?: number;
+    originalFileSize?: number;
+    compressionRatio?: number;
+    updated: boolean;
+  }> {
+    const media = await this.getMediaById(mediaId);
+
+    if (!media) {
+      throw new NotFoundException(`Media not found: ${mediaId}`);
+    }
+
+    // If already completed or failed, return current status
+    if (
+      media.compressionStatus === 'completed' ||
+      media.compressionStatus === 'failed' ||
+      media.compressionStatus === 'none'
+    ) {
+      return {
+        status: media.compressionStatus || 'none',
+        compressedFileSize: media.compressedFileSize || undefined,
+        originalFileSize: media.originalFileSize || undefined,
+        compressionRatio:
+          media.originalFileSize && media.compressedFileSize
+            ? media.originalFileSize / media.compressedFileSize
+            : undefined,
+        updated: false,
+      };
+    }
+
+    // For pending/processing status, check S3 for the compressed file
+    // If compressedS3Key is not stored (older uploads), generate it
+    let compressedS3Key = media.compressedS3Key;
+    if (!compressedS3Key && media.s3Key) {
+      // Generate the expected compressed key using the same logic as Lambda
+      compressedS3Key = this.lambdaCompressionService.generateCompressedKey(
+        media.s3Key,
+      );
+      this.logger.debug(
+        `[Compression Status] Generated expected key for ${mediaId}: ${compressedS3Key}`,
+      );
+    }
+
+    if (!compressedS3Key) {
+      // Still no key - can't poll
+      return {
+        status: media.compressionStatus || 'pending',
+        updated: false,
+      };
+    }
+
+    try {
+      // Check if compressed file exists in S3 by trying to get metadata
+      // getFileMetadata returns null if file doesn't exist
+      const fileMetadata =
+        await this.s3Service.getFileMetadata(compressedS3Key);
+
+      if (fileMetadata) {
+        // File exists - compression is complete
+        const compressedFileSize = fileMetadata.size || 0;
+        const originalFileSize = media.originalFileSize || media.fileSize || 0;
+        const compressionRatio =
+          originalFileSize > 0 && compressedFileSize > 0
+            ? originalFileSize / compressedFileSize
+            : 1;
+
+        // Update database to mark compression as complete
+        await db
+          .update(kbObjectMedia)
+          .set({
+            compressionStatus: 'completed',
+            compressedS3Key, // Store the key for future reference
+            compressedFileSize,
+            // Update main s3Key to point to compressed file
+            s3Key: compressedS3Key,
+            fileSize: compressedFileSize,
+            updatedAt: new Date(),
+          })
+          .where(eq(kbObjectMedia.id, mediaId));
+
+        this.logger.log(
+          `[Compression Status] Detected completed compression for ${mediaId}: ` +
+            `${originalFileSize} -> ${compressedFileSize} bytes ` +
+            `(ratio: ${compressionRatio.toFixed(2)}x)`,
+        );
+
+        return {
+          status: 'completed',
+          compressedFileSize,
+          originalFileSize,
+          compressionRatio,
+          updated: true,
+        };
+      }
+
+      // File doesn't exist yet - still processing
+      return {
+        status: media.compressionStatus || 'pending',
+        updated: false,
+      };
+    } catch (error) {
+      this.logger.error(
+        `[Compression Status] Error checking S3 for ${mediaId}: ${error.message}`,
+      );
+      return {
+        status: media.compressionStatus || 'pending',
+        updated: false,
+      };
+    }
   }
 
   /**
@@ -1130,11 +1307,14 @@ export class KbMediaService {
 
   /**
    * Get presigned URL for media download
+   *
+   * If the media has been compressed and the compressed file exists,
+   * returns URL for the compressed version. Otherwise returns original.
    */
   async getPresignedDownloadUrl(
     userId: number,
     mediaId: string,
-  ): Promise<{ url: string; expiresAt: string }> {
+  ): Promise<{ url: string; expiresAt: string; isCompressed: boolean }> {
     const media = await this.getMediaWithObject(mediaId);
 
     // Verify ownership
@@ -1146,16 +1326,34 @@ export class KbMediaService {
       throw new ForbiddenException('Access denied to this media');
     }
 
-    const presignedResult = await this.s3Service.generatePresignedDownloadUrl(
-      media.s3Key,
-    );
+    // Prefer compressed file if available
+    const s3Key = this.getPreferredS3Key(media);
+    const isCompressed = s3Key !== media.s3Key && !!media.compressedS3Key;
+
+    const presignedResult =
+      await this.s3Service.generatePresignedDownloadUrl(s3Key);
 
     return {
       url: presignedResult.url,
       expiresAt: new Date(
         Date.now() + presignedResult.expiresIn * 1000,
       ).toISOString(),
+      isCompressed,
     };
+  }
+
+  /**
+   * Get the preferred S3 key for a media item.
+   * Returns compressed key if available and compression completed,
+   * otherwise returns the original key.
+   */
+  private getPreferredS3Key(media: MediaWithObject): string {
+    // Use compressed file if compression completed and compressed key exists
+    if (media.compressionStatus === 'completed' && media.compressedS3Key) {
+      return media.compressedS3Key;
+    }
+
+    return media.s3Key;
   }
 
   // ============================================================================
