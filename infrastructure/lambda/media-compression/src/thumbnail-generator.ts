@@ -5,9 +5,10 @@
  * - ffmpeg: For image resizing and video frame extraction (Lambda layer)
  * - Chromium/Puppeteer: For PDF page rendering (Lambda layer)
  *
- * Thumbnail specifications:
- * - Max dimensions: 300x300 (maintains aspect ratio)
- * - Format: JPEG at 80% quality
+ * Thumbnail specifications (context-aware):
+ * - KB media: 300x300 max (for file browser UI)
+ * - Message attachments: 600x600 max (for chat thread with readable text)
+ * - Format: JPEG at 80-85% quality depending on context
  *
  * Storage convention:
  * - Original: path/to/file.mp4
@@ -26,6 +27,7 @@ import { execSync, spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import { logger } from "./logger";
+import { getThumbnailConfig, ThumbnailConfig, ThumbnailContext } from "./types";
 
 // Chromium and Puppeteer imports for PDF rendering
 // These are dynamically loaded to avoid issues when Chromium layer isn't available
@@ -34,20 +36,6 @@ let puppeteer: typeof import("puppeteer-core") | null = null;
 
 // Browser type from puppeteer-core
 type Browser = import("puppeteer-core").Browser;
-
-// Thumbnail configuration
-const THUMBNAIL_CONFIG = {
-  maxWidth: 300,
-  maxHeight: 300,
-  quality: 80,
-  // Video: extract frame at this position (seconds or percentage)
-  videoFramePosition: "00:00:01",
-  // Processing timeout in milliseconds (30 seconds max)
-  processingTimeoutMs: 30000,
-  // PDF rendering - viewport size for Chromium
-  pdfViewportWidth: 800,
-  pdfViewportHeight: 1100,
-};
 
 // Paths to binaries (from Lambda layer or environment)
 const FFMPEG_PATH = process.env.FFMPEG_PATH || "/opt/bin/ffmpeg";
@@ -115,17 +103,31 @@ export function getMediaTypeFromMime(
 /**
  * Generate thumbnail from media buffer
  *
+ * Uses context-aware configuration:
+ * - kb-media: Smaller thumbnails (300x300) for file browser UI
+ * - message-attachment: Larger thumbnails (600x600) for chat with readable text
+ *
  * @param inputBuffer - The source media buffer
  * @param mimeType - MIME type of the source media
  * @param tempDir - Temporary directory for processing
+ * @param context - Thumbnail context for determining size/quality preset
  * @returns ThumbnailResult with thumbnail buffer and metadata
  */
 export async function generateThumbnail(
   inputBuffer: Buffer,
   mimeType: string,
-  tempDir: string = "/tmp"
+  tempDir: string = "/tmp",
+  context?: ThumbnailContext
 ): Promise<ThumbnailResult> {
   const mediaType = getMediaTypeFromMime(mimeType);
+  const config = getThumbnailConfig(context);
+
+  logger.debug("Generating thumbnail with config", undefined, {
+    context,
+    maxWidth: config.maxWidth,
+    maxHeight: config.maxHeight,
+    quality: config.quality,
+  });
 
   if (!mediaType) {
     return {
@@ -146,11 +148,16 @@ export async function generateThumbnail(
   try {
     switch (mediaType) {
       case "image":
-        return await generateImageThumbnail(inputBuffer, tempDir);
+        return await generateImageThumbnail(inputBuffer, tempDir, config);
       case "video":
-        return await generateVideoThumbnail(inputBuffer, mimeType, tempDir);
+        return await generateVideoThumbnail(
+          inputBuffer,
+          mimeType,
+          tempDir,
+          config
+        );
       case "document":
-        return await generatePdfThumbnail(inputBuffer, tempDir);
+        return await generatePdfThumbnail(inputBuffer, tempDir, config);
       default:
         return {
           success: false,
@@ -195,12 +202,29 @@ function isPermanentThumbnailError(errorMessage: string): boolean {
 }
 
 /**
- * Generate thumbnail for image using sharp
- * Uses ffmpeg as fallback since we have it in the layer
+ * Convert quality percentage (1-100) to ffmpeg -q:v scale (1-31)
+ * ffmpeg uses inverse scale: 1 = best quality, 31 = worst
+ *
+ * @param quality - Quality percentage (1-100)
+ * @returns ffmpeg -q:v value (1-31)
+ */
+function qualityToFfmpegQv(quality: number): number {
+  // Map 100% -> 1, 1% -> 31
+  return Math.max(1, Math.min(31, Math.round((100 - quality) / 3.3 + 1)));
+}
+
+/**
+ * Generate thumbnail for image using ffmpeg
+ * Uses ffmpeg from Lambda layer for image resizing
+ *
+ * @param inputBuffer - Source image buffer
+ * @param tempDir - Temporary directory for processing
+ * @param config - Thumbnail configuration (size/quality settings)
  */
 async function generateImageThumbnail(
   inputBuffer: Buffer,
-  tempDir: string
+  tempDir: string,
+  config: ThumbnailConfig
 ): Promise<ThumbnailResult> {
   const inputPath = path.join(tempDir, `input_${Date.now()}.jpg`);
   const outputPath = path.join(tempDir, `thumb_${Date.now()}.jpg`);
@@ -215,9 +239,9 @@ async function generateImageThumbnail(
       "-i",
       inputPath,
       "-vf",
-      `scale='min(${THUMBNAIL_CONFIG.maxWidth},iw)':min'(${THUMBNAIL_CONFIG.maxHeight},ih)':force_original_aspect_ratio=decrease`,
+      `scale='min(${config.maxWidth},iw)':min'(${config.maxHeight},ih)':force_original_aspect_ratio=decrease`,
       "-q:v",
-      String(Math.round((100 - THUMBNAIL_CONFIG.quality) / 5 + 1)), // ffmpeg quality scale
+      String(qualityToFfmpegQv(config.quality)),
       "-y",
       outputPath,
     ];
@@ -249,11 +273,17 @@ async function generateImageThumbnail(
 
 /**
  * Generate thumbnail for video by extracting a frame
+ *
+ * @param inputBuffer - Source video buffer
+ * @param mimeType - Video MIME type (for extension detection)
+ * @param tempDir - Temporary directory for processing
+ * @param config - Thumbnail configuration (size/quality settings)
  */
 async function generateVideoThumbnail(
   inputBuffer: Buffer,
   mimeType: string,
-  tempDir: string
+  tempDir: string,
+  config: ThumbnailConfig
 ): Promise<ThumbnailResult> {
   const extension = getVideoExtension(mimeType);
   const inputPath = path.join(tempDir, `input_${Date.now()}.${extension}`);
@@ -279,9 +309,9 @@ async function generateVideoThumbnail(
       "-vframes",
       "1",
       "-vf",
-      `scale='min(${THUMBNAIL_CONFIG.maxWidth},iw)':min'(${THUMBNAIL_CONFIG.maxHeight},ih)':force_original_aspect_ratio=decrease`,
+      `scale='min(${config.maxWidth},iw)':min'(${config.maxHeight},ih)':force_original_aspect_ratio=decrease`,
       "-q:v",
-      String(Math.round((100 - THUMBNAIL_CONFIG.quality) / 5 + 1)),
+      String(qualityToFfmpegQv(config.quality)),
       "-y",
       outputPath,
     ];
@@ -320,10 +350,15 @@ async function generateVideoThumbnail(
  * then screenshot that canvas.
  *
  * Requires Chromium Lambda layer for ARM64.
+ *
+ * @param inputBuffer - Source PDF buffer
+ * @param tempDir - Temporary directory for processing
+ * @param config - Thumbnail configuration (size/quality settings)
  */
 async function generatePdfThumbnail(
   inputBuffer: Buffer,
-  tempDir: string
+  tempDir: string,
+  config: ThumbnailConfig
 ): Promise<ThumbnailResult> {
   const inputPath = path.join(tempDir, `input_${Date.now()}.pdf`);
   const htmlPath = path.join(tempDir, `pdf_viewer_${Date.now()}.html`);
@@ -334,8 +369,8 @@ async function generatePdfThumbnail(
   const outputPath = path.join(tempDir, `thumb_${Date.now()}.jpg`);
 
   try {
-    // Initialize Chromium browser if not already done
-    const browser = await initChromiumBrowser();
+    // Initialize Chromium browser with context-aware viewport size
+    const browser = await initChromiumBrowser(config);
     if (!browser) {
       logger.warn("Chromium not available - PDF thumbnails disabled");
       return {
@@ -406,7 +441,7 @@ async function generatePdfThumbnail(
       const page = await pdf.getPage(1);
       
       // Scale to fit viewport while maintaining aspect ratio
-      const desiredWidth = ${THUMBNAIL_CONFIG.pdfViewportWidth};
+      const desiredWidth = ${config.pdfViewportWidth};
       const viewport = page.getViewport({ scale: 1 });
       const scale = desiredWidth / viewport.width;
       const scaledViewport = page.getViewport({ scale });
@@ -438,22 +473,22 @@ async function generatePdfThumbnail(
     const page = await browser.newPage();
 
     try {
-      // Set viewport to a reasonable PDF viewing size
+      // Set viewport to PDF viewing size based on context
       await page.setViewport({
-        width: THUMBNAIL_CONFIG.pdfViewportWidth,
-        height: THUMBNAIL_CONFIG.pdfViewportHeight,
+        width: config.pdfViewportWidth,
+        height: config.pdfViewportHeight,
       });
 
       // Navigate to the HTML file
       await page.goto(`file://${htmlPath}`, {
         waitUntil: "networkidle0",
-        timeout: THUMBNAIL_CONFIG.processingTimeoutMs,
+        timeout: config.processingTimeoutMs,
       });
 
       // Wait for PDF to render (poll for window.pdfRendered)
       await page.waitForFunction(
         () => (window as any).pdfRendered || (window as any).pdfError,
-        { timeout: THUMBNAIL_CONFIG.processingTimeoutMs }
+        { timeout: config.processingTimeoutMs }
       );
 
       // Check for errors
@@ -495,9 +530,9 @@ async function generatePdfThumbnail(
       "-i",
       chromiumOutputPath,
       "-vf",
-      `scale='min(${THUMBNAIL_CONFIG.maxWidth},iw)':min'(${THUMBNAIL_CONFIG.maxHeight},ih)':force_original_aspect_ratio=decrease`,
+      `scale='min(${config.maxWidth},iw)':min'(${config.maxHeight},ih)':force_original_aspect_ratio=decrease`,
       "-q:v",
-      String(Math.round((100 - THUMBNAIL_CONFIG.quality) / 5 + 1)),
+      String(qualityToFfmpegQv(config.quality)),
       "-y",
       outputPath,
     ];
@@ -553,10 +588,21 @@ async function generatePdfThumbnail(
  *
  * Uses @sparticuz/chromium package which extracts binaries from the Lambda layer.
  * Browser instance is reused across invocations for performance.
+/**
+ * Initialize Chromium browser for PDF rendering
  *
+ * Uses @sparticuz/chromium package which extracts binaries from the Lambda layer.
+ * Browser instance is reused across invocations for performance.
+ *
+ * Note: The browser is initialized with the largest viewport that might be needed
+ * (message-attachment config) to support both contexts without re-initializing.
+ *
+ * @param config - Thumbnail configuration for viewport sizing
  * @returns Browser instance or null if Chromium is not available
  */
-async function initChromiumBrowser(): Promise<Browser | null> {
+async function initChromiumBrowser(
+  config: ThumbnailConfig
+): Promise<Browser | null> {
   // Return existing instance if available and connected
   if (browserInstance?.connected) {
     return browserInstance;
@@ -597,14 +643,17 @@ async function initChromiumBrowser(): Promise<Browser | null> {
 
     logger.info("Launching Chromium browser", undefined, {
       executablePath,
+      viewportWidth: config.pdfViewportWidth,
+      viewportHeight: config.pdfViewportHeight,
     });
 
     // Launch browser with Lambda-optimized settings
+    // Use provided config's viewport as default
     browserInstance = await puppeteer.default.launch({
       args: chromium.default.args,
       defaultViewport: {
-        width: THUMBNAIL_CONFIG.pdfViewportWidth,
-        height: THUMBNAIL_CONFIG.pdfViewportHeight,
+        width: config.pdfViewportWidth,
+        height: config.pdfViewportHeight,
       },
       executablePath,
       headless: true,

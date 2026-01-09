@@ -297,8 +297,15 @@ async function processThumbnailJob(
     // Read the file into buffer
     const inputBuffer = fs.readFileSync(inputPath);
 
-    // Generate thumbnail
-    const thumbResult = await generateThumbnail(inputBuffer, mimeType, TMP_DIR);
+    // Generate thumbnail with context-aware configuration
+    // - kb-media: Smaller thumbnails (300x300) for file browser UI
+    // - message-attachment: Larger thumbnails (600x600) for chat with readable text
+    const thumbResult = await generateThumbnail(
+      inputBuffer,
+      mimeType,
+      TMP_DIR,
+      context
+    );
 
     if (!thumbResult.success || !thumbResult.thumbnailBuffer) {
       // Check if this is a permanent error that shouldn't be retried

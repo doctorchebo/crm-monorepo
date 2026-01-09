@@ -452,3 +452,113 @@ export interface FfmpegPreset {
    */
   scale?: string;
 }
+
+/**
+ * Context types for thumbnail generation
+ * Determines which thumbnail preset to use
+ */
+export type ThumbnailContext = "kb-media" | "message-attachment";
+
+/**
+ * Configuration for thumbnail generation
+ * These settings affect size, quality, and processing behavior
+ */
+export interface ThumbnailConfig {
+  /**
+   * Maximum width in pixels
+   * Thumbnail maintains aspect ratio and won't exceed this
+   */
+  maxWidth: number;
+
+  /**
+   * Maximum height in pixels
+   * Thumbnail maintains aspect ratio and won't exceed this
+   */
+  maxHeight: number;
+
+  /**
+   * JPEG quality (1-100)
+   * Higher = better quality, larger file
+   */
+  quality: number;
+
+  /**
+   * Video frame extraction position in seconds
+   */
+  videoFramePosition: string;
+
+  /**
+   * Processing timeout in milliseconds
+   */
+  processingTimeoutMs: number;
+
+  /**
+   * PDF viewport width for Chromium rendering
+   */
+  pdfViewportWidth: number;
+
+  /**
+   * PDF viewport height for Chromium rendering
+   */
+  pdfViewportHeight: number;
+}
+
+/**
+ * Context-aware thumbnail presets
+ *
+ * Design rationale:
+ * - KB media: Smaller thumbnails (300x300) are sufficient for file browser UI
+ * - Message attachments: Larger thumbnails (600x600) needed for chat thread
+ *   where users need to preview images with readable text
+ *
+ * These values balance quality vs storage/bandwidth costs
+ */
+export const THUMBNAIL_PRESETS: Record<ThumbnailContext, ThumbnailConfig> = {
+  /**
+   * Knowledge Base thumbnails
+   * Used in file browser/gallery views where thumbnails are displayed small
+   * Optimized for minimal storage and fast loading
+   */
+  "kb-media": {
+    maxWidth: 300,
+    maxHeight: 300,
+    quality: 80,
+    videoFramePosition: "00:00:01",
+    processingTimeoutMs: 30000,
+    pdfViewportWidth: 800,
+    pdfViewportHeight: 1100,
+  },
+
+  /**
+   * Message attachment thumbnails
+   * Used in chat thread where thumbnails are displayed larger
+   * Higher resolution needed to see text in images and documents
+   * Still balanced to avoid excessive storage/bandwidth
+   */
+  "message-attachment": {
+    maxWidth: 600,
+    maxHeight: 600,
+    quality: 85,
+    videoFramePosition: "00:00:01",
+    processingTimeoutMs: 30000,
+    pdfViewportWidth: 1200,
+    pdfViewportHeight: 1600,
+  },
+} as const;
+
+/**
+ * Get thumbnail configuration for a given context
+ * Falls back to message-attachment config if context is unknown
+ *
+ * @param context - The thumbnail context
+ * @returns ThumbnailConfig for the context
+ */
+export function getThumbnailConfig(
+  context?: ThumbnailContext
+): ThumbnailConfig {
+  if (context && THUMBNAIL_PRESETS[context]) {
+    return THUMBNAIL_PRESETS[context];
+  }
+  // Default to message-attachment for better quality if context unknown
+  return THUMBNAIL_PRESETS["message-attachment"];
+}
