@@ -1,5 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { S3Service } from '@shared/services/s3.service';
 import { ProviderRegistry } from '../providers';
 import { TranscriptionProvider, VisionProvider } from '../providers/types';
 import {
@@ -20,6 +21,11 @@ import {
  *
  * Uses the configured LLM provider for image description and transcription,
  * making it provider-agnostic.
+ *
+ * File URL Resolution:
+ * - Supports S3 URIs (s3://bucket/key or s3://key) - converts to presigned URLs
+ * - Supports HTTP/HTTPS URLs - passes through directly
+ * - Falls back to base64 encoding for S3 files when presigned URLs fail
  */
 @Injectable()
 export class ContentProcessingService {
@@ -30,9 +36,13 @@ export class ContentProcessingService {
   private readonly maxDocumentChars: number;
   private readonly maxAudioDurationSeconds: number;
 
+  /** Presigned URL expiry in seconds (1 hour) */
+  private readonly presignedUrlExpiry = 3600;
+
   constructor(
     private readonly configService: ConfigService,
     private readonly providerRegistry: ProviderRegistry,
+    @Optional() private readonly s3Service?: S3Service,
   ) {
     this.enableOcr = this.configService.get<boolean>(
       'aiMemory.processing.enableOcr',
@@ -54,6 +64,145 @@ export class ContentProcessingService {
       'aiMemory.processing.maxAudioDurationSeconds',
       600,
     );
+  }
+
+  /**
+   * Resolve a file URL to an accessible format for external services.
+   *
+   * Handles:
+   * - S3 URIs (s3://key or s3://bucket/key) → presigned URL
+   * - HTTP/HTTPS URLs → pass through
+   *
+   * @param fileUrl - The file URL to resolve (may be S3 URI or HTTP URL)
+   * @returns Resolved URL that external services can access
+   */
+  private async resolveFileUrl(fileUrl: string): Promise<string> {
+    // Check if it's an S3 URI
+    if (fileUrl.startsWith('s3://')) {
+      return this.resolveS3Uri(fileUrl);
+    }
+
+    // HTTP/HTTPS URLs pass through directly
+    if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
+      return fileUrl;
+    }
+
+    // Assume it's an S3 key if no scheme
+    if (!fileUrl.includes('://')) {
+      return this.resolveS3Key(fileUrl);
+    }
+
+    throw new AiMemoryError(
+      `Unsupported file URL scheme: ${fileUrl}`,
+      AiMemoryErrorCode.PROCESSING_FAILED,
+      { fileUrl },
+    );
+  }
+
+  /**
+   * Resolve an S3 URI to a presigned URL
+   *
+   * @param s3Uri - S3 URI in format s3://key or s3://bucket/key
+   * @returns Presigned download URL
+   */
+  private async resolveS3Uri(s3Uri: string): Promise<string> {
+    if (!this.s3Service) {
+      throw new AiMemoryError(
+        'S3Service not available - cannot resolve S3 URI',
+        AiMemoryErrorCode.PROCESSING_FAILED,
+        { s3Uri },
+      );
+    }
+
+    // Extract S3 key from URI (s3://key or s3://bucket/key)
+    // We use a simple approach: remove s3:// prefix and treat rest as key
+    const s3Key = s3Uri.replace(/^s3:\/\//, '');
+
+    return this.resolveS3Key(s3Key);
+  }
+
+  /**
+   * Resolve an S3 key to a presigned URL
+   *
+   * @param s3Key - The S3 object key
+   * @returns Presigned download URL
+   */
+  private async resolveS3Key(s3Key: string): Promise<string> {
+    if (!this.s3Service) {
+      throw new AiMemoryError(
+        'S3Service not available - cannot resolve S3 key',
+        AiMemoryErrorCode.PROCESSING_FAILED,
+        { s3Key },
+      );
+    }
+
+    try {
+      const { url } = await this.s3Service.generatePresignedDownloadUrl(s3Key, {
+        expiresIn: this.presignedUrlExpiry,
+      });
+
+      this.logger.debug(`Resolved S3 key to presigned URL: ${s3Key}`);
+      return url;
+    } catch (error) {
+      this.logger.error(
+        `Failed to generate presigned URL for ${s3Key}:`,
+        error,
+      );
+      throw new AiMemoryError(
+        `Failed to resolve S3 key to URL: ${error.message}`,
+        AiMemoryErrorCode.PROCESSING_FAILED,
+        { s3Key, error: error.message },
+      );
+    }
+  }
+
+  /**
+   * Fetch file as base64 data URL (fallback for when presigned URLs fail)
+   *
+   * @param fileUrl - The file URL (can be S3 key, S3 URI, or HTTP URL)
+   * @param mimeType - MIME type for the data URL
+   * @returns Base64 data URL
+   */
+  private async fetchAsBase64DataUrl(
+    fileUrl: string,
+    mimeType: string,
+  ): Promise<string> {
+    let buffer: Buffer;
+
+    // Handle S3 URIs/keys
+    if (fileUrl.startsWith('s3://') || !fileUrl.includes('://')) {
+      if (!this.s3Service) {
+        throw new AiMemoryError(
+          'S3Service not available - cannot fetch file',
+          AiMemoryErrorCode.PROCESSING_FAILED,
+          { fileUrl },
+        );
+      }
+
+      const s3Key = fileUrl.replace(/^s3:\/\//, '');
+      const downloadedBuffer = await this.s3Service.downloadFile(s3Key);
+
+      if (!downloadedBuffer) {
+        throw new AiMemoryError(
+          `File not found in S3: ${s3Key}`,
+          AiMemoryErrorCode.PROCESSING_FAILED,
+          { s3Key },
+        );
+      }
+
+      buffer = downloadedBuffer;
+    } else {
+      // Fetch from HTTP URL
+      const response = await fetch(fileUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch file: ${response.status}`);
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      buffer = Buffer.from(arrayBuffer);
+    }
+
+    const base64 = buffer.toString('base64');
+    return `data:${mimeType};base64,${base64}`;
   }
 
   /**
@@ -189,7 +338,10 @@ export class ContentProcessingService {
       if (this.enableImageDescription) {
         const visionProvider = this.getVisionProvider();
         if (visionProvider) {
-          const description = await this.describeImage(request.fileUrl);
+          const description = await this.describeImage(
+            request.fileUrl,
+            request.mimeType,
+          );
           if (description) {
             if (extractedContent) {
               extractedContent += `\n\n[AI Description]: ${description}`;
@@ -244,7 +396,10 @@ export class ContentProcessingService {
     }
 
     try {
-      const transcription = await this.transcribeAudio(request.fileUrl);
+      const transcription = await this.transcribeAudio(
+        request.fileUrl,
+        request.mimeType,
+      );
 
       if (!transcription) {
         return {
@@ -303,21 +458,41 @@ export class ContentProcessingService {
 
   /**
    * Extract text from PDF using mupdf
+   *
+   * Handles S3 URIs by fetching the file buffer directly.
    */
   private async extractPdfText(
     fileUrl: string,
   ): Promise<{ text: string; pageCount: number }> {
     try {
-      // Fetch the PDF
-      const response = await fetch(fileUrl);
-      const arrayBuffer = await response.arrayBuffer();
+      let buffer: Buffer;
+
+      // Handle S3 URIs/keys
+      if (fileUrl.startsWith('s3://') || !fileUrl.includes('://')) {
+        if (!this.s3Service) {
+          throw new Error('S3Service not available - cannot fetch PDF');
+        }
+        const s3Key = fileUrl.replace(/^s3:\/\//, '');
+        const downloadedBuffer = await this.s3Service.downloadFile(s3Key);
+
+        if (!downloadedBuffer) {
+          throw new Error(`PDF not found in S3: ${s3Key}`);
+        }
+
+        buffer = downloadedBuffer;
+      } else {
+        // Fetch from HTTP URL
+        const response = await fetch(fileUrl);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch PDF: ${response.status}`);
+        }
+        const arrayBuffer = await response.arrayBuffer();
+        buffer = Buffer.from(arrayBuffer);
+      }
 
       // Use mupdf (already in dependencies)
       const mupdf = await import('mupdf');
-      const document = mupdf.Document.openDocument(
-        Buffer.from(arrayBuffer),
-        'application/pdf',
-      );
+      const document = mupdf.Document.openDocument(buffer, 'application/pdf');
 
       const pageCount = document.countPages();
       let text = '';
@@ -341,9 +516,30 @@ export class ContentProcessingService {
 
   /**
    * Fetch plain text content from URL
+   *
+   * Handles S3 URIs by fetching the file buffer directly.
    */
   private async fetchTextContent(fileUrl: string): Promise<string> {
+    // Handle S3 URIs/keys
+    if (fileUrl.startsWith('s3://') || !fileUrl.includes('://')) {
+      if (!this.s3Service) {
+        throw new Error('S3Service not available - cannot fetch text file');
+      }
+      const s3Key = fileUrl.replace(/^s3:\/\//, '');
+      const buffer = await this.s3Service.downloadFile(s3Key);
+
+      if (!buffer) {
+        throw new Error(`Text file not found in S3: ${s3Key}`);
+      }
+
+      return buffer.toString('utf-8');
+    }
+
+    // Fetch from HTTP URL
     const response = await fetch(fileUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch text file: ${response.status}`);
+    }
     return response.text();
   }
 
@@ -359,20 +555,57 @@ export class ContentProcessingService {
 
   /**
    * Get AI description of an image using vision provider
+   *
+   * Handles URL resolution for S3 files, falling back to base64 encoding
+   * if presigned URLs fail (some AI providers may have issues with them).
    */
-  private async describeImage(fileUrl: string): Promise<string | null> {
+  private async describeImage(
+    fileUrl: string,
+    mimeType: string,
+  ): Promise<string | null> {
     const visionProvider = this.getVisionProvider();
     if (!visionProvider) return null;
 
     try {
-      const response = await visionProvider.analyzeImage({
-        imageUrl: fileUrl,
-        prompt:
-          'Describe this image in detail. Focus on any text, data, or information that would be relevant for future reference. Keep the description concise but comprehensive.',
-        maxTokens: 500,
-      });
+      // First, try with presigned URL
+      const resolvedUrl = await this.resolveFileUrl(fileUrl);
 
-      return response.description || null;
+      try {
+        const response = await visionProvider.analyzeImage({
+          imageUrl: resolvedUrl,
+          prompt:
+            'Describe this image in detail. Focus on any text, data, or information that would be relevant for future reference. Keep the description concise but comprehensive.',
+          maxTokens: 500,
+        });
+
+        return response.description || null;
+      } catch (urlError: any) {
+        // If presigned URL fails (e.g., provider can't access it), try base64
+        if (
+          urlError?.details?.originalError?.code === 'invalid_image_url' ||
+          urlError?.message?.includes('Failed to download')
+        ) {
+          this.logger.warn(
+            `Presigned URL failed for image analysis, falling back to base64: ${urlError.message}`,
+          );
+
+          const base64DataUrl = await this.fetchAsBase64DataUrl(
+            fileUrl,
+            mimeType,
+          );
+
+          const response = await visionProvider.analyzeImage({
+            imageUrl: base64DataUrl,
+            prompt:
+              'Describe this image in detail. Focus on any text, data, or information that would be relevant for future reference. Keep the description concise but comprehensive.',
+            maxTokens: 500,
+          });
+
+          return response.description || null;
+        }
+
+        throw urlError;
+      }
     } catch (error) {
       this.logger.error('Image description failed:', error);
       return null;
@@ -381,15 +614,26 @@ export class ContentProcessingService {
 
   /**
    * Transcribe audio using configured transcription provider
+   *
+   * Handles URL resolution for S3 files.
    */
-  private async transcribeAudio(fileUrl: string): Promise<string | null> {
+  private async transcribeAudio(
+    fileUrl: string,
+    mimeType: string,
+  ): Promise<string | null> {
     const transcriptionProvider = this.getTranscriptionProvider();
     if (!transcriptionProvider) return null;
 
     try {
+      // Resolve URL for S3 files
+      const resolvedUrl = await this.resolveFileUrl(fileUrl);
+
+      // Determine audio format from MIME type
+      const format = this.getAudioFormatFromMimeType(mimeType);
+
       const response = await transcriptionProvider.transcribe({
-        audioUrl: fileUrl,
-        format: 'mp3',
+        audioUrl: resolvedUrl,
+        format,
       });
 
       return response.text || null;
@@ -397,6 +641,23 @@ export class ContentProcessingService {
       this.logger.error('Audio transcription failed:', error);
       return null;
     }
+  }
+
+  /**
+   * Get audio format from MIME type
+   */
+  private getAudioFormatFromMimeType(
+    mimeType: string,
+  ): 'mp3' | 'wav' | 'ogg' | 'webm' {
+    const formatMap: Record<string, 'mp3' | 'wav' | 'ogg' | 'webm'> = {
+      'audio/mpeg': 'mp3',
+      'audio/mp3': 'mp3',
+      'audio/wav': 'wav',
+      'audio/wave': 'wav',
+      'audio/ogg': 'ogg',
+      'audio/webm': 'webm',
+    };
+    return formatMap[mimeType] || 'mp3';
   }
 
   /**

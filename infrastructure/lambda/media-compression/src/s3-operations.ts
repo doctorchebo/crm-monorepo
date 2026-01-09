@@ -94,11 +94,11 @@ export async function downloadFromS3(
 }
 
 /**
- * Upload a file to S3 from local filesystem
+ * Upload a file to S3 from local filesystem or buffer
  *
  * @param bucket - S3 bucket name
  * @param key - S3 object key
- * @param localPath - Local filesystem path of the file to upload
+ * @param source - Local filesystem path or Buffer to upload
  * @param contentType - MIME type of the file
  * @param jobId - Job ID for logging
  * @returns Size of uploaded file in bytes
@@ -106,18 +106,19 @@ export async function downloadFromS3(
 export async function uploadToS3(
   bucket: string,
   key: string,
-  localPath: string,
+  source: string | Buffer,
   contentType: string,
   jobId: string
 ): Promise<number> {
-  logger.info("Uploading file to S3", jobId, {
+  logger.info("Uploading to S3", jobId, {
     bucket,
     key,
-    localPath,
     contentType,
+    sourceType: typeof source === "string" ? "file" : "buffer",
   });
 
-  const fileBuffer = fs.readFileSync(localPath);
+  const fileBuffer =
+    typeof source === "string" ? fs.readFileSync(source) : source;
   const fileSize = fileBuffer.length;
 
   const command = new PutObjectCommand({
@@ -129,7 +130,7 @@ export async function uploadToS3(
 
   await s3Client.send(command);
 
-  logger.info("Uploaded file to S3", jobId, {
+  logger.info("Uploaded to S3", jobId, {
     bucket,
     key,
     sizeBytes: fileSize,

@@ -38,8 +38,8 @@ import {
   imports: [
     ConfigModule,
     AiMemoryModule, // For EmbeddingService
-    ThumbnailModule, // For ThumbnailProcessorService
-    VideoCompressionModule, // For video compression queue (fallback)
+    ThumbnailModule, // For Lambda thumbnail service (via MediaCompressionModule)
+    VideoCompressionModule, // For video compression queue
     MediaCompressionModule, // For Lambda compression (primary)
     forwardRef(() => WhatsAppModule), // For ConversationWindowService
   ],

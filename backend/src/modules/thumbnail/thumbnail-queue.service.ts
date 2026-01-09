@@ -1,204 +1,161 @@
 /**
  * Thumbnail Queue Service
- * Manages the BullMQ queue for thumbnail generation jobs
+ *
+ * Manages thumbnail generation jobs via AWS Lambda.
+ *
+ * Architecture:
+ * - ALL thumbnails generated via AWS Lambda (no local fallback)
+ * - PDFs supported via Chromium + pdf.js Lambda layer
+ * - Safety mechanisms prevent infinite loops and runaway costs
+ *
+ * Flow:
+ * 1. Queue job to Lambda via SQS
+ * 2. Lambda generates thumbnail, uploads to S3, calls callback
+ * 3. Callback updates DB and emits WebSocket event
+ *
+ * Safety:
+ * - Max 3 retry attempts per job
+ * - Job expiry after 1 hour
+ * - File size limits enforced
+ * - Permanent errors (corrupt files, unsupported formats) not retried
  */
 
-import { getThumbnailConfig } from '@config/thumbnail.config';
-import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
-import { Queue } from 'bullmq';
-import {
-  THUMBNAIL_JOB_NAME,
-  THUMBNAIL_QUEUE_NAME,
-  ThumbnailJobData,
-  supportsThumbnail,
-} from './thumbnail.types';
+import { LambdaThumbnailService } from '@shared/services/lambda-thumbnail.service';
+import { ThumbnailJobData, supportsThumbnail } from './thumbnail.types';
+
+/**
+ * Result of queuing a thumbnail job
+ */
+export interface QueueResult {
+  jobId: string | null;
+  success: boolean;
+  error?: string;
+}
 
 @Injectable()
 export class ThumbnailQueueService {
   private readonly logger = new Logger(ThumbnailQueueService.name);
-  private readonly config = getThumbnailConfig();
 
   constructor(
-    @InjectQueue(THUMBNAIL_QUEUE_NAME)
-    private readonly thumbnailQueue: Queue<ThumbnailJobData>,
+    private readonly lambdaThumbnailService: LambdaThumbnailService,
   ) {}
 
   /**
-   * Add a thumbnail generation job to the queue
-   * Called after media is uploaded to S3
+   * Add a thumbnail generation job to Lambda queue
+   * No local fallback - if Lambda fails, thumbnail is not generated
    */
   async queueThumbnailGeneration(
     jobData: ThumbnailJobData,
-  ): Promise<string | null> {
+  ): Promise<QueueResult> {
     // Skip queueing for non-thumbnail media types
     if (!supportsThumbnail(jobData.mediaType, jobData.mimeType)) {
       this.logger.debug(
         `Skipping thumbnail queue for ${jobData.mediaType}: ${jobData.attachmentId}`,
       );
-      return null;
+      return { jobId: null, success: true };
+    }
+
+    // Check if Lambda is enabled
+    if (!this.lambdaThumbnailService.isLambdaThumbnailEnabled()) {
+      this.logger.error(
+        `Lambda not configured - thumbnail will NOT be generated for ${jobData.attachmentId}`,
+      );
+      return {
+        jobId: null,
+        success: false,
+        error: 'Lambda thumbnail service not configured',
+      };
     }
 
     try {
-      const job = await this.thumbnailQueue.add(THUMBNAIL_JOB_NAME, jobData, {
-        attempts: this.config.job.attempts,
-        backoff: {
-          type: this.config.job.backoffType,
-          delay: this.config.job.backoffDelay,
-        },
-        removeOnComplete: this.config.job.removeOnComplete,
-        removeOnFail: this.config.job.removeOnFail,
-        // Priority based on file size (smaller = higher priority)
-        priority: jobData.mediaType === 'image' ? 1 : 5,
+      const jobId = await this.lambdaThumbnailService.queueMessageThumbnail({
+        messageId: jobData.messageId,
+        attachmentId: jobData.attachmentId,
+        s3Key: jobData.s3Key,
+        mimeType: jobData.mimeType,
+        thumbnailS3Key: jobData.thumbnailS3Key,
+        chatId: jobData.chatId,
       });
 
+      if (!jobId) {
+        this.logger.warn(
+          `Unsupported type ${jobData.mimeType} for ${jobData.attachmentId} - no thumbnail will be generated`,
+        );
+        return {
+          jobId: null,
+          success: false,
+          error: `Unsupported MIME type for thumbnail: ${jobData.mimeType}`,
+        };
+      }
+
       this.logger.log(
-        `Queued thumbnail job ${job.id} for ${jobData.mediaType}: ${jobData.attachmentId}`,
+        `Queued Lambda thumbnail job ${jobId} for ${jobData.mediaType}: ${jobData.attachmentId}`,
       );
 
-      return job.id || null;
+      return { jobId, success: true };
     } catch (error) {
       this.logger.error(
-        `Failed to queue thumbnail job: ${error.message}`,
+        `Failed to queue Lambda thumbnail job: ${error.message}`,
         error.stack,
       );
-      throw error;
+      // NO FALLBACK - thumbnail will not be generated
+      return {
+        jobId: null,
+        success: false,
+        error: error.message,
+      };
     }
   }
 
   /**
-   * Bulk queue multiple thumbnail generation jobs
-   * Used when processing multiple attachments at once
+   * Bulk queue multiple thumbnail generation jobs to Lambda
    */
   async queueBulkThumbnailGeneration(
     jobsData: ThumbnailJobData[],
-  ): Promise<void> {
-    // Filter to only media types that support thumbnails
-    const validJobs = jobsData.filter((job) =>
-      supportsThumbnail(job.mediaType),
-    );
-
-    if (validJobs.length === 0) {
-      this.logger.debug('No valid jobs to queue for thumbnail generation');
-      return;
-    }
-
-    try {
-      const jobs = validJobs.map((jobData) => ({
-        name: THUMBNAIL_JOB_NAME,
-        data: jobData,
-        opts: {
-          attempts: this.config.job.attempts,
-          backoff: {
-            type: this.config.job.backoffType as 'exponential' | 'fixed',
-            delay: this.config.job.backoffDelay,
-          },
-          removeOnComplete: this.config.job.removeOnComplete,
-          removeOnFail: this.config.job.removeOnFail,
-          timeout: this.config.job.timeout,
-          priority: jobData.mediaType === 'image' ? 1 : 5,
-        },
-      }));
-
-      await this.thumbnailQueue.addBulk(jobs);
-
-      this.logger.log(`Bulk queued ${validJobs.length} thumbnail jobs`);
-    } catch (error) {
-      this.logger.error(
-        `Failed to bulk queue thumbnail jobs: ${error.message}`,
-        error.stack,
-      );
-      throw error;
-    }
-  }
-
-  /**
-   * HIGH PRIORITY: Queue thumbnail jobs for sync operation
-   * These jobs get priority 0 (highest) to ensure synced messages
-   * display thumbnails as quickly as possible
-   *
-   * @param jobsData - Array of thumbnail job data from sync
-   */
-  async queueSyncThumbnails(jobsData: ThumbnailJobData[]): Promise<void> {
+  ): Promise<{ queued: number; failed: number }> {
     // Filter to only media types that support thumbnails
     const validJobs = jobsData.filter((job) =>
       supportsThumbnail(job.mediaType, job.mimeType),
     );
 
     if (validJobs.length === 0) {
-      this.logger.debug('No valid sync jobs to queue for thumbnail generation');
-      return;
+      this.logger.debug('No valid jobs to queue for thumbnail generation');
+      return { queued: 0, failed: 0 };
     }
 
-    try {
-      // HIGH PRIORITY: Priority 0 for sync thumbnails (lower = higher priority)
-      const jobs = validJobs.map((jobData) => ({
-        name: THUMBNAIL_JOB_NAME,
-        data: { ...jobData, isSync: true }, // Mark as sync job for logging
-        opts: {
-          attempts: this.config.job.attempts,
-          backoff: {
-            type: this.config.job.backoffType as 'exponential' | 'fixed',
-            delay: this.config.job.backoffDelay,
-          },
-          removeOnComplete: this.config.job.removeOnComplete,
-          removeOnFail: this.config.job.removeOnFail,
-          timeout: this.config.job.timeout,
-          priority: 0, // HIGHEST PRIORITY for sync thumbnails
-        },
-      }));
+    let queued = 0;
+    let failed = 0;
 
-      await this.thumbnailQueue.addBulk(jobs);
-
-      this.logger.log(
-        `🚀 HIGH PRIORITY: Queued ${validJobs.length} sync thumbnail jobs`,
-      );
-    } catch (error) {
-      this.logger.error(
-        `Failed to queue sync thumbnail jobs: ${error.message}`,
-        error.stack,
-      );
-      throw error;
+    for (const job of validJobs) {
+      const result = await this.queueThumbnailGeneration(job);
+      if (result.success && result.jobId) {
+        queued++;
+      } else {
+        failed++;
+      }
     }
+
+    this.logger.log(
+      `Bulk queued thumbnails: ${queued} successful, ${failed} failed`,
+    );
+
+    return { queued, failed };
   }
 
   /**
-   * Get queue statistics
+   * HIGH PRIORITY: Queue thumbnail jobs for sync operation
+   * Same as regular queue (Lambda handles priority internally)
    */
-  async getQueueStats(): Promise<{
-    waiting: number;
-    active: number;
-    completed: number;
-    failed: number;
-  }> {
-    const [waiting, active, completed, failed] = await Promise.all([
-      this.thumbnailQueue.getWaitingCount(),
-      this.thumbnailQueue.getActiveCount(),
-      this.thumbnailQueue.getCompletedCount(),
-      this.thumbnailQueue.getFailedCount(),
-    ]);
+  async queueSyncThumbnails(
+    jobsData: ThumbnailJobData[],
+  ): Promise<{ queued: number; failed: number }> {
+    const result = await this.queueBulkThumbnailGeneration(jobsData);
 
-    return { waiting, active, completed, failed };
-  }
+    this.logger.log(
+      `🚀 HIGH PRIORITY: Queued ${result.queued} sync thumbnails to Lambda`,
+    );
 
-  /**
-   * Check if queue is healthy
-   */
-  async isHealthy(): Promise<boolean> {
-    try {
-      await this.thumbnailQueue.getJobCounts();
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Clean old completed/failed jobs
-   */
-  async cleanOldJobs(olderThanMs: number = 24 * 60 * 60 * 1000): Promise<void> {
-    await this.thumbnailQueue.clean(olderThanMs, 1000, 'completed');
-    await this.thumbnailQueue.clean(olderThanMs, 1000, 'failed');
-    this.logger.log('Cleaned old thumbnail jobs');
+    return result;
   }
 }

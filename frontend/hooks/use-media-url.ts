@@ -189,6 +189,18 @@ export function useMediaUrl(
       return;
     }
 
+    // If attachment has a local preview URL (optimistic upload), use it directly
+    // This is for multi-media uploads where we show the local blob URL while uploading
+    if (attachment?.previewUrl) {
+      console.log(
+        `[useMediaUrl] Using previewUrl for ${attachmentId} (optimistic upload)`
+      );
+      setUrl(attachment.previewUrl);
+      setThumbnailUrl(attachment.previewUrl);
+      setLoading(false);
+      return;
+    }
+
     // Skip loading if attachment exists but has no s3Key yet (pending upload)
     // This prevents "Attachment not found" errors during upload
     if (attachment && (!attachment.s3Key || attachment.s3Key === "")) {

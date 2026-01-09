@@ -81,6 +81,18 @@ export interface MediaCompressionLambdaProps {
   readonly ffmpegLayerArn?: string;
 
   /**
+   * ARN of the Chromium Lambda Layer for PDF thumbnail generation.
+   * If not provided, PDF thumbnails will be disabled.
+   *
+   * The layer must be from @sparticuz/chromium releases for ARM64.
+   * Download from: https://github.com/Sparticuz/chromium/releases
+   * Use the arm64 .zip file and upload to S3, then create a layer.
+   *
+   * @default undefined - PDF thumbnails disabled
+   */
+  readonly chromiumLayerArn?: string;
+
+  /**
    * Lambda memory in MB.
    * Higher memory = more CPU = faster compression.
    *
@@ -236,12 +248,29 @@ export class MediaCompressionLambda extends Construct {
     }
 
     // =========================================================================
+    // Chromium Lambda Layer (optional, for PDF thumbnails)
+    // =========================================================================
+    // Build the layers array - ffmpeg is always required
+    const layers: lambda.ILayerVersion[] = [ffmpegLayer];
+
+    // Add Chromium layer if provided (for PDF thumbnail generation)
+    let chromiumLayer: lambda.ILayerVersion | undefined;
+    if (props.chromiumLayerArn) {
+      chromiumLayer = lambda.LayerVersion.fromLayerVersionArn(
+        this,
+        "ChromiumLayer",
+        props.chromiumLayerArn
+      );
+      layers.push(chromiumLayer);
+    }
+
+    // =========================================================================
     // Lambda Function
     // =========================================================================
     this.function = new lambda.Function(this, "Function", {
       functionName: `${resourcePrefix}-lambda`,
       description:
-        "Compresses media files (video/image/audio) for WhatsApp compatibility using ffmpeg",
+        "Compresses media files (video/image/audio) and generates thumbnails using ffmpeg and Chromium",
 
       // Runtime configuration
       runtime: lambda.Runtime.NODEJS_20_X,
@@ -262,8 +291,8 @@ export class MediaCompressionLambda extends Construct {
       // The account must maintain at least 10 unreserved concurrent executions
       // Cost control is achieved through SQS batch size (1) and visibility timeout
 
-      // ffmpeg layer
-      layers: [ffmpegLayer],
+      // Lambda layers (ffmpeg required, Chromium optional)
+      layers,
 
       // Environment variables
       environment: {

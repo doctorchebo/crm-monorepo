@@ -45,8 +45,27 @@ export interface InboundMessage {
   direction?: "inbound" | "outbound"; // Direction of the message (defaults to inbound for legacy compatibility)
   status?: string;
   attachments?: Array<{
+    id: string;
     type: string;
-    mediaId: string;
+    mediaId: string; // For backwards compatibility (same as id)
+    fileName?: string;
+    mimeType?: string;
+    size?: number;
+    s3Key?: string;
+    thumbnailKey?: string;
+    thumbnailStatus?:
+      | "pending"
+      | "processing"
+      | "ready"
+      | "failed"
+      | "not-applicable";
+    width?: number;
+    height?: number;
+    blurhash?: string;
+    duration?: number;
+    status?: string;
+    isVoiceNote?: boolean;
+    isAnimated?: boolean;
   }>;
   replyToMessageId?: string;
   replyPreview?: {
@@ -259,6 +278,93 @@ export function useRealtimeChat(chatId?: string) {
       }
     );
 
+    // Listen for attachment status updates (when individual attachments are sent in multi-media messages)
+    socket.on(
+      "attachment:status",
+      (event: {
+        messageId: string;
+        attachmentId: string;
+        status: string;
+        waMessageId?: string;
+        timestamp?: string;
+      }) => {
+        console.log(
+          `[RealtimeChat] 📤 Attachment status: ${event.attachmentId} for message ${event.messageId} → ${event.status}`
+        );
+
+        // Update the message's attachment status
+        setMessages((prev) =>
+          prev.map((msg) => {
+            if (msg.messageId !== event.messageId) return msg;
+
+            // Update the specific attachment's status
+            const updatedAttachments = msg.attachments?.map((att: any) => {
+              if (att.id === event.attachmentId) {
+                return {
+                  ...att,
+                  status: event.status,
+                  waMessageId: event.waMessageId || att.waMessageId,
+                };
+              }
+              return att;
+            });
+
+            return {
+              ...msg,
+              attachments: updatedAttachments,
+            };
+          })
+        );
+      }
+    );
+
+    // Listen for thumbnail ready events (when Lambda completes thumbnail generation)
+    socket.on(
+      "thumbnail:ready",
+      (event: {
+        messageId: string;
+        attachmentId: string;
+        thumbnailKey: string;
+        width: number;
+        height: number;
+        blurhash: string;
+        duration?: number;
+      }) => {
+        console.log(
+          `[RealtimeChat] 🖼️ Thumbnail ready: ${event.attachmentId} for message ${event.messageId}`
+        );
+
+        // Update the message's attachment with the new thumbnail data
+        setMessages((prev) =>
+          prev.map((msg) => {
+            if (msg.messageId !== event.messageId) return msg;
+
+            // Update the attachment's thumbnail info
+            const updatedAttachments = msg.attachments?.map((att: any) => {
+              if (att.id === event.attachmentId) {
+                return {
+                  ...att,
+                  thumbnailKey: event.thumbnailKey,
+                  thumbnailStatus: "ready",
+                  width: event.width,
+                  height: event.height,
+                  blurhash: event.blurhash,
+                  ...(event.duration !== undefined && {
+                    duration: event.duration,
+                  }),
+                };
+              }
+              return att;
+            });
+
+            return {
+              ...msg,
+              attachments: updatedAttachments,
+            };
+          })
+        );
+      }
+    );
     // Connection errors
     socket.on("error", (error: any) => {
       console.error("[RealtimeChat] ❌ WebSocket error:", error);

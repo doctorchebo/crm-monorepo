@@ -22,7 +22,6 @@ interface MessageInputAreaProps {
   currentAttachmentType: AttachmentType;
   templateInput: string;
   isUploading: boolean;
-  pendingMediaUploadsLength: number;
   t: (key: string) => string;
   onSend: (message: string) => void;
   onSendVoiceNote: (
@@ -50,7 +49,6 @@ export function MessageInputArea({
   currentAttachmentType,
   templateInput,
   isUploading,
-  pendingMediaUploadsLength,
   t,
   onSend,
   onSendVoiceNote,
@@ -166,8 +164,8 @@ export function MessageInputArea({
             currentAttachmentType === "photos-videos"
               ? "image/*,video/*"
               : currentAttachmentType === "document"
-              ? "application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/plain,audio/*"
-              : "*/*"
+                ? "application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/plain,audio/*"
+                : "*/*"
           }
           onChange={(e) => {
             const files = Array.from(e.target.files || []);
@@ -200,11 +198,7 @@ export function MessageInputArea({
                 "Select an approved template above to send a message"
               : t("typeMessageOrUseTemplates")
           }
-          disabled={
-            isUploading ||
-            pendingMediaUploadsLength > 0 ||
-            isOutsideConversationWindow
-          }
+          disabled={isUploading || isOutsideConversationWindow}
           templateValue={templateInput}
           onTemplateUsed={onTemplateUsed}
           leftElement={
@@ -212,11 +206,7 @@ export function MessageInputArea({
               onFilesSelected={onFilesSelected}
               onContactsClick={onContactsClick}
               onCameraClick={onCameraClick}
-              disabled={
-                isUploading ||
-                pendingMediaUploadsLength > 0 ||
-                isOutsideConversationWindow
-              }
+              disabled={isUploading || isOutsideConversationWindow}
             />
           }
         />

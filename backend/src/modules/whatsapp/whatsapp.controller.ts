@@ -53,7 +53,7 @@ export class WhatsAppController {
   async sendMedia(@Body() mediaDto: any, @Req() req: any) {
     const userId = req.user?.userId;
     this.logger.log(
-      `Send media request from user ${userId}: To ${mediaDto.to}, Type: ${mediaDto.mediaType}, originalMessageId: ${mediaDto.originalMessageId}`,
+      `Send media request from user ${userId}: To ${mediaDto.to}, Type: ${mediaDto.mediaType}, originalMessageId: ${mediaDto.originalMessageId}, attachmentId: ${mediaDto.attachmentId}`,
     );
     return this.whatsAppService.sendMedia(
       mediaDto.to,
@@ -63,6 +63,7 @@ export class WhatsAppController {
       mediaDto.senderId,
       mediaDto.fileName,
       mediaDto.originalMessageId,
+      mediaDto.attachmentId,
     );
   }
 

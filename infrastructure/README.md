@@ -164,9 +164,13 @@ All permissions follow least privilege:
 | --------------------- | ----------------------------------------------- | -------- |
 | `INPUT_BUCKET_ARN`    | ARN of existing S3 bucket for input media       | Yes      |
 | `OUTPUT_BUCKET_ARN`   | ARN of existing S3 bucket for output (optional) | No       |
-| `FFMPEG_LAYER_ARN`    | ARN of ffmpeg Lambda Layer                      | Yes      |
+| `FFMPEG_LAYER_ARN`    | ARN of ffmpeg Lambda Layer                      | No\*     |
+| `CHROMIUM_LAYER_ARN`  | ARN of Chromium Lambda Layer for PDF thumbnails | No\*\*   |
 | `CDK_DEFAULT_ACCOUNT` | AWS account ID                                  | Yes      |
 | `CDK_DEFAULT_REGION`  | AWS region                                      | Yes      |
+
+\* If not provided, creates layer from local `layers/ffmpeg` directory  
+\*\* If not provided, PDF thumbnail generation will be disabled
 
 ### CDK Context (Alternative)
 
@@ -174,7 +178,8 @@ All permissions follow least privilege:
 cdk deploy \
   -c inputBucketArn=arn:aws:s3:::my-input-bucket \
   -c outputBucketArn=arn:aws:s3:::my-output-bucket \
-  -c ffmpegLayerArn=arn:aws:lambda:us-east-1:123456789:layer:ffmpeg:1
+  -c ffmpegLayerArn=arn:aws:lambda:us-east-1:123456789:layer:ffmpeg:1 \
+  -c chromiumLayerArn=arn:aws:lambda:us-east-1:123456789:layer:chromium:1
 ```
 
 ## Stack Outputs
@@ -262,13 +267,16 @@ npx cdk deploy
 
 ## ffmpeg Lambda Layer
 
-The Lambda requires an ffmpeg layer. Options:
+The Lambda requires an ffmpeg layer for image/video/audio processing. Options:
 
-1. **Public layer** (recommended for testing):
+1. **Local layer** (default):
+   - Place ffmpeg binaries in `layers/ffmpeg/bin/`
+   - CDK will automatically create a layer
 
+2. **Public layer** (recommended for testing):
    - `arn:aws:lambda:us-east-1:764866452798:layer:ffmpeg:1`
 
-2. **Build your own** (recommended for production):
+3. **Build your own** (recommended for production):
    - See: https://github.com/serverlesspub/ffmpeg-aws-lambda-layer
 
 The layer must contain:
@@ -277,3 +285,19 @@ The layer must contain:
 - `/opt/bin/ffprobe`
 
 Built for `arm64` Linux.
+
+## Chromium Lambda Layer (Optional)
+
+For PDF thumbnail generation, a Chromium layer is required. The Lambda uses `@sparticuz/chromium` with `puppeteer-core` to render PDFs using pdf.js.
+
+**Setup:**
+
+1. Download the arm64 release from [Sparticuz/chromium releases](https://github.com/Sparticuz/chromium/releases)
+2. Upload the `.zip` file to S3
+3. Create a Lambda layer from the S3 object
+4. Set `CHROMIUM_LAYER_ARN` environment variable
+
+**Without Chromium layer:**
+
+- PDF thumbnail generation will be disabled
+- Images, videos, and audio will still work via ffmpeg

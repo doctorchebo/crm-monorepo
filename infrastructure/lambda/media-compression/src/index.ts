@@ -1,15 +1,18 @@
 /**
- * Media Compression Lambda Handler
+ * Media Processing Lambda Handler
  *
- * Entry point for the Lambda function that processes media compression jobs.
+ * Entry point for the Lambda function that processes media jobs:
+ * - Compression: Reduce file size for WhatsApp compatibility
+ * - Thumbnail: Generate preview images for images/videos
  *
  * Flow:
  * 1. Receive SQS message with job details
- * 2. Validate message and check ephemeral storage limits
- * 3. Download source media from S3
- * 4. Compress using ffmpeg (video/image/audio)
- * 5. Upload compressed media to S3
- * 6. Send webhook notification to backend
+ * 2. Determine job type (compression or thumbnail)
+ * 3. Validate message and check ephemeral storage limits
+ * 4. Download source media from S3
+ * 5. Process (compress or generate thumbnail)
+ * 6. Upload result to S3
+ * 7. Send webhook notification to backend
  *
  * Error handling:
  * - Fail fast if media exceeds ephemeral storage
@@ -40,7 +43,23 @@ import {
   uploadToS3,
   validateBuckets,
 } from "./s3-operations";
-import { CompressionJobMessage, CompressionResult } from "./types";
+import {
+  isPermanentError,
+  validateJobSafety,
+  validateThumbnailFileSize,
+} from "./safety";
+import {
+  generateThumbnail,
+  generateThumbnailKey,
+  supportsThumbnailGeneration,
+} from "./thumbnail-generator";
+import {
+  CompressionJobMessage,
+  CompressionResult,
+  MediaJobMessage,
+  ThumbnailJobMessage,
+  ThumbnailResult as ThumbnailJobResult,
+} from "./types";
 import { sendWebhookNotification } from "./webhook";
 
 // Lambda ephemeral storage directory
@@ -57,10 +76,13 @@ const DELETE_ORIGINAL =
   process.env.DELETE_ORIGINAL_AFTER_COMPRESSION === "true";
 
 /**
- * Validate the job message
+ * Validate the job message and determine type
  */
-function validateMessage(message: unknown): CompressionJobMessage {
-  const msg = message as CompressionJobMessage;
+function validateMessage(message: unknown): MediaJobMessage {
+  const msg = message as MediaJobMessage;
+
+  // Check job type - default to compression for backward compatibility
+  const jobType = (msg as any).jobType || "compression";
 
   if (!msg.jobId || typeof msg.jobId !== "string") {
     throw new Error("Invalid message: missing or invalid jobId");
@@ -78,22 +100,6 @@ function validateMessage(message: unknown): CompressionJobMessage {
     throw new Error("Invalid message: missing or invalid outputBucket");
   }
 
-  if (!msg.outputKey || typeof msg.outputKey !== "string") {
-    throw new Error("Invalid message: missing or invalid outputKey");
-  }
-
-  if (!msg.mediaType || !["video", "image", "audio"].includes(msg.mediaType)) {
-    throw new Error("Invalid message: missing or invalid mediaType");
-  }
-
-  if (
-    !msg.targetMaxSizeMb ||
-    typeof msg.targetMaxSizeMb !== "number" ||
-    msg.targetMaxSizeMb <= 0
-  ) {
-    throw new Error("Invalid message: missing or invalid targetMaxSizeMb");
-  }
-
   if (!msg.callback || typeof msg.callback !== "object") {
     throw new Error("Invalid message: missing or invalid callback");
   }
@@ -104,32 +110,352 @@ function validateMessage(message: unknown): CompressionJobMessage {
     );
   }
 
-  return msg;
+  // Validate based on job type
+  if (jobType === "thumbnail") {
+    const thumbMsg = msg as ThumbnailJobMessage;
+    if (!thumbMsg.mimeType || typeof thumbMsg.mimeType !== "string") {
+      throw new Error("Invalid thumbnail message: missing or invalid mimeType");
+    }
+    if (
+      !thumbMsg.context ||
+      !["kb-media", "message-attachment"].includes(thumbMsg.context)
+    ) {
+      throw new Error("Invalid thumbnail message: missing or invalid context");
+    }
+    return thumbMsg;
+  } else {
+    // Compression job validation
+    const compMsg = msg as CompressionJobMessage;
+    if (!compMsg.outputKey || typeof compMsg.outputKey !== "string") {
+      throw new Error("Invalid message: missing or invalid outputKey");
+    }
+    if (
+      !compMsg.mediaType ||
+      !["video", "image", "audio"].includes(compMsg.mediaType)
+    ) {
+      throw new Error("Invalid message: missing or invalid mediaType");
+    }
+    if (
+      !compMsg.targetMaxSizeMb ||
+      typeof compMsg.targetMaxSizeMb !== "number" ||
+      compMsg.targetMaxSizeMb <= 0
+    ) {
+      throw new Error("Invalid message: missing or invalid targetMaxSizeMb");
+    }
+    return compMsg;
+  }
+}
+
+/**
+ * Check if message is a thumbnail job
+ */
+function isThumbnailJob(msg: MediaJobMessage): msg is ThumbnailJobMessage {
+  return (msg as any).jobType === "thumbnail";
 }
 
 /**
  * Clean up temporary files
  */
-function cleanup(inputPath?: string, outputPath?: string): void {
-  try {
-    if (inputPath && fs.existsSync(inputPath)) {
-      fs.unlinkSync(inputPath);
+function cleanup(...paths: (string | undefined)[]): void {
+  for (const filePath of paths) {
+    try {
+      if (filePath && fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    } catch (error) {
+      // Log but don't throw - cleanup failure is not critical
+      logger.warn("Cleanup failed", undefined, {
+        error: error instanceof Error ? error.message : String(error),
+        path: filePath,
+      });
     }
-    if (outputPath && fs.existsSync(outputPath)) {
-      fs.unlinkSync(outputPath);
-    }
-  } catch (error) {
-    // Log but don't throw - cleanup failure is not critical
-    logger.warn("Cleanup failed", undefined, {
-      error: error instanceof Error ? error.message : String(error),
+  }
+}
+
+/**
+ * Process a thumbnail generation job
+ *
+ * SAFETY: This function includes multiple safeguards to prevent infinite loops:
+ * 1. Job safety validation (max attempts, max age)
+ * 2. File size validation
+ * 3. Permanent error detection (errors that should not be retried)
+ */
+async function processThumbnailJob(
+  message: ThumbnailJobMessage
+): Promise<ThumbnailJobResult> {
+  const {
+    jobId,
+    inputBucket,
+    inputKey,
+    outputBucket,
+    outputKey,
+    mimeType,
+    context,
+    entityIds,
+    callback,
+    safety,
+  } = message;
+  const startTime = Date.now();
+
+  let inputPath = "";
+
+  // SAFETY CHECK 1: Validate job safety (max attempts, expiry)
+  const safetyResult = validateJobSafety(message);
+  if (!safetyResult.isValid) {
+    logger.error("Job failed safety validation", jobId, {
+      error: safetyResult.error,
+      errorCode: safetyResult.errorCode,
+      attempt: safetyResult.attempt,
+      maxAttempts: safetyResult.maxAttempts,
     });
+
+    const result: ThumbnailJobResult = {
+      success: false,
+      jobId,
+      jobType: "thumbnail",
+      error: safetyResult.error,
+      errorCode: safetyResult.errorCode,
+      permanentFailure: true,
+      context,
+      entityIds,
+      processingTimeMs: Date.now() - startTime,
+      safetyInfo: {
+        attempt: safetyResult.attempt,
+        maxAttempts: safetyResult.maxAttempts,
+        ageMs: safetyResult.ageMs,
+      },
+    };
+    await sendWebhookNotification(callback, result);
+    return result;
+  }
+
+  try {
+    logger.info("Processing thumbnail job", jobId, {
+      inputBucket,
+      inputKey,
+      mimeType,
+      context,
+      attempt: safetyResult.attempt,
+      maxAttempts: safetyResult.maxAttempts,
+    });
+
+    // Check if this media type supports thumbnails
+    if (!supportsThumbnailGeneration(mimeType)) {
+      logger.info("Media type does not support thumbnails", jobId, {
+        mimeType,
+      });
+      const result: ThumbnailJobResult = {
+        success: true,
+        jobId,
+        jobType: "thumbnail",
+        context,
+        entityIds,
+        processingTimeMs: Date.now() - startTime,
+      };
+      await sendWebhookNotification(callback, result);
+      return result;
+    }
+
+    // Validate bucket names match expected values (security check)
+    if (EXPECTED_INPUT_BUCKET && EXPECTED_OUTPUT_BUCKET) {
+      validateBuckets(
+        inputBucket,
+        outputBucket,
+        EXPECTED_INPUT_BUCKET,
+        EXPECTED_OUTPUT_BUCKET
+      );
+    }
+
+    // SAFETY CHECK 2: Check input file size
+    const inputSize = await getObjectSize(inputBucket, inputKey);
+    logger.info("Input file size for thumbnail", jobId, {
+      sizeBytes: inputSize,
+    });
+
+    const sizeValidation = validateThumbnailFileSize(inputSize, jobId);
+    if (!sizeValidation.isValid) {
+      const result: ThumbnailJobResult = {
+        success: false,
+        jobId,
+        jobType: "thumbnail",
+        error: sizeValidation.error,
+        errorCode: "FILE_TOO_LARGE",
+        permanentFailure: true,
+        context,
+        entityIds,
+        processingTimeMs: Date.now() - startTime,
+      };
+      await sendWebhookNotification(callback, result);
+      return result;
+    }
+
+    // Download source file
+    const extension = path.extname(inputKey) || ".bin";
+    inputPath = path.join(TMP_DIR, `${jobId}-thumb-input${extension}`);
+    await downloadFromS3(inputBucket, inputKey, inputPath, jobId);
+
+    // Read the file into buffer
+    const inputBuffer = fs.readFileSync(inputPath);
+
+    // Generate thumbnail
+    const thumbResult = await generateThumbnail(inputBuffer, mimeType, TMP_DIR);
+
+    if (!thumbResult.success || !thumbResult.thumbnailBuffer) {
+      // Check if this is a permanent error that shouldn't be retried
+      if (thumbResult.permanentError) {
+        logger.warn("Thumbnail generation permanently failed", jobId, {
+          error: thumbResult.error,
+          permanentError: true,
+        });
+        const result: ThumbnailJobResult = {
+          success: false,
+          jobId,
+          jobType: "thumbnail",
+          error: thumbResult.error,
+          errorCode: "PROCESSING_ERROR",
+          permanentFailure: true,
+          context,
+          entityIds,
+          processingTimeMs: Date.now() - startTime,
+        };
+        await sendWebhookNotification(callback, result);
+        cleanup(inputPath);
+        return result;
+      }
+
+      // Non-fatal: some media types just don't have thumbnails
+      if (thumbResult.error) {
+        logger.warn("Thumbnail generation failed (non-fatal)", jobId, {
+          error: thumbResult.error,
+        });
+      }
+      const result: ThumbnailJobResult = {
+        success: true,
+        jobId,
+        jobType: "thumbnail",
+        context,
+        entityIds,
+        processingTimeMs: Date.now() - startTime,
+      };
+      await sendWebhookNotification(callback, result);
+      cleanup(inputPath);
+      return result;
+    }
+
+    // Determine output key
+    const thumbnailKey = outputKey || generateThumbnailKey(inputKey);
+
+    // Upload thumbnail to S3
+    await uploadToS3(
+      outputBucket,
+      thumbnailKey,
+      thumbResult.thumbnailBuffer,
+      "image/jpeg",
+      jobId
+    );
+
+    logger.info("Thumbnail uploaded successfully", jobId, {
+      thumbnailKey,
+      size: thumbResult.thumbnailBuffer.length,
+      width: thumbResult.width,
+      height: thumbResult.height,
+    });
+
+    // Build result
+    const result: ThumbnailJobResult = {
+      success: true,
+      jobId,
+      jobType: "thumbnail",
+      thumbnailKey,
+      width: thumbResult.width,
+      height: thumbResult.height,
+      blurhash: thumbResult.blurhash,
+      duration: thumbResult.duration,
+      processingTimeMs: Date.now() - startTime,
+      outputLocation: {
+        bucket: outputBucket,
+        key: thumbnailKey,
+      },
+      context,
+      entityIds,
+    };
+
+    // Send success webhook
+    await sendWebhookNotification(callback, result);
+
+    // Cleanup
+    cleanup(inputPath);
+
+    logger.info("Thumbnail job completed", jobId, {
+      processingTimeMs: result.processingTimeMs,
+    });
+
+    return result;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const permanent = isPermanentError(
+      error instanceof Error ? error : errorMessage
+    );
+
+    logger.error("Thumbnail job failed", jobId, {
+      error: errorMessage,
+      permanentFailure: permanent,
+      attempt: safetyResult.attempt,
+    });
+
+    // Determine error code
+    let errorCode: ThumbnailJobResult["errorCode"] = "PROCESSING_ERROR";
+    if (errorMessage.toLowerCase().includes("s3")) {
+      errorCode = "S3_ERROR";
+    }
+
+    // Send failure notification
+    const result: ThumbnailJobResult = {
+      success: false,
+      jobId,
+      jobType: "thumbnail",
+      error: errorMessage,
+      errorCode,
+      permanentFailure: permanent,
+      processingTimeMs: Date.now() - startTime,
+      context,
+      entityIds,
+      safetyInfo: {
+        attempt: safetyResult.attempt,
+        maxAttempts: safetyResult.maxAttempts,
+        ageMs: safetyResult.ageMs,
+      },
+    };
+
+    try {
+      await sendWebhookNotification(callback, result);
+    } catch (webhookError) {
+      logger.error("Failed to send thumbnail failure webhook", jobId, {
+        error:
+          webhookError instanceof Error
+            ? webhookError.message
+            : String(webhookError),
+      });
+    }
+
+    cleanup(inputPath);
+
+    // Only re-throw to trigger SQS retry if NOT a permanent error
+    // Permanent errors should be acknowledged to prevent infinite loops
+    if (permanent) {
+      logger.warn("Permanent error - not retrying", jobId);
+      return result;
+    }
+
+    // Re-throw to trigger SQS retry
+    throw error;
   }
 }
 
 /**
  * Process a single compression job
  */
-async function processJob(
+async function processCompressionJob(
   message: CompressionJobMessage
 ): Promise<CompressionResult> {
   const {
@@ -333,9 +659,20 @@ async function processJob(
 }
 
 /**
+ * Route and process a job based on type
+ */
+async function processJob(message: MediaJobMessage): Promise<void> {
+  if (isThumbnailJob(message)) {
+    await processThumbnailJob(message);
+  } else {
+    await processCompressionJob(message);
+  }
+}
+
+/**
  * Lambda handler for SQS events
  *
- * Processes compression jobs from SQS queue.
+ * Processes media jobs (compression or thumbnail) from SQS queue.
  * Returns batch item failures for partial batch failure reporting.
  */
 export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
@@ -352,14 +689,15 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
       // Parse message body
       const body = JSON.parse(record.body);
 
-      // Validate message
+      // Validate and route message
       const message = validateMessage(body);
 
-      // Process the job
+      // Process the job (compression or thumbnail)
       await processJob(message);
 
-      logger.info("Record processed successfully", message.jobId, {
+      logger.info("Record processed successfully", (message as any).jobId, {
         messageId,
+        jobType: isThumbnailJob(message) ? "thumbnail" : "compression",
       });
     } catch (error) {
       const errorMessage =

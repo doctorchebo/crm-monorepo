@@ -199,18 +199,9 @@ export interface InboundMessage {
   timestamp: string;
   direction?: "inbound" | "outbound"; // Direction of the message (defaults to inbound for legacy compatibility)
   status?: string;
-  attachments?: Array<{
-    type: string;
-    mediaId: string;
-  }>;
+  attachments?: Attachment[]; // Use full Attachment type for complete media info
   replyToMessageId?: string;
   replyPreview?: ReplyPreview;
-}
-
-export interface GroupedMessage {
-  type: "single" | "group";
-  messages: Message[];
-  id: string;
 }
 
 export interface MessagesCacheEntry {

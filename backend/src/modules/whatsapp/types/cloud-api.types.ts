@@ -144,7 +144,12 @@ export interface CloudAPIInboundMessage {
     | 'location'
     | 'contacts'
     | 'reaction'
+    | 'order'
+    | 'system'
+    | 'unsupported' // Cloud API error notification for unprocessable messages
     | 'unknown';
+  // Errors array - present when type is 'unsupported'
+  errors?: CloudAPIError[];
   // Reply context - present when this message is a reply to another message
   context?: {
     from?: string; // Phone number of sender of original message
@@ -211,6 +216,9 @@ export interface CloudAPIInboundMessage {
   location?: {
     latitude: number;
     longitude: number;
+    name?: string; // Location name (e.g., "Eiffel Tower")
+    address?: string; // Full address string
+    url?: string; // URL to location
   };
   contacts?: Array<{
     phones: Array<{
@@ -242,6 +250,25 @@ export interface CloudAPIInboundMessage {
     image_url?: string;
     video_url?: string;
     thumbnail_url?: string;
+  };
+  // Order message (WhatsApp Business)
+  order?: {
+    catalog_id?: string;
+    product_items?: Array<{
+      product_retailer_id: string;
+      quantity: number;
+      item_price: number;
+      currency: string;
+    }>;
+    text?: string;
+  };
+  // System message (group changes, etc.)
+  system?: {
+    body?: string;
+    identity?: string;
+    wa_id?: string;
+    type?: string;
+    customer?: string;
   };
 }
 

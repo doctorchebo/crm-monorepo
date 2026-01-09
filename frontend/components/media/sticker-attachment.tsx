@@ -125,6 +125,9 @@ export const StickerAttachment = memo(function StickerAttachment({
     displayWidth = displayHeight * aspectRatio;
   }
 
+  // Track if media is still loading for scroll hook coordination
+  const isMediaLoading = loading || !isLoaded;
+
   return (
     <div
       className="relative inline-block"
@@ -132,6 +135,8 @@ export const StickerAttachment = memo(function StickerAttachment({
         width: displayWidth,
         height: displayHeight,
       }}
+      data-media-container="sticker"
+      data-media-loading={isMediaLoading ? "true" : "false"}
     >
       {/* Loading placeholder */}
       {(loading || !isLoaded) && !hasError && (

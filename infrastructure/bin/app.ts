@@ -14,7 +14,8 @@
  * - CDK_DEFAULT_REGION: AWS region
  * - INPUT_BUCKET_ARN: ARN of existing S3 bucket for input media
  * - OUTPUT_BUCKET_ARN: ARN of existing S3 bucket for output media (optional)
- * - FFMPEG_LAYER_ARN: ARN of ffmpeg Lambda Layer
+ * - FFMPEG_LAYER_ARN: ARN of ffmpeg Lambda Layer (optional, creates from local if not set)
+ * - CHROMIUM_LAYER_ARN: ARN of Chromium Lambda Layer for PDF thumbnails (optional)
  */
 
 import * as dotenv from "dotenv";
@@ -58,6 +59,12 @@ const outputBucketArn =
 const ffmpegLayerArn =
   process.env.FFMPEG_LAYER_ARN || app.node.tryGetContext("ffmpegLayerArn");
 
+// Chromium Lambda Layer ARN
+// Required for PDF thumbnail generation (uses @sparticuz/chromium)
+// Create from: https://github.com/Sparticuz/chromium/releases (use arm64 .zip)
+const chromiumLayerArn =
+  process.env.CHROMIUM_LAYER_ARN || app.node.tryGetContext("chromiumLayerArn");
+
 // Validate required configuration
 if (!inputBucketArn) {
   console.warn(
@@ -69,6 +76,12 @@ if (!inputBucketArn) {
 if (!ffmpegLayerArn) {
   console.log(
     "ℹ️  Info: FFMPEG_LAYER_ARN not set. Will create a local layer from layers/ffmpeg."
+  );
+}
+
+if (!chromiumLayerArn) {
+  console.log(
+    "ℹ️  Info: CHROMIUM_LAYER_ARN not set. PDF thumbnail generation will be disabled."
   );
 }
 
@@ -87,6 +100,9 @@ new MediaCompressionStack(app, "MediaCompressionStack", {
 
   // ffmpeg layer - undefined means create from local binaries
   ffmpegLayerArn: ffmpegLayerArn || undefined,
+
+  // Chromium layer - required for PDF thumbnail generation
+  chromiumLayerArn: chromiumLayerArn || undefined,
 
   // Lambda configuration
   lambda: {

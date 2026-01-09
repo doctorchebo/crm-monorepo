@@ -1,59 +1,43 @@
 /**
  * Webhook Notification
  *
- * Sends callback notifications to the backend when compression completes.
- * Supports both success and failure notifications.
+ * Sends callback notifications to the backend when processing completes.
+ * Supports both compression and thumbnail job results.
  */
 
 import { logger } from "./logger";
-import { CompressionResult, JobCallback } from "./types";
+import {
+  CompressionResult,
+  JobCallback,
+  MediaJobResult,
+  ThumbnailResult,
+} from "./types";
 
 /**
- * Payload sent to the webhook
+ * Check if result is a compression result
  */
-interface WebhookPayload {
-  /**
-   * Job ID for correlation
-   */
-  jobId: string;
+function isCompressionResult(
+  result: MediaJobResult
+): result is CompressionResult {
+  return result.jobType === "compression" || result.jobType === undefined;
+}
 
-  /**
-   * Whether compression succeeded
-   */
-  success: boolean;
-
-  /**
-   * Error message if failed
-   */
-  error?: string;
-
-  /**
-   * Compression result details
-   */
-  result?: {
-    originalSizeBytes: number;
-    compressedSizeBytes: number;
-    compressionRatio: number;
-    processingTimeMs: number;
-    outputBucket: string;
-    outputKey: string;
-  };
-
-  /**
-   * Timestamp of completion
-   */
-  completedAt: string;
+/**
+ * Check if result is a thumbnail result
+ */
+function isThumbnailResult(result: MediaJobResult): result is ThumbnailResult {
+  return result.jobType === "thumbnail";
 }
 
 /**
  * Send a webhook notification
  *
  * @param callback - Callback configuration
- * @param result - Compression result
+ * @param result - Job result (compression or thumbnail)
  */
 export async function sendWebhookNotification(
   callback: JobCallback,
-  result: CompressionResult
+  result: MediaJobResult
 ): Promise<void> {
   if (callback.type !== "webhook") {
     logger.warn("Unsupported callback type", result.jobId, {
@@ -62,22 +46,47 @@ export async function sendWebhookNotification(
     return;
   }
 
-  const payload: WebhookPayload = {
-    jobId: result.jobId,
-    success: result.success,
-    error: result.error,
-    completedAt: new Date().toISOString(),
-  };
+  // Build payload based on job type
+  let payload: Record<string, unknown>;
 
-  if (result.success && result.outputLocation) {
-    payload.result = {
-      originalSizeBytes: result.originalSizeBytes!,
-      compressedSizeBytes: result.compressedSizeBytes!,
-      compressionRatio: result.compressionRatio!,
-      processingTimeMs: result.processingTimeMs!,
-      outputBucket: result.outputLocation.bucket,
-      outputKey: result.outputLocation.key,
+  if (isThumbnailResult(result)) {
+    // Thumbnail result payload
+    payload = {
+      jobId: result.jobId,
+      jobType: "thumbnail",
+      success: result.success,
+      error: result.error,
+      thumbnailKey: result.thumbnailKey,
+      width: result.width,
+      height: result.height,
+      blurhash: result.blurhash,
+      duration: result.duration,
+      processingTimeMs: result.processingTimeMs,
+      outputLocation: result.outputLocation,
+      context: result.context,
+      entityIds: result.entityIds,
+      completedAt: new Date().toISOString(),
     };
+  } else {
+    // Compression result payload
+    payload = {
+      jobId: result.jobId,
+      jobType: "compression",
+      success: result.success,
+      error: result.error,
+      completedAt: new Date().toISOString(),
+    };
+
+    if (result.success && result.outputLocation) {
+      payload.result = {
+        originalSizeBytes: result.originalSizeBytes,
+        compressedSizeBytes: result.compressedSizeBytes,
+        compressionRatio: result.compressionRatio,
+        processingTimeMs: result.processingTimeMs,
+        outputBucket: result.outputLocation.bucket,
+        outputKey: result.outputLocation.key,
+      };
+    }
   }
 
   logger.info("Sending webhook notification", result.jobId, {

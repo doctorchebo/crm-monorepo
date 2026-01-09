@@ -243,6 +243,34 @@ export class WhatsAppGateway
   }
 
   /**
+   * Emit attachment status update to all connected clients
+   * Called when an individual attachment's status changes (for multi-media messages)
+   *
+   * @param event - The attachment status update data
+   */
+  emitAttachmentStatus(event: {
+    messageId: string;
+    attachmentId: string;
+    status: string;
+    waMessageId?: string;
+    timestamp?: Date;
+  }): void {
+    if (this.connectedClients.size === 0) {
+      return; // No clients connected
+    }
+
+    console.log(
+      `📡 Emitting attachment:status for ${event.messageId}/${event.attachmentId} → ${event.status} to ${this.connectedClients.size} clients`,
+    );
+
+    // Emit to all connected clients
+    this.server.emit('attachment:status', {
+      ...event,
+      timestamp: event.timestamp?.toISOString() || new Date().toISOString(),
+    });
+  }
+
+  /**
    * Emit chat update event to all connected clients
    * Called when chat metadata changes (unread count, last message, reactions, etc.)
    *

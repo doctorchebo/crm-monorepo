@@ -90,6 +90,18 @@ export interface MediaCompressionStackProps extends StackProps {
   readonly ffmpegLayerArn?: string;
 
   /**
+   * ARN of the Chromium Lambda Layer for PDF thumbnail generation.
+   * If not provided, PDF thumbnails will be disabled.
+   *
+   * Use @sparticuz/chromium releases for ARM64 layers:
+   * - Download from: https://github.com/Sparticuz/chromium/releases
+   * - Use the arm64 .zip file and upload to S3, then create a layer
+   *
+   * @default undefined - PDF thumbnails disabled
+   */
+  readonly chromiumLayerArn?: string;
+
+  /**
    * Number of days to keep compressed artifacts before deletion.
    * Applied as a lifecycle rule on the output bucket (if created).
    *
@@ -258,6 +270,7 @@ export class MediaCompressionStack extends Stack {
       inputBucket: this.inputBucket,
       outputBucket: this.outputBucket,
       ffmpegLayerArn: props.ffmpegLayerArn,
+      chromiumLayerArn: props.chromiumLayerArn,
       deleteOriginalAfterCompression:
         useSameBucket && deleteOriginalAfterCompression,
       memoryMb: props.lambda?.memoryMb ?? 2048,

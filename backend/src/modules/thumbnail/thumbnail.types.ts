@@ -27,6 +27,10 @@ export interface ThumbnailJobData {
   pathPrefix: string;
   /** Contact ID for folder structure */
   contactId?: string;
+  /** Target S3 key for thumbnail (used by Lambda) */
+  thumbnailS3Key?: string;
+  /** Whether this is a sync job (higher priority) */
+  isSync?: boolean;
 }
 
 /**
@@ -108,7 +112,7 @@ export function getDocumentIconType(mimeType: string): DocumentIconType {
 
 /**
  * Check if media type supports thumbnail generation
- * Now includes PDF documents
+ * Now includes PDF documents (via Chromium + pdf.js Lambda layer)
  */
 export function supportsThumbnail(
   mediaType: 'image' | 'video' | 'audio' | 'document',
@@ -117,15 +121,9 @@ export function supportsThumbnail(
   if (mediaType === 'image' || mediaType === 'video') {
     return true;
   }
-  // Support PDF thumbnails
+  // Support PDF thumbnails (rendered via Ghostscript in Lambda)
   if (mediaType === 'document' && mimeType === 'application/pdf') {
     return true;
   }
   return false;
 }
-
-/**
- * Queue names for thumbnail processing
- */
-export const THUMBNAIL_QUEUE_NAME = 'thumbnail-generation';
-export const THUMBNAIL_JOB_NAME = 'generate-thumbnail';

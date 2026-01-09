@@ -1,19 +1,13 @@
 "use client";
 
 import { ContactMessageBubble } from "@/components/contacts/contact-message-bubble";
-import { GroupedMediaBubble } from "@/components/media/grouped-media-bubble";
-import {
-  PendingMediaUpload,
-  PendingUploadGroup,
-} from "@/components/media/pending-upload-bubble";
 import { StickerMessageBubble } from "@/components/media/sticker-message-bubble";
-import { WhatsAppStatusIcon } from "@/components/whatsapp-status-icon";
 import { Attachment } from "@/lib/media/types";
 import { ReceivedContact } from "@/lib/types/contact-message.types";
 import { getDateKey } from "@/lib/utils/date-formatter";
 import { Loader } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import type { Chat, GroupedMessage, Message, MessageReaction } from "../types";
+import type { Chat, Message, MessageReaction } from "../types";
 import { DateSeparator } from "./date-separator";
 import { MessageBubble } from "./message-bubble";
 import { StickyDateHeader } from "./sticky-date-header";
@@ -95,30 +89,21 @@ function shouldAutoPlayGifs(
 }
 
 /**
- * Get the first message from a grouped message (for date comparison).
- */
-function getFirstMessageFromGroup(group: GroupedMessage): Message {
-  return group.messages[0];
-}
-
-/**
- * Check if a date separator should be shown before a grouped message.
+ * Check if a date separator should be shown before a message.
  * Returns the date to show, or null if no separator needed.
  */
-function shouldShowDateSeparatorForGroup(
-  currentGroup: GroupedMessage,
-  previousGroup: GroupedMessage | null
+function shouldShowDateSeparator(
+  currentMessage: Message,
+  previousMessage: Message | null
 ): Date | null {
-  const currentMessage = getFirstMessageFromGroup(currentGroup);
   const currentDate = new Date(currentMessage.timestamp);
   const currentDateKey = getDateKey(currentDate);
 
-  if (!previousGroup) {
-    // First group - always show date separator
+  if (!previousMessage) {
+    // First message - always show date separator
     return currentDate;
   }
 
-  const previousMessage = getFirstMessageFromGroup(previousGroup);
   const previousDateKey = getDateKey(new Date(previousMessage.timestamp));
 
   // Show separator if dates are different
@@ -138,13 +123,10 @@ interface ConversationWindowStatus {
 }
 
 interface MessagesListProps {
-  groupedMessages: GroupedMessage[];
   messages: Message[];
   selectedChat: Chat | null;
   isLoadingOlderMessages: boolean;
   hasMoreMessages: boolean;
-  pendingMediaUploads: PendingMediaUpload[];
-  pendingCaption: string;
   messageRefs: React.MutableRefObject<Map<string, HTMLDivElement>>;
   isScrollRestoring: boolean;
   messagesContainerRef: React.RefObject<HTMLDivElement | null>;
@@ -204,13 +186,10 @@ interface MessagesListProps {
 }
 
 export function MessagesList({
-  groupedMessages,
   messages,
   selectedChat,
   isLoadingOlderMessages,
   hasMoreMessages,
-  pendingMediaUploads,
-  pendingCaption,
   messageRefs,
   isScrollRestoring,
   messagesContainerRef,
@@ -412,45 +391,14 @@ export function MessagesList({
         </div>
       ) : (
         <div className="space-y-2">
-          {groupedMessages.map((group, index) => {
-            // Check if we need a date separator before this group
-            const previousGroup = index > 0 ? groupedMessages[index - 1] : null;
-            const separatorDate = shouldShowDateSeparatorForGroup(
-              group,
-              previousGroup
+          {messages.map((message, index) => {
+            // Check if we need a date separator before this message
+            const previousMessage = index > 0 ? messages[index - 1] : null;
+            const separatorDate = shouldShowDateSeparator(
+              message,
+              previousMessage
             );
 
-            // Grouped media messages - render as single bubble
-            if (group.type === "group" && group.messages.length > 1) {
-              const lastMessage = group.messages[group.messages.length - 1];
-              const timestamp = new Date(lastMessage.timestamp);
-              const timeString = timestamp.toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              });
-
-              return (
-                <React.Fragment key={group.id}>
-                  {separatorDate && <DateSeparator date={separatorDate} />}
-                  <GroupedMediaBubble
-                    messages={group.messages}
-                    onImageClick={handleImageClick}
-                    statusIcon={
-                      <WhatsAppStatusIcon
-                        status={lastMessage.status || "pending"}
-                        deliveredAt={lastMessage.deliveredAt}
-                        readAt={lastMessage.readAt}
-                        className="ml-1"
-                      />
-                    }
-                    timeString={timeString}
-                  />
-                </React.Fragment>
-              );
-            }
-
-            // Single message - render normally
-            const message = group.messages[0];
             const isOutbound = message.direction === "outbound";
             const timestamp = new Date(message.timestamp);
             const timeString = timestamp.toLocaleTimeString([], {
@@ -600,18 +548,6 @@ export function MessagesList({
               </React.Fragment>
             );
           })}
-
-          {/* Pending Media Uploads - show grouped with progress */}
-          {pendingMediaUploads.length > 0 && (
-            <PendingUploadGroup
-              uploads={pendingMediaUploads}
-              caption={pendingCaption}
-              timestamp={new Date().toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            />
-          )}
 
           <div ref={messagesEndRef} />
         </div>

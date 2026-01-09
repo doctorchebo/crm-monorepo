@@ -2,16 +2,18 @@
   "name": "@whatsapp-crm/media-compression-lambda",
   "version": "1.0.0",
   "private": true,
-  "description": "Lambda function for media compression using ffmpeg",
+  "description": "Lambda function for media compression and thumbnail generation using ffmpeg and Chromium",
   "main": "dist/index.js",
   "scripts": {
-    "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --outfile=dist/index.js --external:@aws-sdk/*",
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --outfile=dist/index.js --external:@aws-sdk/* --external:@sparticuz/chromium",
     "build:watch": "npm run build -- --watch",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.450.0"
+    "@aws-sdk/client-s3": "^3.450.0",
+    "@sparticuz/chromium": "^143.0.4",
+    "puppeteer-core": "^24.0.0"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.131",

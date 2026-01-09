@@ -145,6 +145,7 @@ export function mapCloudAPIMessageType(
   | 'document'
   | 'contacts'
   | 'sticker'
+  | 'location'
   | 'unknown' {
   const typeMap: Record<string, any> = {
     text: 'text',
@@ -156,8 +157,11 @@ export function mapCloudAPIMessageType(
     sticker: 'sticker',
     button: 'text',
     interactive: 'text',
-    location: 'unknown',
-    reaction: 'unknown',
+    location: 'location',
+    order: 'text',
+    system: 'text',
+    unsupported: 'text',
+    reaction: 'unknown', // Handled separately
     unknown: 'unknown',
   };
   return typeMap[cloudAPIType] || 'unknown';

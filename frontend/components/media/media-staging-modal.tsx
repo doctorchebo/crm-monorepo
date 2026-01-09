@@ -9,12 +9,14 @@
  * - Thumbnail carousel at bottom with ability to add more files
  * - Caption input for the message
  * - Send button
+ * - Warning banner when multiple files are selected (WhatsApp API limitation)
  */
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatFileSize } from "@/lib/media/types";
 import {
+  AlertTriangle,
   ChevronLeft,
   ChevronRight,
   FileIcon,
@@ -155,6 +157,20 @@ export function MediaStagingModal({
           </span>
         </div>
       </div>
+
+      {/* Multiple Files Warning Banner */}
+      {files.length > 1 && (
+        <div className="bg-amber-900/50 border-b border-amber-700/50 px-4 py-2.5">
+          <div className="flex items-center gap-2 text-amber-200 text-sm max-w-4xl mx-auto">
+            <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+            <span>
+              Due to WhatsApp Cloud API limitations, each file will be sent as a
+              separate message. The recipient will receive {files.length}{" "}
+              individual messages.
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Main Preview Area */}
       <div className="flex-1 flex items-center justify-center overflow-hidden relative p-4">

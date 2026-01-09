@@ -44,13 +44,15 @@ export interface Attachment {
   duration?: number; // For videos: duration in seconds. For PDFs: page count
   pageCount?: number; // For documents: number of pages
   uploadedAt: string;
-  status: "success" | "pending" | "failed";
+  status: "success" | "pending" | "failed" | "uploading"; // uploading = currently uploading to S3
+  progress?: number; // 0-100 upload progress (for optimistic UI during upload)
   errorMessage?: string;
   thumbnailError?: string; // Error details if thumbnail generation failed
   mediaUrl?: string; // For Cloud API media (inbound from Meta), format: "cloud-api://mediaId"
   isVoiceNote?: boolean; // For audio: true if recorded voice note (vs file upload)
   waveformData?: number[]; // For voice notes: amplitude samples for waveform display
   isAnimated?: boolean; // For stickers/gifs: true if animated
+  previewUrl?: string; // For optimistic UI: local blob URL before upload completes
 }
 
 /**
@@ -253,6 +255,11 @@ export function getMediaIcon(type: MediaType): string {
  * - Upload failed but attachment record was created
  */
 export function hasAccessibleMediaSource(attachment: Attachment): boolean {
+  // Check for local preview URL (optimistic upload in progress)
+  if (attachment.previewUrl && attachment.previewUrl.trim().length > 0) {
+    return true;
+  }
+
   // Check for S3 key
   if (attachment.s3Key && attachment.s3Key.trim().length > 0) {
     return true;

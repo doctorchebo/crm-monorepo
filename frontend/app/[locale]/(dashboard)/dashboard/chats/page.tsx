@@ -61,7 +61,7 @@ import {
 } from "./hooks";
 import type { Chat, Template } from "./types";
 import { PinDuration } from "./types";
-import { calculateConversationWindow, groupMessages } from "./utils";
+import { calculateConversationWindow } from "./utils";
 
 export default function ChatsPage() {
   const t = useTranslations("chats");
@@ -657,12 +657,6 @@ export default function ChatsPage() {
     document.addEventListener("mouseup", handleMouseUp);
   };
 
-  // Group messages for display
-  const groupedMessages = useMemo(
-    () => groupMessages(chatState.messages),
-    [chatState.messages]
-  );
-
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header with Controls */}
@@ -849,13 +843,10 @@ export default function ChatsPage() {
                   <div className="relative flex-1 min-h-0 overflow-hidden">
                     {/* Show messages list - don't block on initial sync */}
                     <MessagesList
-                      groupedMessages={groupedMessages}
                       messages={chatState.messages}
                       selectedChat={effectiveSelectedChat}
                       isLoadingOlderMessages={chatState.isLoadingOlderMessages}
                       hasMoreMessages={chatState.hasMoreMessages}
-                      pendingMediaUploads={mediaHandlers.pendingMediaUploads}
-                      pendingCaption={mediaHandlers.pendingCaption}
                       messageRefs={messageHandlers.messageRefs}
                       isScrollRestoring={chatState.isScrollRestoring}
                       messagesContainerRef={chatState.messagesContainerRef}
@@ -936,9 +927,6 @@ export default function ChatsPage() {
                     currentAttachmentType={mediaHandlers.currentAttachmentType}
                     templateInput={messageHandlers.templateInput}
                     isUploading={isUploading}
-                    pendingMediaUploadsLength={
-                      mediaHandlers.pendingMediaUploads.length
-                    }
                     t={t}
                     onSend={messageHandlers.handleSendMessage}
                     onSendVoiceNote={mediaHandlers.handleSendVoiceNote}

@@ -3,7 +3,9 @@
  *
  * Centralized configuration for FFmpeg and FFprobe binary paths.
  * This ensures consistent path resolution across all services that use
- * FFmpeg/FFprobe (MediaAnalyzerService, ThumbnailProcessorService, etc.)
+ * FFmpeg/FFprobe (MediaAnalyzerService, etc.)
+ *
+ * Note: Thumbnail generation is handled by AWS Lambda, not local ffmpeg.
  *
  * Binary Sources (in priority order):
  * 1. @ffmpeg-installer/ffmpeg - Bundled ffmpeg binary

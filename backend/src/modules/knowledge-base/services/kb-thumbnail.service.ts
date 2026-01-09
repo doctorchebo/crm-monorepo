@@ -2,13 +2,17 @@
  * KB Media Thumbnail Service
  *
  * Handles thumbnail generation for Knowledge Base media files.
- * Integrates with the existing ThumbnailProcessorService for actual generation.
  *
- * Features:
- * - Synchronous thumbnail generation (called after upload)
- * - Supports images, videos, and PDFs
- * - Updates KB media records with thumbnail info
- * - Uses KnowledgeBaseStorageService for consistent S3 path structure
+ * Architecture:
+ * - ALL thumbnails generated via AWS Lambda (no local fallback)
+ * - PDFs supported via Chromium + pdf.js Lambda layer
+ * - Safety mechanisms prevent infinite loops and runaway costs
+ *
+ * Flow:
+ * 1. Queue thumbnail job to Lambda via SQS
+ * 2. Lambda generates thumbnail and uploads to S3
+ * 3. Lambda calls callback endpoint to update DB
+ * 4. WebSocket event emitted for real-time UI update
  *
  * Thumbnail Storage Path:
  * knowledge-base/{userId}/{category}/{objectId}/{mediaType}/thumbnails/thumb-{filename}
@@ -16,9 +20,9 @@
 
 import { db } from '@database/db.connection';
 import { kbObjectMedia } from '@database/knowledge-base.schema';
-import { ThumbnailProcessorService } from '@modules/thumbnail/thumbnail-processor.service';
 import { supportsThumbnail } from '@modules/thumbnail/thumbnail.types';
 import { Injectable, Logger } from '@nestjs/common';
+import { LambdaThumbnailService } from '@shared/services/lambda-thumbnail.service';
 import { S3Service } from '@shared/services/s3.service';
 import { eq } from 'drizzle-orm';
 import { KnowledgeBaseStorageService } from './storage.service';
@@ -39,6 +43,10 @@ export interface KbThumbnailResult {
   blurhash?: string;
   duration?: number;
   error?: string;
+  /** Whether thumbnail was queued to Lambda (async) vs generated locally (sync) */
+  isAsync?: boolean;
+  /** Lambda job ID if queued */
+  jobId?: string;
 }
 
 /**
@@ -57,8 +65,8 @@ export class KbThumbnailService {
 
   constructor(
     private readonly s3Service: S3Service,
-    private readonly thumbnailProcessor: ThumbnailProcessorService,
     private readonly storageService: KnowledgeBaseStorageService,
+    private readonly lambdaThumbnailService: LambdaThumbnailService,
   ) {}
 
   /**
@@ -79,24 +87,32 @@ export class KbThumbnailService {
   }
 
   /**
-   * Generate thumbnail for KB media
+   * Generate thumbnail for KB media via AWS Lambda
    *
-   * This is called synchronously after media upload to generate thumbnails
-   * for images, videos, and PDFs. The process:
-   * 1. Download the original file from S3
-   * 2. Generate thumbnail using ThumbnailProcessorService
-   * 3. Upload thumbnail to S3 in the appropriate knowledge-base path
-   * 4. Update the KB media record with thumbnail info
+   * ALL thumbnails are generated in AWS Lambda (images, videos, PDFs).
+   * No local fallback - if Lambda fails, thumbnail is not generated.
+   *
+   * Flow:
+   * 1. Validate media type supports thumbnails
+   * 2. Queue to Lambda via SQS
+   * 3. Lambda generates thumbnail asynchronously
+   * 4. Lambda calls callback to update DB and emit WebSocket event
    *
    * @param mediaId - The KB media record ID
    * @param s3Key - S3 key of the original file
    * @param mimeType - MIME type of the file
-   * @returns Thumbnail generation result
+   * @param options - Additional options
+   * @returns Thumbnail generation result (async - thumbnail not ready yet)
    */
   async generateThumbnail(
     mediaId: string,
     s3Key: string,
     mimeType: string,
+    options?: {
+      userId?: number;
+      objectId?: string;
+      s3Bucket?: string;
+    },
   ): Promise<KbThumbnailResult> {
     const mediaType = this.getMediaType(mimeType);
 
@@ -108,96 +124,67 @@ export class KbThumbnailService {
       return { success: true }; // Not an error, just no thumbnail needed
     }
 
+    // Check if Lambda is enabled
+    if (!this.lambdaThumbnailService.isLambdaThumbnailEnabled()) {
+      this.logger.error(
+        `[KB Thumbnail] Lambda not configured - thumbnail will NOT be generated for ${mediaId}`,
+      );
+      return {
+        success: false,
+        error: 'Lambda thumbnail service not configured',
+      };
+    }
+
     this.logger.log(
-      `[KB Thumbnail] Generating thumbnail for ${mediaId} (${mediaType}: ${mimeType})`,
+      `[KB Thumbnail] Queueing thumbnail generation for ${mediaId} (${mediaType}: ${mimeType})`,
     );
 
     try {
-      // Download original from S3
-      const originalBuffer = await this.s3Service.downloadFile(s3Key);
-
-      if (!originalBuffer) {
-        throw new Error(`Failed to download original from S3: ${s3Key}`);
-      }
-
-      this.logger.debug(
-        `[KB Thumbnail] Downloaded original: ${originalBuffer.length} bytes`,
-      );
-
-      // Generate thumbnail metadata (dimensions, blurhash)
-      const result = await this.thumbnailProcessor.generateThumbnail(
-        originalBuffer,
-        mediaType,
-        mimeType,
-      );
-
-      if (!result.success) {
-        this.logger.warn(
-          `[KB Thumbnail] Generation failed for ${mediaId}: ${result.error}`,
-        );
-        return {
-          success: false,
-          error: result.error,
-        };
-      }
-
-      // Generate actual thumbnail buffer
-      // Note: audio doesn't support thumbnails, but we already filtered it out above
-      const thumbnailMediaType =
-        mediaType === 'document' || mediaType === 'audio'
-          ? 'document'
-          : (mediaType as 'image' | 'video');
-
-      const thumbnailBuffer = await this.thumbnailProcessor.getThumbnailBuffer(
-        originalBuffer,
-        thumbnailMediaType,
-        mimeType,
-      );
-
-      // Generate thumbnail S3 key using the storage service
-      // This ensures thumbnails are stored in the correct knowledge-base path structure
+      // Generate the target thumbnail S3 key
       const thumbnailPath = this.storageService.generateThumbnailPath(s3Key);
       const thumbnailS3Key = thumbnailPath.key;
 
-      // Upload thumbnail to S3
-      await this.s3Service.uploadFile(
+      const jobId = await this.lambdaThumbnailService.queueKbMediaThumbnail({
+        mediaId,
+        s3Key,
+        mimeType,
         thumbnailS3Key,
-        thumbnailBuffer,
-        'image/jpeg',
-      );
-
-      this.logger.debug(
-        `[KB Thumbnail] Uploaded thumbnail to S3: ${thumbnailS3Key}`,
-      );
-
-      // Update the KB media record
-      await this.updateMediaThumbnail(mediaId, {
-        thumbnailS3Key,
-        thumbnailUrl: null, // Will be generated on demand via presigned URL
-        width: result.width || null,
-        height: result.height || null,
+        s3Bucket: options?.s3Bucket,
+        userId: options?.userId,
+        objectId: options?.objectId,
       });
 
+      if (!jobId) {
+        // This should only happen if mimeType is not supported
+        this.logger.warn(
+          `[KB Thumbnail] Unsupported type ${mimeType} for ${mediaId} - no thumbnail will be generated`,
+        );
+        return {
+          success: false,
+          error: `Unsupported MIME type for thumbnail: ${mimeType}`,
+        };
+      }
+
       this.logger.log(
-        `[KB Thumbnail] Successfully generated thumbnail for ${mediaId}`,
+        `[KB Thumbnail] Queued Lambda thumbnail job ${jobId} for ${mediaId}`,
       );
 
       return {
         success: true,
-        thumbnailS3Key,
-        width: result.width,
-        height: result.height,
-        blurhash: result.blurhash,
-        duration: result.duration,
+        isAsync: true,
+        jobId,
+        thumbnailS3Key, // Return expected key so callers know where it will be
       };
     } catch (error) {
       this.logger.error(
-        `[KB Thumbnail] Failed to generate thumbnail for ${mediaId}: ${error.message}`,
+        `[KB Thumbnail] Failed to queue Lambda job for ${mediaId}: ${error.message}`,
         error.stack,
       );
+
+      // NO FALLBACK - thumbnail will not be generated
       return {
         success: false,
-        error: error.message,
+        error: `Failed to queue Lambda thumbnail job: ${error.message}`,
       };
     }
   }
@@ -242,7 +229,7 @@ export class KbThumbnailService {
   /**
    * Regenerate thumbnail for an existing KB media item
    *
-   * Useful for fixing thumbnails or updating after processing changes.
+   * Deletes existing thumbnail and queues new generation via Lambda.
    *
    * @param mediaId - The KB media record ID
    * @returns Thumbnail generation result
@@ -275,7 +262,7 @@ export class KbThumbnailService {
       }
     }
 
-    // Generate new thumbnail
+    // Generate new thumbnail via Lambda
     return this.generateThumbnail(mediaId, media.s3Key, media.mimeType);
   }
 }

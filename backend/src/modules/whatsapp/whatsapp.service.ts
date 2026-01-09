@@ -704,12 +704,18 @@ export class WhatsAppService {
    * Send media message via Cloud API
    * Supports image, video, audio, document
    *
+   * For multi-media messages, each attachment is sent as a separate WhatsApp message
+   * (WhatsApp Cloud API limitation). The attachmentId parameter is used to track
+   * which specific attachment was sent and update its status/waMessageId.
+   *
    * @param recipientPhone - Recipient phone number
    * @param mediaType - Type of media (image, video, audio, document)
    * @param mediaUrl - URL of media file
    * @param caption - Optional caption for media
    * @param senderId - Optional sender ID to determine which phoneNumberId to use
    * @param fileName - Optional filename for documents (required for WhatsApp to display correct name)
+   * @param originalMessageId - The parent message ID that contains this attachment
+   * @param attachmentId - The specific attachment ID within the message (for multi-media messages)
    * @returns Response with message ID
    */
   async sendMedia(
@@ -720,6 +726,7 @@ export class WhatsAppService {
     senderId?: number,
     fileName?: string,
     originalMessageId?: string,
+    attachmentId?: string,
   ): Promise<any> {
     try {
       const cleanedPhone = cleanPhoneNumber(recipientPhone);
@@ -822,33 +829,91 @@ export class WhatsAppService {
         `Media message sent successfully. ID: ${waMessageId}, Type: ${mediaType}`,
       );
 
-      // If originalMessageId provided, update the existing database message status
-      // NOTE: We keep the original messageId to avoid breaking thumbnail updates and other
-      // operations that reference this ID. The WhatsApp message ID is stored in mediaUrl
-      // field (prefixed with 'wa:') for webhook lookups.
+      // If originalMessageId provided, update the existing database message
+      // For multi-media messages, update the specific attachment's status and waMessageId
       if (originalMessageId) {
         try {
-          await db
-            .update(messages)
-            .set({
-              status: 'sent',
-              sentAt: new Date(),
-              updatedAt: new Date(),
-              // Store WhatsApp message ID in mediaUrl for webhook lookups
-              mediaUrl: `wa:${waMessageId}`,
-            })
-            .where(eq(messages.messageId, originalMessageId));
+          // Get current message to update attachments
+          const currentMessage = await db.query.messages.findFirst({
+            where: eq(messages.messageId, originalMessageId),
+          });
 
-          this.logger.log(
-            `Updated message ${originalMessageId} with status 'sent' (WhatsApp ID: ${waMessageId})`,
-          );
+          if (currentMessage) {
+            const currentAttachments =
+              (currentMessage.attachments as any[]) || [];
+            let allAttachmentsSent = true;
 
-          // Emit status update via WebSocket using original messageId
-          if (whatsAppGatewayInstance) {
-            whatsAppGatewayInstance.emitMessageStatus(
-              originalMessageId,
-              'sent',
+            // Update the specific attachment's status and waMessageId
+            const updatedAttachments = currentAttachments.map((att: any) => {
+              if (attachmentId && att.id === attachmentId) {
+                return {
+                  ...att,
+                  status: 'success',
+                  waMessageId: waMessageId, // Store WhatsApp message ID for this specific attachment
+                };
+              }
+              // Check if any attachments are still pending
+              if (att.status !== 'success') {
+                allAttachmentsSent = false;
+              }
+              return att;
+            });
+
+            // Check if all attachments are now sent (after this update)
+            const hasMultipleAttachments = currentAttachments.length > 1;
+            const allSentAfterUpdate = updatedAttachments.every(
+              (att: any) =>
+                att.status === 'success' ||
+                (attachmentId && att.id === attachmentId),
             );
+
+            // Build the update data
+            const updateData: any = {
+              attachments: updatedAttachments,
+              updatedAt: new Date(),
+            };
+
+            // Only update message status to 'sent' when all attachments are sent
+            // For single attachment messages, update immediately
+            // For multi-attachment messages, wait until all are sent
+            if (!hasMultipleAttachments || allSentAfterUpdate) {
+              updateData.status = 'sent';
+              updateData.sentAt = new Date();
+              // Store the first attachment's WhatsApp ID in mediaUrl for webhook lookups
+              // For multi-media, we now track individual waMessageIds in each attachment
+              if (!currentMessage.mediaUrl && waMessageId) {
+                updateData.mediaUrl = `wa:${waMessageId}`;
+              }
+            }
+
+            await db
+              .update(messages)
+              .set(updateData)
+              .where(eq(messages.messageId, originalMessageId));
+
+            this.logger.log(
+              `Updated message ${originalMessageId} attachment ${attachmentId || 'all'} with WhatsApp ID: ${waMessageId}`,
+            );
+
+            // Emit status update via WebSocket using original messageId
+            // Include attachment-level info for granular UI updates
+            if (whatsAppGatewayInstance) {
+              // Emit attachment-specific update for multi-media tracking
+              whatsAppGatewayInstance.emitAttachmentStatus({
+                messageId: originalMessageId,
+                attachmentId: attachmentId || '',
+                status: 'sent',
+                waMessageId: waMessageId,
+              });
+
+              // Also emit message status if all attachments are sent
+              if (!hasMultipleAttachments || allSentAfterUpdate) {
+                whatsAppGatewayInstance.emitMessageStatus(
+                  originalMessageId,
+                  'sent',
+                );
+              }
+            }
           }
         } catch (updateError) {
           this.logger.warn(
@@ -1603,6 +1668,21 @@ export class WhatsAppService {
       console.log('=== HANDLE INBOUND MESSAGE ===');
       console.log('Raw message:', JSON.stringify(message, null, 2));
 
+      // === SKIP UNSUPPORTED MESSAGE TYPES ===
+      // WhatsApp Cloud API sends type: "unsupported" for messages it cannot process
+      // (e.g., album metadata, ephemeral messages, etc.). These are error notifications,
+      // not actual content, so we skip storing them to avoid "[Message type not supported]" bubbles.
+      // Reference: https://developers.facebook.com/docs/whatsapp/cloud-api/webhooks/components
+      if (message.type === 'unsupported') {
+        this.logger.log(
+          `[Inbound] Skipping unsupported message type. ID: ${message.id}, Errors: ${JSON.stringify(message.errors || [])}`,
+        );
+        console.log(
+          `⏭️ SKIPPED: Unsupported message type ${message.id} - this is a Cloud API error notification, not actual content`,
+        );
+        return; // Don't create a message bubble for unsupported types
+      }
+
       const senderPhone = cleanPhoneNumber(message.from);
 
       console.log('Sender phone:', senderPhone);
@@ -1894,8 +1974,33 @@ export class WhatsAppService {
           );
           // Return early - reactions don't follow the normal message flow
           return;
+        case 'location':
+          // Handle location messages
+          const location = message.location;
+          if (location) {
+            textContent = location.name
+              ? `📍 ${location.name}${location.address ? ` - ${location.address}` : ''}`
+              : `📍 Location: ${location.latitude}, ${location.longitude}`;
+          } else {
+            textContent = '📍 Location shared';
+          }
+          break;
+        case 'order':
+          // Handle order messages (WhatsApp Business)
+          textContent = '🛒 Order received';
+          break;
+        case 'system':
+          // Handle system messages (group changes, etc.)
+          textContent = message.system?.body || '[System message]';
+          break;
+        // Note: 'unsupported' type is handled early in handleInboundMessage() with an early return
+        // since unsupported messages are Cloud API error notifications, not actual content
         default:
-          textContent = '[Unsupported message type]';
+          // Log unknown message types for debugging
+          this.logger.warn(
+            `[Inbound] Unknown message type: ${message.type}. Full message: ${JSON.stringify(message, null, 2)}`,
+          );
+          textContent = `[Unsupported message type: ${message.type || 'unknown'}]`;
       }
 
       // Handle reply context from incoming message
@@ -2015,9 +2120,15 @@ export class WhatsAppService {
                 mimeType: att.mimeType,
                 size: att.size,
                 s3Key: att.s3Key,
+                thumbnailKey: att.thumbnailKey,
                 thumbnailStatus: att.thumbnailStatus,
+                width: att.width,
+                height: att.height,
+                blurhash: att.blurhash,
+                duration: att.duration,
                 status: att.status,
-                isVoiceNote: att.isVoiceNote || false, // Include voice note flag
+                isVoiceNote: att.isVoiceNote || false,
+                isAnimated: att.isAnimated || false,
               }))
             : undefined;
 

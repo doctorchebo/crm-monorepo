@@ -48,6 +48,7 @@ interface AttachmentDisplayProps {
 /**
  * Image Attachment Viewer
  * Now with progressive loading support via thumbnails and blurhash
+ * Also supports optimistic UI with upload progress
  */
 export function ImageAttachment({
   attachment,
@@ -56,8 +57,16 @@ export function ImageAttachment({
   isSquare = false,
   onPreview,
 }: AttachmentDisplayProps) {
+  // Track whether the actual image element has loaded
+  const [imageLoaded, setImageLoaded] = useState(false);
+
   // Check if attachment has accessible media source
   const isAccessible = hasAccessibleMediaSource(attachment);
+
+  // Check if this is an optimistic upload (using local preview URL)
+  const isUploading =
+    attachment.status === "uploading" || attachment.status === "pending";
+  const uploadProgress = attachment.progress || 0;
 
   // Use enhanced hook for media loading with thumbnail support
   // Only fetch if accessible
@@ -117,20 +126,71 @@ export function ImageAttachment({
     );
   }
 
+  // Upload progress overlay component
+  const UploadProgressOverlay = () => (
+    <div className="absolute inset-0 bg-black/40 rounded-lg flex flex-col items-center justify-center gap-1 z-10">
+      {/* Circular Progress */}
+      <div className="relative w-12 h-12">
+        <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
+          {/* Background circle */}
+          <circle
+            cx="18"
+            cy="18"
+            r="15"
+            fill="none"
+            className="stroke-white/30"
+            strokeWidth="3"
+          />
+          {/* Progress circle */}
+          <circle
+            cx="18"
+            cy="18"
+            r="15"
+            fill="none"
+            className="stroke-white"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeDasharray={`${uploadProgress * 0.94} 94`}
+          />
+        </svg>
+        <span className="absolute inset-0 flex items-center justify-center text-xs text-white font-medium">
+          {Math.round(uploadProgress)}%
+        </span>
+      </div>
+    </div>
+  );
+
+  // Track loading state for scroll hook coordination
+  // Media is "loading" if:
+  // 1. We're showing skeleton (no URL yet), OR
+  // 2. We have a URL but the img element hasn't fired onLoad yet
+  const isMediaLoading = showSkeleton || (displayUrl && !imageLoaded);
+
+  // Reset imageLoaded when URL changes (new image to load)
+  useEffect(() => {
+    setImageLoaded(false);
+  }, [displayUrl]);
+
+  const handleImageLoad = useCallback(() => {
+    setImageLoaded(true);
+  }, []);
+
   return (
     <div
       className={`relative group ${
         isSquare ? "w-full h-full" : "inline-block"
-      } cursor-pointer`}
-      onClick={() => onPreview?.(0)}
+      } ${!isUploading ? "cursor-pointer" : ""}`}
+      onClick={!isUploading ? () => onPreview?.(0) : undefined}
+      data-media-container="image"
+      data-media-loading={isMediaLoading ? "true" : "false"}
     >
       {!isSquare && (
-        // Single image: constrained width container to prevent overflow
-        <div className="relative max-w-xs bg-gray-200 dark:bg-gray-700 rounded-lg overflow-hidden">
+        // Single image: consistent width container with aspect ratio preserved
+        <div className="relative w-full bg-gray-200 dark:bg-gray-700 rounded-lg overflow-hidden">
           {showSkeleton ? (
             <ThumbnailSkeleton
-              width={dimensions?.width || 280}
-              height={dimensions?.height || 200}
+              width={dimensions?.width || 224}
+              height={dimensions?.height || 168}
               blurhash={blurhash}
               variant="medium"
             />
@@ -138,11 +198,15 @@ export function ImageAttachment({
             <img
               src={displayUrl}
               alt={attachment.fileName}
-              className="w-full h-auto object-cover transition-opacity duration-300"
+              className={`w-full h-auto max-h-80 object-cover transition-opacity duration-300 ${isUploading ? "opacity-70" : ""}`}
+              onLoad={handleImageLoad}
             />
           ) : null}
 
-          {loading && displayUrl && (
+          {/* Upload progress overlay */}
+          {isUploading && displayUrl && <UploadProgressOverlay />}
+
+          {loading && displayUrl && !isUploading && (
             <div className="absolute inset-0 bg-black/30 rounded-lg flex items-center justify-center">
               <div className="animate-spin rounded-full h-8 w-8 border-2 border-white border-t-blue-500" />
             </div>
@@ -164,11 +228,15 @@ export function ImageAttachment({
             <img
               src={displayUrl}
               alt={attachment.fileName}
-              className="w-full h-full object-cover rounded-lg transition-opacity duration-300"
+              className={`w-full h-full object-cover rounded-lg transition-opacity duration-300 ${isUploading ? "opacity-70" : ""}`}
+              onLoad={handleImageLoad}
             />
           ) : null}
 
-          {loading && displayUrl && (
+          {/* Upload progress overlay */}
+          {isUploading && displayUrl && <UploadProgressOverlay />}
+
+          {loading && displayUrl && !isUploading && (
             <div className="absolute inset-0 bg-black/30 rounded-lg flex items-center justify-center">
               <div className="animate-spin rounded-full h-8 w-8 border-2 border-white border-t-blue-500" />
             </div>
@@ -176,8 +244,8 @@ export function ImageAttachment({
         </>
       )}
 
-      {/* Delete button on hover - only shown on hover */}
-      {onDelete && (
+      {/* Delete button on hover - only shown on hover and not during upload */}
+      {onDelete && !isUploading && (
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -197,6 +265,7 @@ export function ImageAttachment({
  * Video Attachment Viewer
  * With progressive loading via thumbnails and blurhash
  * Click to open preview modal where video autoplays
+ * Also supports optimistic UI with upload progress
  */
 export function VideoAttachment({
   attachment,
@@ -204,8 +273,16 @@ export function VideoAttachment({
   onDelete,
   onPreview,
 }: AttachmentDisplayProps) {
+  // Track whether the thumbnail image has loaded
+  const [thumbnailLoaded, setThumbnailLoaded] = useState(false);
+
   // Check if attachment has accessible media source
   const isAccessible = hasAccessibleMediaSource(attachment);
+
+  // Check if this is an optimistic upload (using local preview URL)
+  const isUploading =
+    attachment.status === "uploading" || attachment.status === "pending";
+  const uploadProgress = attachment.progress || 0;
 
   // Use enhanced hook for media loading with thumbnail support
   // Only fetch if accessible
@@ -240,16 +317,17 @@ export function VideoAttachment({
   // For videos, we wait for thumbnail instead of downloading full video
   // Handle undefined status gracefully to ensure we always show something
   const showSkeleton =
-    loading ||
-    (!thumbnailUrl &&
-      (thumbnailStatus === "pending" ||
-        thumbnailStatus === "processing" ||
-        thumbnailStatus === undefined));
+    !attachment.previewUrl &&
+    (loading ||
+      (!thumbnailUrl &&
+        (thumbnailStatus === "pending" ||
+          thumbnailStatus === "processing" ||
+          thumbnailStatus === undefined)));
 
-  // Display URL is thumbnail for poster display (prefer thumbnail over video)
-  const displayUrl = thumbnailUrl;
+  // Display URL is thumbnail for poster display, or preview URL for optimistic uploads
+  const displayUrl = attachment.previewUrl || thumbnailUrl;
 
-  if (error) {
+  if (error && !displayUrl) {
     return (
       <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
         {error}
@@ -257,10 +335,58 @@ export function VideoAttachment({
     );
   }
 
+  // Upload progress overlay component
+  const UploadProgressOverlay = () => (
+    <div className="absolute inset-0 bg-black/40 rounded-lg flex flex-col items-center justify-center gap-1 z-10">
+      <div className="relative w-12 h-12">
+        <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
+          <circle
+            cx="18"
+            cy="18"
+            r="15"
+            fill="none"
+            className="stroke-white/30"
+            strokeWidth="3"
+          />
+          <circle
+            cx="18"
+            cy="18"
+            r="15"
+            fill="none"
+            className="stroke-white"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeDasharray={`${uploadProgress * 0.94} 94`}
+          />
+        </svg>
+        <span className="absolute inset-0 flex items-center justify-center text-xs text-white font-medium">
+          {Math.round(uploadProgress)}%
+        </span>
+      </div>
+    </div>
+  );
+
+  // Track loading state for scroll hook coordination
+  // Media is "loading" if:
+  // 1. We're showing skeleton (no thumbnail yet), OR
+  // 2. We have a displayUrl but the thumbnail hasn't loaded yet
+  const isMediaLoading = showSkeleton || (displayUrl && !thumbnailLoaded);
+
+  // Reset thumbnailLoaded when URL changes
+  useEffect(() => {
+    setThumbnailLoaded(false);
+  }, [displayUrl]);
+
+  const handleThumbnailLoad = useCallback(() => {
+    setThumbnailLoaded(true);
+  }, []);
+
   return (
     <div
-      className="relative group inline-block max-w-xs cursor-pointer"
-      onClick={() => onPreview?.(0)}
+      className={`relative group inline-block max-w-xs ${!isUploading ? "cursor-pointer" : ""}`}
+      onClick={!isUploading ? () => onPreview?.(0) : undefined}
+      data-media-container="video"
+      data-media-loading={isMediaLoading ? "true" : "false"}
     >
       {showSkeleton ? (
         <ThumbnailSkeleton
@@ -272,14 +398,25 @@ export function VideoAttachment({
         />
       ) : displayUrl ? (
         <div className="relative">
-          {/* Show thumbnail/poster image instead of video element */}
-          <img
-            src={displayUrl}
-            alt={attachment.fileName}
-            className="rounded-lg max-w-full h-auto"
-          />
+          {attachment.previewUrl ? (
+            // Show video element for optimistic uploads
+            <video
+              src={displayUrl}
+              className={`rounded-lg max-w-full h-auto ${isUploading ? "opacity-70" : ""}`}
+              muted
+              onLoadedData={handleThumbnailLoad}
+            />
+          ) : (
+            // Show thumbnail/poster image instead of video element
+            <img
+              src={displayUrl}
+              alt={attachment.fileName}
+              className={`rounded-lg max-w-full h-auto ${isUploading ? "opacity-70" : ""}`}
+              onLoad={handleThumbnailLoad}
+            />
+          )}
           {/* Video duration badge */}
-          {attachment.duration && (
+          {attachment.duration && !isUploading && (
             <div className="absolute bottom-2 left-2 bg-black/70 text-white text-xs px-1.5 py-0.5 rounded">
               {formatDuration(attachment.duration)}
             </div>
@@ -299,14 +436,17 @@ export function VideoAttachment({
         </div>
       )}
 
-      {loading && displayUrl && (
+      {/* Upload progress overlay */}
+      {isUploading && displayUrl && <UploadProgressOverlay />}
+
+      {loading && displayUrl && !isUploading && (
         <div className="absolute inset-0 bg-black/30 rounded-lg flex items-center justify-center">
           <div className="animate-spin rounded-full h-8 w-8 border-2 border-white border-t-blue-500" />
         </div>
       )}
 
-      {/* Play button overlay - shown when we have a thumbnail */}
-      {!showSkeleton && displayUrl && (
+      {/* Play button overlay - shown when we have a thumbnail and not uploading */}
+      {!showSkeleton && displayUrl && !isUploading && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="w-14 h-14 rounded-full bg-black/50 flex items-center justify-center">
             <Play className="w-7 h-7 text-white ml-1" fill="white" />
@@ -314,8 +454,8 @@ export function VideoAttachment({
         </div>
       )}
 
-      {/* Delete button on hover */}
-      {onDelete && (
+      {/* Delete button on hover - not shown during upload */}
+      {onDelete && !isUploading && (
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -335,6 +475,7 @@ export function VideoAttachment({
  * Video Thumbnail for Grid Display
  * Shows video thumbnail with play icon overlay - used in multi-media grids
  * With progressive loading via thumbnails and blurhash
+ * Also supports optimistic UI with upload progress
  */
 export function VideoThumbnail({
   attachment,
@@ -343,6 +484,11 @@ export function VideoThumbnail({
   isSquare = false,
   onPreview,
 }: AttachmentDisplayProps) {
+  // Check if this is an optimistic upload (using local preview URL)
+  const isUploading =
+    attachment.status === "uploading" || attachment.status === "pending";
+  const uploadProgress = attachment.progress || 0;
+
   const {
     url: videoUrl,
     thumbnailUrl,
@@ -360,11 +506,15 @@ export function VideoThumbnail({
   // Show skeleton while thumbnail is being generated
   const showSkeleton =
     !thumbnailUrl &&
+    !attachment.previewUrl &&
     (loading ||
       thumbnailStatus === "pending" ||
       thumbnailStatus === "processing");
 
-  if (error) {
+  // Use preview URL for optimistic uploads
+  const displayUrl = attachment.previewUrl || thumbnailUrl;
+
+  if (error && !displayUrl) {
     return (
       <div className="w-full h-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
         <Play className="w-6 h-6 text-gray-400" />
@@ -372,10 +522,41 @@ export function VideoThumbnail({
     );
   }
 
+  // Upload progress overlay component
+  const UploadProgressOverlay = () => (
+    <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center gap-1 z-10">
+      <div className="relative w-10 h-10">
+        <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
+          <circle
+            cx="18"
+            cy="18"
+            r="15"
+            fill="none"
+            className="stroke-white/30"
+            strokeWidth="3"
+          />
+          <circle
+            cx="18"
+            cy="18"
+            r="15"
+            fill="none"
+            className="stroke-white"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeDasharray={`${uploadProgress * 0.94} 94`}
+          />
+        </svg>
+        <span className="absolute inset-0 flex items-center justify-center text-xs text-white font-medium">
+          {Math.round(uploadProgress)}%
+        </span>
+      </div>
+    </div>
+  );
+
   return (
     <div
-      className={`relative w-full h-full cursor-pointer group`}
-      onClick={() => onPreview?.(0)}
+      className={`relative w-full h-full ${!isUploading ? "cursor-pointer" : ""} group`}
+      onClick={!isUploading ? () => onPreview?.(0) : undefined}
     >
       {showSkeleton ? (
         <ThumbnailSkeleton
@@ -384,20 +565,32 @@ export function VideoThumbnail({
           blurhash={blurhash}
           variant="small"
         />
-      ) : thumbnailUrl ? (
-        <img
-          src={thumbnailUrl}
-          alt={attachment.fileName}
-          className="w-full h-full object-cover transition-opacity duration-300"
-        />
+      ) : displayUrl ? (
+        attachment.previewUrl ? (
+          // For video preview during upload, show the video element
+          <video
+            src={displayUrl}
+            className={`w-full h-full object-cover transition-opacity duration-300 ${isUploading ? "opacity-70" : ""}`}
+            muted
+          />
+        ) : (
+          <img
+            src={displayUrl}
+            alt={attachment.fileName}
+            className={`w-full h-full object-cover transition-opacity duration-300 ${isUploading ? "opacity-70" : ""}`}
+          />
+        )
       ) : (
         <div className="w-full h-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center">
           <Play className="w-6 h-6 text-gray-500" />
         </div>
       )}
 
-      {/* Video play icon overlay */}
-      {!showSkeleton && (
+      {/* Upload progress overlay */}
+      {isUploading && displayUrl && <UploadProgressOverlay />}
+
+      {/* Video play icon overlay - not shown during upload */}
+      {!showSkeleton && !isUploading && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/20">
           <div className="w-8 h-8 rounded-full bg-black/50 flex items-center justify-center">
             <Play className="w-4 h-4 text-white" />
@@ -405,13 +598,13 @@ export function VideoThumbnail({
         </div>
       )}
 
-      {loading && (
+      {loading && !isUploading && (
         <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
           <div className="animate-spin rounded-full h-6 w-6 border-2 border-white border-t-blue-500" />
         </div>
       )}
 
-      {onDelete && (
+      {onDelete && !isUploading && (
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -875,11 +1068,11 @@ export const AttachmentGallery = memo(function AttachmentGallery({
   }
 
   // Generate a stable unique key for each attachment
-  // Prioritizes: id > url > filename > index-based fallback
+  // Prioritizes: id > s3Key > fileName > index-based fallback
   const getAttachmentKey = (attachment: Attachment, index: number): string => {
     if (attachment.id) return attachment.id;
-    if (attachment.url) return `${messageId}-url-${attachment.url}`;
-    if (attachment.filename) return `${messageId}-file-${attachment.filename}`;
+    if (attachment.s3Key) return `${messageId}-s3-${attachment.s3Key}`;
+    if (attachment.fileName) return `${messageId}-file-${attachment.fileName}`;
     return `${messageId}-idx-${index}`;
   };
 
@@ -996,8 +1189,8 @@ export const AttachmentGallery = memo(function AttachmentGallery({
                     )}
                   </div>
                 ) : (
-                  // Single media - constrained width with max-w
-                  <div className="max-w-xs w-full">
+                  // Single media - consistent width for uniform appearance
+                  <div className="w-56 rounded-lg overflow-hidden">
                     {isVideo ? (
                       <VideoAttachment
                         attachment={attachment}

@@ -255,12 +255,17 @@ export function useScrollToBottom(
 
       // ============================================================
       // HELPER: Check if scroll session is complete
+      // Note: Call scanForMedia() before checkComplete() to ensure
+      // all pending media is tracked before checking completion.
       // ============================================================
       const checkComplete = () => {
         if (!isActive) return;
 
         if (pendingMedia.size === 0) {
-          // All media loaded - scroll one more time and wait for settle
+          // All known media loaded - scroll one more time and wait for settle
+          console.log(
+            "[checkComplete] No pending media, starting settle timer"
+          );
           doScroll();
 
           // Clear any existing settle timeout
@@ -271,12 +276,19 @@ export function useScrollToBottom(
             if (!isActive) return;
 
             // Final scroll and cleanup
+            console.log("[checkComplete] Session complete, cleaning up");
             doScroll();
             cleanup();
             if (activeSessionRef.current?.id === sessionId) {
               activeSessionRef.current = null;
             }
           }, SETTLE_DELAY_MS);
+        } else {
+          console.log(
+            "[checkComplete] Still waiting for",
+            pendingMedia.size,
+            "media elements"
+          );
         }
       };
 
@@ -357,6 +369,31 @@ export function useScrollToBottom(
       const scanForMedia = () => {
         if (!isActive || !container) return;
 
+        // -------------------------------------------------------
+        // STRATEGY 1: Track elements with data-media-loading="true"
+        // This is the primary mechanism for tracking async-loaded media
+        // (e.g., images loaded via useMediaUrl hook)
+        // -------------------------------------------------------
+        const loadingContainers = container.querySelectorAll(
+          '[data-media-loading="true"]'
+        );
+        loadingContainers.forEach((el) => {
+          const element = el as HTMLElement;
+          if (!pendingMedia.has(element)) {
+            console.log(
+              "[scanForMedia] Found loading container:",
+              element.getAttribute("data-media-container")
+            );
+            pendingMedia.add(element);
+            // We don't attach traditional load listeners here
+            // Instead, MutationObserver watches for attribute changes
+          }
+        });
+
+        // -------------------------------------------------------
+        // STRATEGY 2: Track traditional img/video load states
+        // This handles media that's already in DOM but still loading
+        // -------------------------------------------------------
         // Find all images and videos
         const images = container.querySelectorAll("img");
         const videos = container.querySelectorAll("video");
@@ -453,6 +490,45 @@ export function useScrollToBottom(
         let hasNewMedia = false;
 
         for (const mutation of mutations) {
+          // -------------------------------------------------------
+          // HANDLE ATTRIBUTE CHANGES: data-media-loading
+          // This is the PRIMARY mechanism for tracking async media loading
+          // -------------------------------------------------------
+          if (
+            mutation.type === "attributes" &&
+            mutation.attributeName === "data-media-loading"
+          ) {
+            const target = mutation.target as HTMLElement;
+            const newValue = target.getAttribute("data-media-loading");
+
+            if (newValue === "false") {
+              // Media finished loading - remove from pending
+              console.log(
+                "[MutationObserver] Media finished loading:",
+                target.getAttribute("data-media-container")
+              );
+              pendingMedia.delete(target);
+              doScroll();
+              checkComplete();
+            } else if (newValue === "true" && !pendingMedia.has(target)) {
+              // New media started loading
+              console.log(
+                "[MutationObserver] New media started loading:",
+                target.getAttribute("data-media-container")
+              );
+              pendingMedia.add(target);
+              // Clear settle timeout since we have new pending media
+              if (settleTimeoutId) {
+                clearTimeout(settleTimeoutId);
+                settleTimeoutId = null;
+              }
+            }
+            continue;
+          }
+
+          // -------------------------------------------------------
+          // HANDLE NEW DOM NODES
+          // -------------------------------------------------------
           for (const node of mutation.addedNodes) {
             if (node instanceof HTMLElement) {
               // Check if the node itself is media
@@ -470,6 +546,13 @@ export function useScrollToBottom(
               if (
                 node.matches('[data-media-container="gif"]') ||
                 node.querySelector('[data-media-container="gif"]')
+              ) {
+                hasNewMedia = true;
+              }
+              // Check for any media containers with loading state
+              if (
+                node.matches("[data-media-loading]") ||
+                node.querySelector("[data-media-loading]")
               ) {
                 hasNewMedia = true;
               }
@@ -502,6 +585,8 @@ export function useScrollToBottom(
       mutationObserver.observe(container, {
         childList: true,
         subtree: true,
+        attributes: true, // Watch for attribute changes
+        attributeFilter: ["data-media-loading"], // Only watch this attribute
       });
 
       // Set up ResizeObserver as backup for content size changes
@@ -564,6 +649,10 @@ export function useScrollToBottom(
    * This effect ONLY handles:
    * - New messages arriving while user is at bottom → auto-scroll to show new message
    * - Reset tracking when chat changes
+   *
+   * NOTE: For rapid message arrivals (like grouped media), we track whether the user
+   * WAS at the bottom when the first message in a batch arrived, and continue scrolling
+   * for all subsequent messages in the batch until scroll completes or user scrolls away.
    */
   useEffect(() => {
     // Skip if no chat selected
@@ -601,9 +690,18 @@ export function useScrollToBottom(
     lastMessageCountRef.current = messages.length;
 
     // Auto-scroll for new messages only if user was at bottom
-    if (isNewMessages && shouldAutoScroll && isAtBottom(100)) {
+    // Use a larger threshold (150px) to be more forgiving during rapid message arrival
+    // Also scroll if there's an active scroll session (we started scrolling and more messages came in)
+    const wasAtBottom = isAtBottom(150);
+    const hasActiveSession = activeSessionRef.current?.active;
+
+    if (
+      isNewMessages &&
+      shouldAutoScroll &&
+      (wasAtBottom || hasActiveSession)
+    ) {
       console.log(
-        "[ScrollToBottom Effect] New message arrived, user at bottom, scrolling"
+        "[ScrollToBottom Effect] New message arrived, user at bottom or scroll session active, scrolling"
       );
       scrollToBottom(false);
     }

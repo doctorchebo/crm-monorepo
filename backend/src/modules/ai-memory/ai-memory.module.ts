@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { S3Service } from '@shared/services/s3.service';
 import { AiMemoryController } from './ai-memory.controller';
 import { ProviderRegistry } from './providers';
 import { AiMemoryRepository } from './repositories';
@@ -30,6 +31,7 @@ import { PgVectorStore } from './stores';
  * - Uses pgvector for vector storage (no external vector DB costs)
  * - VectorStore abstraction allows future migration to dedicated vector DBs
  * - Provider pattern for LLM flexibility
+ * - S3 integration for processing media files stored in S3
  *
  * Configuration:
  * - AI_MEMORY_PROVIDER_TYPE: LLM provider type (default: 'openai')
@@ -42,7 +44,7 @@ import { PgVectorStore } from './stores';
  * - EmbeddingService: Generate vector embeddings (provider-agnostic)
  * - PgVectorStore: Store/retrieve vectors in PostgreSQL pgvector
  * - AiMemoryService: Main orchestration service
- * - ContentProcessingService: Process uploaded files
+ * - ContentProcessingService: Process uploaded files (supports S3)
  * - MessageMemoryIntegration: Integration with messaging services
  * - AiMemoryRepository: Database operations
  */
@@ -55,6 +57,9 @@ import { PgVectorStore } from './stores';
 
     // Vector store (pgvector implementation)
     PgVectorStore,
+
+    // S3 service for file access
+    S3Service,
 
     // Core services
     EmbeddingService,

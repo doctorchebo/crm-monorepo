@@ -2,7 +2,6 @@
 
 import { AttachmentType } from "@/components/media/attachment-menu";
 import { StagedFile } from "@/components/media/media-staging-panel";
-import { PendingMediaUpload } from "@/components/media/pending-upload-bubble";
 import { backendApi } from "@/lib/api/endpoints";
 import { mediaApi } from "@/lib/media/api";
 import { Attachment, hasAccessibleMediaSource } from "@/lib/media/types";
@@ -45,10 +44,6 @@ interface UseMediaHandlersReturn {
   stagedFiles: StagedFile[];
   setStagedFiles: React.Dispatch<React.SetStateAction<StagedFile[]>>;
   currentAttachmentType: AttachmentType;
-
-  // Pending uploads
-  pendingMediaUploads: PendingMediaUpload[];
-  pendingCaption: string;
 
   // Preview modal state
   previewModalOpen: boolean;
@@ -154,12 +149,6 @@ export function useMediaHandlers(
     useState<AttachmentType>("photos-videos");
   const addMoreInputRef = useRef<HTMLInputElement>(null);
 
-  // Pending uploads
-  const [pendingMediaUploads, setPendingMediaUploads] = useState<
-    PendingMediaUpload[]
-  >([]);
-  const [pendingCaption, setPendingCaption] = useState("");
-
   // Preview modal state
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const [previewInitialIndex, setPreviewInitialIndex] = useState(0);
@@ -232,10 +221,10 @@ export function useMediaHandlers(
         const fileType = file.type.startsWith("image/")
           ? "image"
           : file.type.startsWith("video/")
-          ? "video"
-          : file.type.startsWith("audio/")
-          ? "audio"
-          : "document";
+            ? "video"
+            : file.type.startsWith("audio/")
+              ? "audio"
+              : "document";
 
         return {
           id: Math.random().toString(36).substring(7),
@@ -244,8 +233,8 @@ export function useMediaHandlers(
             fileType === "image" || fileType === "video"
               ? URL.createObjectURL(file)
               : fileType === "audio"
-              ? URL.createObjectURL(file)
-              : undefined,
+                ? URL.createObjectURL(file)
+                : undefined,
           type: fileType,
         };
       });
@@ -278,6 +267,7 @@ export function useMediaHandlers(
   }, []);
 
   // Handle sending media from staging modal
+  // Each file is sent as a separate message due to WhatsApp Cloud API limitation
   const handleSendMediaFromStaging = useCallback(
     async (caption: string) => {
       if (stagedFiles.length === 0 || !selectedChatId) return;
@@ -287,82 +277,177 @@ export function useMediaHandlers(
         const selectedChat = chats.find((c) => c.chatId === selectedChatId);
         if (!selectedChat) return;
 
-        const newPendingUploads: PendingMediaUpload[] = stagedFiles.map(
-          (sf) => ({
-            id: sf.id,
-            file: sf.file,
-            previewUrl: sf.previewUrl,
-            type: sf.type,
-            progress: 0,
-            status: "queued" as const,
-          })
-        );
-
-        setPendingMediaUploads(newPendingUploads);
-        setPendingCaption(caption);
+        // Close modal and clear staging immediately for better UX
+        const filesToSend = [...stagedFiles];
         setStagedFiles([]);
         setMediaStagingOpen(false);
 
         setShouldAutoScroll(true);
         scrollHelperRequestScroll(true);
 
-        let messagePayload: any = {
-          to: selectedChat.participantPhone,
-          senderId: selectedChat.senderId,
-        };
+        // Track all created messages for cleanup
+        const createdMessageIds: string[] = [];
+        const previewUrlsToCleanup: string[] = [];
 
-        if (caption.trim()) {
-          messagePayload.body = caption;
-        }
+        // Send each file as a separate message
+        // Caption is only added to the first message
+        // Reply context is only added to the first message
+        for (let i = 0; i < filesToSend.length; i++) {
+          const stagedFile = filesToSend[i];
+          const isFirstMessage = i === 0;
 
-        if (replyingToMessage?.messageId) {
-          messagePayload.replyToMessageId = replyingToMessage.messageId;
-        }
+          // Track preview URL for cleanup
+          if (stagedFile.previewUrl) {
+            previewUrlsToCleanup.push(stagedFile.previewUrl);
+          }
 
-        messagePayload.attachments = newPendingUploads.map((upload) => ({
-          id: upload.id,
-          type: upload.type,
-          fileName: upload.file.name,
-          mimeType: upload.file.type || "application/octet-stream",
-          size: upload.file.size,
-          s3Key: "",
-          status: "pending",
-          uploadedAt: new Date().toISOString(),
-        }));
+          // Create message payload for this single attachment
+          const messagePayload: any = {
+            to: selectedChat.participantPhone,
+            senderId: selectedChat.senderId,
+            attachments: [
+              {
+                id: stagedFile.id,
+                type: stagedFile.type,
+                fileName: stagedFile.file.name,
+                mimeType: stagedFile.file.type || "application/octet-stream",
+                size: stagedFile.file.size,
+                s3Key: "",
+                status: "pending",
+                uploadedAt: new Date().toISOString(),
+              },
+            ],
+          };
 
-        const sentMessage = (await backendApi.whatsapp.sendMessage(
-          messagePayload
-        )) as { messageId?: string };
+          // Only add caption to the first message
+          if (isFirstMessage && caption.trim()) {
+            messagePayload.body = caption;
+          }
 
-        if (!sentMessage?.messageId) {
-          throw new Error("Failed to get message ID");
-        }
+          // Only add reply context to the first message
+          if (isFirstMessage && replyingToMessage?.messageId) {
+            messagePayload.replyToMessageId = replyingToMessage.messageId;
+          }
 
-        const messageId = sentMessage.messageId;
+          // Create message record in backend
+          const sentMessage = (await backendApi.whatsapp.sendMessage(
+            messagePayload
+          )) as { messageId?: string };
 
-        for (let i = 0; i < newPendingUploads.length; i++) {
-          const upload = newPendingUploads[i];
+          if (!sentMessage?.messageId) {
+            throw new Error(`Failed to get message ID for file ${i + 1}`);
+          }
 
-          setPendingMediaUploads((prev) =>
-            prev.map((u) =>
-              u.id === upload.id ? { ...u, status: "uploading" as const } : u
-            )
-          );
+          const messageId = sentMessage.messageId;
+          createdMessageIds.push(messageId);
 
+          // Create optimistic message for immediate UI display
+          const optimisticMessage = {
+            messageId: messageId,
+            text: isFirstMessage && caption.trim() ? caption : null,
+            sender: selectedChat.businessPhone || "",
+            direction: "outbound" as const,
+            timestamp: new Date().toISOString(),
+            type: stagedFile.type,
+            status: "pending" as const,
+            attachments: [
+              {
+                id: stagedFile.id,
+                type: stagedFile.type,
+                fileName: stagedFile.file.name,
+                mimeType: stagedFile.file.type || "application/octet-stream",
+                size: stagedFile.file.size,
+                s3Key: "",
+                status: "uploading" as const,
+                uploadedAt: new Date().toISOString(),
+                previewUrl: stagedFile.previewUrl,
+                progress: 0,
+              },
+            ],
+            replyToMessageId:
+              isFirstMessage && replyingToMessage?.messageId
+                ? replyingToMessage.messageId
+                : null,
+            replyPreview:
+              isFirstMessage && replyingToMessage
+                ? {
+                    messageId: replyingToMessage.messageId,
+                    senderType:
+                      replyingToMessage.direction === "inbound"
+                        ? ("customer" as const)
+                        : ("agent" as const),
+                    senderName:
+                      replyingToMessage.direction === "inbound"
+                        ? selectedChat.participantName || "Contact"
+                        : "You",
+                    type:
+                      (replyingToMessage.type as
+                        | "text"
+                        | "image"
+                        | "video"
+                        | "audio"
+                        | "document"
+                        | "contacts"
+                        | "sticker"
+                        | "gif") || "text",
+                    text: replyingToMessage.text || undefined,
+                  }
+                : null,
+          };
+
+          // Add optimistic message to the UI
+          setMessages((prev) => {
+            if (prev.some((m) => m.messageId === messageId)) {
+              return prev;
+            }
+            return [...prev, optimisticMessage];
+          });
+          setMessageCount((prev) => prev + 1);
+
+          // Helper to update this message's attachment status
+          const updateMessageStatus = (
+            status: "uploading" | "success" | "failed",
+            additionalData?: {
+              progress?: number;
+              s3Key?: string;
+              errorMessage?: string;
+            }
+          ) => {
+            setMessages((prev) =>
+              prev.map((msg) => {
+                if (msg.messageId !== messageId) return msg;
+                return {
+                  ...msg,
+                  status:
+                    status === "success"
+                      ? "sent"
+                      : status === "failed"
+                        ? "failed"
+                        : msg.status,
+                  attachments: msg.attachments?.map((att) => ({
+                    ...att,
+                    status,
+                    ...additionalData,
+                  })),
+                };
+              })
+            );
+          };
+
+          // Upload file to S3
           try {
             const result = await mediaApi.uploadFileToBackend(
-              upload.file,
+              stagedFile.file,
               selectedChat.senderId,
               selectedChatId,
               messageId,
               (progress) => {
-                setPendingMediaUploads((prev) =>
-                  prev.map((u) => (u.id === upload.id ? { ...u, progress } : u))
-                );
+                updateMessageStatus("uploading", { progress });
               },
-              upload.id
+              stagedFile.id
             );
 
+            // Get download URL and send via WhatsApp
             const downloadUrl = (await backendApi.whatsapp.getDownloadUrl(
               messageId,
               result.uploadId
@@ -371,98 +456,81 @@ export function useMediaHandlers(
             if (downloadUrl?.url) {
               await backendApi.whatsapp.sendMedia({
                 to: selectedChat.participantPhone,
-                mediaType: upload.type,
+                mediaType: stagedFile.type,
                 mediaUrl: downloadUrl.url,
-                caption: i === 0 ? caption : undefined,
+                caption: isFirstMessage ? caption : undefined,
                 senderId: selectedChat.senderId,
-                fileName: upload.file.name,
+                fileName: stagedFile.file.name,
                 originalMessageId: messageId,
+                attachmentId: stagedFile.id,
               });
             }
 
-            setPendingMediaUploads((prev) =>
-              prev.map((u) =>
-                u.id === upload.id
-                  ? { ...u, status: "completed" as const, progress: 100 }
-                  : u
-              )
-            );
+            // Mark as success
+            updateMessageStatus("success", {
+              progress: 100,
+              s3Key: result.s3Key,
+            });
           } catch (uploadError) {
-            console.error(`Failed to upload ${upload.file.name}:`, uploadError);
-            setPendingMediaUploads((prev) =>
-              prev.map((u) =>
-                u.id === upload.id
-                  ? { ...u, status: "error" as const, error: "Upload failed" }
-                  : u
-              )
+            console.error(
+              `Failed to upload ${stagedFile.file.name}:`,
+              uploadError
             );
+            updateMessageStatus("failed", { errorMessage: "Upload failed" });
           }
         }
 
-        // Refresh messages - but only if we're still on the same chat
-        if (currentMessagesChatIdRef.current !== selectedChatId) {
-          console.log(
-            "[MediaHandlers] Skipping message refresh - chat changed during upload"
+        // Refresh messages from backend after all uploads complete
+        if (currentMessagesChatIdRef.current === selectedChatId) {
+          const response = await backendApi.whatsapp.getChatMessages(
+            selectedChatId,
+            0,
+            PAGE_SIZE
           );
-          return;
-        }
 
-        const response = await backendApi.whatsapp.getChatMessages(
-          selectedChatId,
-          0,
-          PAGE_SIZE
-        );
-
-        // Double-check after async operation
-        if (currentMessagesChatIdRef.current !== selectedChatId) {
-          console.log(
-            "[MediaHandlers] Skipping message update - chat changed during fetch"
-          );
-          return;
-        }
-
-        if (response && response.messages) {
-          const sorted = [...response.messages].sort(
-            (a, b) =>
-              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-          );
-          const cachedData = messagesCacheRef.current.get(selectedChatId);
-          let combined = sorted;
-          if (cachedData && cachedData.cursor > PAGE_SIZE) {
-            const existingIds = new Set(sorted.map((m) => m.messageId));
-            const olderMessages = cachedData.messages.filter(
-              (m) => !existingIds.has(m.messageId)
-            );
-            combined = [...olderMessages, ...sorted].sort(
+          if (
+            currentMessagesChatIdRef.current === selectedChatId &&
+            response?.messages
+          ) {
+            const sorted = [...response.messages].sort(
               (a, b) =>
                 new Date(a.timestamp).getTime() -
                 new Date(b.timestamp).getTime()
             );
+            const cachedData = messagesCacheRef.current.get(selectedChatId);
+            let combined = sorted;
+            if (cachedData && cachedData.cursor > PAGE_SIZE) {
+              const existingIds = new Set(sorted.map((m) => m.messageId));
+              const olderMessages = cachedData.messages.filter(
+                (m) => !existingIds.has(m.messageId)
+              );
+              combined = [...olderMessages, ...sorted].sort(
+                (a, b) =>
+                  new Date(a.timestamp).getTime() -
+                  new Date(b.timestamp).getTime()
+              );
+            }
+            setMessages(combined);
+            setMessageCount(combined.length);
+            messagesCacheRef.current.set(selectedChatId, {
+              messages: combined,
+              hasMore: cachedData?.hasMore ?? response.hasMore,
+              cursor: cachedData?.cursor ?? response.nextCursor,
+            });
           }
-          setMessages(combined);
-          setMessageCount(combined.length);
-          messagesCacheRef.current.set(selectedChatId, {
-            messages: combined,
-            hasMore: cachedData?.hasMore ?? response.hasMore,
-            cursor: cachedData?.cursor ?? response.nextCursor,
-          });
         }
 
+        // Clean up preview blob URLs
         setTimeout(() => {
-          newPendingUploads.forEach((u) => {
-            if (u.previewUrl) {
-              URL.revokeObjectURL(u.previewUrl);
-            }
+          previewUrlsToCleanup.forEach((url) => {
+            URL.revokeObjectURL(url);
           });
-          setPendingMediaUploads([]);
-          setPendingCaption("");
-        }, 500);
+        }, 2000);
 
         setReplyingToMessage(null);
       } catch (err: any) {
         console.error("Error sending media:", err);
 
-        // Check if this is a conversation window violation error from the backend
         if (
           err?.response?.data?.error === "CONVERSATION_WINDOW_VIOLATION" ||
           err?.response?.data?.errorCode === "OUTSIDE_CONVERSATION_WINDOW" ||
@@ -476,9 +544,6 @@ export function useMediaHandlers(
         } else {
           setError("Failed to send media");
         }
-
-        setPendingMediaUploads([]);
-        setPendingCaption("");
       }
     },
     [
@@ -520,17 +585,6 @@ export function useMediaHandlers(
           type: audioBlob.type || "audio/webm",
         });
 
-        const pendingUpload: PendingMediaUpload = {
-          id: uploadId,
-          file: voiceFile,
-          previewUrl: undefined,
-          type: "audio",
-          progress: 0,
-          status: "queued" as const,
-        };
-
-        setPendingMediaUploads([pendingUpload]);
-        setPendingCaption("");
         setShouldAutoScroll(true);
         scrollHelperRequestScroll(true);
 
@@ -568,11 +622,96 @@ export function useMediaHandlers(
 
         const messageId = sentMessage.messageId;
 
-        setPendingMediaUploads((prev) =>
-          prev.map((u) =>
-            u.id === uploadId ? { ...u, status: "uploading" as const } : u
-          )
-        );
+        // Create optimistic message for immediate UI display
+        const optimisticMessage = {
+          messageId: messageId,
+          text: null,
+          sender: selectedChat.businessPhone || "",
+          direction: "outbound" as const,
+          timestamp: new Date().toISOString(),
+          type: "audio",
+          status: "pending" as const,
+          attachments: [
+            {
+              id: uploadId,
+              type: "audio" as const,
+              fileName: voiceFile.name,
+              mimeType: voiceFile.type || "audio/webm",
+              size: voiceFile.size,
+              s3Key: "",
+              status: "uploading" as const,
+              uploadedAt: new Date().toISOString(),
+              isVoiceNote: true,
+              waveformData: waveformData,
+              duration: duration,
+              progress: 0,
+            },
+          ],
+          replyToMessageId: replyingToMessage?.messageId || null,
+          replyPreview: replyingToMessage
+            ? {
+                messageId: replyingToMessage.messageId,
+                senderType:
+                  replyingToMessage.direction === "inbound"
+                    ? ("customer" as const)
+                    : ("agent" as const),
+                senderName:
+                  replyingToMessage.direction === "inbound"
+                    ? selectedChat.participantName || "Contact"
+                    : "You",
+                type:
+                  (replyingToMessage.type as
+                    | "text"
+                    | "image"
+                    | "video"
+                    | "audio"
+                    | "document"
+                    | "contacts"
+                    | "sticker"
+                    | "gif") || "text",
+                text: replyingToMessage.text || undefined,
+              }
+            : null,
+        };
+
+        // Add optimistic message to the UI
+        setMessages((prev) => {
+          if (prev.some((m) => m.messageId === messageId)) {
+            return prev;
+          }
+          return [...prev, optimisticMessage];
+        });
+        setMessageCount((prev) => prev + 1);
+
+        // Helper to update message status
+        const updateMessageStatus = (
+          status: "uploading" | "success" | "failed",
+          additionalData?: {
+            progress?: number;
+            s3Key?: string;
+            errorMessage?: string;
+          }
+        ) => {
+          setMessages((prev) =>
+            prev.map((msg) => {
+              if (msg.messageId !== messageId) return msg;
+              return {
+                ...msg,
+                status:
+                  status === "success"
+                    ? "sent"
+                    : status === "failed"
+                      ? "failed"
+                      : msg.status,
+                attachments: msg.attachments?.map((att) => ({
+                  ...att,
+                  status,
+                  ...additionalData,
+                })),
+              };
+            })
+          );
+        };
 
         try {
           const result = await mediaApi.uploadFileToBackend(
@@ -581,9 +720,7 @@ export function useMediaHandlers(
             selectedChatId,
             messageId,
             (progress) => {
-              setPendingMediaUploads((prev) =>
-                prev.map((u) => (u.id === uploadId ? { ...u, progress } : u))
-              );
+              updateMessageStatus("uploading", { progress });
             },
             uploadId
           );
@@ -600,73 +737,51 @@ export function useMediaHandlers(
               mediaUrl: downloadUrl.url,
               senderId: selectedChat.senderId,
               originalMessageId: messageId,
+              attachmentId: uploadId,
             });
           }
 
-          setPendingMediaUploads((prev) =>
-            prev.map((u) =>
-              u.id === uploadId
-                ? { ...u, status: "completed" as const, progress: 100 }
-                : u
-            )
-          );
+          updateMessageStatus("success", {
+            progress: 100,
+            s3Key: result.s3Key,
+          });
         } catch (uploadError) {
           console.error("Failed to upload voice note:", uploadError);
-          setPendingMediaUploads((prev) =>
-            prev.map((u) =>
-              u.id === uploadId
-                ? { ...u, status: "error" as const, error: "Upload failed" }
-                : u
-            )
-          );
+          updateMessageStatus("failed", { errorMessage: "Upload failed" });
         }
 
         setReplyingToMessage(null);
 
-        // Refresh messages - but only if we're still on the same chat
-        if (currentMessagesChatIdRef.current !== selectedChatId) {
-          console.log(
-            "[MediaHandlers] Skipping voice note message refresh - chat changed"
+        // Refresh messages from backend
+        if (currentMessagesChatIdRef.current === selectedChatId) {
+          const response = await backendApi.whatsapp.getChatMessages(
+            selectedChatId,
+            0,
+            PAGE_SIZE
           );
-          return;
+
+          if (
+            currentMessagesChatIdRef.current === selectedChatId &&
+            response?.messages
+          ) {
+            const sorted = [...response.messages].sort(
+              (a, b) =>
+                new Date(a.timestamp).getTime() -
+                new Date(b.timestamp).getTime()
+            );
+            setMessages(sorted);
+            setMessageCount(sorted.length);
+            messagesCacheRef.current.set(selectedChatId, {
+              messages: sorted,
+              hasMore: response.hasMore,
+              cursor: response.nextCursor,
+            });
+            scrollHelperRequestScroll(true);
+          }
         }
-
-        const response = await backendApi.whatsapp.getChatMessages(
-          selectedChatId,
-          0,
-          PAGE_SIZE
-        );
-
-        // Double-check after async operation
-        if (currentMessagesChatIdRef.current !== selectedChatId) {
-          console.log(
-            "[MediaHandlers] Skipping voice note message update - chat changed"
-          );
-          return;
-        }
-
-        if (response && response.messages) {
-          const sorted = [...response.messages].sort(
-            (a, b) =>
-              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-          );
-          setMessages(sorted);
-          setMessageCount(sorted.length);
-          messagesCacheRef.current.set(selectedChatId, {
-            messages: sorted,
-            hasMore: response.hasMore,
-            cursor: response.nextCursor,
-          });
-          scrollHelperRequestScroll(true);
-        }
-
-        setTimeout(() => {
-          setPendingMediaUploads([]);
-        }, 2000);
       } catch (err: any) {
         console.error("Error sending voice note:", err);
 
-        // Check if this is a conversation window violation error from the backend
         if (
           err?.response?.data?.error === "CONVERSATION_WINDOW_VIOLATION" ||
           err?.response?.data?.errorCode === "OUTSIDE_CONVERSATION_WINDOW" ||
@@ -680,8 +795,6 @@ export function useMediaHandlers(
         } else {
           setError("Failed to send voice note");
         }
-
-        setPendingMediaUploads([]);
       }
     },
     [
@@ -887,22 +1000,41 @@ export function useMediaHandlers(
           type: "image/jpeg",
         });
 
-        // Add pending upload for UI feedback
-        const pendingUpload: PendingMediaUpload = {
-          id: tempId,
-          file,
-          type: "image",
-          previewUrl,
-          status: "uploading",
-          progress: 0,
-        };
-        setPendingMediaUploads((prev) => [...prev, pendingUpload]);
-
         // Auto-scroll when sending
         setShouldAutoScroll(true);
         const cancelScroll = scrollHelperRequestScroll(true);
 
-        // First, create a message record to get an ID (matching existing pattern)
+        // Create optimistic message for immediate UI feedback
+        const optimisticAttachment: Attachment = {
+          id: tempId,
+          type: "image",
+          fileName: file.name,
+          mimeType: file.type || "image/jpeg",
+          size: file.size,
+          s3Key: "",
+          status: "pending",
+          progress: 0,
+          uploadedAt: new Date().toISOString(),
+          previewUrl: previewUrl,
+        };
+
+        const optimisticMessage: Message = {
+          messageId: tempId,
+          direction: "outbound",
+          status: "pending",
+          timestamp: new Date().toISOString(),
+          text: caption?.trim() || undefined,
+          type: "image",
+          sender: "agent",
+          attachments: [optimisticAttachment],
+          replyToMessageId: replyingToMessage?.messageId,
+        };
+
+        // Add optimistic message to UI
+        setMessages((prev) => [...prev, optimisticMessage]);
+        setMessageCount((prev) => prev + 1);
+
+        // Create message record on backend
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const messagePayload: any = {
           to: selectedChat.participantPhone,
@@ -921,7 +1053,7 @@ export function useMediaHandlers(
           ],
         };
 
-        if (caption.trim()) {
+        if (caption?.trim()) {
           messagePayload.body = caption;
         }
 
@@ -939,15 +1071,29 @@ export function useMediaHandlers(
 
         const messageId = sentMessage.messageId;
 
-        // Upload the file
+        // Update optimistic message with real ID
+        setMessages((prev) =>
+          prev.map((m) => (m.messageId === tempId ? { ...m, messageId } : m))
+        );
+
+        // Upload the file with progress tracking
         const result = await mediaApi.uploadFileToBackend(
           file,
           selectedChat.senderId,
           selectedChatId,
           messageId,
           (progress) => {
-            setPendingMediaUploads((prev) =>
-              prev.map((u) => (u.id === tempId ? { ...u, progress } : u))
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.messageId === messageId
+                  ? {
+                      ...m,
+                      attachments: m.attachments?.map((a) =>
+                        a.id === tempId ? { ...a, uploadProgress: progress } : a
+                      ),
+                    }
+                  : m
+              )
             );
           },
           tempId
@@ -971,68 +1117,32 @@ export function useMediaHandlers(
           });
         }
 
-        // Update pending upload status
-        setPendingMediaUploads((prev) =>
-          prev.map((upload) =>
-            upload.id === tempId
-              ? { ...upload, status: "completed" as const, progress: 100 }
-              : upload
+        // Update optimistic message to show completion
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.messageId === messageId
+              ? {
+                  ...m,
+                  status: "sent",
+                  attachments: m.attachments?.map((a) =>
+                    a.id === tempId
+                      ? {
+                          ...a,
+                          status: "success",
+                          progress: 100,
+                          s3Key: result.uploadId,
+                        }
+                      : a
+                  ),
+                }
+              : m
           )
         );
 
-        // Refresh messages to get the newly sent message from the server
-        // This ensures the message persists in the UI after the pending upload is cleared
-        if (currentMessagesChatIdRef.current === selectedChatId) {
-          try {
-            const response = await backendApi.whatsapp.getChatMessages(
-              selectedChatId,
-              0,
-              PAGE_SIZE
-            );
-
-            if (
-              response &&
-              response.messages &&
-              currentMessagesChatIdRef.current === selectedChatId
-            ) {
-              const sorted = [...response.messages].sort(
-                (a, b) =>
-                  new Date(a.timestamp).getTime() -
-                  new Date(b.timestamp).getTime()
-              );
-              const cachedData = messagesCacheRef.current.get(selectedChatId);
-              let combined = sorted;
-              if (cachedData && cachedData.cursor > PAGE_SIZE) {
-                const existingIds = new Set(sorted.map((m) => m.messageId));
-                const olderMessages = cachedData.messages.filter(
-                  (m) => !existingIds.has(m.messageId)
-                );
-                combined = [...olderMessages, ...sorted].sort(
-                  (a, b) =>
-                    new Date(a.timestamp).getTime() -
-                    new Date(b.timestamp).getTime()
-                );
-              }
-              setMessages(combined);
-              setMessageCount(combined.length);
-              messagesCacheRef.current.set(selectedChatId, {
-                messages: combined,
-                hasMore: cachedData?.hasMore ?? response.hasMore,
-                cursor: cachedData?.cursor ?? response.nextCursor,
-              });
-            }
-          } catch (refreshErr) {
-            console.error("Failed to refresh messages after send:", refreshErr);
-          }
-        }
-
-        // Remove pending upload after a short delay
+        // Cleanup local preview URL after a delay
         setTimeout(() => {
-          setPendingMediaUploads((prev) =>
-            prev.filter((upload) => upload.id !== tempId)
-          );
           URL.revokeObjectURL(previewUrl);
-        }, 2000);
+        }, 5000);
 
         // Clear reply state
         if (replyingToMessage) {
@@ -1049,12 +1159,20 @@ export function useMediaHandlers(
         console.error("Failed to send camera image:", err);
         setError("Failed to send image. Please try again.");
 
-        // Update pending upload to show error
-        setPendingMediaUploads((prev) =>
-          prev.map((upload) =>
-            upload.id.startsWith("temp-")
-              ? { ...upload, status: "error" as const, error: "Upload failed" }
-              : upload
+        // Update optimistic message to show error
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.messageId.startsWith("temp-")
+              ? {
+                  ...m,
+                  status: "failed",
+                  attachments: m.attachments?.map((a) => ({
+                    ...a,
+                    status: "failed",
+                    errorMessage: "Upload failed",
+                  })),
+                }
+              : m
           )
         );
       }
@@ -1069,8 +1187,6 @@ export function useMediaHandlers(
       scrollHelperRequestScroll,
       replyingToMessage,
       setReplyingToMessage,
-      currentMessagesChatIdRef,
-      messagesCacheRef,
     ]
   );
 
@@ -1179,8 +1295,6 @@ export function useMediaHandlers(
     stagedFiles,
     setStagedFiles,
     currentAttachmentType,
-    pendingMediaUploads,
-    pendingCaption,
     previewModalOpen,
     setPreviewModalOpen,
     previewMediaItems,

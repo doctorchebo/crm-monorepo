@@ -646,6 +646,7 @@ export const backendApi = {
       senderId?: number;
       fileName?: string;
       originalMessageId?: string;
+      attachmentId?: string; // ID of the specific attachment being sent (for multi-media messages)
     }) => apiClient.post("/whatsapp/send-media", data),
     sendContacts: (data: {
       to: string;

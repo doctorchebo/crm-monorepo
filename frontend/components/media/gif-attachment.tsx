@@ -330,6 +330,8 @@ export const GifAttachment = memo(function GifAttachment({
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [hasError, setHasError] = useState(false);
+  // Track if video element has loaded (first frame ready)
+  const [videoLoaded, setVideoLoaded] = useState(false);
   // Track video dimensions once loaded (fallback if API doesn't have them)
   const [videoDimensions, setVideoDimensions] = useState<{
     width: number;
@@ -365,7 +367,7 @@ export const GifAttachment = memo(function GifAttachment({
     onAutoPlayStarted,
   });
 
-  // Enhanced video loaded handler that also captures dimensions
+  // Enhanced video loaded handler that also captures dimensions and sets loaded state
   const handleVideoLoaded = useCallback(() => {
     const video = videoRef.current;
     if (video && video.videoWidth && video.videoHeight) {
@@ -375,8 +377,14 @@ export const GifAttachment = memo(function GifAttachment({
         height: video.videoHeight,
       });
     }
+    setVideoLoaded(true);
     originalHandleVideoLoaded();
   }, [originalHandleVideoLoaded]);
+
+  // Reset videoLoaded when mediaUrl changes (new video to load)
+  useEffect(() => {
+    setVideoLoaded(false);
+  }, [mediaUrl]);
 
   // Combined error handler
   const onVideoError = useCallback(() => {
@@ -437,6 +445,14 @@ export const GifAttachment = memo(function GifAttachment({
     effectiveDimensions?.width && effectiveDimensions?.height
   );
 
+  // Track if media is still loading for scroll hook coordination
+  // Media is "loading" if:
+  // 1. URL is being fetched (loading from useMediaUrl)
+  // 2. Playback is in loading state (buffering)
+  // 3. We have a URL but video hasn't loaded yet
+  const isMediaLoading =
+    loading || state === "loading" || (mediaUrl && !videoLoaded);
+
   return (
     <div
       ref={containerRef}
@@ -460,6 +476,7 @@ export const GifAttachment = memo(function GifAttachment({
         }
       }}
       data-media-container="gif"
+      data-media-loading={isMediaLoading ? "true" : "false"}
     >
       {/* Video element */}
       {mediaUrl && (

@@ -1862,3 +1862,6 @@ export const workflowStageAiSettingsRelations = relations(
 
 // Export knowledge base schema
 export * from './knowledge-base.schema';
+
+// Export AI context schema (lightweight replacement for AI memory)
+export * from './ai-context.schema';
