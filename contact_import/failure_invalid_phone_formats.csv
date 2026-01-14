@@ -1,0 +1,4 @@
+First Name,Last Name,Country Code,Phone,Email
+Short,Number,+1,123,short@email.com
+TooLong,Number,+1,12345678901234567890,long@email.com
+ValidPhone,Test,+1,4155551234,valid@email.com

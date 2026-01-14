@@ -27,6 +27,7 @@ dotenv.config({ path: path.resolve(__dirname, "../.env") });
 import * as cdk from "aws-cdk-lib";
 import "source-map-support/register";
 import { MediaCompressionStack } from "../lib/media-compression-stack";
+import { ContactsImportStack } from "../lib/contacts-import-stack";
 
 // Initialize CDK app
 const app = new cdk.App();
@@ -65,11 +66,15 @@ const ffmpegLayerArn =
 const chromiumLayerArn =
   process.env.CHROMIUM_LAYER_ARN || app.node.tryGetContext("chromiumLayerArn");
 
+// Database URL for contacts import Lambda functions
+const databaseUrl =
+  process.env.DATABASE_URL || app.node.tryGetContext("databaseUrl") || "";
+
 // Validate required configuration
 if (!inputBucketArn) {
   console.warn(
     "⚠️  Warning: INPUT_BUCKET_ARN not set. Set it via environment variable or CDK context.\n" +
-      "   Example: cdk deploy -c inputBucketArn=arn:aws:s3:::my-media-bucket"
+    "   Example: cdk deploy -c inputBucketArn=arn:aws:s3:::my-media-bucket"
   );
 }
 
@@ -125,7 +130,40 @@ new MediaCompressionStack(app, "MediaCompressionStack", {
   resourcePrefix: "media-compression",
 });
 
+// ============================================================================
+// Contacts Import Stack
+// ============================================================================
+new ContactsImportStack(app, "ContactsImportStack", {
+  env,
+  description: "WhatsApp CRM - Contacts Import Infrastructure (S3 + SQS + Lambda)",
+
+  // Database URL for Lambda functions
+  databaseUrl: databaseUrl,
+
+  // Lambda configuration
+  lambda: {
+    memoryMb: 1024,
+    timeoutSeconds: 300, // 5 minutes
+  },
+
+  // Queue configuration
+  queue: {
+    maxReceiveCount: 3,
+    dlqRetentionDays: 14,
+  },
+
+  // Logging
+  logRetentionDays: 14,
+
+  // File retention
+  fileRetentionDays: 7, // Auto-delete uploaded files after 7 days
+
+  // Resource naming
+  resourcePrefix: "contacts-import",
+});
+
 // Add tags to all resources
 cdk.Tags.of(app).add("Project", "WhatsApp-CRM");
 cdk.Tags.of(app).add("Component", "MediaCompression");
 cdk.Tags.of(app).add("ManagedBy", "CDK");
+

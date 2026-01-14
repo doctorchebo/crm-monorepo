@@ -90,7 +90,31 @@ export interface CreateContactDto {
   phoneNumber: string;
 }
 
-export interface UpdateContactDto extends Partial<CreateContactDto> {}
+export interface UpdateContactDto extends Partial<CreateContactDto> { }
+
+/**
+ * Contact entity returned from the API
+ */
+export interface Contact {
+  id: number;
+  contactId: string;
+  firstName: string;
+  lastName?: string | null;
+  email?: string | null;
+  language?: string | null;
+  countryCode: string;
+  phoneNumber: string;
+  twilioContactId?: string | null;
+  lastMessageTime?: string | null;
+  lastMessagePreview?: string | null;
+  lastMessageType?: string | null;
+  avatar?: string | null;
+  isActive: boolean;
+  source?: string | null;
+  importJobId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export interface ContactAttribute {
   id: string;
@@ -684,8 +708,7 @@ export const backendApi = {
       nextCursor: number;
     }> =>
       apiClient.get(
-        `/whatsapp/chats/${chatId}/messages?skip=${skip || 0}&take=${
-          take || 50
+        `/whatsapp/chats/${chatId}/messages?skip=${skip || 0}&take=${take || 50
         }`
       ),
     /**
@@ -725,9 +748,9 @@ export const backendApi = {
       timeRemainingMs: number;
       hasInboundMessage: boolean;
       blockReason?:
-        | "no_inbound_messages"
-        | "window_expired"
-        | "window_expiring_soon";
+      | "no_inbound_messages"
+      | "window_expired"
+      | "window_expiring_soon";
     }> => apiClient.get(`/whatsapp/chats/${chatId}/window-status`),
     validateSend: (
       chatId: string,
@@ -745,32 +768,58 @@ export const backendApi = {
         timeRemainingMs: number;
         hasInboundMessage: boolean;
         blockReason?:
-          | "no_inbound_messages"
-          | "window_expired"
-          | "window_expiring_soon";
+        | "no_inbound_messages"
+        | "window_expired"
+        | "window_expiring_soon";
       };
       errorMessage?: string;
       errorCode?:
-        | "OUTSIDE_CONVERSATION_WINDOW"
-        | "NO_CUSTOMER_MESSAGES"
-        | "TEMPLATE_NOT_APPROVED"
-        | "INVALID_MESSAGE_TYPE";
+      | "OUTSIDE_CONVERSATION_WINDOW"
+      | "NO_CUSTOMER_MESSAGES"
+      | "TEMPLATE_NOT_APPROVED"
+      | "INVALID_MESSAGE_TYPE";
     }> => apiClient.post(`/whatsapp/chats/${chatId}/validate-send`, data),
   },
 
   // Contacts endpoints
   contacts: {
-    list: (skip?: number, take?: number, phoneNumberId?: number) =>
-      apiClient.get(
-        `/contacts?skip=${skip || 0}&take=${take || 50}${
-          phoneNumberId ? `&phoneNumberId=${phoneNumberId}` : ""
-        }`
-      ),
+    /**
+     * List contacts with pagination and search
+     * @param options - Pagination and search options
+     */
+    list: (options?: {
+      page?: number;
+      limit?: number;
+      search?: string;
+    }): Promise<{
+      data: Contact[];
+      pagination: {
+        page: number;
+        limit: number;
+        totalItems: number;
+        totalPages: number;
+      };
+    }> => {
+      const params = new URLSearchParams();
+      if (options?.page) params.append("page", options.page.toString());
+      if (options?.limit) params.append("limit", options.limit.toString());
+      if (options?.search) params.append("search", options.search);
+      const queryString = params.toString();
+      return apiClient.get(`/contacts${queryString ? `?${queryString}` : ""}`);
+    },
     get: (contactId: string) => apiClient.get(`/contacts/${contactId}`),
     create: (data: any) => apiClient.post("/contacts", data),
     update: (contactId: string, data: any) =>
       apiClient.patch(`/contacts/${contactId}`, data),
     delete: (contactId: string) => apiClient.delete(`/contacts/${contactId}`),
+    /**
+     * Bulk delete multiple contacts
+     * @param contactIds - Array of contact IDs to delete
+     */
+    bulkDelete: (
+      contactIds: string[]
+    ): Promise<{ success: boolean; deletedCount: number }> =>
+      apiClient.post("/contacts/bulk-delete", { contactIds }),
     getByPhone: (phoneNumber: string) =>
       apiClient.get(`/contacts/phone/${phoneNumber}`),
     // Profile endpoints (chatId is optional for chat-specific attributes)
@@ -779,8 +828,7 @@ export const backendApi = {
       chatId?: string
     ): Promise<CustomerProfile> =>
       apiClient.get(
-        `/contacts/${contactId}/profile${
-          chatId ? `?chatId=${encodeURIComponent(chatId)}` : ""
+        `/contacts/${contactId}/profile${chatId ? `?chatId=${encodeURIComponent(chatId)}` : ""
         }`
       ),
     // Attributes endpoints (chatId is optional for chat-specific attributes)
@@ -789,8 +837,7 @@ export const backendApi = {
       chatId?: string
     ): Promise<ContactAttribute[]> =>
       apiClient.get(
-        `/contacts/${contactId}/attributes${
-          chatId ? `?chatId=${encodeURIComponent(chatId)}` : ""
+        `/contacts/${contactId}/attributes${chatId ? `?chatId=${encodeURIComponent(chatId)}` : ""
         }`
       ),
     getAttribute: (
@@ -799,8 +846,7 @@ export const backendApi = {
       chatId?: string
     ): Promise<ContactAttribute> =>
       apiClient.get(
-        `/contacts/${contactId}/attributes/${key}${
-          chatId ? `?chatId=${encodeURIComponent(chatId)}` : ""
+        `/contacts/${contactId}/attributes/${key}${chatId ? `?chatId=${encodeURIComponent(chatId)}` : ""
         }`
       ),
     upsertAttribute: (
@@ -816,8 +862,7 @@ export const backendApi = {
       apiClient.patch(`/contacts/${contactId}/attributes/${key}`, data),
     deleteAttribute: (contactId: string, key: string, chatId?: string) =>
       apiClient.delete(
-        `/contacts/${contactId}/attributes/${key}${
-          chatId ? `?chatId=${encodeURIComponent(chatId)}` : ""
+        `/contacts/${contactId}/attributes/${key}${chatId ? `?chatId=${encodeURIComponent(chatId)}` : ""
         }`
       ),
     bulkUpsertAttributes: (
@@ -827,6 +872,105 @@ export const backendApi = {
         chatId?: string;
       }
     ) => apiClient.post(`/contacts/${contactId}/attributes/bulk`, data),
+  },
+
+  // Import Jobs endpoints - Bulk contacts import
+  importJobs: {
+    /**
+     * Create a new import job and get presigned URL for upload
+     */
+    create: (originalFilename: string): Promise<{
+      jobId: string;
+      uploadUrl: string;
+      s3Key: string;
+    }> => apiClient.post("/import-jobs", { originalFilename }),
+
+    /**
+     * Notify that file upload is complete
+     */
+    notifyUploadComplete: (jobId: string) =>
+      apiClient.post(`/import-jobs/${jobId}/upload-complete`, {}),
+
+    /**
+     * List all import jobs for current user
+     */
+    list: () => apiClient.get("/import-jobs"),
+
+    /**
+     * Get a single import job
+     */
+    get: (jobId: string) => apiClient.get(`/import-jobs/${jobId}`),
+
+    /**
+     * Save field mapping configuration
+     */
+    saveMapping: (
+      jobId: string,
+      data: {
+        mapping: Record<string, string | null>;
+        fullNameColumn?: string;
+        defaultCountryCode?: string;
+      }
+    ) => apiClient.post(`/import-jobs/${jobId}/mapping`, data),
+
+    /**
+     * Trigger validation
+     */
+    triggerValidation: (jobId: string, batchSize?: number) =>
+      apiClient.post(`/import-jobs/${jobId}/validate`, { batchSize }),
+
+    /**
+     * Get staging rows preview
+     */
+    getPreview: (
+      jobId: string,
+      options?: { skip?: number; take?: number; status?: string }
+    ): Promise<{
+      rows: Array<{
+        id: string;
+        rowNumber: number | null;
+        rawData: Record<string, unknown>;
+        mappedData: Record<string, unknown> | null;
+        validationErrors: Array<{ field: string; message: string }>;
+        status: string;
+      }>;
+      total: number;
+      validCount: number;
+      invalidCount: number;
+      duplicateCount: number;
+    }> => {
+      const params = new URLSearchParams();
+      if (options?.skip !== undefined) params.append("skip", String(options.skip));
+      if (options?.take !== undefined) params.append("take", String(options.take));
+      if (options?.status) params.append("status", options.status);
+      const query = params.toString();
+      return apiClient.get(`/import-jobs/${jobId}/preview${query ? `?${query}` : ""}`);
+    },
+
+    /**
+     * Commit the import
+     */
+    commit: (jobId: string, batchSize?: number) =>
+      apiClient.post(`/import-jobs/${jobId}/commit`, { batchSize }),
+
+    /**
+     * Rollback an import
+     */
+    rollback: (jobId: string): Promise<{ count: number }> =>
+      apiClient.delete(`/import-jobs/${jobId}/rollback`),
+
+    /**
+     * Delete an import job
+     */
+    delete: (jobId: string) => apiClient.delete(`/import-jobs/${jobId}`),
+
+    // Mapping profiles
+    profiles: {
+      list: () => apiClient.get("/import-jobs/profiles"),
+      create: (data: { providerName: string; mapping: Record<string, string | null> }) =>
+        apiClient.post("/import-jobs/profiles", data),
+      delete: (profileId: string) => apiClient.delete(`/import-jobs/profiles/${profileId}`),
+    },
   },
 
   // Senders endpoints - Phone number management for the WABA
@@ -916,8 +1060,7 @@ export const backendApi = {
       apiClient.post(`/templates/${templateId}/validate`, data),
     submit: (templateId: string, data: any, provider?: string) =>
       apiClient.post(
-        `/templates/${templateId}/submit${
-          provider ? `?provider=${provider}` : ""
+        `/templates/${templateId}/submit${provider ? `?provider=${provider}` : ""
         }`,
         data
       ),
@@ -1249,8 +1392,7 @@ export const backendApi = {
       total: number;
     }> =>
       apiClient.get(
-        `/pins/${chatId}/context/${messageId}${
-          windowSize ? `?windowSize=${windowSize}` : ""
+        `/pins/${chatId}/context/${messageId}${windowSize ? `?windowSize=${windowSize}` : ""
         }`
       ),
   },

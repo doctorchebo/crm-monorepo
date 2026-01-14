@@ -1,0 +1,6 @@
+First Name,Last Name,Country Code,Phone,Email
+Valid1,User,+1,4155550001,valid1@email.com
+,MissingFirst,+1,4155550002,missing@email.com
+Valid2,User,+1,4155550003,valid2@email.com
+BadEmail,User,+1,4155550004,bademail
+Valid3,User,+1,4155550005,valid3@email.com

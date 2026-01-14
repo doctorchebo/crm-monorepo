@@ -218,11 +218,15 @@ export const contacts = pgTable(
     lastMessageType: varchar('last_message_type'), // 'text', 'image', etc
     avatar: text('avatar'), // Avatar URL from Twilio or custom
     isActive: boolean('is_active').default(true),
+    // Import tracking fields for reversibility
+    source: varchar('source', { length: 50 }).default('MANUAL'), // 'MANUAL', 'IMPORT', 'API'
+    importJobId: uuid('import_job_id'), // References import_jobs.id for rollback support
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
   },
   (table) => ({
     contactIdUnique: unique().on(table.contactId),
+    importJobIdIndex: index('idx_contacts_import_job_id').on(table.importJobId),
     // Note: phoneNumber unique constraint is applied as a conditional index in migrations
     // to allow soft-deleted contacts to be recreated
   }),
@@ -1930,6 +1934,178 @@ export const stagedMediaRelations = relations(stagedMedia, ({ one }) => ({
     references: [users.id],
   }),
 }));
+
+// ==================== Contacts Import Tables ====================
+
+/**
+ * Import Job Status Enum Values
+ * Tracks the lifecycle of a contact import job:
+ * - UPLOADED: File uploaded to S3, awaiting parsing
+ * - MAPPED: User has mapped columns to internal fields
+ * - VALIDATED: Rows have been validated, awaiting user review
+ * - QUEUED: User approved import, job is queued for processing
+ * - PROCESSING: Lambda is importing contacts
+ * - IMPORTED: Import completed successfully
+ * - FAILED: Import failed (see error details)
+ */
+export const importJobStatuses = [
+  'UPLOADED',
+  'MAPPED',
+  'VALIDATED',
+  'QUEUED',
+  'PROCESSING',
+  'IMPORTED',
+  'FAILED',
+] as const;
+export type ImportJobStatus = (typeof importJobStatuses)[number];
+
+/**
+ * Import Staging Row Status Enum Values
+ * - PENDING: Row awaiting validation
+ * - VALID: Row passed validation, ready to import
+ * - INVALID: Row has validation errors
+ * - DUPLICATE: Row duplicates an existing contact
+ */
+export const importStagingStatuses = [
+  'PENDING',
+  'VALID',
+  'INVALID',
+  'DUPLICATE',
+] as const;
+export type ImportStagingStatus = (typeof importStagingStatuses)[number];
+
+/**
+ * Import Jobs table - tracks the lifecycle of contact import operations
+ *
+ * Each import creates one job that moves through statuses:
+ * UPLOADED → MAPPED → VALIDATED → QUEUED → PROCESSING → IMPORTED/FAILED
+ */
+export const importJobs = pgTable(
+  'import_jobs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    status: varchar('status', { length: 20 }).notNull().default('UPLOADED'),
+    originalFilename: text('original_filename'),
+    s3Key: text('s3_key'), // S3 key where uploaded file is stored
+    totalRows: integer('total_rows').default(0),
+    validRows: integer('valid_rows').default(0),
+    invalidRows: integer('invalid_rows').default(0),
+    duplicateRows: integer('duplicate_rows').default(0),
+    // Field mapping configuration (column index → internal field)
+    fieldMapping: jsonb('field_mapping'),
+    // Error details if status is FAILED
+    errorMessage: text('error_message'),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (table) => ({
+    userIdIndex: index('idx_import_jobs_user_id').on(table.userId),
+    statusIndex: index('idx_import_jobs_status').on(table.status),
+    createdAtIndex: index('idx_import_jobs_created_at').on(table.createdAt),
+  }),
+);
+
+export type ImportJob = typeof importJobs.$inferSelect;
+export type NewImportJob = typeof importJobs.$inferInsert;
+
+/**
+ * Import Contacts Staging table - temporary storage for imported rows
+ *
+ * CRITICAL: All imported contacts flow through this staging table.
+ * No direct inserts into the contacts table from imports.
+ *
+ * Workflow:
+ * 1. File Parser Lambda inserts raw rows here
+ * 2. Validator Lambda validates and sets status
+ * 3. User reviews in UI
+ * 4. Import Executor Lambda moves VALID rows to contacts
+ */
+export const importContactsStaging = pgTable(
+  'import_contacts_staging',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    importJobId: uuid('import_job_id')
+      .notNull()
+      .references(() => importJobs.id, { onDelete: 'cascade' }),
+    // Raw row data from CSV/XLSX (preserves original column names)
+    rawData: jsonb('raw_data').notNull(),
+    // Mapped data with internal field names (after user mapping)
+    mappedData: jsonb('mapped_data'),
+    // Validation errors array: [{ field: string, message: string }]
+    validationErrors: jsonb('validation_errors').default([]),
+    // Row status after validation
+    status: varchar('status', { length: 20 }).notNull().default('PENDING'),
+    // Row number from original file (for error reporting)
+    rowNumber: integer('row_number'),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (table) => ({
+    importJobIdIndex: index('idx_import_staging_job_id').on(table.importJobId),
+    statusIndex: index('idx_import_staging_status').on(table.status),
+  }),
+);
+
+export type ImportContactStaging = typeof importContactsStaging.$inferSelect;
+export type NewImportContactStaging = typeof importContactsStaging.$inferInsert;
+
+/**
+ * Import Mapping Profiles table - reusable column mapping configurations
+ *
+ * Users can save their column mappings for future imports from the same
+ * source (e.g., "Google Contacts Export", "Mailchimp Subscribers").
+ */
+export const importMappingProfiles = pgTable(
+  'import_mapping_profiles',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // User-friendly name (e.g., "Google Contacts", "Mailchimp")
+    providerName: text('provider_name').notNull(),
+    // Column mapping: { sourceColumn: internalField, ... }
+    mapping: jsonb('mapping').notNull(),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (table) => ({
+    userIdIndex: index('idx_import_profiles_user_id').on(table.userId),
+  }),
+);
+
+export type ImportMappingProfile = typeof importMappingProfiles.$inferSelect;
+export type NewImportMappingProfile = typeof importMappingProfiles.$inferInsert;
+
+// Import Jobs relations
+export const importJobsRelations = relations(importJobs, ({ one, many }) => ({
+  user: one(users, {
+    fields: [importJobs.userId],
+    references: [users.id],
+  }),
+  stagingRows: many(importContactsStaging),
+}));
+
+export const importContactsStagingRelations = relations(
+  importContactsStaging,
+  ({ one }) => ({
+    importJob: one(importJobs, {
+      fields: [importContactsStaging.importJobId],
+      references: [importJobs.id],
+    }),
+  }),
+);
+
+export const importMappingProfilesRelations = relations(
+  importMappingProfiles,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [importMappingProfiles.userId],
+      references: [users.id],
+    }),
+  }),
+);
 
 // Export knowledge base schema
 export * from './knowledge-base.schema';

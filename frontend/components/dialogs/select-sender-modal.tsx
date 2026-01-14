@@ -31,7 +31,7 @@ interface Sender {
 
 interface Contact {
   firstName: string;
-  lastName?: string;
+  lastName?: string | null;
   phoneNumber: string;
 }
 

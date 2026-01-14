@@ -1,9 +1,22 @@
 import { db } from '@database/db.connection';
 import { Contact, contacts, senders } from '@database/schema';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, count, desc, eq, ilike, or, sql, inArray } from 'drizzle-orm';
 import { CreateContactDto } from './dto/create-contact.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
+
+/**
+ * Paginated response interface for contacts list
+ */
+export interface PaginatedContactsResponse {
+  data: Contact[];
+  pagination: {
+    page: number;
+    limit: number;
+    totalItems: number;
+    totalPages: number;
+  };
+}
 
 /**
  * Contacts Service
@@ -94,35 +107,82 @@ export class ContactsService {
   }
 
   /**
-   * Get all contacts
+   * Get all contacts with pagination and optional search
    * Contacts are global - any sender can message any contact
+   * 
+   * @param userId - User ID to verify sender access
+   * @param page - Page number (1-indexed)
+   * @param limit - Items per page
+   * @param search - Optional search query for first name, last name, or phone number
    */
   async findAll(
     userId: number,
-    skip: number = 0,
-    take: number = 50,
-  ): Promise<Contact[]> {
+    page: number = 1,
+    limit: number = 20,
+    search?: string,
+  ): Promise<PaginatedContactsResponse> {
     try {
       // Verify user has at least one active sender
       const userSender = await db.query.senders.findFirst({
         where: and(eq(senders.userId, userId), eq(senders.isActive, true)),
       });
 
-      // If user has no senders, return empty array (they need a WhatsApp number first)
+      // If user has no senders, return empty result
       if (!userSender) {
         this.logger.log(`User ${userId} has no active senders`);
-        return [];
+        return {
+          data: [],
+          pagination: {
+            page,
+            limit,
+            totalItems: 0,
+            totalPages: 0,
+          },
+        };
       }
 
-      // Return all active contacts, ordered by last message time
+      // Build where conditions
+      const conditions = [eq(contacts.isActive, true)];
+
+      // Add search filter if provided
+      if (search && search.trim()) {
+        const searchTerm = `%${search.trim()}%`;
+        conditions.push(
+          or(
+            ilike(contacts.firstName, searchTerm),
+            ilike(contacts.lastName, searchTerm),
+            ilike(contacts.phoneNumber, searchTerm),
+          )!,
+        );
+      }
+
+      // Get total count for pagination
+      const [countResult] = await db
+        .select({ count: count() })
+        .from(contacts)
+        .where(and(...conditions));
+
+      const totalItems = countResult?.count || 0;
+      const totalPages = Math.ceil(totalItems / limit);
+      const offset = (page - 1) * limit;
+
+      // Fetch paginated results
       const result = await db.query.contacts.findMany({
-        where: eq(contacts.isActive, true),
-        orderBy: desc(contacts.lastMessageTime),
-        limit: take,
-        offset: skip,
+        where: and(...conditions),
+        orderBy: [desc(contacts.lastMessageTime), desc(contacts.contactId)],
+        limit,
+        offset,
       });
 
-      return result;
+      return {
+        data: result,
+        pagination: {
+          page,
+          limit,
+          totalItems,
+          totalPages,
+        },
+      };
     } catch (error) {
       this.logger.error(`Error fetching contacts: ${error.message}`);
       throw error;
@@ -227,6 +287,40 @@ export class ContactsService {
       this.logger.log(`Contact deleted: ${contactId}`);
     } catch (error) {
       this.logger.error(`Error deleting contact: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Bulk delete multiple contacts (soft delete)
+   * @param contactIds - Array of contact IDs to delete
+   * @returns Number of contacts deleted
+   */
+  async bulkDelete(contactIds: string[]): Promise<number> {
+    if (!contactIds || contactIds.length === 0) {
+      return 0;
+    }
+
+    try {
+      const result = await db
+        .update(contacts)
+        .set({
+          isActive: false,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            inArray(contacts.contactId, contactIds),
+            eq(contacts.isActive, true),
+          ),
+        )
+        .returning();
+
+      const deletedCount = result.length;
+      this.logger.log(`Bulk deleted ${deletedCount} contacts`);
+      return deletedCount;
+    } catch (error) {
+      this.logger.error(`Error bulk deleting contacts: ${error.message}`);
       throw error;
     }
   }

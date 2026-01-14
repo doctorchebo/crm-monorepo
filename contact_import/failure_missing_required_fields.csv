@@ -1,0 +1,4 @@
+First Name,Last Name,Country Code,Phone,Email
+User with missing first name but has phone,,,4155550001,
+,Missing name but has email,,,missing@email.com
+Both,Fields,+1,4155550002,both@email.com

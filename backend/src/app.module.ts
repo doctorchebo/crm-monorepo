@@ -28,6 +28,7 @@ import { TemplatesModule } from './modules/templates/templates.module';
 import { ThumbnailModule } from './modules/thumbnail/thumbnail.module';
 import { UserModule } from './modules/user/user.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
+import { ImportJobsModule } from './modules/import-jobs/import-jobs.module';
 
 @Module({
   imports: [
@@ -60,9 +61,10 @@ import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
     WorkflowModule,
     MediaCompressionModule,
     ScheduledTasksModule,
+    ImportJobsModule,
     DatabaseModule,
   ],
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule {}
+export class AppModule { }

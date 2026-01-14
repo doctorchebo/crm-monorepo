@@ -30,7 +30,7 @@ export class ContactsController {
   constructor(
     private contactsService: ContactsService,
     private contactAttributesService: ContactAttributesService,
-  ) {}
+  ) { }
 
   /**
    * Create a new contact
@@ -46,18 +46,21 @@ export class ContactsController {
   }
 
   /**
-   * Get all contacts for current user's registered senders
-   * GET /contacts?phoneNumberId=1
+   * Get all contacts with pagination and search
+   * GET /contacts?page=1&limit=20&search=john
    */
   @Get()
   async findAll(
     @Req() req: any,
-    @Query('skip') skip: number = 0,
-    @Query('take') take: number = 50,
+    @Query('page') page: number = 1,
+    @Query('limit') limit: number = 20,
+    @Query('search') search?: string,
   ) {
     const userId = req.user?.userId;
-    this.logger.log(`Get all contacts for user ${userId}`);
-    return this.contactsService.findAll(userId, skip, take);
+    this.logger.log(
+      `Get contacts for user ${userId}, page=${page}, limit=${limit}, search=${search || 'none'}`,
+    );
+    return this.contactsService.findAll(userId, page, limit, search);
   }
 
   /**
@@ -103,6 +106,19 @@ export class ContactsController {
     this.logger.log(`Delete contact: ${contactId}`);
     await this.contactsService.delete(contactId);
     return { success: true };
+  }
+
+  /**
+   * Bulk delete multiple contacts
+   * POST /contacts/bulk-delete
+   * Body: { contactIds: string[] }
+   */
+  @Post('bulk-delete')
+  async bulkDelete(@Body() body: { contactIds: string[] }) {
+    const { contactIds } = body;
+    this.logger.log(`Bulk delete ${contactIds?.length || 0} contacts`);
+    const deletedCount = await this.contactsService.bulkDelete(contactIds);
+    return { success: true, deletedCount };
   }
 
   // ==================== Contact Attributes Endpoints ====================

@@ -1,0 +1,4 @@
+First Name,Last Name,Country Code,Phone,Email
+InvalidEmail,NoAt,+1,4155550001,invalidemail
+NoTLD,Test,+1,4155550002,test@nodom
+GoodEmail,Valid,+1,4155550003,valid@email.com
