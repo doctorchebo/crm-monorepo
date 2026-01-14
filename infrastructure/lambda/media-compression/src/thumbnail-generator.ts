@@ -7,7 +7,7 @@
  *
  * Thumbnail specifications (context-aware):
  * - KB media: 300x300 max (for file browser UI)
- * - Message attachments: 600x600 max (for chat thread with readable text)
+ * - Message attachments: 1200x1200 max (for chat thread with readable text)
  * - Format: JPEG at 80-85% quality depending on context
  *
  * Storage convention:

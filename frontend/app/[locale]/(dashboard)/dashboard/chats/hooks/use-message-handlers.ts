@@ -1,5 +1,6 @@
 "use client";
 
+import { invalidateCacheForAttachment } from "@/hooks/use-media-url";
 import { useRealtimeChat } from "@/hooks/use-message-status-socket";
 import { useThumbnailUpdates } from "@/hooks/use-thumbnail-updates";
 import { backendApi } from "@/lib/api/endpoints";
@@ -595,10 +596,17 @@ export function useMessageHandlers(
                   mimeType: att.mimeType || "application/octet-stream",
                   size: att.size || 0,
                   s3Key: att.s3Key || att.id || att.mediaId,
+                  // Thumbnail fields - critical for displaying thumbnails instead of originals
+                  thumbnailKey: att.thumbnailKey,
                   thumbnailStatus: att.thumbnailStatus,
+                  width: att.width,
+                  height: att.height,
+                  blurhash: att.blurhash,
+                  duration: att.duration,
                   status: att.status || ("success" as const),
                   uploadedAt: wsMsg.timestamp,
                   isVoiceNote: att.isVoiceNote || false,
+                  isAnimated: att.isAnimated,
                 }))
               : undefined,
             sentAt: wsMsg.timestamp,
@@ -674,8 +682,14 @@ export function useMessageHandlers(
     (event: ThumbnailReadyEvent) => {
       console.log("📷 Thumbnail ready event received:", event);
 
-      setMessages((prevMessages) =>
-        prevMessages.map((message) => {
+      // Invalidate cached thumbnail URL so we fetch the real one
+      invalidateCacheForAttachment(event.messageId, event.attachmentId);
+
+      // Update messages state and track the updated messages for cache sync
+      let updatedMessages: Message[] = [];
+
+      setMessages((prevMessages) => {
+        updatedMessages = prevMessages.map((message) => {
           if (message.messageId !== event.messageId) {
             return message;
           }
@@ -721,8 +735,86 @@ export function useMessageHandlers(
             ...message,
             attachments: updatedAttachments,
           };
-        })
-      );
+        });
+        return updatedMessages;
+      });
+
+      // CRITICAL: Update the messages cache for the CORRECT chat
+      // The event includes chatId so we can update the right cache entry
+      // even if the user is viewing a different chat
+      const targetChatId = event.chatId || selectedChatId;
+
+      if (targetChatId && messagesCacheRef.current.has(targetChatId)) {
+        const cachedData = messagesCacheRef.current.get(targetChatId);
+        if (cachedData) {
+          // If this is the selected chat, use the updatedMessages from state
+          // Otherwise, we need to update the cached messages directly
+          if (targetChatId === selectedChatId) {
+            messagesCacheRef.current.set(targetChatId, {
+              ...cachedData,
+              messages: updatedMessages,
+            });
+          } else {
+            // Update the cache for a non-selected chat
+            const updatedCachedMessages = cachedData.messages.map((message) => {
+              if (message.messageId !== event.messageId) {
+                return message;
+              }
+
+              const updatedAttachments = (message.attachments || []).map(
+                (attachment: Attachment) => {
+                  if (attachment.id !== event.attachmentId) {
+                    return attachment;
+                  }
+
+                  // Apply same staging check as above
+                  const eventIsStaging =
+                    event.thumbnailKey?.startsWith("staging/");
+                  const attachmentIsPromoted =
+                    attachment.s3Key &&
+                    !attachment.s3Key.startsWith("staging/");
+
+                  if (eventIsStaging && attachmentIsPromoted) {
+                    return attachment;
+                  }
+
+                  return {
+                    ...attachment,
+                    thumbnailKey: event.thumbnailKey,
+                    thumbnailStatus: "ready" as const,
+                    width: event.width,
+                    height: event.height,
+                    blurhash: event.blurhash,
+                    ...(event.duration
+                      ? { pageCount: event.duration, duration: event.duration }
+                      : {}),
+                  };
+                }
+              );
+
+              return {
+                ...message,
+                attachments: updatedAttachments,
+              };
+            });
+
+            messagesCacheRef.current.set(targetChatId, {
+              ...cachedData,
+              messages: updatedCachedMessages,
+            });
+          }
+          console.log(
+            `📷 Updated messages cache for chat ${targetChatId} with thumbnail data` +
+              (targetChatId !== selectedChatId
+                ? ` (while viewing chat ${selectedChatId})`
+                : "")
+          );
+        }
+      } else if (targetChatId) {
+        console.log(
+          `📷 No cache entry for chat ${targetChatId} - thumbnail data will be fetched from server when chat is selected`
+        );
+      }
 
       const container = messagesContainerRef.current;
       if (container) {
@@ -738,7 +830,7 @@ export function useMessageHandlers(
         }
       }
     },
-    [setMessages, messagesContainerRef]
+    [setMessages, messagesContainerRef, selectedChatId, messagesCacheRef]
   );
 
   useThumbnailUpdates({

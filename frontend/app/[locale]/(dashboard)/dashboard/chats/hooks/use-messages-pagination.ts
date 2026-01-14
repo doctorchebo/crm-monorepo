@@ -41,7 +41,8 @@ export interface UseMessagesPaginationReturn {
 
   // Actions
   loadInitialMessages: (
-    chatId: string
+    chatId: string,
+    options?: { forceRefresh?: boolean }
   ) => Promise<{ fromCache: boolean; messages: Message[] }>;
   loadOlderMessages: (
     chatId: string,
@@ -135,32 +136,43 @@ export function useMessagesPagination(): UseMessagesPaginationReturn {
   // ============================================================
   const loadInitialMessages = useCallback(
     async (
-      chatId: string
+      chatId: string,
+      options?: { forceRefresh?: boolean }
     ): Promise<{ fromCache: boolean; messages: Message[] }> => {
-      // Check cache first
-      const cached = messagesCacheRef.current.get(chatId);
-      if (cached && cached.messages.length > 0) {
-        // Restore from cache
-        setMessages(cached.messages);
-        setMessageCount(cached.messages.length);
-        setHasMoreMessages(cached.hasMore);
-        currentCursorRef.current = cached.cursor;
+      const { forceRefresh = false } = options || {};
 
-        // Sync pagination ref
-        paginationRef.current = {
-          hasMore: cached.hasMore,
-          isLoading: false,
-          cursor: cached.cursor,
-          chatId,
-        };
+      // Check cache first (unless forceRefresh is requested)
+      if (!forceRefresh) {
+        const cached = messagesCacheRef.current.get(chatId);
+        if (cached && cached.messages.length > 0) {
+          // Restore from cache
+          setMessages(cached.messages);
+          setMessageCount(cached.messages.length);
+          setHasMoreMessages(cached.hasMore);
+          currentCursorRef.current = cached.cursor;
 
-        console.log("[MessagesPagination] Restored from cache:", {
+          // Sync pagination ref
+          paginationRef.current = {
+            hasMore: cached.hasMore,
+            isLoading: false,
+            cursor: cached.cursor,
+            chatId,
+          };
+
+          console.log("[MessagesPagination] Restored from cache:", {
+            chatId,
+            messageCount: cached.messages.length,
+            cursor: cached.cursor,
+          });
+
+          return { fromCache: true, messages: cached.messages };
+        }
+      } else {
+        // Clear stale cache when force refreshing
+        messagesCacheRef.current.delete(chatId);
+        console.log("[MessagesPagination] Force refresh - cleared cache for:", {
           chatId,
-          messageCount: cached.messages.length,
-          cursor: cached.cursor,
         });
-
-        return { fromCache: true, messages: cached.messages };
       }
 
       // No cache - fetch from backend

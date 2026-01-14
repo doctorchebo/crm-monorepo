@@ -508,7 +508,7 @@ export interface ThumbnailConfig {
  *
  * Design rationale:
  * - KB media: Smaller thumbnails (300x300) are sufficient for file browser UI
- * - Message attachments: Larger thumbnails (600x600) needed for chat thread
+ * - Message attachments: Larger thumbnails (1200x1200) needed for chat thread
  *   where users need to preview images with readable text
  *
  * These values balance quality vs storage/bandwidth costs
@@ -536,8 +536,8 @@ export const THUMBNAIL_PRESETS: Record<ThumbnailContext, ThumbnailConfig> = {
    * Still balanced to avoid excessive storage/bandwidth
    */
   "message-attachment": {
-    maxWidth: 600,
-    maxHeight: 600,
+    maxWidth: 1200,
+    maxHeight: 1200,
     quality: 85,
     videoFramePosition: "00:00:01",
     processingTimeoutMs: 30000,

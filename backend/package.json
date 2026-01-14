@@ -21,7 +21,11 @@
     "db:migrate": "node migrate.js",
     "db:migrate:status": "node migrate.js --status",
     "db:migrate:init": "node migrate.js --init",
-    "db:seed": "ts-node run-seed.ts"
+    "db:seed": "ts-node run-seed.ts",
+    "thumbnails:status": "ts-node scripts/thumbnail-regeneration/index.ts status",
+    "thumbnails:regenerate": "ts-node scripts/thumbnail-regeneration/index.ts regenerate --force",
+    "thumbnails:regenerate:dry": "ts-node scripts/thumbnail-regeneration/index.ts regenerate --force --dry-run",
+    "thumbnails:resume": "ts-node scripts/thumbnail-regeneration/index.ts resume"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.948.0",

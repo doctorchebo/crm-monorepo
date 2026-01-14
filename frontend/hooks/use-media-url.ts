@@ -1,11 +1,19 @@
 /**
  * Hook for loading media URLs with proper lifecycle management
  *
- * SIMPLIFIED DESIGN:
- * - Only caches presigned URLs (not blob URLs)
+ * DESIGN:
+ * - Uses centralized MediaCache for presigned URL caching
  * - Blob URLs are created and managed per-component instance
  * - Clear separation between thumbnail URLs (presigned) and full URLs (blob)
- * - No complex reference counting - React's cleanup handles it
+ * - Correctly distinguishes between:
+ *   1. True optimistic messages (not yet in DB) - use previewUrl only
+ *   2. Messages with pending- prefix that ARE in DB - load from backend
+ *   3. Staging files (still uploading) - use previewUrl or thumbnail if available
+ *
+ * Message ID Notes:
+ * - Outbound media messages use "pending-{timestamp}-{random}" as permanent messageId
+ * - The real WhatsApp ID is stored in message.mediaUrl as "wa:wamid.xxx"
+ * - This is by design - the messageId never changes, it's used for S3 paths
  *
  * Usage:
  * ```tsx
@@ -13,119 +21,10 @@
  * ```
  */
 
+import { mediaCache } from "@/lib/cache/media-cache";
 import { mediaApi } from "@/lib/media/api";
 import { Attachment, ThumbnailStatus } from "@/lib/media/types";
 import { useCallback, useEffect, useRef, useState } from "react";
-
-// ============================================================
-// PRESIGNED URL CACHE (NO blob URLs)
-// ============================================================
-// Only stores presigned URLs which are safe to cache
-// Blob URLs are NOT cached - they're managed per-component
-
-interface CachedPresignedUrl {
-  url: string;
-  cachedAt: number;
-  s3Key: string; // Track which s3Key this URL was generated for
-}
-
-// Cache for thumbnail presigned URLs only
-const thumbnailUrlCache = new Map<string, CachedPresignedUrl>();
-
-// Cache TTL - 30 minutes (presigned URLs typically last 1 hour)
-const CACHE_TTL = 30 * 60 * 1000;
-
-function getThumbnailCacheKey(messageId: string, attachmentId: string): string {
-  return `thumb:${messageId}:${attachmentId}`;
-}
-
-function getCachedThumbnailUrl(
-  messageId: string,
-  attachmentId: string,
-  currentS3Key?: string
-): string | null {
-  const key = getThumbnailCacheKey(messageId, attachmentId);
-  const entry = thumbnailUrlCache.get(key);
-
-  if (!entry) return null;
-
-  // Check if expired
-  if (Date.now() - entry.cachedAt > CACHE_TTL) {
-    thumbnailUrlCache.delete(key);
-    return null;
-  }
-
-  // Check if s3Key changed (file was promoted)
-  if (currentS3Key && entry.s3Key !== currentS3Key) {
-    thumbnailUrlCache.delete(key);
-    return null;
-  }
-
-  return entry.url;
-}
-
-function setCachedThumbnailUrl(
-  messageId: string,
-  attachmentId: string,
-  url: string,
-  s3Key: string
-): void {
-  const key = getThumbnailCacheKey(messageId, attachmentId);
-  thumbnailUrlCache.set(key, {
-    url,
-    cachedAt: Date.now(),
-    s3Key,
-  });
-}
-
-/**
- * Invalidate cache for an attachment.
- * Call this when the attachment's s3Key changes (e.g., after promotion).
- */
-export function invalidateCacheForAttachment(
-  messageId: string,
-  attachmentId: string
-): void {
-  const key = getThumbnailCacheKey(messageId, attachmentId);
-  if (thumbnailUrlCache.has(key)) {
-    thumbnailUrlCache.delete(key);
-    console.debug(`[MediaUrlCache] Invalidated cache for ${key}`);
-  }
-}
-
-/**
- * Invalidate all cache entries with staging paths.
- */
-export function invalidateStagingCaches(): void {
-  let count = 0;
-  for (const [key, entry] of thumbnailUrlCache) {
-    if (entry.s3Key?.startsWith("staging/")) {
-      thumbnailUrlCache.delete(key);
-      count++;
-    }
-  }
-  if (count > 0) {
-    console.debug(`[MediaUrlCache] Invalidated ${count} staging cache entries`);
-  }
-}
-
-/**
- * Invalidate all cache entries for a message.
- */
-export function invalidateCachesForMessage(messageId: string): void {
-  let count = 0;
-  for (const key of thumbnailUrlCache.keys()) {
-    if (key.includes(`:${messageId}:`)) {
-      thumbnailUrlCache.delete(key);
-      count++;
-    }
-  }
-  if (count > 0) {
-    console.debug(
-      `[MediaUrlCache] Invalidated ${count} cache entries for message ${messageId}`
-    );
-  }
-}
 
 // ============================================================
 // HOOK TYPES
@@ -166,6 +65,112 @@ interface UseMediaUrlResult {
 }
 
 // ============================================================
+// HELPER FUNCTIONS
+// ============================================================
+
+/**
+ * Determine if a message is a TRUE optimistic message (not yet stored in DB).
+ *
+ * Key insight: Messages with "pending-xxx" prefix are PERMANENT IDs for outbound
+ * media messages. They ARE stored in the database. The way to tell if a message
+ * is truly optimistic (frontend-only) is to check for backend confirmation:
+ *
+ * - Has thumbnailKey → Backend processed it, message is in DB
+ * - Has non-staging s3Key → File promoted, message is in DB
+ * - Status is 'sent'/'delivered'/'read'/'success' → Obviously in DB
+ *
+ * A TRUE optimistic message has:
+ * - pending- prefix
+ * - NO thumbnailKey (or staging thumbnailKey)
+ * - s3Key is empty or staging
+ * - previewUrl exists (local blob from file selection)
+ */
+function isTrueOptimisticMessage(
+  messageId: string,
+  attachment?: Attachment
+): boolean {
+  // Not a pending message at all
+  if (!messageId.startsWith("pending-")) {
+    return false;
+  }
+
+  // Has non-staging thumbnail key means backend has processed it
+  if (
+    attachment?.thumbnailKey &&
+    !attachment.thumbnailKey.startsWith("staging/")
+  ) {
+    return false;
+  }
+
+  // Has non-staging s3Key means file is promoted and message is stored
+  if (attachment?.s3Key && !attachment.s3Key.startsWith("staging/")) {
+    return false;
+  }
+
+  // Has successful status means it's in the DB
+  const confirmedStatuses = ["success", "sent", "delivered", "read"];
+  if (attachment?.status && confirmedStatuses.includes(attachment.status)) {
+    return false;
+  }
+
+  // This is a true optimistic message - only exists in frontend state
+  return true;
+}
+
+/**
+ * Determine if the full resolution media can be loaded from the backend.
+ * Returns false for:
+ * - True optimistic messages (not yet in DB)
+ * - Files still in staging (being uploaded)
+ */
+function canLoadFullFromBackend(
+  messageId: string,
+  attachment?: Attachment
+): boolean {
+  // True optimistic messages don't exist in DB
+  if (isTrueOptimisticMessage(messageId, attachment)) {
+    return false;
+  }
+
+  // Staging files can't be downloaded via normal API
+  if (attachment?.s3Key?.startsWith("staging/")) {
+    return false;
+  }
+
+  return true;
+}
+
+// ============================================================
+// CACHE INVALIDATION UTILITIES (Delegated to MediaCache)
+// ============================================================
+
+/**
+ * Invalidate cache for an attachment.
+ * Call when thumbnail becomes ready or attachment is updated.
+ */
+export function invalidateCacheForAttachment(
+  messageId: string,
+  attachmentId: string
+): void {
+  mediaCache.invalidateThumbnailUrl(messageId, attachmentId);
+}
+
+/**
+ * Invalidate all cache entries for a message.
+ */
+export function invalidateCachesForMessage(messageId: string): void {
+  mediaCache.invalidateMessageUrls(messageId);
+}
+
+/**
+ * Invalidate all cache entries with staging paths.
+ * Call after file promotion to ensure we don't serve stale staging URLs.
+ */
+export function invalidateStagingCaches(): void {
+  mediaCache.invalidateStagingUrls();
+}
+
+// ============================================================
 // MAIN HOOK
 // ============================================================
 
@@ -196,8 +201,16 @@ export function useMediaUrl(
 
   // Derived values from attachment
   const thumbnailStatus = attachment?.thumbnailStatus;
+
+  // ROBUST CHECK: If thumbnailKey exists and is NOT staging, thumbnail is available in S3
+  // We try to load it unless status explicitly indicates failure or pending processing
   const hasThumbnail =
-    thumbnailStatus === "ready" && !!attachment?.thumbnailKey;
+    !!attachment?.thumbnailKey &&
+    !attachment.thumbnailKey.startsWith("staging/") &&
+    thumbnailStatus !== "failed" &&
+    thumbnailStatus !== "pending" &&
+    thumbnailStatus !== "processing";
+
   const blurhash = attachment?.blurhash;
   const dimensions = {
     width: attachment?.width,
@@ -220,7 +233,7 @@ export function useMediaUrl(
       blobUrlRef.current = null;
     }
 
-    // Early exit conditions
+    // Early exit: disabled or no attachmentId
     if (!enabled || !attachmentId) {
       setLoading(false);
       setUrl(null);
@@ -229,35 +242,52 @@ export function useMediaUrl(
       return;
     }
 
-    // CASE 1: Active upload in progress - use previewUrl directly
-    // previewUrl is a blob URL created during file selection
-    const isActiveUpload =
-      attachment?.previewUrl &&
-      (!attachment.s3Key ||
-        attachment.s3Key === "" ||
-        attachment.s3Key.startsWith("staging/"));
+    // Determine what kind of message/attachment this is
+    const isOptimistic = isTrueOptimisticMessage(messageId, attachment);
+    const isStaging = attachment?.s3Key?.startsWith("staging/");
+    const hasPreviewUrl = !!attachment?.previewUrl;
+    const hasS3Key = !!attachment?.s3Key && attachment.s3Key !== "";
 
-    if (isActiveUpload) {
-      setUrl(attachment.previewUrl!);
-      setThumbnailUrl(attachment.previewUrl!);
+    // CASE 1: True optimistic message - use previewUrl only
+    if (isOptimistic) {
+      if (hasPreviewUrl) {
+        setUrl(attachment!.previewUrl!);
+        setThumbnailUrl(attachment!.previewUrl!);
+        setLoading(false);
+        return;
+      }
+      // No preview - nothing to show yet
       setLoading(false);
       return;
     }
 
-    // CASE 2: No s3Key yet - nothing to load
-    if (!attachment?.s3Key || attachment.s3Key === "") {
+    // CASE 2: Staging file - use previewUrl or try to load thumbnail
+    if (isStaging) {
+      if (hasPreviewUrl) {
+        setUrl(attachment!.previewUrl!);
+        setThumbnailUrl(attachment!.previewUrl!);
+        setLoading(false);
+        return;
+      }
+      // No preview - check if we can load thumbnail
+      if (!hasThumbnail) {
+        setLoading(false);
+        return;
+      }
+      // Fall through to load thumbnail from backend
+    }
+
+    // CASE 3: No s3Key - nothing to load from backend
+    if (!hasS3Key) {
+      if (hasPreviewUrl) {
+        setUrl(attachment!.previewUrl!);
+        setThumbnailUrl(attachment!.previewUrl!);
+      }
       setLoading(false);
       return;
     }
 
-    // CASE 3: Orphaned staging file - show error
-    if (attachment.s3Key.startsWith("staging/") && !attachment.previewUrl) {
-      setError("Media file is no longer available");
-      setLoading(false);
-      return;
-    }
-
-    // CASE 4: Normal load from S3
+    // CASE 4: Load from backend (thumbnail and/or full)
     let isMounted = true;
     abortControllerRef.current = new AbortController();
 
@@ -269,47 +299,61 @@ export function useMediaUrl(
         let loadedThumbnailUrl: string | null = null;
         let loadedFullUrl: string | null = null;
 
+        console.log(
+          `[useMediaUrl] CASE 4: Loading from backend for ${attachmentId}:`,
+          {
+            loadThumbnail,
+            hasThumbnail,
+            isOptimistic,
+            isStaging,
+            thumbnailKey: attachment?.thumbnailKey,
+          }
+        );
+
         // Try to load thumbnail if requested and available
         if (loadThumbnail && hasThumbnail) {
-          // Check cache first
-          const cached = getCachedThumbnailUrl(
-            messageId,
-            attachmentId,
-            attachment?.s3Key
-          );
+          try {
+            console.log(
+              `[useMediaUrl] Calling getThumbnailUrl for ${attachmentId}...`
+            );
+            // MediaCache handles deduplication and TTL internally
+            const thumbUrl = await mediaApi.getThumbnailUrl(
+              messageId,
+              attachmentId
+            );
+            console.log(
+              `[useMediaUrl] getThumbnailUrl returned for ${attachmentId}:`,
+              thumbUrl ? "URL" : "NULL"
+            );
 
-          if (cached) {
-            loadedThumbnailUrl = cached;
-          } else {
-            try {
-              const thumbUrl = await mediaApi.getThumbnailUrl(
-                messageId,
-                attachmentId
-              );
-              if (thumbUrl) {
-                loadedThumbnailUrl = thumbUrl;
-                // Cache the presigned URL
-                setCachedThumbnailUrl(
-                  messageId,
-                  attachmentId,
-                  thumbUrl,
-                  attachment?.s3Key || ""
-                );
-              }
-            } catch (err) {
-              console.debug(
-                "[useMediaUrl] Thumbnail load failed, will fall back to full"
-              );
+            if (thumbUrl) {
+              loadedThumbnailUrl = thumbUrl;
             }
+          } catch (err) {
+            console.error(
+              `[useMediaUrl] Thumbnail load failed for ${attachmentId}:`,
+              err
+            );
           }
+        } else {
+          console.log(
+            `[useMediaUrl] Skipping thumbnail load for ${attachmentId}:`,
+            {
+              loadThumbnail,
+              hasThumbnail,
+            }
+          );
         }
 
         // Determine if we need to load full resolution
         const isVideo = attachment?.type === "video";
+        const canLoad = canLoadFullFromBackend(messageId, attachment);
+
         const needsFull =
-          !loadThumbnail || // Explicitly requesting full
-          (!loadedThumbnailUrl && !isVideo) || // Thumbnail failed for image
-          shouldLoadFull; // User requested full
+          canLoad &&
+          (!loadThumbnail || // Explicitly requesting full
+            (!loadedThumbnailUrl && !isVideo) || // Thumbnail failed for non-video
+            shouldLoadFull); // User requested full
 
         if (needsFull) {
           try {
@@ -371,7 +415,7 @@ export function useMediaUrl(
 
     loadMedia();
 
-    // Cleanup on unmount or dependency change
+    // Cleanup function
     return () => {
       isMounted = false;
       abortControllerRef.current?.abort();
@@ -388,16 +432,17 @@ export function useMediaUrl(
   }, [
     messageId,
     attachmentId,
+    enabled,
     loadThumbnail,
     handleCloudApi,
-    hasThumbnail,
-    shouldLoadFull,
-    enabled,
-    // Re-run when attachment state changes
     attachment?.s3Key,
     attachment?.thumbnailKey,
     attachment?.thumbnailStatus,
     attachment?.previewUrl,
+    attachment?.status,
+    attachment?.type,
+    hasThumbnail,
+    shouldLoadFull,
   ]);
 
   return {
@@ -413,6 +458,10 @@ export function useMediaUrl(
     loadFullResolution,
   };
 }
+
+// ============================================================
+// BATCH LOADING HOOK
+// ============================================================
 
 /**
  * Hook for batch loading multiple media items
@@ -464,4 +513,43 @@ export function useMediaUrls(
   }, [attachments]);
 
   return { urls, loading, errors };
+}
+
+// ============================================================
+// PREFETCH UTILITIES
+// ============================================================
+
+/**
+ * Prefetch thumbnail URLs for a list of attachments.
+ * Useful for preloading thumbnails when a chat is opened.
+ */
+export async function prefetchThumbnailUrls(
+  attachments: Array<{
+    messageId: string;
+    attachmentId: string;
+    thumbnailKey?: string;
+    thumbnailStatus?: ThumbnailStatus;
+  }>
+): Promise<void> {
+  const validAttachments = attachments.filter(
+    (a) =>
+      a.thumbnailKey &&
+      !a.thumbnailKey.startsWith("staging/") &&
+      a.thumbnailStatus !== "failed" &&
+      a.thumbnailStatus !== "pending" &&
+      a.thumbnailStatus !== "processing"
+  );
+
+  const promises = validAttachments.map(async (attachment) => {
+    try {
+      await mediaApi.getThumbnailUrl(
+        attachment.messageId,
+        attachment.attachmentId
+      );
+    } catch {
+      // Ignore errors during prefetch
+    }
+  });
+
+  await Promise.allSettled(promises);
 }

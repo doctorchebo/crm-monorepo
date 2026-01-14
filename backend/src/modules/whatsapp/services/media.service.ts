@@ -645,6 +645,7 @@ export class MediaService {
       });
 
       if (!message) {
+        this.logger.warn(`getThumbnailUrl: Message not found: ${messageId}`);
         return null;
       }
 
@@ -653,9 +654,23 @@ export class MediaService {
         []) as AttachmentMetadata[];
       const attachment = attachmentsList.find((a) => a.id === attachmentId);
 
-      if (!attachment || !attachment.thumbnailKey) {
+      if (!attachment) {
+        this.logger.warn(
+          `getThumbnailUrl: Attachment not found: ${attachmentId} in message ${messageId}`,
+        );
         return null;
       }
+
+      if (!attachment.thumbnailKey) {
+        this.logger.warn(
+          `getThumbnailUrl: No thumbnailKey for attachment ${attachmentId}: ${JSON.stringify(attachment)}`,
+        );
+        return null;
+      }
+
+      this.logger.log(
+        `getThumbnailUrl: Generating URL for thumbnailKey: ${attachment.thumbnailKey}`,
+      );
 
       // Generate download URL for thumbnail
       const downloadData = await this.s3Service.generatePresignedDownloadUrl(
@@ -663,6 +678,9 @@ export class MediaService {
         { expiresIn },
       );
 
+      this.logger.log(
+        `getThumbnailUrl: Generated URL successfully for ${attachmentId}`,
+      );
       return downloadData.url;
     } catch (error) {
       this.logger.error(`Error generating thumbnail URL: ${error.message}`);

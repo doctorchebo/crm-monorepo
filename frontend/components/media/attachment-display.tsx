@@ -88,16 +88,50 @@ export function ImageAttachment({
     enabled: isAccessible,
   });
 
+  // Debug logging for thumbnail issues
+  useEffect(() => {
+    console.log(`[ImageAttachment] Rendering for ${attachment.id}:`, {
+      messageId,
+      thumbnailKey: attachment.thumbnailKey,
+      thumbnailStatus: attachment.thumbnailStatus,
+      s3Key: attachment.s3Key,
+      status: attachment.status,
+      previewUrl: attachment.previewUrl ? "HAS_PREVIEW" : "NO_PREVIEW",
+    });
+    console.log(`[ImageAttachment] useMediaUrl result for ${attachment.id}:`, {
+      imageUrl: imageUrl ? "SET" : "NULL",
+      thumbnailUrl: thumbnailUrl ? "SET" : "NULL",
+      loading,
+      error,
+      hasThumbnail,
+    });
+  }, [
+    attachment.id,
+    attachment.thumbnailKey,
+    attachment.thumbnailStatus,
+    attachment.s3Key,
+    attachment.status,
+    attachment.previewUrl,
+    messageId,
+    imageUrl,
+    thumbnailUrl,
+    loading,
+    error,
+    hasThumbnail,
+  ]);
+
   // Show skeleton while thumbnail is being generated or loading
   // Also show skeleton for any case where we don't have a displayable URL yet
   // This ensures we never render "nothing" while waiting for media
+  // BUT: If we have hasThumbnail (thumbnailKey exists), don't show skeleton
+  // for undefined status - the thumbnail is likely ready
   const showSkeleton =
     !thumbnailUrl &&
     !imageUrl &&
     (loading ||
       thumbnailStatus === "pending" ||
       thumbnailStatus === "processing" ||
-      thumbnailStatus === undefined); // Handle undefined status gracefully
+      (thumbnailStatus === undefined && !hasThumbnail)); // Only show skeleton for undefined if no thumbnail available
 
   // Determine which URL to display (prefer thumbnail for initial view)
   const displayUrl = thumbnailUrl || imageUrl;

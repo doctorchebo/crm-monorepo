@@ -215,7 +215,11 @@ export function useRealtimeChat(chatId?: string) {
         chatId: string;
         attachmentId: string;
         s3Key: string;
+        thumbnailKey?: string;
         thumbnailStatus?: string;
+        width?: number;
+        height?: number;
+        blurhash?: string;
       }) => {
         const currentChatId = chatIdRef.current;
 
@@ -251,8 +255,13 @@ export function useRealtimeChat(chatId?: string) {
                 return {
                   ...att,
                   s3Key: update.s3Key,
+                  // Include thumbnail fields if provided
+                  thumbnailKey: update.thumbnailKey || att.thumbnailKey,
                   thumbnailStatus:
                     update.thumbnailStatus || att.thumbnailStatus,
+                  width: update.width || att.width,
+                  height: update.height || att.height,
+                  blurhash: update.blurhash || att.blurhash,
                 };
               }
               return att;

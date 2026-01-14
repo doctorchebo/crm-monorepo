@@ -201,6 +201,7 @@ export class WhatsAppGateway
     height: number;
     blurhash: string;
     duration?: number; // For PDFs: page count
+    chatId?: string; // Chat ID for cache updates when viewing other chats
   }): void {
     if (this.connectedClients.size === 0) {
       return; // No clients connected

@@ -44,11 +44,19 @@ export function useThumbnailUpdates(options: UseThumbnailUpdatesOptions = {}) {
 
     // Listen for single thumbnail ready events
     const handleThumbnailReady = (event: ThumbnailReadyEvent) => {
+      console.log(
+        `📷 [useThumbnailUpdates] Received thumbnail:ready event:`,
+        event
+      );
       onThumbnailReady?.(event);
     };
 
     // Listen for batch thumbnail events
     const handleThumbnailsBatch = (events: ThumbnailReadyEvent[]) => {
+      console.log(
+        `📷 [useThumbnailUpdates] Received thumbnails:batch event (${events.length} thumbnails):`,
+        events
+      );
       onThumbnailsBatch?.(events);
 
       // Also call individual handler for each

@@ -387,19 +387,30 @@ export const mediaApi = {
       const params = new URLSearchParams();
       if (expiresIn) params.append("expiresIn", expiresIn.toString());
 
-      const response = await fetch(
-        `${API_BASE_URL}/whatsapp/media/${messageId}/${attachmentId}/thumbnail-url?${params.toString()}`,
-        {
-          method: "GET",
-          credentials: "include", // CRITICAL: Send cookies for authentication
-        }
+      const url = `${API_BASE_URL}/whatsapp/media/${messageId}/${attachmentId}/thumbnail-url?${params.toString()}`;
+      console.log(`[mediaApi] Fetching thumbnail URL: ${url}`);
+
+      const response = await fetch(url, {
+        method: "GET",
+        credentials: "include", // CRITICAL: Send cookies for authentication
+      });
+
+      console.log(
+        `[mediaApi] Thumbnail URL response for ${attachmentId}: status=${response.status}`
       );
 
       if (!response.ok) {
+        console.warn(
+          `[mediaApi] Thumbnail URL fetch failed: ${response.status}`
+        );
         return null;
       }
 
       const data = await response.json();
+      console.log(
+        `[mediaApi] Thumbnail URL data for ${attachmentId}:`,
+        data.url ? "HAS_URL" : "NO_URL"
+      );
       return data.url || null;
     });
   },

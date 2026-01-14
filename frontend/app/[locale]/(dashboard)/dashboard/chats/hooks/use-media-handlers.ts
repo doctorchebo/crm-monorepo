@@ -177,7 +177,7 @@ export function useMediaHandlers(
     for (const message of messages) {
       // Skip deleted messages - their attachments should not be shown
       if (message.isDeleted) continue;
-      if (!message.attachments) continue;
+      if (!message.attachments || !Array.isArray(message.attachments)) continue;
 
       message.attachments.forEach((attachment, index) => {
         // Only include visual media (images and videos)

@@ -132,31 +132,48 @@ export class MediaCache {
     // Check cache first
     const cached = this.thumbnailUrlCache.get(cacheKey);
     if (cached && !this._isExpired(cached)) {
-      console.debug(`[MediaCache] Cache hit for thumbnail URL: ${cacheKey}`);
-      return cached.data;
+      // IMPORTANT: Only return cache hit if we have an actual URL
+      // Don't return cached null - that was from a failed request before thumbnail was ready
+      if (cached.data) {
+        console.log(
+          `[MediaCache] Cache HIT for thumbnail URL: ${cacheKey} -> HAS_URL`
+        );
+        return cached.data;
+      } else {
+        // Cached null - remove it and re-fetch
+        console.log(
+          `[MediaCache] Cache HIT but NULL - removing stale entry: ${cacheKey}`
+        );
+        this.thumbnailUrlCache.delete(cacheKey);
+      }
     }
 
     // Check if request is already in-flight
     const inFlight = this.inFlightThumbnailRequests.get(cacheKey);
     if (inFlight) {
-      // console.debug(
-      //   `[MediaCache] Returning in-flight thumbnail URL request: ${cacheKey}`
-      // );
+      console.log(`[MediaCache] In-flight request found for: ${cacheKey}`);
       return inFlight.promise;
     }
 
+    console.log(`[MediaCache] Cache MISS, fetching: ${cacheKey}`);
+
     // Fetch and cache
-    // console.debug(
-    //   `[MediaCache] Cache miss, fetching thumbnail URL: ${cacheKey}`
-    // );
     const promise = fetcher()
       .then((url) => {
-        // Store in cache (even if null - thumbnail doesn't exist)
-        this.thumbnailUrlCache.set(cacheKey, {
-          data: url,
-          timestamp: Date.now(),
-          expiresAt: Date.now() + this.TTL,
-        });
+        // ONLY cache successful responses - don't cache null
+        // This allows retrying when thumbnail becomes ready
+        if (url) {
+          console.log(`[MediaCache] Caching successful URL for: ${cacheKey}`);
+          this.thumbnailUrlCache.set(cacheKey, {
+            data: url,
+            timestamp: Date.now(),
+            expiresAt: Date.now() + this.TTL,
+          });
+        } else {
+          console.log(
+            `[MediaCache] Not caching NULL response for: ${cacheKey}`
+          );
+        }
 
         // Remove from in-flight
         this.inFlightThumbnailRequests.delete(cacheKey);
@@ -213,6 +230,20 @@ export class MediaCache {
 
     console.debug(
       `[MediaCache] Invalidated URLs for attachment: ${downloadKey}`
+    );
+  }
+
+  /**
+   * Invalidate thumbnail URL specifically
+   * Call when thumbnail becomes ready to clear any cached null value
+   */
+  invalidateThumbnailUrl(messageId: string, attachmentId: string): void {
+    const thumbnailKey = this._makeCacheKey(messageId, attachmentId, "thumb");
+    this.thumbnailUrlCache.delete(thumbnailKey);
+    this.inFlightThumbnailRequests.delete(thumbnailKey);
+
+    console.debug(
+      `[MediaCache] Invalidated thumbnail URL for: ${messageId}:${attachmentId}`
     );
   }
 

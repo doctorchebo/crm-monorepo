@@ -345,6 +345,21 @@ export class ThumbnailCallbackController {
         .set({ attachments: attachments as any })
         .where(eq(messages.messageId, messageId));
 
+      // VERIFY: Read back to confirm the update was saved
+      const verifyMessage = await db.query.messages.findFirst({
+        where: eq(messages.messageId, messageId),
+      });
+      const verifyAttachments = (verifyMessage?.attachments || []) as any[];
+      const verifyAttachment = verifyAttachments.find(
+        (a) => a.id === attachmentId,
+      );
+      this.logger.log(
+        `[Thumbnail Callback] VERIFY after update: messageId=${messageId}, ` +
+          `attachmentId=${attachmentId}, ` +
+          `thumbnailKey=${verifyAttachment?.thumbnailKey}, ` +
+          `thumbnailStatus=${verifyAttachment?.thumbnailStatus}`,
+      );
+
       this.logger.log(
         `[Thumbnail Callback] Updated message ${messageId} attachment ${attachmentId} with thumbnail: ` +
           `${finalThumbnailKey} (${payload.width}x${payload.height})`,
@@ -361,6 +376,7 @@ export class ThumbnailCallbackController {
             height: payload.height || 0,
             blurhash: payload.blurhash || '',
             duration: payload.duration,
+            chatId, // Include chatId for cross-chat cache updates
           });
           this.logger.debug(
             `[Thumbnail Callback] Emitted thumbnailReady event for message ${messageId}`,
