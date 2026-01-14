@@ -3,6 +3,7 @@ import { MediaCompressionModule } from '@modules/media-compression/media-compres
 import { NotesModule } from '@modules/notes/notes.module';
 import { PinsModule } from '@modules/pins/pins.module';
 import { ReactionsModule } from '@modules/reactions/reactions.module';
+import { ScheduledTasksModule } from '@modules/scheduled-tasks/scheduled-tasks.module';
 import { WorkflowModule } from '@modules/workflow/workflow.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
@@ -58,6 +59,7 @@ import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
     KnowledgeBaseModule,
     WorkflowModule,
     MediaCompressionModule,
+    ScheduledTasksModule,
     DatabaseModule,
   ],
   controllers: [AppController],

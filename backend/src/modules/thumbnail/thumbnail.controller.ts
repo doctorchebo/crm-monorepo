@@ -17,6 +17,7 @@ import {
 } from '@nestjs/common';
 import { ThumbnailQueueService } from './thumbnail-queue.service';
 import { ThumbnailService } from './thumbnail.service';
+import { ThumbnailJobData } from './thumbnail.types';
 
 @Controller('api/whatsapp/thumbnails')
 @UseGuards(JwtAuthGuard)

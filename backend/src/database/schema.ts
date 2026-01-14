@@ -1860,6 +1860,77 @@ export const workflowStageAiSettingsRelations = relations(
   }),
 );
 
+// ============================================================================
+// Media Staging Table
+// ============================================================================
+
+/**
+ * Staged Media table - temporary storage for files being previewed/edited
+ *
+ * Used for pre-generating thumbnails before a message is sent.
+ * Files in staging can be:
+ * - "Promoted" to a message path when the user sends
+ * - Cleaned up if the user cancels
+ * - Auto-expired after 24 hours
+ *
+ * Flow:
+ * 1. User attaches file → uploaded to staging/{userId}/{stagingId}/
+ * 2. Thumbnail generation queued immediately
+ * 3. User sends → file promoted to {senderId}/{contactId}/{messageId}/
+ * 4. User cancels → file deleted from S3 and record removed
+ *
+ * Promotion Flow (handles thumbnail race condition):
+ * 1. User sends → promoteStagedFile() copies files to final path
+ * 2. If thumbnail ready → copy both files, then mark record for cleanup
+ * 3. If thumbnail pending → copy main file, store promoted path info
+ * 4. Thumbnail callback → check for promoted records, copy thumbnail to final path
+ * 5. Scheduled cleanup → remove old promoted records after grace period
+ */
+export const stagedMedia = pgTable(
+  'staged_media',
+  {
+    id: serial('id').primaryKey(),
+    stagingId: uuid('staging_id').notNull().unique().defaultRandom(),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    senderId: integer('sender_id').notNull(), // Target sender for when promoted
+    contactId: varchar('contact_id').notNull(), // Target contact for when promoted
+    s3Key: varchar('s3_key').notNull(), // S3 key in staging area
+    thumbnailKey: varchar('thumbnail_key'), // S3 key for generated thumbnail
+    fileName: varchar('file_name').notNull(), // Original filename
+    mimeType: varchar('mime_type').notNull(), // MIME type
+    size: integer('size').notNull(), // File size in bytes
+    mediaType: varchar('media_type').notNull(), // 'image', 'video', 'audio', 'document'
+    thumbnailStatus: varchar('thumbnail_status').default('pending'), // 'pending', 'ready', 'failed', 'not-applicable'
+    createdAt: timestamp('created_at').defaultNow(),
+    expiresAt: timestamp('expires_at').notNull(), // When this staging record expires
+
+    // Promotion tracking - handles race condition with async thumbnail generation
+    promotedAt: timestamp('promoted_at'), // When the main file was promoted
+    promotedMessageId: varchar('promoted_message_id'), // The message ID it was promoted to
+    promotedS3Key: varchar('promoted_s3_key'), // Final S3 key after promotion
+    promotedThumbnailKey: varchar('promoted_thumbnail_key'), // Final thumbnail S3 key after promotion
+    thumbnailPromotedAt: timestamp('thumbnail_promoted_at'), // When thumbnail was copied to final path
+  },
+  (table) => ({
+    stagingIdIndex: index('idx_staged_media_staging_id').on(table.stagingId),
+    userIdIndex: index('idx_staged_media_user_id').on(table.userId),
+    expiresAtIndex: index('idx_staged_media_expires_at').on(table.expiresAt),
+    promotedAtIndex: index('idx_staged_media_promoted_at').on(table.promotedAt),
+  }),
+);
+
+export type StagedMedia = typeof stagedMedia.$inferSelect;
+export type NewStagedMedia = typeof stagedMedia.$inferInsert;
+
+export const stagedMediaRelations = relations(stagedMedia, ({ one }) => ({
+  user: one(users, {
+    fields: [stagedMedia.userId],
+    references: [users.id],
+  }),
+}));
+
 // Export knowledge base schema
 export * from './knowledge-base.schema';
 

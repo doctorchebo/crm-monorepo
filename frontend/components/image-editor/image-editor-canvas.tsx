@@ -182,11 +182,19 @@ export const ImageEditorCanvas = React.forwardRef<
     getDimensions: () => dimensions,
   }));
 
+  // Track image loading state
+  const [isImageLoading, setIsImageLoading] = useState(true);
+  const [imageLoadError, setImageLoadError] = useState<string | null>(null);
+
   // Load and size image
   useEffect(() => {
+    setIsImageLoading(true);
+    setImageLoadError(null);
+
     const img = new Image();
     img.onload = () => {
       imageRef.current = img;
+      setIsImageLoading(false);
 
       // Calculate display size maintaining aspect ratio
       let displayWidth = img.width;
@@ -217,6 +225,14 @@ export const ImageEditorCanvas = React.forwardRef<
 
       // Update context with actual canvas dimensions (scales elements if dimensions changed)
       updateCanvasDimensions(newDimensions);
+    };
+    img.onerror = () => {
+      setIsImageLoading(false);
+      setImageLoadError("Failed to load image");
+      console.error(
+        "Failed to load image:",
+        state.originalImage?.substring(0, 100)
+      );
     };
     img.src = state.originalImage;
   }, [
@@ -503,6 +519,41 @@ export const ImageEditorCanvas = React.forwardRef<
       removeText,
     ]
   );
+
+  // Show loading state
+  if (isImageLoading) {
+    return (
+      <div
+        className={cn(
+          "relative flex items-center justify-center bg-zinc-800/50 rounded-lg",
+          className
+        )}
+        style={{ width: maxWidth, height: maxHeight }}
+      >
+        <div className="flex flex-col items-center gap-3 text-white/60">
+          <div className="w-8 h-8 border-2 border-white/30 border-t-white/80 rounded-full animate-spin" />
+          <span className="text-sm">Loading image...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state
+  if (imageLoadError) {
+    return (
+      <div
+        className={cn(
+          "relative flex items-center justify-center bg-zinc-800/50 rounded-lg",
+          className
+        )}
+        style={{ width: maxWidth, height: maxHeight }}
+      >
+        <div className="flex flex-col items-center gap-3 text-white/60">
+          <span className="text-sm text-red-400">{imageLoadError}</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

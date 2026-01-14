@@ -59,6 +59,8 @@ export function ImageAttachment({
 }: AttachmentDisplayProps) {
   // Track whether the actual image element has loaded
   const [imageLoaded, setImageLoaded] = useState(false);
+  // Track image load errors (e.g., S3 file deleted but URL still in DB)
+  const [imageError, setImageError] = useState(false);
 
   // Check if attachment has accessible media source
   const isAccessible = hasAccessibleMediaSource(attachment);
@@ -86,24 +88,6 @@ export function ImageAttachment({
     enabled: isAccessible,
   });
 
-  // If not accessible, show unavailable state
-  if (!isAccessible) {
-    return (
-      <div
-        className={`relative ${
-          isSquare ? "w-full h-full" : "max-w-xs"
-        } bg-gray-200 dark:bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center ${
-          isSquare ? "" : "min-h-[100px]"
-        }`}
-      >
-        <div className="flex flex-col items-center text-gray-400 dark:text-gray-500 p-4">
-          <ImageOff className="w-8 h-8 mb-2" />
-          <span className="text-sm text-center">Media unavailable</span>
-        </div>
-      </div>
-    );
-  }
-
   // Show skeleton while thumbnail is being generated or loading
   // Also show skeleton for any case where we don't have a displayable URL yet
   // This ensures we never render "nothing" while waiting for media
@@ -118,13 +102,31 @@ export function ImageAttachment({
   // Determine which URL to display (prefer thumbnail for initial view)
   const displayUrl = thumbnailUrl || imageUrl;
 
-  if (error) {
-    return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
-        {error}
-      </div>
+  // Handle image load error (e.g., presigned URL points to deleted S3 object)
+  const handleImageError = useCallback(() => {
+    console.error(
+      `[ImageAttachment] Failed to load image for ${attachment.id} - file may be deleted`
     );
-  }
+    setImageError(true);
+    setImageLoaded(true); // Mark as "loaded" to stop showing skeleton
+  }, [attachment.id]);
+
+  // Track loading state for scroll hook coordination
+  // Media is "loading" if:
+  // 1. We're showing skeleton (no URL yet), OR
+  // 2. We have a URL but the img element hasn't fired onLoad yet
+  const isMediaLoading = showSkeleton || (displayUrl && !imageLoaded);
+
+  // Reset imageLoaded and imageError when URL changes (new image to load)
+  // This allows retry when the attachment is updated (e.g., after promotion)
+  useEffect(() => {
+    setImageLoaded(false);
+    setImageError(false);
+  }, [displayUrl]);
+
+  const handleImageLoad = useCallback(() => {
+    setImageLoaded(true);
+  }, []);
 
   // Upload progress overlay component
   const UploadProgressOverlay = () => (
@@ -160,20 +162,53 @@ export function ImageAttachment({
     </div>
   );
 
-  // Track loading state for scroll hook coordination
-  // Media is "loading" if:
-  // 1. We're showing skeleton (no URL yet), OR
-  // 2. We have a URL but the img element hasn't fired onLoad yet
-  const isMediaLoading = showSkeleton || (displayUrl && !imageLoaded);
+  // ============================================================
+  // EARLY RETURNS (must be AFTER all hooks)
+  // ============================================================
 
-  // Reset imageLoaded when URL changes (new image to load)
-  useEffect(() => {
-    setImageLoaded(false);
-  }, [displayUrl]);
+  // If not accessible, show unavailable state
+  // IMPORTANT: Must include data-media-loading="false" to signal scroll system
+  // that this media is "done" (even though it failed)
+  if (!isAccessible) {
+    return (
+      <div
+        className={`relative ${
+          isSquare ? "w-full h-full" : "max-w-xs"
+        } bg-gray-200 dark:bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center ${
+          isSquare ? "" : "min-h-[100px]"
+        }`}
+        data-media-container="image"
+        data-media-loading="false"
+      >
+        <div className="flex flex-col items-center text-gray-400 dark:text-gray-500 p-4">
+          <ImageOff className="w-8 h-8 mb-2" />
+          <span className="text-sm text-center">Media unavailable</span>
+        </div>
+      </div>
+    );
+  }
 
-  const handleImageLoad = useCallback(() => {
-    setImageLoaded(true);
-  }, []);
+  // Show error state (either from useMediaUrl hook or from img element error)
+  // IMPORTANT: Must include data-media-loading="false" to signal scroll system
+  // that this media is "done" (even though it failed)
+  if (error || imageError) {
+    return (
+      <div
+        className={`relative ${
+          isSquare ? "w-full h-full" : "max-w-xs"
+        } bg-gray-100 dark:bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center ${
+          isSquare ? "" : "min-h-[100px]"
+        }`}
+        data-media-container="image"
+        data-media-loading="false"
+      >
+        <div className="flex flex-col items-center text-gray-400 dark:text-gray-500 p-4">
+          <ImageOff className="w-8 h-8 mb-2" />
+          <span className="text-sm text-center">Media unavailable</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -200,6 +235,7 @@ export function ImageAttachment({
               alt={attachment.fileName}
               className={`w-full h-auto max-h-80 object-cover transition-opacity duration-300 ${isUploading ? "opacity-70" : ""}`}
               onLoad={handleImageLoad}
+              onError={handleImageError}
             />
           ) : null}
 
@@ -230,6 +266,7 @@ export function ImageAttachment({
               alt={attachment.fileName}
               className={`w-full h-full object-cover rounded-lg transition-opacity duration-300 ${isUploading ? "opacity-70" : ""}`}
               onLoad={handleImageLoad}
+              onError={handleImageError}
             />
           ) : null}
 
@@ -275,6 +312,8 @@ export function VideoAttachment({
 }: AttachmentDisplayProps) {
   // Track whether the thumbnail image has loaded
   const [thumbnailLoaded, setThumbnailLoaded] = useState(false);
+  // Track thumbnail load errors
+  const [thumbnailError, setThumbnailError] = useState(false);
 
   // Check if attachment has accessible media source
   const isAccessible = hasAccessibleMediaSource(attachment);
@@ -301,39 +340,56 @@ export function VideoAttachment({
     enabled: isAccessible,
   });
 
-  // If not accessible, show unavailable state
-  if (!isAccessible) {
-    return (
-      <div className="relative max-w-xs bg-gray-200 dark:bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center min-h-[100px]">
-        <div className="flex flex-col items-center text-gray-400 dark:text-gray-500 p-4">
-          <ImageOff className="w-8 h-8 mb-2" />
-          <span className="text-sm text-center">Video unavailable</span>
-        </div>
-      </div>
-    );
-  }
+  // Check if the attachment is still in staging (previewUrl is valid)
+  // Once promoted (s3Key doesn't start with "staging/"), previewUrl blob may be revoked
+  // so we should use the S3 thumbnail instead.
+  const isStillInStaging =
+    !attachment.s3Key ||
+    attachment.s3Key === "" ||
+    attachment.s3Key.startsWith("staging/");
 
   // Show skeleton while thumbnail is being generated or loading
   // For videos, we wait for thumbnail instead of downloading full video
   // Handle undefined status gracefully to ensure we always show something
   const showSkeleton =
-    !attachment.previewUrl &&
+    !(isStillInStaging && attachment.previewUrl) &&
     (loading ||
       (!thumbnailUrl &&
         (thumbnailStatus === "pending" ||
           thumbnailStatus === "processing" ||
           thumbnailStatus === undefined)));
 
-  // Display URL is thumbnail for poster display, or preview URL for optimistic uploads
-  const displayUrl = attachment.previewUrl || thumbnailUrl;
+  // Display URL: Use previewUrl ONLY during staging (upload in progress)
+  // Once file is promoted to message path, use S3 thumbnail to avoid revoked blob URLs
+  const displayUrl =
+    isStillInStaging && attachment.previewUrl
+      ? attachment.previewUrl
+      : thumbnailUrl;
 
-  if (error && !displayUrl) {
-    return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
-        {error}
-      </div>
+  // Track loading state for scroll hook coordination
+  // Media is "loading" if:
+  // 1. We're showing skeleton (no thumbnail yet), OR
+  // 2. We have a displayUrl but the thumbnail hasn't loaded yet
+  const isMediaLoading = showSkeleton || (displayUrl && !thumbnailLoaded);
+
+  // Reset thumbnailLoaded and thumbnailError when URL changes
+  // This allows retry when the attachment is updated (e.g., after promotion)
+  useEffect(() => {
+    setThumbnailLoaded(false);
+    setThumbnailError(false);
+  }, [displayUrl]);
+
+  const handleThumbnailLoad = useCallback(() => {
+    setThumbnailLoaded(true);
+  }, []);
+
+  const handleThumbnailError = useCallback(() => {
+    console.error(
+      `[VideoAttachment] Failed to load thumbnail for ${attachment.id} - file may be deleted`
     );
-  }
+    setThumbnailError(true);
+    setThumbnailLoaded(true); // Mark as "loaded" to stop showing skeleton
+  }, [attachment.id]);
 
   // Upload progress overlay component
   const UploadProgressOverlay = () => (
@@ -366,20 +422,57 @@ export function VideoAttachment({
     </div>
   );
 
-  // Track loading state for scroll hook coordination
-  // Media is "loading" if:
-  // 1. We're showing skeleton (no thumbnail yet), OR
-  // 2. We have a displayUrl but the thumbnail hasn't loaded yet
-  const isMediaLoading = showSkeleton || (displayUrl && !thumbnailLoaded);
+  // ============================================================
+  // EARLY RETURNS (must be AFTER all hooks)
+  // ============================================================
 
-  // Reset thumbnailLoaded when URL changes
-  useEffect(() => {
-    setThumbnailLoaded(false);
-  }, [displayUrl]);
+  // If not accessible, show unavailable state
+  // IMPORTANT: Must include data-media-loading="false" to signal scroll system
+  // that this media is "done" (even though it failed)
+  if (!isAccessible) {
+    return (
+      <div
+        className="relative max-w-xs bg-gray-200 dark:bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center min-h-[100px]"
+        data-media-container="video"
+        data-media-loading="false"
+      >
+        <div className="flex flex-col items-center text-gray-400 dark:text-gray-500 p-4">
+          <ImageOff className="w-8 h-8 mb-2" />
+          <span className="text-sm text-center">Video unavailable</span>
+        </div>
+      </div>
+    );
+  }
 
-  const handleThumbnailLoad = useCallback(() => {
-    setThumbnailLoaded(true);
-  }, []);
+  // Show unavailable state if thumbnail failed to load (e.g., S3 file deleted)
+  if (thumbnailError) {
+    return (
+      <div
+        className="relative max-w-xs bg-gray-200 dark:bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center min-h-[100px]"
+        data-media-container="video"
+        data-media-loading="false"
+      >
+        <div className="flex flex-col items-center text-gray-400 dark:text-gray-500 p-4">
+          <ImageOff className="w-8 h-8 mb-2" />
+          <span className="text-sm text-center">Video unavailable</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (error && !displayUrl) {
+    // IMPORTANT: Must include data-media-loading="false" to signal scroll system
+    // that this media is "done" (even though it failed)
+    return (
+      <div
+        className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700"
+        data-media-container="video"
+        data-media-loading="false"
+      >
+        {error}
+      </div>
+    );
+  }
 
   return (
     <div
@@ -405,6 +498,7 @@ export function VideoAttachment({
               className={`rounded-lg max-w-full h-auto ${isUploading ? "opacity-70" : ""}`}
               muted
               onLoadedData={handleThumbnailLoad}
+              onError={handleThumbnailError}
             />
           ) : (
             // Show thumbnail/poster image instead of video element
@@ -413,6 +507,7 @@ export function VideoAttachment({
               alt={attachment.fileName}
               className={`rounded-lg max-w-full h-auto ${isUploading ? "opacity-70" : ""}`}
               onLoad={handleThumbnailLoad}
+              onError={handleThumbnailError}
             />
           )}
           {/* Video duration badge */}
@@ -503,16 +598,27 @@ export function VideoThumbnail({
     attachment,
   });
 
+  // Check if the attachment is still in staging (previewUrl is valid)
+  // Once promoted (s3Key doesn't start with "staging/"), previewUrl blob may be revoked
+  const isStillInStaging =
+    !attachment.s3Key ||
+    attachment.s3Key === "" ||
+    attachment.s3Key.startsWith("staging/");
+
   // Show skeleton while thumbnail is being generated
   const showSkeleton =
     !thumbnailUrl &&
-    !attachment.previewUrl &&
+    !(isStillInStaging && attachment.previewUrl) &&
     (loading ||
       thumbnailStatus === "pending" ||
       thumbnailStatus === "processing");
 
-  // Use preview URL for optimistic uploads
-  const displayUrl = attachment.previewUrl || thumbnailUrl;
+  // Use preview URL for optimistic uploads ONLY during staging
+  // Once file is promoted, use S3 thumbnail to avoid revoked blob URLs
+  const displayUrl =
+    isStillInStaging && attachment.previewUrl
+      ? attachment.previewUrl
+      : thumbnailUrl;
 
   if (error && !displayUrl) {
     return (
@@ -679,15 +785,25 @@ export function AudioAttachment({
   }, [volume, isMuted]);
 
   if (error) {
+    // IMPORTANT: Must include data-media-loading="false" to signal scroll system
+    // that this media is "done" (even though it failed)
     return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+      <div
+        className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700"
+        data-media-container="audio"
+        data-media-loading="false"
+      >
         {error}
       </div>
     );
   }
 
   return (
-    <div className="bg-gray-100 rounded-lg p-3 space-y-2 max-w-xs">
+    <div
+      className="bg-gray-100 rounded-lg p-3 space-y-2 max-w-xs"
+      data-media-container="audio"
+      data-media-loading={loading ? "true" : "false"}
+    >
       {audioUrl && (
         <audio
           ref={audioRef}

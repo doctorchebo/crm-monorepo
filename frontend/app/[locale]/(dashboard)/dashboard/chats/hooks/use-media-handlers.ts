@@ -1,9 +1,18 @@
 "use client";
 
 import { AttachmentType } from "@/components/media/attachment-menu";
-import { StagedFile } from "@/components/media/media-staging-panel";
+import {
+  invalidateCacheForAttachment,
+  invalidateStagingCaches,
+} from "@/hooks/use-media-url";
 import { backendApi } from "@/lib/api/endpoints";
+import { mediaCache } from "@/lib/cache/media-cache";
 import { mediaApi } from "@/lib/media/api";
+import {
+  createStagedFile,
+  getStagingIds,
+  StagedFile,
+} from "@/lib/media/staging-types";
 import { Attachment, hasAccessibleMediaSource } from "@/lib/media/types";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PAGE_SIZE } from "../constants";
@@ -44,6 +53,8 @@ interface UseMediaHandlersReturn {
   stagedFiles: StagedFile[];
   setStagedFiles: React.Dispatch<React.SetStateAction<StagedFile[]>>;
   currentAttachmentType: AttachmentType;
+  /** ID of the staged file that should be focused (used when adding more files) */
+  focusFileId: string | null;
 
   // Preview modal state
   previewModalOpen: boolean;
@@ -78,7 +89,8 @@ interface UseMediaHandlersReturn {
   imageEditorOpen: boolean;
   setImageEditorOpen: React.Dispatch<React.SetStateAction<boolean>>;
   imageToEdit: string | null;
-  imageEditorSource: "camera" | "attachment" | "staged" | null;
+  imageEditorSource: "camera" | "attachment" | null;
+  /** @deprecated No longer needed - editing is now integrated in staging panel */
   editingStagedFileId: string | null;
 
   // Refs
@@ -120,8 +132,10 @@ interface UseMediaHandlersReturn {
   handleImageEditorRetake: () => void;
   handleImageEditorClose: () => void;
   handleEditAttachedImage: (imageUrl: string) => void;
+  /** @deprecated No longer needed - editing is now integrated in staging panel */
   handleEditStagedImage: (file: StagedFile) => void;
-  handleStagedImageEdited: (imageBlob: Blob) => void;
+  /** Called when an image is edited in the staging panel - returns Promise that resolves when re-upload is complete */
+  handleStagedImageEdited: (fileId: string, imageBlob: Blob) => Promise<void>;
 }
 
 export function useMediaHandlers(
@@ -147,6 +161,7 @@ export function useMediaHandlers(
   const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
   const [currentAttachmentType, setCurrentAttachmentType] =
     useState<AttachmentType>("photos-videos");
+  const [focusFileId, setFocusFileId] = useState<string | null>(null);
   const addMoreInputRef = useRef<HTMLInputElement>(null);
 
   // Preview modal state
@@ -155,10 +170,13 @@ export function useMediaHandlers(
 
   // Build previewable media items from all messages in the current batch
   // Only includes visual media (images/videos) that have accessible media sources
+  // Excludes deleted messages - their attachments should not be shown in the preview
   const previewMediaItems = useMemo<PreviewableMediaItem[]>(() => {
     const items: PreviewableMediaItem[] = [];
 
     for (const message of messages) {
+      // Skip deleted messages - their attachments should not be shown
+      if (message.isDeleted) continue;
       if (!message.attachments) continue;
 
       message.attachments.forEach((attachment, index) => {
@@ -206,52 +224,315 @@ export function useMediaHandlers(
   const [imageEditorOpen, setImageEditorOpen] = useState(false);
   const [imageToEdit, setImageToEdit] = useState<string | null>(null);
   const [imageEditorSource, setImageEditorSource] = useState<
-    "camera" | "attachment" | "staged" | null
+    "camera" | "attachment" | null
   >(null);
+  // @deprecated - no longer needed with integrated editing
   const [editingStagedFileId, setEditingStagedFileId] = useState<string | null>(
     null
   );
 
-  // Handle files selected from attachment menu
-  const handleFilesSelected = useCallback(
-    (files: File[], type: AttachmentType) => {
-      setCurrentAttachmentType(type);
+  // Track mounted state for async operations
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
-      const newStagedFiles: StagedFile[] = files.map((file) => {
-        const fileType = file.type.startsWith("image/")
-          ? "image"
-          : file.type.startsWith("video/")
-            ? "video"
-            : file.type.startsWith("audio/")
-              ? "audio"
-              : "document";
+  // Get current staged files for cleanup on unmount
+  const stagedFilesRef = useRef(stagedFiles);
+  stagedFilesRef.current = stagedFiles;
+
+  // Track staging IDs that have been committed to messages AND promoted
+  // These should NOT be cleaned up on unmount because:
+  // 1. The files have been copied to the final message path in S3
+  // 2. The database s3Key has been updated to the promoted path
+  // 3. Staging records can be safely cleaned up by the scheduled task
+  const committedStagingIdsRef = useRef<Set<string>>(new Set());
+
+  // Cleanup staged files on unmount (user navigated away without sending)
+  // This handles the case where user adds files to staging but never sends.
+  // Committed files (successfully promoted) are excluded from cleanup.
+  useEffect(() => {
+    return () => {
+      const allStagingIds = getStagingIds(stagedFilesRef.current);
+      const committedIds = committedStagingIdsRef.current;
+
+      // Only cleanup staging files that were NOT committed to messages
+      const stagingIdsToCleanup = allStagingIds.filter(
+        (id) => !committedIds.has(id)
+      );
+
+      if (stagingIdsToCleanup.length > 0) {
+        console.log(
+          "[MediaHandlers] Cleaning up uncommitted staged files on unmount:",
+          stagingIdsToCleanup
+        );
+        console.log(
+          "[MediaHandlers] Skipping committed staging IDs:",
+          Array.from(committedIds)
+        );
+        mediaApi.cleanupBatchStagedFiles(stagingIdsToCleanup).catch((err) => {
+          console.error("[MediaHandlers] Cleanup on unmount failed:", err);
+        });
+      } else if (allStagingIds.length > 0) {
+        console.log(
+          "[MediaHandlers] All staged files were committed, skipping cleanup:",
+          allStagingIds
+        );
+      }
+    };
+  }, []);
+
+  /**
+   * Upload a file to staging area for thumbnail pre-generation
+   * Returns a Promise that resolves with the upload result
+   */
+  const uploadToStaging = useCallback(
+    async (
+      file: StagedFile
+    ): Promise<{
+      success: boolean;
+      stagingId?: string;
+      s3Key?: string;
+      thumbnailKey?: string;
+      error?: string;
+    }> => {
+      const selectedChat = chats.find((c) => c.chatId === selectedChatId);
+      if (!selectedChat || !selectedChatId) {
+        console.error("[Staging] Cannot upload - no chat selected");
+        setStagedFiles((prev) =>
+          prev.map((f) =>
+            f.id === file.id
+              ? { ...f, uploadStatus: "failed", error: "No chat selected" }
+              : f
+          )
+        );
+        return { success: false, error: "No chat selected" };
+      }
+
+      // Update status to uploading
+      setStagedFiles((prev) =>
+        prev.map((f) =>
+          f.id === file.id ? { ...f, uploadStatus: "uploading" } : f
+        )
+      );
+
+      try {
+        const result = await mediaApi.stageFile(
+          file.file,
+          selectedChat.senderId,
+          selectedChatId,
+          (progress) => {
+            if (isMountedRef.current) {
+              setStagedFiles((prev) =>
+                prev.map((f) =>
+                  f.id === file.id ? { ...f, uploadProgress: progress } : f
+                )
+              );
+            }
+          }
+        );
+
+        if (!isMountedRef.current) {
+          return { success: false, error: "Component unmounted" };
+        }
+
+        console.log(`[Staging] Upload complete for ${file.id}:`, result);
+
+        // Update state and ref synchronously so that handleSendMediaFromStaging
+        // can read the latest data immediately after upload completes
+        setStagedFiles((prev) => {
+          const updated = prev.map((f) =>
+            f.id === file.id
+              ? {
+                  ...f,
+                  uploadStatus: "uploaded" as const,
+                  uploadProgress: 100,
+                  stagingId: result.stagingId,
+                  s3Key: result.s3Key,
+                  thumbnailKey: result.thumbnailKey,
+                  thumbnailStatus: result.thumbnailQueued
+                    ? ("processing" as const)
+                    : ("pending" as const),
+                }
+              : f
+          );
+          // Update ref synchronously within the state updater
+          stagedFilesRef.current = updated;
+          return updated;
+        });
+
+        // Start polling for thumbnail if queued
+        if (result.thumbnailQueued) {
+          pollThumbnailStatus(file.id, result.stagingId);
+        }
 
         return {
-          id: Math.random().toString(36).substring(7),
-          file,
-          previewUrl:
-            fileType === "image" || fileType === "video"
-              ? URL.createObjectURL(file)
-              : fileType === "audio"
-                ? URL.createObjectURL(file)
-                : undefined,
-          type: fileType,
+          success: true,
+          stagingId: result.stagingId,
+          s3Key: result.s3Key,
+          thumbnailKey: result.thumbnailKey,
         };
-      });
+      } catch (error) {
+        console.error(`[Staging] Upload failed for ${file.id}:`, error);
 
-      setStagedFiles((prev) => [...prev, ...newStagedFiles]);
-      setMediaStagingOpen(true);
+        if (!isMountedRef.current) {
+          return { success: false, error: "Component unmounted" };
+        }
+
+        const errorMessage =
+          error instanceof Error ? error.message : "Upload failed";
+
+        setStagedFiles((prev) =>
+          prev.map((f) =>
+            f.id === file.id
+              ? { ...f, uploadStatus: "failed", error: errorMessage }
+              : f
+          )
+        );
+
+        return { success: false, error: errorMessage };
+      }
+    },
+    [selectedChatId, chats]
+  );
+
+  /**
+   * Poll for thumbnail generation status
+   */
+  const thumbnailPollingRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+
+  const pollThumbnailStatus = useCallback(
+    (fileId: string, stagingId: string) => {
+      let pollCount = 0;
+      const maxPolls = 30;
+      const pollInterval = 2000;
+
+      const poll = async () => {
+        if (!isMountedRef.current || pollCount >= maxPolls) {
+          thumbnailPollingRef.current.delete(stagingId);
+          if (pollCount >= maxPolls) {
+            setStagedFiles((prev) =>
+              prev.map((f) =>
+                f.id === fileId ? { ...f, thumbnailStatus: "failed" } : f
+              )
+            );
+          }
+          return;
+        }
+
+        pollCount++;
+
+        try {
+          const status = await mediaApi.getStagingStatus(stagingId);
+
+          if (!isMountedRef.current) return;
+
+          if (status) {
+            setStagedFiles((prev) =>
+              prev.map((f) =>
+                f.id === fileId
+                  ? {
+                      ...f,
+                      thumbnailStatus: status.thumbnailStatus as
+                        | "pending"
+                        | "processing"
+                        | "completed"
+                        | "failed",
+                      thumbnailUrl: status.thumbnailUrl,
+                    }
+                  : f
+              )
+            );
+
+            if (
+              status.thumbnailStatus === "completed" ||
+              status.thumbnailStatus === "failed"
+            ) {
+              thumbnailPollingRef.current.delete(stagingId);
+              return;
+            }
+          }
+
+          // Continue polling
+          if (isMountedRef.current) {
+            const timerId = setTimeout(poll, pollInterval);
+            thumbnailPollingRef.current.set(stagingId, timerId);
+          }
+        } catch (error) {
+          console.error(`[Staging] Poll error for ${stagingId}:`, error);
+          if (isMountedRef.current && pollCount < maxPolls) {
+            const timerId = setTimeout(poll, pollInterval);
+            thumbnailPollingRef.current.set(stagingId, timerId);
+          }
+        }
+      };
+
+      // Start initial poll
+      const timerId = setTimeout(poll, pollInterval);
+      thumbnailPollingRef.current.set(stagingId, timerId);
     },
     []
   );
 
-  // Handle removing a staged file
+  // Handle files selected from attachment menu
+  // Now immediately starts staging uploads for thumbnail pre-generation
+  const handleFilesSelected = useCallback(
+    (files: File[], type: AttachmentType) => {
+      setCurrentAttachmentType(type);
+
+      // Create staged files with upload tracking
+      const newStagedFiles: StagedFile[] = files.map((file) =>
+        createStagedFile(file)
+      );
+
+      // Set focus to the first new file when adding more
+      if (newStagedFiles.length > 0) {
+        setFocusFileId(newStagedFiles[0].id);
+      }
+
+      setStagedFiles((prev) => [...prev, ...newStagedFiles]);
+      setMediaStagingOpen(true);
+
+      // Start staging uploads for each file immediately
+      newStagedFiles.forEach((file) => {
+        uploadToStaging(file);
+      });
+    },
+    [uploadToStaging]
+  );
+
+  // Handle removing a staged file - cleans up from S3 if uploaded
   const handleRemoveStagedFile = useCallback((id: string) => {
     setStagedFiles((prev) => {
       const file = prev.find((f) => f.id === id);
-      if (file?.previewUrl) {
-        URL.revokeObjectURL(file.previewUrl);
+
+      if (file) {
+        // Clean up blob URL
+        if (file.previewUrl) {
+          URL.revokeObjectURL(file.previewUrl);
+        }
+
+        // Clean up from S3 if staged
+        if (file.stagingId) {
+          console.log(`[Staging] Cleaning up ${file.stagingId}`);
+
+          // Stop thumbnail polling
+          const timerId = thumbnailPollingRef.current.get(file.stagingId);
+          if (timerId) {
+            clearTimeout(timerId);
+            thumbnailPollingRef.current.delete(file.stagingId);
+          }
+
+          // Cleanup from S3 (fire and forget)
+          mediaApi.cleanupStagedFile(file.stagingId).catch((err) => {
+            console.error(`[Staging] Cleanup failed:`, err);
+          });
+        }
       }
+
       const newFiles = prev.filter((f) => f.id !== id);
       if (newFiles.length === 0) {
         setMediaStagingOpen(false);
@@ -260,38 +541,114 @@ export function useMediaHandlers(
     });
   }, []);
 
-  // Handle closing the staging modal
+  // Handle closing the staging modal - cleans up all staged files from S3
   const handleCloseStagingModal = useCallback(() => {
+    // Get staging IDs before clearing
+    const currentFiles = stagedFilesRef.current;
+    const stagingIds = getStagingIds(currentFiles);
+
+    // Clean up blob URLs
+    currentFiles.forEach((file) => {
+      if (file.previewUrl) {
+        URL.revokeObjectURL(file.previewUrl);
+      }
+    });
+
+    // Stop all thumbnail polling
+    thumbnailPollingRef.current.forEach((timerId) => {
+      clearTimeout(timerId);
+    });
+    thumbnailPollingRef.current.clear();
+
+    // Clear state
     setStagedFiles([]);
     setMediaStagingOpen(false);
+    setFocusFileId(null);
+
+    // Cleanup from S3
+    if (stagingIds.length > 0) {
+      console.log(`[Staging] Batch cleanup:`, stagingIds);
+      mediaApi.cleanupBatchStagedFiles(stagingIds).catch((err) => {
+        console.error(`[Staging] Batch cleanup failed:`, err);
+      });
+    }
   }, []);
 
   // Handle sending media from staging modal
   // Each file is sent as a separate message due to WhatsApp Cloud API limitation
+  // Files are already pre-uploaded to staging - we promote them to the message path
   const handleSendMediaFromStaging = useCallback(
     async (caption: string) => {
       if (stagedFiles.length === 0 || !selectedChatId) return;
+
+      // Check if all files are uploaded (staged)
+      const hasFailedUploads = stagedFiles.some(
+        (f) => f.uploadStatus === "failed"
+      );
+      const hasUploading = stagedFiles.some(
+        (f) => f.uploadStatus === "uploading" || f.uploadStatus === "pending"
+      );
+
+      if (hasFailedUploads) {
+        setError("Some files failed to upload. Remove them to continue.");
+        return;
+      }
+
+      if (hasUploading) {
+        setError("Please wait for uploads to complete.");
+        return;
+      }
 
       try {
         setError(null);
         const selectedChat = chats.find((c) => c.chatId === selectedChatId);
         if (!selectedChat) return;
 
+        // Stop all thumbnail polling
+        thumbnailPollingRef.current.forEach((timerId) => {
+          clearTimeout(timerId);
+        });
+        thumbnailPollingRef.current.clear();
+
         // Close modal and clear staging immediately for better UX
-        const filesToSend = [...stagedFiles];
+        // IMPORTANT: Use stagedFilesRef.current to ensure we get the latest data
+        // (including any edited files that were just re-uploaded)
+        const filesToSend = [...stagedFilesRef.current];
+
+        // Debug: Log the files we're about to send
+        console.log(
+          `[Staging] Preparing to send ${filesToSend.length} files:`,
+          filesToSend.map((f) => ({
+            id: f.id,
+            stagingId: f.stagingId,
+            uploadStatus: f.uploadStatus,
+            s3Key: f.s3Key,
+            fileName: f.file.name,
+          }))
+        );
+
         setStagedFiles([]);
         setMediaStagingOpen(false);
 
-        setShouldAutoScroll(true);
-        scrollHelperRequestScroll(true);
-
         // Track all created messages for cleanup
-        const createdMessageIds: string[] = [];
         const previewUrlsToCleanup: string[] = [];
 
-        // Send each file as a separate message
-        // Caption is only added to the first message
-        // Reply context is only added to the first message
+        // =========================================================
+        // PHASE 1: Create messages AND promote staging files immediately
+        // This ensures each message has the correct s3Key before proceeding.
+        // If page refreshes mid-loop, completed messages have correct paths.
+        // =========================================================
+        interface PreparedMessage {
+          messageId: string;
+          stagedFile: StagedFile;
+          isFirstMessage: boolean;
+          optimisticMessage: Message;
+          promotedS3Key: string;
+          promotedThumbnailKey?: string;
+        }
+
+        const preparedMessages: PreparedMessage[] = [];
+
         for (let i = 0; i < filesToSend.length; i++) {
           const stagedFile = filesToSend[i];
           const isFirstMessage = i === 0;
@@ -312,19 +669,22 @@ export function useMediaHandlers(
                 fileName: stagedFile.file.name,
                 mimeType: stagedFile.file.type || "application/octet-stream",
                 size: stagedFile.file.size,
-                s3Key: "",
-                status: "pending",
+                s3Key: stagedFile.s3Key || "",
+                status:
+                  stagedFile.uploadStatus === "uploaded"
+                    ? "success"
+                    : "pending",
                 uploadedAt: new Date().toISOString(),
+                stagingId: stagedFile.stagingId,
+                thumbnailKey: stagedFile.thumbnailKey,
               },
             ],
           };
 
-          // Only add caption to the first message
           if (isFirstMessage && caption.trim()) {
             messagePayload.body = caption;
           }
 
-          // Only add reply context to the first message
           if (isFirstMessage && replyingToMessage?.messageId) {
             messagePayload.replyToMessageId = replyingToMessage.messageId;
           }
@@ -339,10 +699,73 @@ export function useMediaHandlers(
           }
 
           const messageId = sentMessage.messageId;
-          createdMessageIds.push(messageId);
 
-          // Create optimistic message for immediate UI display
-          const optimisticMessage = {
+          // =========================================================
+          // CRITICAL: Promote staging file IMMEDIATELY after message creation
+          // This ensures the database has the correct s3Key even if
+          // the page refreshes before PHASE 3 completes.
+          // =========================================================
+          let promotedS3Key = stagedFile.s3Key || "";
+          let promotedThumbnailKey = stagedFile.thumbnailKey;
+
+          // Debug: Log staging state to understand why promotion might be skipped
+          console.log(`[Staging] File ${i + 1}/${filesToSend.length} state:`, {
+            id: stagedFile.id,
+            stagingId: stagedFile.stagingId,
+            uploadStatus: stagedFile.uploadStatus,
+            s3Key: stagedFile.s3Key,
+            fileName: stagedFile.file.name,
+          });
+
+          if (stagedFile.stagingId && stagedFile.uploadStatus === "uploaded") {
+            try {
+              console.log(
+                `[Staging] Promoting ${stagedFile.stagingId} for message ${messageId}, attachment ${stagedFile.id}`
+              );
+
+              const promoted = await mediaApi.promoteStagedFile(
+                stagedFile.stagingId,
+                messageId,
+                selectedChat.senderId,
+                selectedChatId,
+                stagedFile.id
+              );
+
+              promotedS3Key = promoted.s3Key;
+              promotedThumbnailKey =
+                promoted.thumbnailKey || promotedThumbnailKey;
+              console.log(`[Staging] Promoted to ${promotedS3Key}`);
+
+              // CRITICAL: Invalidate all caches for this attachment
+              // The staging URLs are now invalid - files have been moved.
+              // This clears both module-level cache (use-media-url.ts) and
+              // singleton cache (media-cache.ts) to ensure fresh URLs are fetched.
+              invalidateCacheForAttachment(messageId, stagedFile.id);
+              mediaCache.invalidateAttachmentUrl(messageId, stagedFile.id);
+
+              // Mark as committed (file has been promoted, safe to cleanup staging record)
+              committedStagingIdsRef.current.add(stagedFile.stagingId);
+            } catch (promoteError) {
+              console.error(
+                `[Staging] Promotion failed for ${stagedFile.stagingId}:`,
+                promoteError
+              );
+              // Continue with original s3Key - WhatsApp send will still work
+              // but future loads may fail if staging files get cleaned up
+            }
+          }
+
+          // Create optimistic message for UI with PROMOTED s3Key
+          // Map staging thumbnailStatus to attachment thumbnailStatus:
+          // "completed" -> "ready", others map directly
+          const attachmentThumbnailStatus =
+            stagedFile.thumbnailStatus === "completed"
+              ? ("ready" as const)
+              : stagedFile.thumbnailStatus === "failed"
+                ? ("failed" as const)
+                : ("pending" as const);
+
+          const optimisticMessage: Message = {
             messageId: messageId,
             text: isFirstMessage && caption.trim() ? caption : null,
             sender: selectedChat.businessPhone || "",
@@ -357,11 +780,23 @@ export function useMediaHandlers(
                 fileName: stagedFile.file.name,
                 mimeType: stagedFile.file.type || "application/octet-stream",
                 size: stagedFile.file.size,
-                s3Key: "",
-                status: "uploading" as const,
+                s3Key: promotedS3Key,
+                thumbnailKey: promotedThumbnailKey,
+                // CRITICAL: Include thumbnailStatus so useMediaUrl can load the thumbnail
+                // Without this, hasThumbnail is false and it falls back to loading full image
+                thumbnailStatus: attachmentThumbnailStatus,
+                status:
+                  stagedFile.uploadStatus === "uploaded"
+                    ? "success"
+                    : ("uploading" as const),
                 uploadedAt: new Date().toISOString(),
-                previewUrl: stagedFile.previewUrl,
-                progress: 0,
+                // DON'T include previewUrl once we have a promoted s3Key
+                // The blob URL will be revoked soon, and useMediaUrl should load from S3 instead
+                // Only keep previewUrl if promotion failed (s3Key still starts with "staging/")
+                previewUrl: promotedS3Key.startsWith("staging/")
+                  ? stagedFile.previewUrl
+                  : undefined,
+                progress: stagedFile.uploadStatus === "uploaded" ? 100 : 0,
               },
             ],
             replyToMessageId:
@@ -395,138 +830,197 @@ export function useMediaHandlers(
                 : null,
           };
 
-          // Add optimistic message to the UI
-          setMessages((prev) => {
-            if (prev.some((m) => m.messageId === messageId)) {
-              return prev;
-            }
-            return [...prev, optimisticMessage];
+          preparedMessages.push({
+            messageId,
+            stagedFile,
+            isFirstMessage,
+            optimisticMessage,
+            promotedS3Key,
+            promotedThumbnailKey,
           });
-          setMessageCount((prev) => prev + 1);
-
-          // Helper to update this message's attachment status
-          const updateMessageStatus = (
-            status: "uploading" | "success" | "failed",
-            additionalData?: {
-              progress?: number;
-              s3Key?: string;
-              errorMessage?: string;
-            }
-          ) => {
-            setMessages((prev) =>
-              prev.map((msg) => {
-                if (msg.messageId !== messageId) return msg;
-                return {
-                  ...msg,
-                  status:
-                    status === "success"
-                      ? "sent"
-                      : status === "failed"
-                        ? "failed"
-                        : msg.status,
-                  attachments: msg.attachments?.map((att) => ({
-                    ...att,
-                    status,
-                    ...additionalData,
-                  })),
-                };
-              })
-            );
-          };
-
-          // Upload file to S3
-          try {
-            const result = await mediaApi.uploadFileToBackend(
-              stagedFile.file,
-              selectedChat.senderId,
-              selectedChatId,
-              messageId,
-              (progress) => {
-                updateMessageStatus("uploading", { progress });
-              },
-              stagedFile.id
-            );
-
-            // Get download URL and send via WhatsApp
-            const downloadUrl = (await backendApi.whatsapp.getDownloadUrl(
-              messageId,
-              result.uploadId
-            )) as { url?: string };
-
-            if (downloadUrl?.url) {
-              await backendApi.whatsapp.sendMedia({
-                to: selectedChat.participantPhone,
-                mediaType: stagedFile.type,
-                mediaUrl: downloadUrl.url,
-                caption: isFirstMessage ? caption : undefined,
-                senderId: selectedChat.senderId,
-                fileName: stagedFile.file.name,
-                originalMessageId: messageId,
-                attachmentId: stagedFile.id,
-              });
-            }
-
-            // Mark as success
-            updateMessageStatus("success", {
-              progress: 100,
-              s3Key: result.s3Key,
-            });
-          } catch (uploadError) {
-            console.error(
-              `Failed to upload ${stagedFile.file.name}:`,
-              uploadError
-            );
-            updateMessageStatus("failed", { errorMessage: "Upload failed" });
-          }
         }
 
-        // Refresh messages from backend after all uploads complete
-        if (currentMessagesChatIdRef.current === selectedChatId) {
-          const response = await backendApi.whatsapp.getChatMessages(
-            selectedChatId,
-            0,
-            PAGE_SIZE
-          );
+        // CRITICAL: After all promotions, clear any remaining staging URLs from caches
+        // This ensures no stale staging URLs are served from any cache layer
+        invalidateStagingCaches();
+        mediaCache.invalidateStagingUrls();
 
-          if (
-            currentMessagesChatIdRef.current === selectedChatId &&
-            response?.messages
-          ) {
-            const sorted = [...response.messages].sort(
-              (a, b) =>
-                new Date(a.timestamp).getTime() -
-                new Date(b.timestamp).getTime()
-            );
-            const cachedData = messagesCacheRef.current.get(selectedChatId);
-            let combined = sorted;
-            if (cachedData && cachedData.cursor > PAGE_SIZE) {
-              const existingIds = new Set(sorted.map((m) => m.messageId));
-              const olderMessages = cachedData.messages.filter(
-                (m) => !existingIds.has(m.messageId)
+        // =========================================================
+        // PHASE 2: Add ALL optimistic messages to UI in one batch
+        // This ensures scroll request sees all messages at once
+        // =========================================================
+        setMessages((prev) => {
+          const existingIds = new Set(prev.map((m) => m.messageId));
+          const newMessages = preparedMessages
+            .map((pm) => pm.optimisticMessage)
+            .filter((m) => !existingIds.has(m.messageId));
+          return [...prev, ...newMessages];
+        });
+        setMessageCount((prev) => prev + preparedMessages.length);
+
+        // Request scroll AFTER messages are added to state
+        // Use setTimeout to ensure React has processed the state update
+        setShouldAutoScroll(true);
+        setTimeout(() => {
+          scrollHelperRequestScroll(true);
+        }, 50);
+
+        // =========================================================
+        // PHASE 3: Send to WhatsApp API in background (don't await)
+        // Promotion already happened in PHASE 1, so we just need to:
+        // 1. Handle fallback upload for files that weren't staged
+        // 2. Get download URL and send to WhatsApp
+        // =========================================================
+        (async () => {
+          for (const {
+            messageId,
+            stagedFile,
+            isFirstMessage,
+            promotedS3Key,
+          } of preparedMessages) {
+            // Helper to update this message's attachment status
+            const updateMessageStatus = (
+              status: "uploading" | "success" | "failed",
+              additionalData?: {
+                progress?: number;
+                s3Key?: string;
+                errorMessage?: string;
+              }
+            ) => {
+              setMessages((prev) =>
+                prev.map((msg) => {
+                  if (msg.messageId !== messageId) return msg;
+                  return {
+                    ...msg,
+                    status:
+                      status === "success"
+                        ? "sent"
+                        : status === "failed"
+                          ? "failed"
+                          : msg.status,
+                    attachments: msg.attachments?.map((att) => ({
+                      ...att,
+                      status,
+                      ...additionalData,
+                      // CRITICAL: Clear previewUrl when s3Key is updated
+                      // This ensures useMediaUrl loads the actual thumbnail from S3
+                      // instead of continuing to use the local blob URL
+                      previewUrl: additionalData?.s3Key
+                        ? undefined
+                        : att.previewUrl,
+                    })),
+                  };
+                })
               );
-              combined = [...olderMessages, ...sorted].sort(
+            };
+
+            try {
+              let s3Key = promotedS3Key;
+
+              // Fallback: upload fresh if not staged (shouldn't happen normally)
+              if (
+                !stagedFile.stagingId ||
+                stagedFile.uploadStatus !== "uploaded"
+              ) {
+                console.log(
+                  `[Staging] Fallback upload for ${stagedFile.file.name}`
+                );
+
+                const result = await mediaApi.uploadFileToBackend(
+                  stagedFile.file,
+                  selectedChat.senderId,
+                  selectedChatId,
+                  messageId,
+                  (progress) => {
+                    updateMessageStatus("uploading", { progress });
+                  },
+                  stagedFile.id
+                );
+                s3Key = result.s3Key;
+              }
+
+              // Get download URL and send via WhatsApp
+              const downloadUrl = (await backendApi.whatsapp.getDownloadUrl(
+                messageId,
+                stagedFile.id
+              )) as { url?: string };
+
+              if (downloadUrl?.url) {
+                await backendApi.whatsapp.sendMedia({
+                  to: selectedChat.participantPhone,
+                  mediaType: stagedFile.type,
+                  mediaUrl: downloadUrl.url,
+                  caption: isFirstMessage ? caption : undefined,
+                  senderId: selectedChat.senderId,
+                  fileName: stagedFile.file.name,
+                  originalMessageId: messageId,
+                  attachmentId: stagedFile.id,
+                });
+              }
+
+              // Mark as success
+              updateMessageStatus("success", {
+                progress: 100,
+                s3Key: s3Key,
+              });
+            } catch (uploadError) {
+              console.error(
+                `Failed to send ${stagedFile.file.name}:`,
+                uploadError
+              );
+              updateMessageStatus("failed", { errorMessage: "Send failed" });
+            }
+          }
+
+          // Refresh messages from backend after all uploads complete
+          if (currentMessagesChatIdRef.current === selectedChatId) {
+            const response = await backendApi.whatsapp.getChatMessages(
+              selectedChatId,
+              0,
+              PAGE_SIZE
+            );
+
+            if (
+              currentMessagesChatIdRef.current === selectedChatId &&
+              response?.messages
+            ) {
+              const sorted = [...response.messages].sort(
                 (a, b) =>
                   new Date(a.timestamp).getTime() -
                   new Date(b.timestamp).getTime()
               );
+              const cachedData = messagesCacheRef.current.get(selectedChatId);
+              let combined = sorted;
+              if (cachedData && cachedData.cursor > PAGE_SIZE) {
+                const existingIds = new Set(sorted.map((m) => m.messageId));
+                const olderMessages = cachedData.messages.filter(
+                  (m) => !existingIds.has(m.messageId)
+                );
+                combined = [...olderMessages, ...sorted].sort(
+                  (a, b) =>
+                    new Date(a.timestamp).getTime() -
+                    new Date(b.timestamp).getTime()
+                );
+              }
+              setMessages(combined);
+              setMessageCount(combined.length);
+              messagesCacheRef.current.set(selectedChatId, {
+                messages: combined,
+                hasMore: cachedData?.hasMore ?? response.hasMore,
+                cursor: cachedData?.cursor ?? response.nextCursor,
+              });
             }
-            setMessages(combined);
-            setMessageCount(combined.length);
-            messagesCacheRef.current.set(selectedChatId, {
-              messages: combined,
-              hasMore: cachedData?.hasMore ?? response.hasMore,
-              cursor: cachedData?.cursor ?? response.nextCursor,
-            });
           }
-        }
 
-        // Clean up preview blob URLs
-        setTimeout(() => {
-          previewUrlsToCleanup.forEach((url) => {
-            URL.revokeObjectURL(url);
-          });
-        }, 2000);
+          // Clean up preview blob URLs
+          setTimeout(() => {
+            previewUrlsToCleanup.forEach((url) => {
+              URL.revokeObjectURL(url);
+            });
+          }, 2000);
+        })(); // End of async IIFE for background uploads
 
+        // Clear reply state immediately (UI feedback)
         setReplyingToMessage(null);
       } catch (err: any) {
         console.error("Error sending media:", err);
@@ -1130,7 +1624,10 @@ export function useMediaHandlers(
                           ...a,
                           status: "success",
                           progress: 100,
-                          s3Key: result.uploadId,
+                          s3Key: result.s3Key,
+                          // Clear previewUrl once we have a real s3Key
+                          // The blob URL will be revoked and we should use S3 URLs
+                          previewUrl: undefined,
                         }
                       : a
                   ),
@@ -1210,20 +1707,21 @@ export function useMediaHandlers(
     setImageEditorOpen(true);
   }, []);
 
-  // Handler to edit a staged image from the staging panel
-  const handleEditStagedImage = useCallback((file: StagedFile) => {
-    if (file.previewUrl) {
-      setImageToEdit(file.previewUrl);
-      setEditingStagedFileId(file.id);
-      setImageEditorSource("staged");
-      setImageEditorOpen(true);
-    }
+  // @deprecated - Handler to edit a staged image from the staging panel
+  // No longer used - editing is now integrated in staging panel
+  const handleEditStagedImage = useCallback((_file: StagedFile) => {
+    // Deprecated - do nothing
+    console.warn(
+      "handleEditStagedImage is deprecated. Image editing is now integrated in the staging panel."
+    );
   }, []);
 
   // Handler when a staged image has been edited - replace the file in staging
+  // Cleans up old staging and re-uploads the edited file
+  // Returns Promise that resolves when upload is complete
   const handleStagedImageEdited = useCallback(
-    (imageBlob: Blob) => {
-      if (!editingStagedFileId) return;
+    async (fileId: string, imageBlob: Blob): Promise<void> => {
+      if (!fileId) return;
 
       // Create a new File from the edited blob
       const editedFile = new File([imageBlob], `edited-${Date.now()}.jpg`, {
@@ -1233,31 +1731,76 @@ export function useMediaHandlers(
       // Create new preview URL
       const newPreviewUrl = URL.createObjectURL(imageBlob);
 
-      // Update the staged file
+      // Find the old file to clean up staging
+      const oldFile = stagedFilesRef.current.find((f) => f.id === fileId);
+
+      // Clean up old staging from S3 if exists
+      if (oldFile?.stagingId) {
+        console.log(
+          `[Staging] Cleaning up old staging ${oldFile.stagingId} for edited file`
+        );
+
+        // Stop thumbnail polling
+        const timerId = thumbnailPollingRef.current.get(oldFile.stagingId);
+        if (timerId) {
+          clearTimeout(timerId);
+          thumbnailPollingRef.current.delete(oldFile.stagingId);
+        }
+
+        // Cleanup from S3 (fire and forget)
+        mediaApi.cleanupStagedFile(oldFile.stagingId).catch((err) => {
+          console.error(`[Staging] Cleanup failed:`, err);
+        });
+      }
+
+      // Revoke old preview URL
+      if (oldFile?.previewUrl) {
+        URL.revokeObjectURL(oldFile.previewUrl);
+      }
+
+      // Update the staged file - reset staging status
       setStagedFiles((prev) =>
         prev.map((sf) => {
-          if (sf.id === editingStagedFileId) {
-            // Revoke old preview URL
-            if (sf.previewUrl) {
-              URL.revokeObjectURL(sf.previewUrl);
-            }
+          if (sf.id === fileId) {
             return {
               ...sf,
               file: editedFile,
               previewUrl: newPreviewUrl,
+              // Reset staging status - will be re-uploaded
+              stagingId: undefined,
+              s3Key: undefined,
+              thumbnailKey: undefined,
+              uploadStatus: "uploading",
+              uploadProgress: 0,
+              thumbnailStatus: "pending",
+              thumbnailUrl: undefined,
+              error: undefined,
             };
           }
           return sf;
         })
       );
 
-      // Close editor and reset state
-      setImageEditorOpen(false);
-      setImageToEdit(null);
-      setImageEditorSource(null);
-      setEditingStagedFileId(null);
+      // Start new upload for the edited file and WAIT for it to complete
+      const updatedFile: StagedFile = {
+        id: fileId,
+        file: editedFile,
+        previewUrl: newPreviewUrl,
+        type: "image",
+        uploadStatus: "pending",
+        uploadProgress: 0,
+        thumbnailStatus: "pending",
+      };
+
+      const result = await uploadToStaging(updatedFile);
+
+      if (!result.success) {
+        throw new Error(result.error || "Failed to upload edited image");
+      }
+
+      console.log(`[Staging] Edited image uploaded successfully:`, result);
     },
-    [editingStagedFileId]
+    [uploadToStaging]
   );
 
   // Close download menu on click outside or Escape key
@@ -1295,6 +1838,7 @@ export function useMediaHandlers(
     stagedFiles,
     setStagedFiles,
     currentAttachmentType,
+    focusFileId,
     previewModalOpen,
     setPreviewModalOpen,
     previewMediaItems,

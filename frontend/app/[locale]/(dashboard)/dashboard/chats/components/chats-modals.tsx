@@ -10,6 +10,7 @@ import {
   CameraCapturePanel,
   ImageEditorPanel,
 } from "@/components/image-editor";
+import { EnhancedMediaPreviewModal } from "@/components/media/enhanced-media-preview-modal-standalone";
 import { MediaDownloadMenu } from "@/components/media/media-download-menu";
 import {
   MediaStagingPanel,
@@ -22,7 +23,6 @@ import {
   ReceivedContact,
 } from "@/lib/types/contact-message.types";
 import type { Sender } from "../types";
-import { EnhancedMediaPreviewModal } from "@/components/media/enhanced-media-preview-modal-standalone";
 
 interface ChatsModalsProps {
   // Media staging
@@ -34,7 +34,12 @@ interface ChatsModalsProps {
   onSendMediaFromStaging: (caption: string) => void;
   onAddMoreMedia: () => void;
   onRemoveStagedFile: (id: string) => void;
+  /** @deprecated No longer used - editing is now integrated in staging panel */
   onEditStagedImage: (file: StagedFile) => void;
+  /** Called when an image is edited in the staging panel - returns Promise that resolves when re-upload is complete */
+  onStagedImageEdited?: (fileId: string, newBlob: Blob) => Promise<void>;
+  /** ID of the file to focus on (used when adding new files) */
+  focusFileId?: string | null;
 
   // Media preview - enhanced version with all media items from batch
   previewModalOpen: boolean;
@@ -79,11 +84,10 @@ interface ChatsModalsProps {
   // Image editor
   imageEditorOpen: boolean;
   imageToEdit: string | null;
-  imageEditorSource: "camera" | "attachment" | "staged" | null;
+  imageEditorSource: "camera" | "attachment" | null;
   onImageEditorSend: (imageBlob: Blob, caption: string) => Promise<void>;
   onImageEditorRetake: () => void;
   onImageEditorClose: () => void;
-  onStagedImageEdited?: (imageBlob: Blob) => void;
 
   // Contact modals
   sendContactsModalOpen: boolean;
@@ -136,6 +140,8 @@ export function ChatsModals({
   onAddMoreMedia,
   onRemoveStagedFile,
   onEditStagedImage,
+  onStagedImageEdited,
+  focusFileId,
   previewModalOpen,
   previewMediaItems,
   previewInitialIndex,
@@ -166,7 +172,6 @@ export function ChatsModals({
   onImageEditorSend,
   onImageEditorRetake,
   onImageEditorClose,
-  onStagedImageEdited,
   sendContactsModalOpen,
   contactPreviewModalOpen,
   viewContactsModalOpen,
@@ -194,23 +199,9 @@ export function ChatsModals({
   onCloseSenderSelectModal,
   onSenderSelectedForContact,
 }: ChatsModalsProps) {
-  // Handler for image editor completion - different behavior based on source
-  const handleImageEditorComplete = async (
-    imageBlob: Blob,
-    caption: string
-  ) => {
-    if (imageEditorSource === "staged" && onStagedImageEdited) {
-      // For staged images, just replace the file and don't send
-      onStagedImageEdited(imageBlob);
-    } else {
-      // For camera/attachment, send the message
-      await onImageEditorSend(imageBlob, caption);
-    }
-  };
-
   return (
     <>
-      {/* Media Staging Panel */}
+      {/* Media Staging Panel - Full-screen with integrated image editing */}
       <MediaStagingPanel
         isOpen={mediaStagingOpen}
         files={stagedFiles}
@@ -218,9 +209,10 @@ export function ChatsModals({
         onSend={onSendMediaFromStaging}
         onAddMore={onAddMoreMedia}
         onRemove={onRemoveStagedFile}
-        onEditImage={onEditStagedImage}
+        onImageEdited={onStagedImageEdited}
         disabled={isUploading}
         sendButtonText={sendButtonText}
+        focusFileId={focusFileId}
       />
 
       {/* Enhanced Media Preview Modal */}
@@ -272,13 +264,13 @@ export function ChatsModals({
         />
       )}
 
-      {/* Image Editor Panel */}
+      {/* Image Editor Panel - For camera captures and attachment edits (not staged) */}
       {imageEditorOpen && imageToEdit && (
         <ImageEditorPanel
           image={imageToEdit}
           isFromCamera={imageEditorSource === "camera"}
-          isFromStaged={imageEditorSource === "staged"}
-          onComplete={handleImageEditorComplete}
+          isFromStaged={false}
+          onComplete={onImageEditorSend}
           onCancel={onImageEditorClose}
           onRetake={
             imageEditorSource === "camera" ? onImageEditorRetake : undefined

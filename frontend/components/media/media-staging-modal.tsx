@@ -10,10 +10,13 @@
  * - Caption input for the message
  * - Send button
  * - Warning banner when multiple files are selected (WhatsApp API limitation)
+ *
+ * @deprecated Use MediaStagingPanel instead which has integrated image editing
  */
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { StagedFile } from "@/lib/media/staging-types";
 import { formatFileSize } from "@/lib/media/types";
 import {
   AlertTriangle,
@@ -28,12 +31,8 @@ import {
 } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
-export interface StagedFile {
-  id: string;
-  file: File;
-  previewUrl?: string;
-  type: "image" | "video" | "audio" | "document";
-}
+// Re-export StagedFile for backward compatibility
+export type { StagedFile } from "@/lib/media/staging-types";
 
 interface MediaStagingModalProps {
   isOpen: boolean;

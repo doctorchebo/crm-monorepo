@@ -150,8 +150,6 @@ export function useScrollToBottom(
    */
   const requestScrollToBottom = useCallback(
     (smooth = false): (() => void) | undefined => {
-      console.log("[requestScrollToBottom] CALLED - creating scroll session");
-
       // Cancel any existing session
       cancelPendingScroll();
 
@@ -162,11 +160,8 @@ export function useScrollToBottom(
 
       const container = containerRef.current;
       if (!container) {
-        console.log("[requestScrollToBottom] ABORT: no container");
         return undefined;
       }
-
-      console.log("[requestScrollToBottom] Container found, starting session");
 
       // Generate unique session ID for debugging
       const sessionId = `scroll-${Date.now()}-${Math.random()
@@ -198,29 +193,13 @@ export function useScrollToBottom(
       // ============================================================
       const doScroll = () => {
         if (!isActive) {
-          console.log("[doScroll] SKIP: session not active");
           return;
         }
         // CRITICAL: Don't scroll if user has intentionally scrolled away
         if (userScrolledAwayRef.current) {
-          console.log("[doScroll] SKIP: user scrolled away");
           return;
         }
-        const beforeScrollTop = containerRef.current?.scrollTop;
-        const scrollHeight = containerRef.current?.scrollHeight;
-        const clientHeight = containerRef.current?.clientHeight;
-        console.log("[doScroll] SCROLLING TO BOTTOM. Before:", {
-          scrollTop: beforeScrollTop,
-          scrollHeight,
-          clientHeight,
-          targetScrollTop:
-            scrollHeight && clientHeight ? scrollHeight - clientHeight : "N/A",
-        });
         scrollContainerToBottom(containerRef.current, smooth);
-        console.log(
-          "[doScroll] After scrollTop:",
-          containerRef.current?.scrollTop
-        );
       };
 
       // ============================================================
@@ -263,9 +242,6 @@ export function useScrollToBottom(
 
         if (pendingMedia.size === 0) {
           // All known media loaded - scroll one more time and wait for settle
-          console.log(
-            "[checkComplete] No pending media, starting settle timer"
-          );
           doScroll();
 
           // Clear any existing settle timeout
@@ -276,19 +252,12 @@ export function useScrollToBottom(
             if (!isActive) return;
 
             // Final scroll and cleanup
-            console.log("[checkComplete] Session complete, cleaning up");
             doScroll();
             cleanup();
             if (activeSessionRef.current?.id === sessionId) {
               activeSessionRef.current = null;
             }
           }, SETTLE_DELAY_MS);
-        } else {
-          console.log(
-            "[checkComplete] Still waiting for",
-            pendingMedia.size,
-            "media elements"
-          );
         }
       };
 
@@ -380,10 +349,6 @@ export function useScrollToBottom(
         loadingContainers.forEach((el) => {
           const element = el as HTMLElement;
           if (!pendingMedia.has(element)) {
-            console.log(
-              "[scanForMedia] Found loading container:",
-              element.getAttribute("data-media-container")
-            );
             pendingMedia.add(element);
             // We don't attach traditional load listeners here
             // Instead, MutationObserver watches for attribute changes
@@ -503,19 +468,11 @@ export function useScrollToBottom(
 
             if (newValue === "false") {
               // Media finished loading - remove from pending
-              console.log(
-                "[MutationObserver] Media finished loading:",
-                target.getAttribute("data-media-container")
-              );
               pendingMedia.delete(target);
               doScroll();
               checkComplete();
             } else if (newValue === "true" && !pendingMedia.has(target)) {
               // New media started loading
-              console.log(
-                "[MutationObserver] New media started loading:",
-                target.getAttribute("data-media-container")
-              );
               pendingMedia.add(target);
               // Clear settle timeout since we have new pending media
               if (settleTimeoutId) {

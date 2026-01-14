@@ -44,13 +44,11 @@ export function useThumbnailUpdates(options: UseThumbnailUpdatesOptions = {}) {
 
     // Listen for single thumbnail ready events
     const handleThumbnailReady = (event: ThumbnailReadyEvent) => {
-      console.log("📷 Thumbnail ready:", event.messageId, event.attachmentId);
       onThumbnailReady?.(event);
     };
 
     // Listen for batch thumbnail events
     const handleThumbnailsBatch = (events: ThumbnailReadyEvent[]) => {
-      console.log("📷 Thumbnails batch ready:", events.length);
       onThumbnailsBatch?.(events);
 
       // Also call individual handler for each
@@ -97,6 +95,21 @@ export function createThumbnailUpdateHandler(
             (attachment: any) => {
               if (attachment.id !== event.attachmentId) {
                 return attachment;
+              }
+
+              // CRITICAL: Ignore stale staging thumbnail events
+              // If the event's thumbnailKey is a staging path but the attachment
+              // has already been promoted (s3Key doesn't start with "staging/"),
+              // this is a late-arriving event from before promotion - ignore it.
+              const eventIsStaging = event.thumbnailKey?.startsWith("staging/");
+              const attachmentIsPromoted =
+                attachment.s3Key && !attachment.s3Key.startsWith("staging/");
+
+              if (eventIsStaging && attachmentIsPromoted) {
+                console.log(
+                  `📷 [createThumbnailUpdateHandler] Ignoring stale staging thumbnail for promoted attachment ${attachment.id}`
+                );
+                return attachment; // Don't apply stale staging path
               }
 
               return {

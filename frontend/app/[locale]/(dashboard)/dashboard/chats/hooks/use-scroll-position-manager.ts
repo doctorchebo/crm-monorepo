@@ -392,42 +392,20 @@ export function useScrollPositionManager(
     (chatId: string, force: boolean = false): void => {
       const container = containerRef.current;
       if (!container) {
-        console.log("[ScrollManager SAVE] No container");
         return;
       }
 
       // Only save in IDLE state unless forced
       if (!force && stateRef.current !== "idle") {
-        console.log(
-          "[ScrollManager SAVE] SKIP: not idle, state=",
-          stateRef.current
-        );
         return;
       }
 
       // Only save for active chat unless forced
       if (!force && activeChatIdRef.current !== chatId) {
-        console.log("[ScrollManager SAVE] SKIP: wrong chat", {
-          active: activeChatIdRef.current,
-          requested: chatId,
-        });
         return;
       }
 
       const entry = createPositionEntry(container);
-
-      // DEBUG: Log with type info
-      console.log("[ScrollManager SAVE] Saving position:", {
-        chatId,
-        distanceFromBottom: entry.distanceFromBottom,
-        distanceFromBottomType: typeof entry.distanceFromBottom,
-        wasAtBottom: entry.wasAtBottom,
-        scrollHeight: container.scrollHeight,
-        scrollTop: container.scrollTop,
-        clientHeight: container.clientHeight,
-        calculation: `${container.scrollHeight} - ${container.scrollTop} - ${container.clientHeight} = ${entry.distanceFromBottom}`,
-        forced: force,
-      });
 
       positionsRef.current.set(chatId, entry);
 
@@ -480,11 +458,8 @@ export function useScrollPositionManager(
     ): Promise<RestoreResult> => {
       const { maxWaitMs = 5000 } = options;
 
-      console.log("[ScrollManager RESTORE] Starting for:", chatId);
-
       const container = containerRef.current;
       if (!container) {
-        console.log("[ScrollManager RESTORE] FAILED: no container");
         scrollDebug("[ScrollManager] Restore failed: no container");
         return { success: false, appliedScrollTop: 0, scrolledToBottom: false };
       }
@@ -493,48 +468,23 @@ export function useScrollPositionManager(
       stateRef.current = "restoring";
       activeChatIdRef.current = chatId;
 
-      console.log(
-        "[ScrollManager RESTORE] Container state before media wait:",
-        {
-          scrollHeight: container.scrollHeight,
-          scrollTop: container.scrollTop,
-          clientHeight: container.clientHeight,
-        }
-      );
-
       scrollDebug("[ScrollManager] Starting restore for:", chatId);
 
       // Wait for media to load - this is EVENT-DRIVEN, not a timeout guess
       await waitForMediaLoaded(container, maxWaitMs);
 
-      console.log(
-        "[ScrollManager RESTORE] After media wait, scrollHeight:",
-        container.scrollHeight
-      );
-
       // Re-check we're still on the same chat after waiting
       if (activeChatIdRef.current !== chatId) {
-        console.log("[ScrollManager RESTORE] ABORTED: chat changed");
         scrollDebug("[ScrollManager] Restore aborted: chat changed");
         return { success: false, appliedScrollTop: 0, scrolledToBottom: false };
       }
 
       // CRITICAL: Wait for scrollHeight to stabilize BEFORE applying scroll
       // This fixes the issue where cached images render but DOM height hasn't settled
-      console.log(
-        "[ScrollManager RESTORE] Waiting for height stabilization..."
-      );
       const stableHeight = await waitForHeightStabilization(container, 2000);
-      console.log(
-        "[ScrollManager RESTORE] Height stabilized at:",
-        stableHeight
-      );
 
       // Re-check we're still on the same chat after waiting
       if (activeChatIdRef.current !== chatId) {
-        console.log(
-          "[ScrollManager RESTORE] ABORTED: chat changed during height wait"
-        );
         scrollDebug(
           "[ScrollManager] Restore aborted: chat changed during height wait"
         );
@@ -544,7 +494,6 @@ export function useScrollPositionManager(
       // Re-get container (might have unmounted/remounted)
       const currentContainer = containerRef.current;
       if (!currentContainer) {
-        console.log("[ScrollManager RESTORE] FAILED: container gone");
         scrollDebug("[ScrollManager] Restore failed: container gone");
         stateRef.current = "idle";
         return { success: false, appliedScrollTop: 0, scrolledToBottom: false };
@@ -553,12 +502,6 @@ export function useScrollPositionManager(
       // Get saved position
       const entry = positionsRef.current.get(chatId);
 
-      console.log("[ScrollManager RESTORE] Saved entry:", {
-        hasEntry: !!entry,
-        entry: entry,
-        distanceFromBottomType: entry ? typeof entry.distanceFromBottom : "N/A",
-      });
-
       // Determine if we should scroll to bottom or restore position
       const shouldScrollToBottom =
         !entry || entry.wasAtBottom || !isPositionValid(entry);
@@ -566,14 +509,6 @@ export function useScrollPositionManager(
       const savedDistanceFromBottom = entry
         ? Number(entry.distanceFromBottom)
         : 0;
-
-      console.log("[ScrollManager RESTORE] Decision:", {
-        shouldScrollToBottom,
-        savedDistanceFromBottom,
-        savedDistanceFromBottomType: typeof savedDistanceFromBottom,
-        wasAtBottom: entry?.wasAtBottom,
-        isValid: entry ? isPositionValid(entry) : "N/A",
-      });
 
       // Function to calculate and apply scroll position
       const applyScrollPosition = (): {
@@ -593,11 +528,6 @@ export function useScrollPositionManager(
         if (shouldScrollToBottom) {
           targetScrollTop = scrollHeight - clientHeight;
           scrolledToBottom = true;
-          console.log("[ScrollManager RESTORE] Scrolling to BOTTOM:", {
-            scrollHeight,
-            clientHeight,
-            targetScrollTop,
-          });
         } else {
           // Calculate from distanceFromBottom
           targetScrollTop =
@@ -605,27 +535,12 @@ export function useScrollPositionManager(
           // Clamp to valid range
           const maxScroll = scrollHeight - clientHeight;
           targetScrollTop = Math.max(0, Math.min(targetScrollTop, maxScroll));
-          console.log("[ScrollManager RESTORE] Restoring POSITION:", {
-            scrollHeight,
-            clientHeight,
-            savedDistanceFromBottom,
-            calculation: `${scrollHeight} - ${clientHeight} - ${savedDistanceFromBottom} = ${
-              scrollHeight - clientHeight - savedDistanceFromBottom
-            }`,
-            targetScrollTop,
-            maxScroll,
-          });
         }
 
         // Mark as programmatic scroll
         programmaticScrollRef.current = true;
         lastProgrammaticScrollTopRef.current = targetScrollTop;
         cont.scrollTop = targetScrollTop;
-
-        console.log("[ScrollManager RESTORE] After applying scroll:", {
-          targetScrollTop,
-          actualScrollTop: cont.scrollTop,
-        });
 
         return { scrollTop: targetScrollTop, scrolledToBottom };
       };

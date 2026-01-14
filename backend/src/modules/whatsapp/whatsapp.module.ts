@@ -11,6 +11,7 @@ import { MediaController } from './controllers/media.controller';
 import { AudioConverterService } from './services/audio-converter.service';
 import { ConversationWindowService } from './services/conversation-window.service';
 import { MediaAnalyzerService } from './services/media-analyzer.service';
+import { MediaStagingService } from './services/media-staging.service';
 import { MediaService } from './services/media.service';
 import { WhatsAppController } from './whatsapp.controller';
 import { WhatsAppGateway, setWhatsAppGateway } from './whatsapp.gateway';
@@ -53,6 +54,7 @@ import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
     WhatsAppService,
     ConversationWindowService,
     MediaService,
+    MediaStagingService,
     MediaAnalyzerService,
     AudioConverterService,
     S3Service,
@@ -63,6 +65,7 @@ import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
     WhatsAppService,
     ConversationWindowService,
     MediaService,
+    MediaStagingService,
     MediaAnalyzerService,
     AudioConverterService,
     S3Service,
@@ -75,6 +78,7 @@ export class WhatsAppModule implements OnModuleInit {
     private gateway: WhatsAppGateway,
     private moduleRef: ModuleRef,
     private mediaService: MediaService,
+    private mediaStagingService: MediaStagingService,
     private mediaAnalyzerService: MediaAnalyzerService,
   ) {
     setWhatsAppGateway(gateway);
@@ -87,15 +91,19 @@ export class WhatsAppModule implements OnModuleInit {
       '✅ MediaAnalyzerService injected into MediaService for GIF detection',
     );
 
-    // Inject ThumbnailQueueService into MediaService to avoid circular dependency
+    // Inject ThumbnailQueueService into MediaService and MediaStagingService
+    // This avoids circular dependency issues
     try {
       const thumbnailQueueService = this.moduleRef.get(ThumbnailQueueService, {
         strict: false,
       });
       if (thumbnailQueueService) {
         this.mediaService.setThumbnailQueueService(thumbnailQueueService);
+        this.mediaStagingService.setThumbnailQueueService(
+          thumbnailQueueService,
+        );
         console.log(
-          '✅ ThumbnailQueueService injected into MediaService successfully',
+          '✅ ThumbnailQueueService injected into MediaService and MediaStagingService',
         );
       } else {
         console.warn(

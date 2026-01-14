@@ -587,28 +587,52 @@ function renderImageToCanvas(options: RenderOptions): HTMLCanvasElement {
   return canvas;
 }
 
+/**
+ * Saved editor state that can be persisted across component unmounts.
+ * Used for maintaining edit state when switching between files.
+ */
+export interface SavedEditorState {
+  state: EditorState;
+  history: HistoryEntry[];
+  historyIndex: number;
+}
+
 interface EditorProviderProps {
   children: React.ReactNode;
   initialImage: string;
+  /** Saved state to restore from (for per-file editing persistence) */
+  savedState?: SavedEditorState | null;
+  /** Callback to save state when it changes (for per-file editing persistence) */
+  onStateChange?: (savedState: SavedEditorState) => void;
 }
 
 export function EditorProvider({
   children,
   initialImage,
+  savedState,
+  onStateChange,
 }: EditorProviderProps) {
-  // Core state
-  const [state, setState] = useState<EditorState>(() =>
-    createInitialEditorState(initialImage)
-  );
+  // Core state - restore from saved state if available
+  const [state, setState] = useState<EditorState>(() => {
+    if (savedState?.state) {
+      return savedState.state;
+    }
+    return createInitialEditorState(initialImage);
+  });
 
   // History management - stores ContentState only (excludes UI state)
   const [history, setHistory] = useState<HistoryEntry[]>(() => {
+    if (savedState?.history) {
+      return savedState.history;
+    }
     const initialState = createInitialEditorState(initialImage);
     return [
       { state: extractContentState(initialState), timestamp: Date.now() },
     ];
   });
-  const [historyIndex, setHistoryIndex] = useState(0);
+  const [historyIndex, setHistoryIndex] = useState(() => {
+    return savedState?.historyIndex ?? 0;
+  });
 
   // Refs to hold current values for callbacks (avoids stale closures)
   const historyRef = useRef(history);
@@ -638,6 +662,25 @@ export function EditorProvider({
   React.useEffect(() => {
     historyIndexRef.current = historyIndex;
   }, [historyIndex]);
+
+  // Notify parent of state changes for persistence (debounced to avoid excessive calls)
+  const onStateChangeRef = useRef(onStateChange);
+  onStateChangeRef.current = onStateChange;
+
+  React.useEffect(() => {
+    if (!onStateChangeRef.current) return;
+
+    // Use a small timeout to batch rapid state changes
+    const timeoutId = setTimeout(() => {
+      onStateChangeRef.current?.({
+        state,
+        history,
+        historyIndex,
+      });
+    }, 100);
+
+    return () => clearTimeout(timeoutId);
+  }, [state, history, historyIndex]);
 
   // Refs for canvas export
   const canvasRef = useRef<HTMLCanvasElement | null>(null);

@@ -52,5 +52,6 @@ export class OutboundMessageDto {
     uploadedAt: string;
     status: string;
     errorMessage?: string;
+    stagingId?: string; // For staged files - used to track thumbnail jobs
   }>;
 }

@@ -274,10 +274,6 @@ export function MessagesList({
     // The GIF component has internal tracking (hasAutoPlayedRef) that prevents
     // duplicate auto-plays. The IDs are only cleared when the chat changes.
     if (newGifMessageIds.length > 0) {
-      console.log(
-        `[MessagesList] 🎬 New GIF messages arrived, marking for auto-play:`,
-        newGifMessageIds
-      );
       setNewlyArrivedGifMessageIds((prev) => {
         const updated = new Set(prev);
         newGifMessageIds.forEach((id) => updated.add(id));

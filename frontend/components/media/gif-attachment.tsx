@@ -414,9 +414,15 @@ export const GifAttachment = memo(function GifAttachment({
   }, [mediaUrl]);
 
   // Error state
+  // IMPORTANT: Must include data-media-loading="false" to signal scroll system
+  // that this media is "done" (even though it failed)
   if (error || hasError) {
     return (
-      <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 text-sm text-red-700 dark:text-red-400 max-w-xs">
+      <div
+        className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 text-sm text-red-700 dark:text-red-400 max-w-xs"
+        data-media-container="gif"
+        data-media-loading="false"
+      >
         Failed to load GIF
       </div>
     );

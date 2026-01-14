@@ -522,4 +522,252 @@ export const mediaApi = {
   cleanupComponentMedia(component: object): void {
     blobUrlManager.cleanupComponent(component);
   },
+
+  // ============================================================================
+  // STAGING API
+  // Pre-upload files for thumbnail generation before sending
+  // ============================================================================
+
+  /**
+   * Stage a file for preview/editing with immediate thumbnail generation
+   * Returns staging details including s3Key and thumbnailKey
+   *
+   * @param file - File to stage
+   * @param senderId - Sender ID for eventual destination
+   * @param contactId - Contact ID for eventual destination
+   * @param onProgress - Progress callback (0-100)
+   * @returns StagedFileResult with staging details
+   */
+  async stageFile(
+    file: File,
+    senderId: number,
+    contactId: string,
+    onProgress?: (progress: number) => void
+  ): Promise<{
+    stagingId: string;
+    s3Key: string;
+    thumbnailKey: string;
+    mediaType: string;
+    size: number;
+    fileName: string;
+    mimeType: string;
+    thumbnailQueued: boolean;
+  }> {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    console.log(`[Staging] Starting staging upload`, {
+      fileName: file.name,
+      size: file.size,
+      senderId,
+      contactId,
+    });
+
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+
+      xhr.upload.addEventListener("progress", (event) => {
+        if (event.lengthComputable && onProgress) {
+          const progress = (event.loaded / event.total) * 100;
+          onProgress(progress);
+        }
+      });
+
+      xhr.addEventListener("load", () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const result = JSON.parse(xhr.responseText);
+            console.log(`[Staging] Upload successful:`, result);
+            resolve(result);
+          } catch (error) {
+            reject(new Error(`Failed to parse staging response: ${error}`));
+          }
+        } else if (xhr.status === 401) {
+          reject(new Error("Staging failed: unauthorized"));
+        } else {
+          try {
+            const error = JSON.parse(xhr.responseText);
+            reject(new Error(error.message || `Staging failed: ${xhr.status}`));
+          } catch {
+            reject(new Error(`Staging failed: ${xhr.status}`));
+          }
+        }
+      });
+
+      xhr.addEventListener("error", () => {
+        reject(new Error("Staging failed due to network error"));
+      });
+
+      const params = new URLSearchParams();
+      params.append("senderId", senderId.toString());
+      params.append("contactId", contactId);
+
+      xhr.open(
+        "POST",
+        `${API_BASE_URL}/whatsapp/media/staging?${params.toString()}`
+      );
+      xhr.withCredentials = true;
+      xhr.send(formData);
+    });
+  },
+
+  /**
+   * Get staging status including thumbnail progress
+   *
+   * @param stagingId - The staging ID to check
+   * @returns Status object or null if not found
+   */
+  async getStagingStatus(stagingId: string): Promise<{
+    stagingId: string;
+    s3Key: string;
+    thumbnailKey: string;
+    thumbnailStatus: string;
+    mediaType: string;
+    thumbnailUrl?: string;
+  } | null> {
+    const response = await fetch(
+      `${API_BASE_URL}/whatsapp/media/staging/${stagingId}`,
+      {
+        method: "GET",
+        credentials: "include",
+      }
+    );
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        return null;
+      }
+      throw new Error(`Failed to get staging status: ${response.status}`);
+    }
+
+    return response.json();
+  },
+
+  /**
+   * Clean up a staged file (user cancelled)
+   *
+   * @param stagingId - The staging ID to clean up
+   */
+  async cleanupStagedFile(stagingId: string): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/whatsapp/media/staging/${stagingId}`,
+      {
+        method: "DELETE",
+        credentials: "include",
+      }
+    );
+
+    if (!response.ok && response.status !== 404) {
+      throw new Error(`Failed to cleanup staged file: ${response.status}`);
+    }
+  },
+
+  /**
+   * Clean up multiple staged files at once (batch operation)
+   *
+   * @param stagingIds - Array of staging IDs to clean up
+   */
+  async cleanupBatchStagedFiles(stagingIds: string[]): Promise<void> {
+    if (stagingIds.length === 0) return;
+
+    const response = await fetch(
+      `${API_BASE_URL}/whatsapp/media/staging/cleanup-batch`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ stagingIds }),
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Failed to cleanup staged files: ${response.status}`);
+    }
+  },
+
+  /**
+   * Promote a staged file to a message
+   * Moves the file from staging to the message path
+   *
+   * @param stagingId - The staging ID to promote
+   * @param messageId - The message ID to associate with
+   * @param senderId - Sender ID for the destination path
+   * @param contactId - Contact ID for the destination path
+   * @param attachmentId - Optional attachment ID for precise matching
+   * @param retries - Number of retry attempts for transient failures (default: 2)
+   * @returns Promoted file result with new S3 locations
+   */
+  async promoteStagedFile(
+    stagingId: string,
+    messageId: string,
+    senderId: number,
+    contactId: string,
+    attachmentId?: string,
+    retries = 2
+  ): Promise<{
+    stagingId: string;
+    s3Key: string;
+    thumbnailKey?: string;
+    thumbnailStatus: string;
+  }> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/whatsapp/media/staging/${stagingId}/promote`,
+          {
+            method: "POST",
+            credentials: "include",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              messageId,
+              senderId,
+              contactId,
+              attachmentId,
+            }),
+          }
+        );
+
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          const errorMessage =
+            error.message ||
+            `Failed to promote staged file: ${response.status}`;
+
+          // Don't retry 4xx errors (client errors) except 409 (conflict)
+          if (
+            response.status >= 400 &&
+            response.status < 500 &&
+            response.status !== 409
+          ) {
+            throw new Error(errorMessage);
+          }
+
+          // Retry 5xx errors and 409 conflicts
+          throw new Error(errorMessage);
+        }
+
+        return response.json();
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+
+        if (attempt < retries) {
+          // Exponential backoff: 100ms, 200ms
+          const delay = 100 * Math.pow(2, attempt);
+          console.warn(
+            `[Staging] Promotion attempt ${attempt + 1} failed, retrying in ${delay}ms:`,
+            lastError.message
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
+    }
+
+    throw lastError || new Error("Promotion failed after retries");
+  },
 };

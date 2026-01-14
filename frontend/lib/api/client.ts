@@ -102,21 +102,11 @@ class ApiClient {
       ...options.headers,
     };
 
-    console.debug(
-      `[ApiClient] Making ${
-        options.method || "GET"
-      } request to ${endpoint} with credentials: "include"`
-    );
-
     const response = await fetch(url, {
       ...options,
       headers,
       credentials: "include", // CRITICAL: Send and receive HTTP-only cookies
     });
-
-    console.debug(
-      `[ApiClient] ${options.method || "GET"} ${endpoint} - ${response.status}`
-    );
 
     // Handle 401 Unauthorized
     if (response.status === 401) {
@@ -135,7 +125,6 @@ class ApiClient {
         await TokenManager.refreshAccessToken();
 
         // Retry request with new token (sent as HTTP-only cookie)
-        console.debug("[ApiClient] Retrying request after token refresh");
         return this.request<T>(endpoint, options, true);
       } catch (refreshError) {
         console.error("[ApiClient] Token refresh failed:", refreshError);

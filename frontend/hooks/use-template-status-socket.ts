@@ -140,37 +140,32 @@ export function useTemplateStatusSocket(
     });
 
     socket.on("connect", () => {
-      console.log("📱 Template WebSocket connected:", socket.id);
       isConnectedRef.current = true;
       callbacksRef.current.onConnect?.();
     });
 
     socket.on("disconnect", (reason) => {
-      console.log("📴 Template WebSocket disconnected:", reason);
       isConnectedRef.current = false;
       callbacksRef.current.onDisconnect?.();
     });
 
     socket.on("connect_error", (error) => {
-      console.error("❌ Template WebSocket error:", error);
+      console.error("Template WebSocket error:", error);
       callbacksRef.current.onError?.(error);
     });
 
     // Listen for single status updates
     socket.on("template:status", (update: TemplateStatusUpdate) => {
-      console.log("📡 Template status update received:", update);
       callbacksRef.current.onStatusUpdate?.(update);
     });
 
     // Listen for batch status updates
     socket.on("template:statuses", (updates: TemplateStatusUpdate[]) => {
-      console.log(`📡 Received ${updates.length} template status updates`);
       callbacksRef.current.onStatusUpdates?.(updates);
     });
 
     // Listen for quality updates
     socket.on("template:quality", (update: TemplateQualityUpdate) => {
-      console.log("📡 Template quality update received:", update);
       callbacksRef.current.onQualityUpdate?.(update);
     });
 

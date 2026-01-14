@@ -952,6 +952,8 @@ export default function ChatsPage() {
                     onAddMoreMedia={mediaHandlers.handleAddMoreMedia}
                     onRemoveStagedFile={mediaHandlers.handleRemoveStagedFile}
                     onEditStagedImage={mediaHandlers.handleEditStagedImage}
+                    onStagedImageEdited={mediaHandlers.handleStagedImageEdited}
+                    focusFileId={mediaHandlers.focusFileId}
                     // Media preview - enhanced version with all batch media items
                     previewModalOpen={mediaHandlers.previewModalOpen}
                     previewMediaItems={mediaHandlers.previewMediaItems}
@@ -999,7 +1001,6 @@ export default function ChatsPage() {
                     onImageEditorSend={mediaHandlers.handleImageEditorSend}
                     onImageEditorRetake={mediaHandlers.handleImageEditorRetake}
                     onImageEditorClose={mediaHandlers.handleImageEditorClose}
-                    onStagedImageEdited={mediaHandlers.handleStagedImageEdited}
                     // Contact modals
                     sendContactsModalOpen={
                       contactHandlers.sendContactsModalOpen

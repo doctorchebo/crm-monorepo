@@ -384,20 +384,20 @@ export function useChatState(): UseChatStateReturn {
               update.lastActivityType === "reaction"
                 ? update.lastReactionEmoji
                 : update.lastActivityType === "message"
-                ? null
-                : chat.lastReactionEmoji,
+                  ? null
+                  : chat.lastReactionEmoji,
             lastReactionIsOwn:
               update.lastActivityType === "reaction"
                 ? update.lastReactionIsOwn
                 : update.lastActivityType === "message"
-                ? null
-                : chat.lastReactionIsOwn,
+                  ? null
+                  : chat.lastReactionIsOwn,
             lastReactedMessagePreview:
               update.lastActivityType === "reaction"
                 ? update.lastReactedMessagePreview
                 : update.lastActivityType === "message"
-                ? null
-                : chat.lastReactedMessagePreview,
+                  ? null
+                  : chat.lastReactedMessagePreview,
           };
         }
         return chat;
@@ -1251,23 +1251,13 @@ export function useChatState(): UseChatStateReturn {
   // - Chat Switch effect handles cache restoration and message swapping
   // - This effect handles: fresh fetches for uncached chats, scroll restoration for cached chats
   useEffect(() => {
-    console.log(
-      "[Fetch Messages] Effect triggered. selectedChatId:",
-      selectedChatId
-    );
-
     if (!selectedChatId) {
-      console.log("[Fetch Messages] SKIP: no selectedChatId");
       return;
     }
 
     // CRITICAL GUARD: Only run if this is a NEW chat selection
     // This prevents re-running when other dependencies change
     if (lastFetchedChatIdRef.current === selectedChatId) {
-      console.log(
-        "[Fetch Messages] SKIP: already fetched for:",
-        selectedChatId
-      );
       scrollDebug(
         "[Fetch Messages] Skipping - already fetched for:",
         selectedChatId
@@ -1275,12 +1265,6 @@ export function useChatState(): UseChatStateReturn {
       return;
     }
 
-    console.log(
-      "[Fetch Messages] RUNNING - new chat:",
-      selectedChatId,
-      "previous:",
-      lastFetchedChatIdRef.current
-    );
     scrollDebug(
       "[Fetch Messages] Running for:",
       selectedChatId,
@@ -1297,12 +1281,6 @@ export function useChatState(): UseChatStateReturn {
     const cachedData = messagesCacheRef.current.get(chatToLoad);
     const wasRestoredFromCache = cachedData && cachedData.messages.length > 0;
 
-    console.log("[Fetch Messages] Cache check:", {
-      chatToLoad,
-      wasRestoredFromCache,
-      cachedMessageCount: cachedData?.messages?.length || 0,
-      cacheKeys: Array.from(messagesCacheRef.current.keys()),
-    });
     scrollDebug("[Fetch Messages] Cache status:", {
       chatToLoad,
       wasRestoredFromCache,
@@ -1310,14 +1288,12 @@ export function useChatState(): UseChatStateReturn {
     });
 
     if (wasRestoredFromCache) {
-      console.log("[Fetch Messages] === CACHED CHAT PATH ===");
       // CACHED CHAT PATH
       // Messages already swapped in by Chat Switch effect
       // Use the scroll manager's event-driven restoration (waits for media)
 
       // Use async IIFE to handle the async restoration cleanly
       (async () => {
-        console.log("[Fetch Messages:CACHED] Waiting for RAF...");
         // Wait for React to flush updates before restoring scroll
         await new Promise<void>((resolve) => {
           requestAnimationFrame(() => {
@@ -1326,36 +1302,21 @@ export function useChatState(): UseChatStateReturn {
             });
           });
         });
-        console.log("[Fetch Messages:CACHED] RAF complete");
 
         // Check if user switched to another chat while waiting
         if (lastFetchedChatIdRef.current !== chatToLoad) {
-          console.log(
-            "[Fetch Messages:CACHED] ABORT: chat changed during RAF wait"
-          );
           scrollDebug("[Cache Restore] Aborted: chat changed during RAF wait");
           return;
         }
 
-        console.log(
-          "[Fetch Messages:CACHED] Calling restoreScrollPosition for:",
-          chatToLoad
-        );
         // Restore scroll position - this WAITS for media to load (event-driven)
         const result = await scrollPositionManager.restoreScrollPosition(
           chatToLoad,
           { maxWaitMs: 5000 }
         );
-        console.log(
-          "[Fetch Messages:CACHED] restoreScrollPosition returned:",
-          result
-        );
 
         // Check again if user switched chats
         if (lastFetchedChatIdRef.current !== chatToLoad) {
-          console.log(
-            "[Fetch Messages:CACHED] ABORT: chat changed during restore"
-          );
           scrollDebug("[Cache Restore] Aborted: chat changed during restore");
           return;
         }
@@ -1364,47 +1325,29 @@ export function useChatState(): UseChatStateReturn {
 
         // Update state based on restoration result
         setShouldAutoScroll(result.scrolledToBottom);
-        console.log(
-          "[Fetch Messages:CACHED] setShouldAutoScroll:",
-          result.scrolledToBottom
-        );
 
         // Finalize transition
         isTransitioningRef.current = false;
         setIsScrollRestoring(false);
         setIsInitialLoad(false);
-        console.log("[Fetch Messages:CACHED] Transition finalized");
 
         // Signal scroll manager that transition is complete
         // Now user scrolls will be saved
         scrollPositionManager.onChatDidChange(chatToLoad);
-        console.log("[Fetch Messages:CACHED] onChatDidChange called");
       })();
 
       return;
     }
 
-    console.log(
-      "[Fetch Messages] === UNCACHED CHAT PATH - fetching from backend ==="
-    );
-
     // No cache - fetch messages from backend
     const fetchMessages = async () => {
       try {
-        console.log(
-          "[Fetch Messages:UNCACHED] Fetching messages for:",
-          chatToLoad
-        );
         setError(null);
         const response = await backendApi.whatsapp.getChatMessages(
           chatToLoad,
           0,
           PAGE_SIZE
         );
-        console.log("[Fetch Messages:UNCACHED] Got response:", {
-          messageCount: response?.messages?.length,
-          hasMore: response?.hasMore,
-        });
 
         // CRITICAL: Check if we're still on the same chat
         // Both checks ensure we don't contaminate a different chat's messages
@@ -1412,9 +1355,6 @@ export function useChatState(): UseChatStateReturn {
           lastFetchedChatIdRef.current !== chatToLoad ||
           currentMessagesChatIdRef.current !== chatToLoad
         ) {
-          console.log(
-            "[Fetch Messages:UNCACHED] ABORT: Chat changed during fetch"
-          );
           scrollDebug("[Initial Fetch] ABORT: Chat changed during fetch", {
             lastFetched: lastFetchedChatIdRef.current,
             currentMessages: currentMessagesChatIdRef.current,
@@ -1424,11 +1364,6 @@ export function useChatState(): UseChatStateReturn {
         }
 
         if (response && response.messages) {
-          console.log(
-            "[Fetch Messages:UNCACHED] Processing",
-            response.messages.length,
-            "messages"
-          );
           const fetchedSorted = [...response.messages].sort(
             (a, b) =>
               new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
@@ -1497,9 +1432,6 @@ export function useChatState(): UseChatStateReturn {
             cursor: nextCursor,
           });
 
-          console.log(
-            "[Fetch Messages:UNCACHED] Setting shouldAutoScroll=true. Messages set."
-          );
           setShouldAutoScroll(true);
 
           // CRITICAL: Wait for React to render the messages, then scroll to bottom
@@ -1508,22 +1440,12 @@ export function useChatState(): UseChatStateReturn {
             requestAnimationFrame(() => {
               // Check if user switched chats while waiting
               if (lastFetchedChatIdRef.current !== chatToLoad) {
-                console.log(
-                  "[Fetch Messages:UNCACHED] ABORT scroll: chat changed during RAF wait"
-                );
                 return;
               }
 
-              console.log(
-                "[Fetch Messages:UNCACHED] Calling scrollHelperRequestScroll for reliable scroll"
-              );
               scrollHelperRequestScroll(false);
 
               // Mark initial scroll as done for this chat
-              console.log(
-                "[Fetch Messages:UNCACHED] Marking initial scroll done for:",
-                chatToLoad
-              );
               initialScrollDoneRef.current.add(chatToLoad);
             });
           });

@@ -111,6 +111,25 @@ export class ThumbnailService {
         return;
       }
 
+      const currentAttachment = attachments[attachmentIndex];
+
+      // CRITICAL: Check for stale staging thumbnails
+      // If the metadata's thumbnailKey is a staging path but the attachment's s3Key
+      // is NOT a staging path (file was promoted), this is a late-arriving update
+      // from before promotion - ignore it to prevent overwriting the promoted thumbnailKey.
+      const metadataIsStaging = metadata.thumbnailKey?.startsWith('staging/');
+      const attachmentIsPromoted =
+        currentAttachment.s3Key &&
+        !currentAttachment.s3Key.startsWith('staging/');
+
+      if (metadataIsStaging && attachmentIsPromoted) {
+        this.logger.log(
+          `Ignoring stale staging thumbnail for promoted attachment ${attachmentId}: ` +
+            `metadata thumbnailKey=${metadata.thumbnailKey}, attachment s3Key=${currentAttachment.s3Key}`,
+        );
+        return;
+      }
+
       // Update the attachment with all thumbnail metadata
       attachments[attachmentIndex] = {
         ...attachments[attachmentIndex],

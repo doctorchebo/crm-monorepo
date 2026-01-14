@@ -261,10 +261,6 @@ export function ChatNotificationsProvider({
     const currentActiveChatId = activeChatIdRef.current;
     const isActiveChat = update.chatId === currentActiveChatId;
 
-    console.log(
-      `[ChatNotifications] 📨 Chat update: ${update.chatId}, unread: ${update.unreadCount}, isActiveChat: ${isActiveChat}`
-    );
-
     // Update unread count - but SKIP if this is the currently active chat
     // The active chat should always show 0 unread since the user is viewing it
     if (!isActiveChat) {
@@ -289,13 +285,8 @@ export function ChatNotificationsProvider({
       // Get current settings from ref (always up-to-date)
       const currentSettings = settingsRef.current;
 
-      console.log(
-        `[ChatNotifications] 🔔 Triggering notifications for chat ${update.chatId}, soundEnabled=${currentSettings.soundEnabled}`
-      );
-
       // Play sound if enabled
       if (currentSettings.soundEnabled) {
-        console.log("[ChatNotifications] 🔊 Calling playSound");
         playSoundRef.current();
       }
 
@@ -358,10 +349,6 @@ export function ChatNotificationsProvider({
    * Handle incoming new chat from WebSocket (customer initiated conversation)
    */
   const handleNewChat = useCallback((chat: NewChatEvent) => {
-    console.log(
-      `[ChatNotifications] 🆕 New chat created: ${chat.chatId}, participant: ${chat.participantPhone}`
-    );
-
     // Initialize unread count for the new chat
     setUnreadCounts((prev) => {
       const next = new Map(prev);
@@ -417,10 +404,6 @@ export function ChatNotificationsProvider({
    */
   const handleChatDeleted = useCallback(
     (event: ChatDeletedEvent) => {
-      console.log(
-        `[ChatNotifications] 🗑️ Chat deleted: ${event.chatId}, timestamp: ${event.timestamp}`
-      );
-
       // Remove unread count for the deleted chat
       removeUnreadCount(event.chatId);
 
@@ -476,13 +459,8 @@ export function ChatNotificationsProvider({
     const isAuthenticated = TokenManager.isAccessTokenValid();
 
     if (!isAuthenticated) {
-      console.log(
-        "[ChatNotifications] User not authenticated, skipping WebSocket connection"
-      );
       return;
     }
-
-    console.log("[ChatNotifications] Connecting to WebSocket...");
 
     const socket = io(
       process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001",
@@ -498,12 +476,10 @@ export function ChatNotificationsProvider({
     socketRef.current = socket;
 
     socket.on("connect", () => {
-      console.log("[ChatNotifications] ✅ Connected to WebSocket");
       setIsConnected(true);
     });
 
     socket.on("disconnect", () => {
-      console.log("[ChatNotifications] ❌ Disconnected from WebSocket");
       setIsConnected(false);
     });
 
@@ -528,7 +504,6 @@ export function ChatNotificationsProvider({
     });
 
     return () => {
-      console.log("[ChatNotifications] Cleaning up WebSocket connection");
       socket.disconnect();
       socketRef.current = null;
     };

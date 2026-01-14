@@ -423,9 +423,8 @@ export function useMessageHandlers(
       if (selectedContactId && template.locales.length > 1) {
         try {
           // Fetch contact's preferred language
-          const contactProfile = await backendApi.contacts.getProfile(
-            selectedContactId
-          );
+          const contactProfile =
+            await backendApi.contacts.getProfile(selectedContactId);
           const customerLanguage = contactProfile?.contact?.language;
 
           console.log(
@@ -575,8 +574,8 @@ export function useMessageHandlers(
                 | "read"
                 | "failed")
             : wsMsg.direction === "outbound"
-            ? "sent"
-            : "delivered";
+              ? "sent"
+              : "delivered";
 
           return {
             id: undefined,
@@ -684,6 +683,23 @@ export function useMessageHandlers(
           const updatedAttachments = (message.attachments || []).map(
             (attachment: Attachment) => {
               if (attachment.id !== event.attachmentId) {
+                return attachment;
+              }
+
+              // CRITICAL: Ignore stale staging thumbnail events
+              // If the event's thumbnailKey is a staging path but the attachment
+              // has already been promoted (s3Key doesn't start with "staging/"),
+              // this is a late-arriving event from before promotion - ignore it.
+              const eventIsStaging = event.thumbnailKey?.startsWith("staging/");
+              const attachmentIsPromoted =
+                attachment.s3Key && !attachment.s3Key.startsWith("staging/");
+
+              if (eventIsStaging && attachmentIsPromoted) {
+                console.log(
+                  `📷 Ignoring stale staging thumbnail for promoted attachment ${attachment.id}:`,
+                  `event thumbnailKey=${event.thumbnailKey}, attachment s3Key=${attachment.s3Key}`
+                );
+                // Return attachment unchanged - don't apply stale staging path
                 return attachment;
               }
 

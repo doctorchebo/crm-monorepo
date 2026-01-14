@@ -4,6 +4,7 @@
  */
 
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
@@ -243,6 +244,61 @@ export class S3Service {
     } catch (error) {
       this.logger.error(`Failed to delete S3 object: ${error.message}`, error);
       throw new Error(`Failed to delete file: ${error.message}`);
+    }
+  }
+
+  /**
+   * Copy a file within S3
+   * Used for promoting staged files to message paths
+   *
+   * IMPORTANT: The CopySource must be URL-encoded per AWS S3 API requirements.
+   * Files with spaces or special characters in their names will fail to copy
+   * without proper encoding.
+   *
+   * @param sourceKey - Source S3 key
+   * @param destinationKey - Destination S3 key
+   */
+  async copyFile(sourceKey: string, destinationKey: string): Promise<void> {
+    // URL-encode each path segment separately to handle special characters (spaces, etc.)
+    // This is required by AWS S3 CopyObject API
+    const encodedSourceKey = sourceKey
+      .split('/')
+      .map((segment) => encodeURIComponent(segment))
+      .join('/');
+
+    const copySource = `${this.bucketName}/${encodedSourceKey}`;
+
+    this.logger.log(
+      `Copying S3 object: ${sourceKey} -> ${destinationKey} (CopySource: ${copySource})`,
+    );
+
+    try {
+      const command = new CopyObjectCommand({
+        Bucket: this.bucketName,
+        CopySource: copySource,
+        Key: destinationKey,
+      });
+
+      const result = await this.s3Client.send(command);
+
+      // Verify the copy succeeded by checking the response
+      if (!result.CopyObjectResult?.ETag) {
+        throw new Error(
+          'Copy succeeded but no ETag returned - file may not have been copied correctly',
+        );
+      }
+
+      this.logger.log(
+        `Successfully copied ${sourceKey} to ${destinationKey} (ETag: ${result.CopyObjectResult.ETag})`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to copy S3 object: ${sourceKey} -> ${destinationKey}. Error: ${error.message}`,
+        error.stack,
+      );
+      throw new Error(
+        `Failed to copy file from ${sourceKey}: ${error.message}`,
+      );
     }
   }
 

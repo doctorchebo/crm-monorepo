@@ -63,8 +63,6 @@ export function useCompressionUpdates(
 
     // Handle compression status updates
     const handleStatusUpdate = (event: CompressionStatusEvent) => {
-      console.log("🎬 Compression status:", event.mediaId, event.status);
-
       // Call the status change callback
       onStatusChange?.(event);
 

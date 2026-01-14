@@ -24,13 +24,14 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { LambdaCompressionService } from '@shared/services/lambda-compression.service';
 import { LambdaThumbnailService } from '@shared/services/lambda-thumbnail.service';
+import { S3Service } from '@shared/services/s3.service';
 import { CompressionCallbackController } from './compression-callback.controller';
 import { ThumbnailCallbackController } from './thumbnail-callback.controller';
 
 @Module({
   imports: [ConfigModule],
   controllers: [CompressionCallbackController, ThumbnailCallbackController],
-  providers: [LambdaCompressionService, LambdaThumbnailService],
+  providers: [LambdaCompressionService, LambdaThumbnailService, S3Service],
   exports: [LambdaCompressionService, LambdaThumbnailService],
 })
 export class MediaCompressionModule {}

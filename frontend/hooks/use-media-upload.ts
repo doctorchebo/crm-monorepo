@@ -34,13 +34,9 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
    */
   const queueFiles = useCallback(
     (files: File[]) => {
-      console.log(`[queueFiles] Queueing ${files.length} files`);
       const newPending = new Map(pendingUploads);
 
       for (const file of files) {
-        console.log(
-          `[queueFiles] Processing file: ${file.name} (${file.size} bytes)`
-        );
         // Validate file
         const validation = validateFile(file);
         if (!validation.valid) {
@@ -74,11 +70,9 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
           previewUrl: createPreviewUrl(file),
         };
 
-        console.log(`[queueFiles] Queued file with ID: ${id}`);
         newPending.set(id, upload);
       }
 
-      console.log(`[queueFiles] Total pending uploads: ${newPending.size}`);
       setPendingUploads(newPending);
     },
     [pendingUploads, options, createPreviewUrl]
@@ -107,16 +101,12 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
         setPendingUploads(new Map(pendingUploads).set(uploadId, updated));
 
         // Upload file through backend (avoids CORS issues)
-        console.log(
-          `[Upload] Uploading file through backend: ${upload.file.name}`
-        );
         const result = await mediaApi.uploadFileToBackend(
           upload.file,
           senderId!,
           contactId!,
           messageId,
           (progress) => {
-            console.log(`[Upload] Progress: ${progress.toFixed(1)}%`);
             setPendingUploads(
               new Map(pendingUploads).set(uploadId, {
                 ...upload,
@@ -126,11 +116,6 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
             );
           }
         );
-
-        console.log(`[Upload] Backend upload completed:`, {
-          uploadId: result.uploadId,
-          s3Key: result.s3Key,
-        });
 
         // Get file duration for media files
         let duration: number | undefined;
@@ -144,8 +129,6 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
             console.warn("Failed to get media duration:", e);
           }
         }
-
-        console.log(`[Upload] Successfully uploaded: ${upload.file.name}`);
 
         // Update status
         setPendingUploads(
@@ -193,23 +176,13 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
       contactId?: string
     ): Promise<Attachment[]> => {
       setIsUploading(true);
-      console.log(
-        `[uploadAll] Starting upload with ${pendingUploads.size} files`
-      );
-      console.log(
-        `[uploadAll] Message ID: ${messageId}, Sender ID: ${senderId}, Contact ID: ${contactId}`
-      );
 
       try {
         const attachments: Attachment[] = [];
 
         for (const [uploadId, upload] of pendingUploads) {
-          console.log(
-            `[uploadAll] Processing upload ${uploadId} with status: ${upload.status}`
-          );
           if (upload.status === "queued" || upload.status === "error") {
             try {
-              console.log(`[uploadAll] Calling uploadFile for ${uploadId}`);
               const attachment = await uploadFile(
                 uploadId,
                 messageId,
@@ -217,32 +190,13 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
                 contactId
               );
               if (attachment) {
-                console.log(
-                  `[uploadAll] Successfully got attachment:`,
-                  attachment
-                );
                 attachments.push(attachment);
-              } else {
-                console.warn(
-                  `[uploadAll] uploadFile returned null for ${uploadId}`
-                );
               }
             } catch (e) {
-              console.error(
-                `[uploadAll] uploadFile threw error for ${uploadId}:`,
-                e
-              );
+              // Error already logged in uploadFile
             }
-          } else {
-            console.log(
-              `[uploadAll] Skipping upload ${uploadId} - status is ${upload.status}`
-            );
           }
         }
-
-        console.log(
-          `[uploadAll] Completed with ${attachments.length} attachments`
-        );
 
         // Clean up completed uploads after a delay
         setTimeout(() => {

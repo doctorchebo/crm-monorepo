@@ -3205,7 +3205,15 @@ export class WhatsAppService {
               mediaType === 'audio' ||
               mediaType === 'document';
 
-            if (needsThumbnail && this.thumbnailQueueService) {
+            // Skip if this attachment came from staging - it already has a thumbnail job queued
+            // Attachments from staging have a stagingId property set
+            const hasExistingStagingThumbnail = !!(attachment as any).stagingId;
+
+            if (
+              needsThumbnail &&
+              this.thumbnailQueueService &&
+              !hasExistingStagingThumbnail
+            ) {
               try {
                 const thumbnailJobData: ThumbnailJobData = {
                   messageId: messageData.waMessageId,
@@ -3233,6 +3241,10 @@ export class WhatsAppService {
                 );
                 // Don't fail the message storage - thumbnail will remain pending
               }
+            } else if (hasExistingStagingThumbnail) {
+              this.logger.debug(
+                `[Outbound Media] Skipping thumbnail queue for ${attachment.id} - already handled by staging`,
+              );
             }
           }
         }

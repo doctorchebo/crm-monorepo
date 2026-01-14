@@ -217,6 +217,72 @@ export class MediaCache {
   }
 
   /**
+   * Invalidate all cached URLs that contain staging paths
+   * Called after promotion to ensure we don't serve stale staging URLs
+   */
+  invalidateStagingUrls(): void {
+    let downloadRemoved = 0;
+    let thumbnailRemoved = 0;
+
+    // Scan download URL cache for staging URLs
+    for (const [key, entry] of this.downloadUrlCache) {
+      if (
+        entry.data &&
+        typeof entry.data === "string" &&
+        entry.data.includes("/staging/")
+      ) {
+        this.downloadUrlCache.delete(key);
+        downloadRemoved++;
+      }
+    }
+
+    // Scan thumbnail URL cache for staging URLs
+    for (const [key, entry] of this.thumbnailUrlCache) {
+      if (
+        entry.data &&
+        typeof entry.data === "string" &&
+        entry.data.includes("/staging/")
+      ) {
+        this.thumbnailUrlCache.delete(key);
+        thumbnailRemoved++;
+      }
+    }
+
+    if (downloadRemoved > 0 || thumbnailRemoved > 0) {
+      console.debug(
+        `[MediaCache] Invalidated staging URLs: ${downloadRemoved} download, ${thumbnailRemoved} thumbnail`
+      );
+    }
+  }
+
+  /**
+   * Pre-cache a known thumbnail URL for an attachment
+   * Used after promotion to immediately make the new URL available
+   */
+  setCachedThumbnailUrl(
+    messageId: string,
+    attachmentId: string,
+    url: string | null
+  ): void {
+    const cacheKey = this._makeCacheKey(messageId, attachmentId, "thumb");
+    this.thumbnailUrlCache.set(cacheKey, {
+      data: url,
+      timestamp: Date.now(),
+      expiresAt: Date.now() + this.TTL,
+    });
+    console.debug(
+      `[MediaCache] Pre-cached thumbnail URL for ${messageId}:${attachmentId}`
+    );
+  }
+
+  /**
+   * Get the cache key format - useful for external cache coordination
+   */
+  getCacheKey(messageId: string, attachmentId: string, prefix = ""): string {
+    return this._makeCacheKey(messageId, attachmentId, prefix);
+  }
+
+  /**
    * Clear entire cache
    */
   clear(): void {

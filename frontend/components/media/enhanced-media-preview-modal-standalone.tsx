@@ -37,7 +37,7 @@ import {
   X,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useRef, useState } from "react";
 
 /**
  * A media item that can be previewed.
@@ -91,6 +91,8 @@ export function EnhancedMediaPreviewModal({
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const [isVideoLoaded, setIsVideoLoaded] = useState(false);
+  // Track media load errors (when presigned URL returns 404 from S3)
+  const [mediaLoadError, setMediaLoadError] = useState<string | null>(null);
 
   const overlayRef = useRef<HTMLDivElement>(null);
   const mediaContainerRef = useRef<HTMLDivElement>(null);
@@ -102,31 +104,80 @@ export function EnhancedMediaPreviewModal({
       setCurrentIndex(initialIndex);
       setReactionPickerOpen(false);
       setIsVideoLoaded(false);
+      setMediaLoadError(null);
     }
   }, [isOpen, initialIndex]);
+
+  // Handle mediaItems array changes (e.g., when a message is deleted while modal is open)
+  // Ensure currentIndex stays within bounds and close modal if no items remain
+  useEffect(() => {
+    if (!isOpen) return;
+
+    if (mediaItems.length === 0) {
+      // No more items to show, close the modal
+      onClose();
+      return;
+    }
+
+    // Keep index in bounds if items were removed
+    if (currentIndex >= mediaItems.length) {
+      setCurrentIndex(mediaItems.length - 1);
+    }
+  }, [isOpen, mediaItems.length, currentIndex, onClose]);
 
   const currentItem = mediaItems[currentIndex] || null;
   const isVideo = currentItem?.attachment.type === "video";
   const hasNext = currentIndex < mediaItems.length - 1;
   const hasPrevious = currentIndex > 0;
 
-  // Load media URL
+  // Load media URL for display
+  // For images: load thumbnail (faster, sufficient for preview)
+  // For videos: load full video (needed for playback)
+  // The download button will always fetch the original via stream endpoint
   const {
     url: mediaUrl,
-    loading: urlLoading,
+    loading: mediaLoading,
     error: urlError,
   } = useMediaUrl(
     currentItem?.messageId || "",
     currentItem?.attachment.id || "",
     {
+      loadThumbnail: !isVideo, // Use thumbnail for images, full for videos
       handleCloudApi: true,
+      attachment: currentItem?.attachment,
     }
   );
 
-  // Reset video loaded state when changing items
+  // Reset state when changing items
   useEffect(() => {
     setIsVideoLoaded(false);
+    setMediaLoadError(null);
   }, [currentIndex]);
+
+  // URL to display - thumbnail for images, full for videos
+  const displayUrl = mediaUrl;
+
+  // Loading state
+  const urlLoading = mediaLoading;
+
+  // Combined error state (from useMediaUrl hook OR from element load error)
+  const hasError = urlError || mediaLoadError;
+
+  // Handle image load error (e.g., presigned URL points to deleted S3 object)
+  const handleImageError = useCallback(() => {
+    console.error(
+      "[Preview] Image failed to load - file may have been deleted"
+    );
+    setMediaLoadError("Media file is no longer available");
+  }, []);
+
+  // Handle video load error
+  const handleVideoError = useCallback(() => {
+    console.error(
+      "[Preview] Video failed to load - file may have been deleted"
+    );
+    setMediaLoadError("Media file is no longer available");
+  }, []);
 
   // Handle video loaded
   const handleVideoCanPlay = useCallback(() => {
@@ -421,7 +472,7 @@ export function EnhancedMediaPreviewModal({
         className="flex-1 flex items-center justify-center relative min-h-0 px-16"
       >
         {/* Loading State */}
-        {urlLoading && (
+        {urlLoading && !hasError && (
           <div className="text-white flex flex-col items-center gap-2">
             <div className="animate-spin rounded-full h-8 w-8 border-2 border-white border-t-blue-500" />
             <span className="text-sm text-white/70">Loading...</span>
@@ -429,15 +480,21 @@ export function EnhancedMediaPreviewModal({
         )}
 
         {/* Error State */}
-        {urlError && (
-          <div className="text-red-400 text-center p-4">
-            <p>Failed to load media</p>
-            <p className="text-sm text-white/50 mt-1">{urlError}</p>
+        {hasError && (
+          <div className="text-red-400 text-center p-4 flex flex-col items-center gap-3">
+            <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center">
+              <X className="w-8 h-8 text-red-400" />
+            </div>
+            <p className="text-lg font-medium">Failed to load media</p>
+            <p className="text-sm text-white/50">{hasError}</p>
+            <p className="text-xs text-white/30 mt-2">
+              The file may have been deleted or moved.
+            </p>
           </div>
         )}
 
         {/* Media Content */}
-        {!urlLoading && !urlError && mediaUrl && (
+        {!urlLoading && !hasError && displayUrl && (
           <>
             {/* Previous Button */}
             <button
@@ -458,16 +515,17 @@ export function EnhancedMediaPreviewModal({
 
             {/* Media Display */}
             <div
-              className="flex items-center justify-center max-w-full max-h-full"
+              className="flex items-center justify-center max-w-full max-h-full relative"
               onClick={(e) => e.stopPropagation()}
             >
               {isVideo ? (
                 <video
                   ref={videoRef}
                   key={`${currentItem.messageId}-${currentItem.attachment.id}`}
-                  src={mediaUrl}
+                  src={displayUrl}
                   controls
                   onCanPlay={handleVideoCanPlay}
+                  onError={handleVideoError}
                   className={cn(
                     "max-h-[calc(100vh-200px)] max-w-full rounded-lg transition-opacity duration-300",
                     isVideoLoaded ? "opacity-100" : "opacity-0"
@@ -479,10 +537,11 @@ export function EnhancedMediaPreviewModal({
                 </video>
               ) : (
                 <img
-                  src={mediaUrl}
+                  src={displayUrl}
                   alt={currentItem.attachment.fileName || "Preview"}
                   className="max-h-[calc(100vh-200px)] max-w-full rounded-lg object-contain"
                   draggable={false}
+                  onError={handleImageError}
                 />
               )}
             </div>
@@ -509,22 +568,70 @@ export function EnhancedMediaPreviewModal({
 
       {/* Thumbnail Strip */}
       {mediaItems.length > 1 && (
-        <div
-          className="h-24 flex items-center justify-center gap-2 px-4 py-3 flex-shrink-0"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="flex gap-2 overflow-x-auto max-w-full px-2 py-1">
-            {mediaItems.map((item, index) => (
-              <ThumbnailButton
-                key={`${item.messageId}-${item.attachment.id}`}
-                item={item}
-                isSelected={index === currentIndex}
-                onClick={() => goToIndex(index)}
-              />
-            ))}
-          </div>
-        </div>
+        <ThumbnailStrip
+          mediaItems={mediaItems}
+          currentIndex={currentIndex}
+          onSelectIndex={goToIndex}
+        />
       )}
+    </div>
+  );
+}
+
+/**
+ * Thumbnail strip component with auto-scroll to selected item
+ */
+interface ThumbnailStripProps {
+  mediaItems: PreviewableMediaItem[];
+  currentIndex: number;
+  onSelectIndex: (index: number) => void;
+}
+
+function ThumbnailStrip({
+  mediaItems,
+  currentIndex,
+  onSelectIndex,
+}: ThumbnailStripProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const thumbnailRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
+
+  // Scroll to selected thumbnail when currentIndex changes
+  useEffect(() => {
+    const selectedThumbnail = thumbnailRefs.current.get(currentIndex);
+    if (selectedThumbnail) {
+      selectedThumbnail.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+        inline: "center",
+      });
+    }
+  }, [currentIndex]);
+
+  return (
+    <div
+      className="h-24 flex items-center justify-center gap-2 px-4 py-3 flex-shrink-0"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div
+        ref={containerRef}
+        className="flex gap-2 overflow-x-auto max-w-full px-2 py-1 scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent"
+      >
+        {mediaItems.map((item, index) => (
+          <ThumbnailButton
+            key={`${item.messageId}-${item.attachment.id}`}
+            ref={(el) => {
+              if (el) {
+                thumbnailRefs.current.set(index, el);
+              } else {
+                thumbnailRefs.current.delete(index);
+              }
+            }}
+            item={item}
+            isSelected={index === currentIndex}
+            onClick={() => onSelectIndex(index)}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -538,52 +645,58 @@ interface ThumbnailButtonProps {
   onClick: () => void;
 }
 
-function ThumbnailButton({ item, isSelected, onClick }: ThumbnailButtonProps) {
-  const { url: thumbnailUrl, loading } = useMediaUrl(
-    item.messageId,
-    item.attachment.id,
-    {
+const ThumbnailButton = forwardRef<HTMLButtonElement, ThumbnailButtonProps>(
+  function ThumbnailButton({ item, isSelected, onClick }, ref) {
+    const {
+      url: thumbnailUrl,
+      loading,
+      error,
+    } = useMediaUrl(item.messageId, item.attachment.id, {
       loadThumbnail: true,
       handleCloudApi: true,
-    }
-  );
+      attachment: item.attachment, // Pass attachment for staging path detection
+    });
 
-  const isVideo = item.attachment.type === "video";
+    const isVideo = item.attachment.type === "video";
 
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        "flex-shrink-0 w-16 h-16 rounded-lg overflow-hidden transition-all",
-        "border-2 relative",
-        isSelected
-          ? "border-white ring-2 ring-white/30 scale-105"
-          : "border-transparent opacity-60 hover:opacity-100 hover:border-white/30"
-      )}
-    >
-      {loading || !thumbnailUrl ? (
-        <div className="w-full h-full bg-white/10 flex items-center justify-center">
-          {loading ? (
-            <div className="animate-spin rounded-full h-4 w-4 border border-white border-t-transparent" />
-          ) : (
-            <span className="text-xs text-white/50">?</span>
-          )}
-        </div>
-      ) : (
-        <img
-          src={thumbnailUrl}
-          alt=""
-          className="w-full h-full object-cover"
-          draggable={false}
-        />
-      )}
+    return (
+      <button
+        ref={ref}
+        onClick={onClick}
+        className={cn(
+          "flex-shrink-0 w-16 h-16 rounded-lg overflow-hidden transition-all",
+          "border-2 relative",
+          isSelected
+            ? "border-white ring-2 ring-white/30 scale-105"
+            : "border-transparent opacity-60 hover:opacity-100 hover:border-white/30"
+        )}
+      >
+        {loading || !thumbnailUrl ? (
+          <div className="w-full h-full bg-white/10 flex items-center justify-center">
+            {loading ? (
+              <div className="animate-spin rounded-full h-4 w-4 border border-white border-t-transparent" />
+            ) : error ? (
+              <span className="text-xs text-white/50">!</span>
+            ) : (
+              <span className="text-xs text-white/50">?</span>
+            )}
+          </div>
+        ) : (
+          <img
+            src={thumbnailUrl}
+            alt=""
+            className="w-full h-full object-cover"
+            draggable={false}
+          />
+        )}
 
-      {/* Video indicator overlay */}
-      {isVideo && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-          <Film className="w-4 h-4 text-white" />
-        </div>
-      )}
-    </button>
-  );
-}
+        {/* Video indicator overlay */}
+        {isVideo && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+            <Film className="w-4 h-4 text-white" />
+          </div>
+        )}
+      </button>
+    );
+  }
+);

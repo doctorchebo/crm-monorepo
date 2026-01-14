@@ -116,7 +116,6 @@ export function useRealtimeChat(chatId?: string) {
   useEffect(() => {
     // Connect to WebSocket server
     setConnectionStatus("connecting");
-    console.log("[RealtimeChat] Connecting to WebSocket server...");
 
     const socket = io(
       process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001",
@@ -135,15 +134,10 @@ export function useRealtimeChat(chatId?: string) {
     socket.on("connect", () => {
       setIsConnected(true);
       setConnectionStatus("connected");
-      console.log("[RealtimeChat] ✅ Connected to WebSocket server");
     });
 
     // Listen for single status update
     socket.on("message:status", (update: MessageStatusUpdate) => {
-      console.log(
-        `[RealtimeChat] 📡 Received status: ${update.messageId} → ${update.status}`
-      );
-
       setStatusMap((prev) => ({
         ...prev,
         [update.messageId]: {
@@ -156,10 +150,6 @@ export function useRealtimeChat(chatId?: string) {
 
     // Listen for batch status updates
     socket.on("message:statuses", (updates: MessageStatusUpdate[]) => {
-      console.log(
-        `[RealtimeChat] 📡 Received ${updates.length} status updates`
-      );
-
       setStatusMap((prev) => {
         const updated = { ...prev };
         for (const update of updates) {
@@ -175,24 +165,16 @@ export function useRealtimeChat(chatId?: string) {
 
     // Listen for new inbound message
     socket.on("message:new", (message: InboundMessage) => {
-      console.log(
-        `[RealtimeChat] 📨 Received new message: ${message.messageId} from ${message.sender} for chat ${message.chatId}`
-      );
-
       // Only add message if it matches the currently selected chat
       // This prevents messages from appearing in the wrong chat
       const currentChatId = chatIdRef.current;
 
       // If no chat is selected, don't add any messages
       if (!currentChatId) {
-        console.log(`[RealtimeChat] ⏭️ Skipping message - no chat selected`);
         return;
       }
 
       if (message.chatId !== currentChatId) {
-        console.log(
-          `[RealtimeChat] ⏭️ Skipping message - belongs to chat ${message.chatId}, not current chat ${currentChatId}`
-        );
         return;
       }
 
@@ -208,15 +190,10 @@ export function useRealtimeChat(chatId?: string) {
 
     // Listen for batch new messages
     socket.on("message:batch", (messageList: InboundMessage[]) => {
-      console.log(
-        `[RealtimeChat] 📨 Received ${messageList.length} new messages`
-      );
-
       const currentChatId = chatIdRef.current;
 
       // If no chat is selected, don't add any messages
       if (!currentChatId) {
-        console.log(`[RealtimeChat] ⏭️ Skipping batch - no chat selected`);
         return;
       }
 
@@ -240,10 +217,6 @@ export function useRealtimeChat(chatId?: string) {
         s3Key: string;
         thumbnailStatus?: string;
       }) => {
-        console.log(
-          `[RealtimeChat] 📎 Attachment updated: ${update.attachmentId} for message ${update.messageId}`
-        );
-
         const currentChatId = chatIdRef.current;
 
         // Only update if it's for the current chat
@@ -259,6 +232,22 @@ export function useRealtimeChat(chatId?: string) {
             // Update the attachment's s3Key
             const updatedAttachments = msg.attachments?.map((att: any) => {
               if (att.id === update.attachmentId) {
+                // CRITICAL: Ignore stale staging s3Key updates
+                // If the update's s3Key is a staging path but the attachment
+                // has already been promoted (s3Key doesn't start with "staging/"),
+                // this is a late-arriving event from before promotion - ignore it.
+                const updateIsStaging = update.s3Key?.startsWith("staging/");
+                const attachmentIsPromoted =
+                  att.s3Key && !att.s3Key.startsWith("staging/");
+
+                if (updateIsStaging && attachmentIsPromoted) {
+                  console.log(
+                    `[attachment:updated] Ignoring stale staging s3Key for promoted attachment ${att.id}:`,
+                    `update s3Key=${update.s3Key}, current s3Key=${att.s3Key}`
+                  );
+                  return att; // Don't apply stale staging path
+                }
+
                 return {
                   ...att,
                   s3Key: update.s3Key,
@@ -288,10 +277,6 @@ export function useRealtimeChat(chatId?: string) {
         waMessageId?: string;
         timestamp?: string;
       }) => {
-        console.log(
-          `[RealtimeChat] 📤 Attachment status: ${event.attachmentId} for message ${event.messageId} → ${event.status}`
-        );
-
         // Update the message's attachment status
         setMessages((prev) =>
           prev.map((msg) => {
@@ -318,53 +303,9 @@ export function useRealtimeChat(chatId?: string) {
       }
     );
 
-    // Listen for thumbnail ready events (when Lambda completes thumbnail generation)
-    socket.on(
-      "thumbnail:ready",
-      (event: {
-        messageId: string;
-        attachmentId: string;
-        thumbnailKey: string;
-        width: number;
-        height: number;
-        blurhash: string;
-        duration?: number;
-      }) => {
-        console.log(
-          `[RealtimeChat] 🖼️ Thumbnail ready: ${event.attachmentId} for message ${event.messageId}`
-        );
-
-        // Update the message's attachment with the new thumbnail data
-        setMessages((prev) =>
-          prev.map((msg) => {
-            if (msg.messageId !== event.messageId) return msg;
-
-            // Update the attachment's thumbnail info
-            const updatedAttachments = msg.attachments?.map((att: any) => {
-              if (att.id === event.attachmentId) {
-                return {
-                  ...att,
-                  thumbnailKey: event.thumbnailKey,
-                  thumbnailStatus: "ready",
-                  width: event.width,
-                  height: event.height,
-                  blurhash: event.blurhash,
-                  ...(event.duration !== undefined && {
-                    duration: event.duration,
-                  }),
-                };
-              }
-              return att;
-            });
-
-            return {
-              ...msg,
-              attachments: updatedAttachments,
-            };
-          })
-        );
-      }
-    );
+    // NOTE: thumbnail:ready events are handled by useThumbnailUpdates hook
+    // which has proper stale staging path detection. Do NOT add a handler here
+    // to avoid duplicate updates that could overwrite correct data with stale data.
     // Connection errors
     socket.on("error", (error: any) => {
       console.error("[RealtimeChat] ❌ WebSocket error:", error);
@@ -374,12 +315,10 @@ export function useRealtimeChat(chatId?: string) {
     socket.on("disconnect", () => {
       setIsConnected(false);
       setConnectionStatus("disconnected");
-      console.log("[RealtimeChat] ❌ Disconnected from WebSocket server");
     });
 
     // Cleanup on unmount
     return () => {
-      console.log("[RealtimeChat] Cleaning up WebSocket connection");
       socket.disconnect();
       socketRef.current = null;
     };

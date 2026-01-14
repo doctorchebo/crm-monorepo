@@ -1,6 +1,11 @@
 /**
  * Media Controller
- * Handles API endpoints for media upload, download, and attachment management
+ * Handles API endpoints for media upload, download, attachment management, and staging
+ *
+ * IMPORTANT: Route ordering matters in NestJS!
+ * Routes with literal path segments (e.g., 'staging/:id') MUST be defined BEFORE
+ * routes with dynamic parameters (e.g., ':messageId/:attachmentId').
+ * Otherwise, 'staging' would be matched as a messageId parameter.
  */
 
 import { db } from '@database/db.connection';
@@ -30,13 +35,22 @@ import {
   RequestPresignedUrlDto,
   UploadCompletedDto,
 } from '../dto/media.dto';
+import { MediaStagingService } from '../services/media-staging.service';
 import { MediaService } from '../services/media.service';
 
 @Controller('whatsapp/media')
 export class MediaController {
   private readonly logger = new Logger(MediaController.name);
 
-  constructor(private mediaService: MediaService) {}
+  constructor(
+    private mediaService: MediaService,
+    private mediaStagingService: MediaStagingService,
+  ) {}
+
+  // ============================================================================
+  // FIXED PATH ENDPOINTS (no dynamic segments)
+  // These must come first to be matched correctly
+  // ============================================================================
 
   /**
    * Request presigned URL for file upload
@@ -248,7 +262,6 @@ export class MediaController {
    * GET /whatsapp/media/cloud-api/:mediaId
    *
    * Returns the media file from Meta's Cloud API
-   * MUST be before generic :messageId routes to match correctly
    */
   @Get('cloud-api/:mediaId')
   @UseGuards(JwtAuthGuard)
@@ -279,6 +292,266 @@ export class MediaController {
       throw new BadRequestException(`Failed to fetch media: ${error.message}`);
     }
   }
+
+  // ============================================================================
+  // STAGING ENDPOINTS
+  // Pre-upload files for thumbnail generation before sending
+  // IMPORTANT: These must be defined BEFORE :messageId routes!
+  // ============================================================================
+
+  /**
+   * Stage a file for preview/editing with immediate thumbnail generation
+   * POST /whatsapp/media/staging
+   *
+   * Form data:
+   * - file: binary file data
+   * - senderId: sender ID (query param)
+   * - contactId: contact ID (query param)
+   *
+   * Response:
+   * {
+   *   "stagingId": "uuid",
+   *   "s3Key": "staging/userId/stagingId/filename.jpg",
+   *   "thumbnailKey": "staging/userId/stagingId/filename_thumb.jpg",
+   *   "mediaType": "image",
+   *   "size": 2048576,
+   *   "fileName": "photo.jpg",
+   *   "mimeType": "image/jpeg",
+   *   "thumbnailQueued": true
+   * }
+   */
+  @Post('staging')
+  @UseGuards(JwtAuthGuard)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: {
+        fileSize: 50 * 1024 * 1024, // 50MB max
+      },
+    }),
+  )
+  async stageFile(
+    @UploadedFile() file: any,
+    @Req() req: any,
+    @Query('senderId') senderId?: string,
+    @Query('contactId') contactId?: string,
+  ): Promise<{
+    stagingId: string;
+    s3Key: string;
+    thumbnailKey: string;
+    mediaType: string;
+    size: number;
+    fileName: string;
+    mimeType: string;
+    thumbnailQueued: boolean;
+  }> {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) {
+        throw new BadRequestException('User not authenticated');
+      }
+
+      if (!file) {
+        throw new BadRequestException('No file provided');
+      }
+
+      if (!senderId || !contactId) {
+        throw new BadRequestException('senderId and contactId are required');
+      }
+
+      this.logger.log(
+        `[Staging] File staging requested: ${file.originalname} (${file.size} bytes)`,
+      );
+
+      const result = await this.mediaStagingService.stageFile(
+        file,
+        parseInt(senderId),
+        contactId,
+        userId,
+      );
+
+      return result;
+    } catch (error) {
+      this.logger.error(`[Staging] Error staging file: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Clean up multiple staged files at once (batch operation)
+   * POST /whatsapp/media/staging/cleanup-batch
+   *
+   * Body: { "stagingIds": ["uuid1", "uuid2", ...] }
+   *
+   * Note: This must come before 'staging/:stagingId' routes
+   */
+  @Post('staging/cleanup-batch')
+  @UseGuards(JwtAuthGuard)
+  async cleanupBatchStagedFiles(
+    @Body() body: { stagingIds: string[] },
+    @Req() req: any,
+  ): Promise<{ success: boolean; cleaned: number }> {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) {
+        throw new BadRequestException('User not authenticated');
+      }
+
+      if (!body.stagingIds || !Array.isArray(body.stagingIds)) {
+        throw new BadRequestException('stagingIds array is required');
+      }
+
+      this.logger.log(
+        `[Staging] Batch cleanup requested for ${body.stagingIds.length} files`,
+      );
+
+      await this.mediaStagingService.cleanupMultipleStagedFiles(
+        body.stagingIds,
+      );
+
+      return { success: true, cleaned: body.stagingIds.length };
+    } catch (error) {
+      this.logger.error(`[Staging] Error in batch cleanup: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Get staging status including thumbnail progress
+   * GET /whatsapp/media/staging/:stagingId
+   */
+  @Get('staging/:stagingId')
+  @UseGuards(JwtAuthGuard)
+  async getStagingStatus(
+    @Param('stagingId') stagingId: string,
+    @Req() req: any,
+  ): Promise<{
+    stagingId: string;
+    s3Key: string;
+    thumbnailKey: string;
+    thumbnailStatus: string;
+    mediaType: string;
+    thumbnailUrl?: string;
+  } | null> {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) {
+        throw new BadRequestException('User not authenticated');
+      }
+
+      const status = await this.mediaStagingService.getStagingStatus(stagingId);
+
+      if (!status) {
+        return null;
+      }
+
+      // Get presigned thumbnail URL if ready
+      let thumbnailUrl: string | undefined;
+      if (status.thumbnailStatus === 'ready') {
+        thumbnailUrl =
+          (await this.mediaStagingService.getStagedThumbnailUrl(stagingId)) ||
+          undefined;
+      }
+
+      return {
+        ...status,
+        thumbnailUrl,
+      };
+    } catch (error) {
+      this.logger.error(
+        `[Staging] Error getting staging status: ${error.message}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Promote a staged file to a message
+   * POST /whatsapp/media/staging/:stagingId/promote
+   *
+   * Body: { "messageId": "msg-uuid", "senderId": 123, "contactId": "contact-uuid", "attachmentId": "att-uuid" (optional) }
+   */
+  @Post('staging/:stagingId/promote')
+  @UseGuards(JwtAuthGuard)
+  async promoteStagedFile(
+    @Param('stagingId') stagingId: string,
+    @Body()
+    body: {
+      messageId: string;
+      senderId: number;
+      contactId: string;
+      attachmentId?: string;
+    },
+    @Req() req: any,
+  ): Promise<{
+    stagingId: string;
+    s3Key: string;
+    thumbnailKey?: string;
+    thumbnailStatus: string;
+  }> {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) {
+        throw new BadRequestException('User not authenticated');
+      }
+
+      if (!body.messageId || !body.senderId || !body.contactId) {
+        throw new BadRequestException(
+          'messageId, senderId, and contactId are required',
+        );
+      }
+
+      this.logger.log(
+        `[Staging] Promote requested: ${stagingId} → message ${body.messageId}${body.attachmentId ? ` (attachment ${body.attachmentId})` : ''}`,
+      );
+
+      const result = await this.mediaStagingService.promoteStagedFile(
+        stagingId,
+        body.messageId,
+        body.senderId,
+        body.contactId,
+        body.attachmentId,
+      );
+
+      return result;
+    } catch (error) {
+      this.logger.error(`[Staging] Error promoting file: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Clean up a staged file (user cancelled)
+   * DELETE /whatsapp/media/staging/:stagingId
+   */
+  @Delete('staging/:stagingId')
+  @UseGuards(JwtAuthGuard)
+  async cleanupStagedFile(
+    @Param('stagingId') stagingId: string,
+    @Req() req: any,
+  ): Promise<{ success: boolean }> {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) {
+        throw new BadRequestException('User not authenticated');
+      }
+
+      this.logger.log(`[Staging] Cleanup requested for: ${stagingId}`);
+
+      await this.mediaStagingService.cleanupStagedFile(stagingId);
+
+      return { success: true };
+    } catch (error) {
+      this.logger.error(
+        `[Staging] Error cleaning up staged file: ${error.message}`,
+      );
+      throw error;
+    }
+  }
+
+  // ============================================================================
+  // DYNAMIC PATH ENDPOINTS (:messageId)
+  // These must come AFTER all literal path routes
+  // ============================================================================
 
   /**
    * Download/stream media file from S3

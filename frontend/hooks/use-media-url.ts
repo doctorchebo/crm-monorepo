@@ -1,17 +1,15 @@
 /**
- * Hook for loading media with caching and abort support
+ * Hook for loading media URLs with proper lifecycle management
  *
- * Features:
- * - Automatic cleanup on unmount via AbortController
- * - Integrated media URL caching
- * - Cloud API blob URL lifecycle management
- * - Prevents race conditions on component unmount
- * - Thumbnail status awareness for progressive loading
- * - Module-level URL cache for instant restoration on re-mount
+ * SIMPLIFIED DESIGN:
+ * - Only caches presigned URLs (not blob URLs)
+ * - Blob URLs are created and managed per-component instance
+ * - Clear separation between thumbnail URLs (presigned) and full URLs (blob)
+ * - No complex reference counting - React's cleanup handles it
  *
  * Usage:
  * ```tsx
- * const { url, loading, error, thumbnailStatus } = useMediaUrl(messageId, attachmentId);
+ * const { url, loading, error } = useMediaUrl(messageId, attachmentId, { attachment });
  * ```
  */
 
@@ -20,59 +18,113 @@ import { Attachment, ThumbnailStatus } from "@/lib/media/types";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 // ============================================================
-// MODULE-LEVEL THUMBNAIL URL CACHE
+// PRESIGNED URL CACHE (NO blob URLs)
 // ============================================================
-// This cache persists across component unmounts/remounts
-// It stores thumbnail URLs that have been successfully loaded
-// This eliminates loading flicker when switching between chats
-// and prevents unnecessary skeleton displays
+// Only stores presigned URLs which are safe to cache
+// Blob URLs are NOT cached - they're managed per-component
 
-interface CachedMediaEntry {
-  thumbnailUrl: string | null;
-  fullUrl: string | null;
+interface CachedPresignedUrl {
+  url: string;
   cachedAt: number;
+  s3Key: string; // Track which s3Key this URL was generated for
 }
 
-// Module-level cache - survives component unmounts
-const mediaUrlCache = new Map<string, CachedMediaEntry>();
+// Cache for thumbnail presigned URLs only
+const thumbnailUrlCache = new Map<string, CachedPresignedUrl>();
 
-// Cache TTL - 30 minutes (thumbnail presigned URLs typically last 1 hour)
+// Cache TTL - 30 minutes (presigned URLs typically last 1 hour)
 const CACHE_TTL = 30 * 60 * 1000;
 
-function getCacheKey(messageId: string, attachmentId: string): string {
-  return `${messageId}:${attachmentId}`;
+function getThumbnailCacheKey(messageId: string, attachmentId: string): string {
+  return `thumb:${messageId}:${attachmentId}`;
 }
 
-function getCachedEntry(
+function getCachedThumbnailUrl(
   messageId: string,
-  attachmentId: string
-): CachedMediaEntry | null {
-  const key = getCacheKey(messageId, attachmentId);
-  const entry = mediaUrlCache.get(key);
+  attachmentId: string,
+  currentS3Key?: string
+): string | null {
+  const key = getThumbnailCacheKey(messageId, attachmentId);
+  const entry = thumbnailUrlCache.get(key);
 
   if (!entry) return null;
 
-  // Check if entry is expired
+  // Check if expired
   if (Date.now() - entry.cachedAt > CACHE_TTL) {
-    mediaUrlCache.delete(key);
+    thumbnailUrlCache.delete(key);
     return null;
   }
 
-  return entry;
+  // Check if s3Key changed (file was promoted)
+  if (currentS3Key && entry.s3Key !== currentS3Key) {
+    thumbnailUrlCache.delete(key);
+    return null;
+  }
+
+  return entry.url;
 }
 
-function setCachedEntry(
+function setCachedThumbnailUrl(
   messageId: string,
   attachmentId: string,
-  thumbnailUrl: string | null,
-  fullUrl: string | null
+  url: string,
+  s3Key: string
 ): void {
-  const key = getCacheKey(messageId, attachmentId);
-  mediaUrlCache.set(key, {
-    thumbnailUrl,
-    fullUrl,
+  const key = getThumbnailCacheKey(messageId, attachmentId);
+  thumbnailUrlCache.set(key, {
+    url,
     cachedAt: Date.now(),
+    s3Key,
   });
+}
+
+/**
+ * Invalidate cache for an attachment.
+ * Call this when the attachment's s3Key changes (e.g., after promotion).
+ */
+export function invalidateCacheForAttachment(
+  messageId: string,
+  attachmentId: string
+): void {
+  const key = getThumbnailCacheKey(messageId, attachmentId);
+  if (thumbnailUrlCache.has(key)) {
+    thumbnailUrlCache.delete(key);
+    console.debug(`[MediaUrlCache] Invalidated cache for ${key}`);
+  }
+}
+
+/**
+ * Invalidate all cache entries with staging paths.
+ */
+export function invalidateStagingCaches(): void {
+  let count = 0;
+  for (const [key, entry] of thumbnailUrlCache) {
+    if (entry.s3Key?.startsWith("staging/")) {
+      thumbnailUrlCache.delete(key);
+      count++;
+    }
+  }
+  if (count > 0) {
+    console.debug(`[MediaUrlCache] Invalidated ${count} staging cache entries`);
+  }
+}
+
+/**
+ * Invalidate all cache entries for a message.
+ */
+export function invalidateCachesForMessage(messageId: string): void {
+  let count = 0;
+  for (const key of thumbnailUrlCache.keys()) {
+    if (key.includes(`:${messageId}:`)) {
+      thumbnailUrlCache.delete(key);
+      count++;
+    }
+  }
+  if (count > 0) {
+    console.debug(
+      `[MediaUrlCache] Invalidated ${count} cache entries for message ${messageId}`
+    );
+  }
 }
 
 // ============================================================
@@ -80,34 +132,36 @@ function setCachedEntry(
 // ============================================================
 
 interface UseMediaUrlOptions {
-  loadThumbnail?: boolean; // Try to load thumbnail first
-  handleCloudApi?: boolean; // Convert cloud-api:// URLs to blob URLs
-  /** Attachment data with thumbnail info */
+  /** Try to load thumbnail first (for images) */
+  loadThumbnail?: boolean;
+  /** Handle cloud-api:// URLs */
+  handleCloudApi?: boolean;
+  /** Attachment data with s3Key, thumbnailKey, etc. */
   attachment?: Attachment;
-  /** Whether to enable fetching (default: true). When false, no API calls will be made */
+  /** Whether to enable fetching (default: true) */
   enabled?: boolean;
 }
 
 interface UseMediaUrlResult {
-  /** The resolved URL (thumbnail or full) */
+  /** The resolved URL to display (thumbnail or full) */
   url: string | null;
-  /** Thumbnail URL (if available) */
+  /** Thumbnail presigned URL (if available) */
   thumbnailUrl: string | null;
-  /** Full resolution URL (separate from thumbnail) */
+  /** Full resolution URL (blob URL for local display) */
   fullUrl: string | null;
   /** Whether loading is in progress */
   loading: boolean;
   /** Error message if loading failed */
   error: string | null;
-  /** Current thumbnail status */
+  /** Current thumbnail status from attachment */
   thumbnailStatus: ThumbnailStatus | undefined;
-  /** Whether thumbnail is ready */
+  /** Whether thumbnail is available */
   hasThumbnail: boolean;
   /** Blurhash for progressive loading */
   blurhash: string | undefined;
   /** Media dimensions */
   dimensions: { width?: number; height?: number };
-  /** Manually load full resolution */
+  /** Manually trigger full resolution load */
   loadFullResolution: () => void;
 }
 
@@ -127,35 +181,20 @@ export function useMediaUrl(
     enabled = true,
   } = options;
 
-  // Check module-level cache SYNCHRONOUSLY for initial state
-  // This prevents loading flicker when component remounts
-  const cachedEntry =
-    attachmentId && enabled ? getCachedEntry(messageId, attachmentId) : null;
-  const hasCachedUrl =
-    cachedEntry && (cachedEntry.thumbnailUrl || cachedEntry.fullUrl);
-
-  // Initialize state from cache if available
-  const [url, setUrl] = useState<string | null>(
-    hasCachedUrl ? cachedEntry.thumbnailUrl || cachedEntry.fullUrl : null
-  );
-  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(
-    cachedEntry?.thumbnailUrl || null
-  );
-  const [fullUrl, setFullUrl] = useState<string | null>(
-    cachedEntry?.fullUrl || null
-  );
-  // CRITICAL: Start as NOT loading if we have cached data
-  const [loading, setLoading] = useState(!hasCachedUrl);
+  // State
+  const [url, setUrl] = useState<string | null>(null);
+  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
+  const [fullUrl, setFullUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [shouldLoadFull, setShouldLoadFull] = useState(false);
 
-  // Track AbortController to cancel requests on unmount
+  // Refs for cleanup
   const abortControllerRef = useRef<AbortController | null>(null);
-  const componentRef = useRef<object>({});
-  // Track blob URLs created for cleanup
-  const blobUrlsRef = useRef<string[]>([]);
+  const blobUrlRef = useRef<string | null>(null);
+  const cloudApiBlobRef = useRef<object>({});
 
-  // Get thumbnail metadata from attachment
+  // Derived values from attachment
   const thumbnailStatus = attachment?.thumbnailStatus;
   const hasThumbnail =
     thumbnailStatus === "ready" && !!attachment?.thumbnailKey;
@@ -165,14 +204,24 @@ export function useMediaUrl(
     height: attachment?.height,
   };
 
-  // Function to manually trigger full resolution loading
+  // Manual trigger for full resolution
   const loadFullResolution = useCallback(() => {
     setShouldLoadFull(true);
   }, []);
 
+  // Main loading effect
   useEffect(() => {
-    // Skip loading if disabled
-    if (!enabled) {
+    // Reset state when key props change
+    setError(null);
+
+    // Clean up previous blob URL when deps change
+    if (blobUrlRef.current) {
+      URL.revokeObjectURL(blobUrlRef.current);
+      blobUrlRef.current = null;
+    }
+
+    // Early exit conditions
+    if (!enabled || !attachmentId) {
       setLoading(false);
       setUrl(null);
       setThumbnailUrl(null);
@@ -180,174 +229,137 @@ export function useMediaUrl(
       return;
     }
 
-    // Skip loading if no attachmentId is provided
-    if (!attachmentId) {
-      setLoading(false);
-      setUrl(null);
-      setThumbnailUrl(null);
-      setFullUrl(null);
-      return;
-    }
+    // CASE 1: Active upload in progress - use previewUrl directly
+    // previewUrl is a blob URL created during file selection
+    const isActiveUpload =
+      attachment?.previewUrl &&
+      (!attachment.s3Key ||
+        attachment.s3Key === "" ||
+        attachment.s3Key.startsWith("staging/"));
 
-    // If attachment has a local preview URL (optimistic upload), use it directly
-    // This is for multi-media uploads where we show the local blob URL while uploading
-    if (attachment?.previewUrl) {
-      console.log(
-        `[useMediaUrl] Using previewUrl for ${attachmentId} (optimistic upload)`
-      );
-      setUrl(attachment.previewUrl);
-      setThumbnailUrl(attachment.previewUrl);
+    if (isActiveUpload) {
+      setUrl(attachment.previewUrl!);
+      setThumbnailUrl(attachment.previewUrl!);
       setLoading(false);
       return;
     }
 
-    // Skip loading if attachment exists but has no s3Key yet (pending upload)
-    // This prevents "Attachment not found" errors during upload
-    if (attachment && (!attachment.s3Key || attachment.s3Key === "")) {
-      console.log(
-        `[useMediaUrl] Skipping fetch for ${attachmentId} - s3Key is empty (pending upload)`
-      );
+    // CASE 2: No s3Key yet - nothing to load
+    if (!attachment?.s3Key || attachment.s3Key === "") {
       setLoading(false);
       return;
     }
 
-    // Check module-level cache first - if we have cached URLs, skip the fetch
-    const cached = getCachedEntry(messageId, attachmentId);
-    if (cached && (cached.thumbnailUrl || cached.fullUrl)) {
-      // We already have cached URLs, just ensure state is set correctly
-      // (This handles the case where dependencies change but we still have valid cache)
-      const displayUrl = cached.thumbnailUrl || cached.fullUrl;
-      if (
-        url !== displayUrl ||
-        thumbnailUrl !== cached.thumbnailUrl ||
-        fullUrl !== cached.fullUrl
-      ) {
-        setThumbnailUrl(cached.thumbnailUrl);
-        setFullUrl(cached.fullUrl);
-        setUrl(displayUrl);
-      }
+    // CASE 3: Orphaned staging file - show error
+    if (attachment.s3Key.startsWith("staging/") && !attachment.previewUrl) {
+      setError("Media file is no longer available");
       setLoading(false);
-
-      // If thumbnail wasn't ready before but now is, we might need to fetch it
-      // Check if we should fetch thumbnail now that it's ready
-      if (loadThumbnail && hasThumbnail && !cached.thumbnailUrl) {
-        // Fall through to fetch thumbnail
-      } else {
-        console.log(`[useMediaUrl] Using cached URL for ${attachmentId}`);
-        return; // Cache hit - no need to fetch
-      }
+      return;
     }
 
-    // Create abort controller for this effect
-    abortControllerRef.current = new AbortController();
+    // CASE 4: Normal load from S3
     let isMounted = true;
+    abortControllerRef.current = new AbortController();
 
-    console.log(`[useMediaUrl] Fetching URL for ${attachmentId}:`, {
-      hasThumbnail,
-      thumbnailStatus,
-      thumbnailKey: attachment?.thumbnailKey,
-      s3Key: attachment?.s3Key,
-    });
-
-    const loadUrl = async () => {
+    const loadMedia = async () => {
       try {
-        // Only set loading if we don't already have a URL to display
-        if (!url) {
-          setLoading(true);
-        }
+        setLoading(true);
         setError(null);
 
         let loadedThumbnailUrl: string | null = null;
-        let originalUrl: string | null = null;
+        let loadedFullUrl: string | null = null;
 
-        // Try to load thumbnail if available and requested
+        // Try to load thumbnail if requested and available
         if (loadThumbnail && hasThumbnail) {
-          try {
-            loadedThumbnailUrl = await mediaApi.getThumbnailUrl(
-              messageId,
-              attachmentId
-            );
-          } catch (err) {
-            console.debug("Thumbnail load failed, falling back to full image");
-          }
-        }
+          // Check cache first
+          const cached = getCachedThumbnailUrl(
+            messageId,
+            attachmentId,
+            attachment?.s3Key
+          );
 
-        // For videos: only load full video if explicitly requested via shouldLoadFull
-        // Otherwise, just show the thumbnail (or skeleton if thumbnail isn't ready)
-        const isVideo = attachment?.type === "video";
-        const shouldSkipFullLoad = isVideo && loadThumbnail && !shouldLoadFull;
-
-        // Load full URL if thumbnail not available or explicitly requested
-        // Skip full load for videos when we only want thumbnail display
-        if ((!loadedThumbnailUrl && !shouldSkipFullLoad) || shouldLoadFull) {
-          // Use streaming endpoint to avoid CORS issues with direct S3 URLs
-          // Fetch the media as a blob and create an object URL
-          try {
-            const blob = await mediaApi.downloadMediaViaStream(
-              messageId,
-              attachmentId
-            );
-            originalUrl = window.URL.createObjectURL(blob);
-            // Track blob URL for cleanup on unmount
-            blobUrlsRef.current.push(originalUrl);
-          } catch (streamErr) {
-            console.warn(
-              "Stream download failed, falling back to presigned URL:",
-              streamErr
-            );
-            // Fallback to presigned URL (may fail due to CORS)
-            const urlResponse = await mediaApi.getDownloadUrl(
-              messageId,
-              attachmentId
-            );
-            originalUrl = urlResponse.url;
-
-            // Handle Cloud API media URLs
-            if (
-              originalUrl &&
-              handleCloudApi &&
-              originalUrl.startsWith("cloud-api://")
-            ) {
-              const mediaId = originalUrl.replace("cloud-api://", "");
-              try {
-                originalUrl = await mediaApi.fetchCloudAPIMedia(
-                  mediaId,
-                  componentRef.current
+          if (cached) {
+            loadedThumbnailUrl = cached;
+          } else {
+            try {
+              const thumbUrl = await mediaApi.getThumbnailUrl(
+                messageId,
+                attachmentId
+              );
+              if (thumbUrl) {
+                loadedThumbnailUrl = thumbUrl;
+                // Cache the presigned URL
+                setCachedThumbnailUrl(
+                  messageId,
+                  attachmentId,
+                  thumbUrl,
+                  attachment?.s3Key || ""
                 );
-              } catch (err) {
-                console.error("Failed to fetch cloud API media:", err);
-                throw err;
               }
+            } catch (err) {
+              console.debug(
+                "[useMediaUrl] Thumbnail load failed, will fall back to full"
+              );
             }
           }
         }
 
-        // Update state if component is still mounted and request wasn't aborted
-        if (isMounted && !abortControllerRef.current?.signal.aborted) {
-          // Use thumbnail as primary URL if available, otherwise full
-          setThumbnailUrl(loadedThumbnailUrl);
-          setUrl(loadedThumbnailUrl || originalUrl);
-          setFullUrl(originalUrl);
-          setError(null);
+        // Determine if we need to load full resolution
+        const isVideo = attachment?.type === "video";
+        const needsFull =
+          !loadThumbnail || // Explicitly requesting full
+          (!loadedThumbnailUrl && !isVideo) || // Thumbnail failed for image
+          shouldLoadFull; // User requested full
 
-          // Update module-level cache for instant restoration on re-mount
-          // Only cache presigned URLs (not blob URLs which are component-local)
-          if (
-            loadedThumbnailUrl ||
-            (originalUrl && !originalUrl.startsWith("blob:"))
-          ) {
-            setCachedEntry(
+        if (needsFull) {
+          try {
+            // Download via stream and create blob URL
+            const blob = await mediaApi.downloadMediaViaStream(
               messageId,
-              attachmentId,
-              loadedThumbnailUrl,
-              originalUrl && !originalUrl.startsWith("blob:")
-                ? originalUrl
-                : null
+              attachmentId
             );
+            loadedFullUrl = URL.createObjectURL(blob);
+            // Track for cleanup
+            blobUrlRef.current = loadedFullUrl;
+          } catch (streamErr) {
+            console.warn(
+              "[useMediaUrl] Stream download failed, trying presigned URL"
+            );
+
+            // Fallback to presigned URL
+            const response = await mediaApi.getDownloadUrl(
+              messageId,
+              attachmentId
+            );
+            let presignedUrl = response.url;
+
+            // Handle cloud-api:// URLs
+            if (
+              presignedUrl &&
+              handleCloudApi &&
+              presignedUrl.startsWith("cloud-api://")
+            ) {
+              const mediaId = presignedUrl.replace("cloud-api://", "");
+              presignedUrl = await mediaApi.fetchCloudAPIMedia(
+                mediaId,
+                cloudApiBlobRef.current
+              );
+            }
+
+            loadedFullUrl = presignedUrl;
           }
+        }
+
+        // Update state if still mounted
+        if (isMounted && !abortControllerRef.current?.signal.aborted) {
+          setThumbnailUrl(loadedThumbnailUrl);
+          setFullUrl(loadedFullUrl);
+          // Prefer thumbnail for display, fall back to full
+          setUrl(loadedThumbnailUrl || loadedFullUrl);
         }
       } catch (err) {
         if (isMounted && !abortControllerRef.current?.signal.aborted) {
+          console.error("[useMediaUrl] Load failed:", err);
           setError(err instanceof Error ? err.message : "Failed to load media");
         }
       } finally {
@@ -357,21 +369,21 @@ export function useMediaUrl(
       }
     };
 
-    loadUrl();
+    loadMedia();
 
-    // Cleanup on unmount
+    // Cleanup on unmount or dependency change
     return () => {
       isMounted = false;
       abortControllerRef.current?.abort();
 
-      // Cleanup cloud API blob URLs
-      mediaApi.cleanupComponentMedia(componentRef.current);
+      // Revoke blob URL we created
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
+        blobUrlRef.current = null;
+      }
 
-      // Cleanup blob URLs created from stream downloads
-      blobUrlsRef.current.forEach((blobUrl) => {
-        window.URL.revokeObjectURL(blobUrl);
-      });
-      blobUrlsRef.current = [];
+      // Cleanup cloud API blobs
+      mediaApi.cleanupComponentMedia(cloudApiBlobRef.current);
     };
   }, [
     messageId,
@@ -381,11 +393,11 @@ export function useMediaUrl(
     hasThumbnail,
     shouldLoadFull,
     enabled,
-    // Include thumbnailKey to re-run when thumbnail becomes ready via WebSocket
+    // Re-run when attachment state changes
+    attachment?.s3Key,
     attachment?.thumbnailKey,
     attachment?.thumbnailStatus,
-    // Include s3Key to re-fetch when attachment upload completes
-    attachment?.s3Key,
+    attachment?.previewUrl,
   ]);
 
   return {
@@ -404,7 +416,6 @@ export function useMediaUrl(
 
 /**
  * Hook for batch loading multiple media items
- * Useful for galleries and carousels
  */
 export function useMediaUrls(
   attachments: Array<{ id: string; messageId: string }>,
@@ -412,69 +423,45 @@ export function useMediaUrls(
 ) {
   const [urls, setUrls] = useState<Record<string, string | null>>({});
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const [errors, setErrors] = useState<Record<string, string | null>>({});
 
   useEffect(() => {
-    abortControllerRef.current = new AbortController();
+    if (!attachments.length) {
+      setLoading(false);
+      return;
+    }
+
     let isMounted = true;
 
-    const loadUrls = async () => {
-      try {
-        setLoading(true);
-        setError(null);
+    const loadAll = async () => {
+      const newUrls: Record<string, string | null> = {};
+      const newErrors: Record<string, string | null> = {};
 
-        const results: Record<string, string | null> = {};
-
-        // Load all URLs in parallel
-        const promises = attachments.map(async (attachment) => {
+      await Promise.all(
+        attachments.map(async ({ id, messageId }) => {
           try {
-            const urlResponse = await mediaApi.getDownloadUrl(
-              attachment.messageId,
-              attachment.id
-            );
-            let finalUrl = urlResponse.url;
-
-            // Handle Cloud API media
-            if (
-              options.handleCloudApi !== false &&
-              finalUrl.startsWith("cloud-api://")
-            ) {
-              const mediaId = finalUrl.replace("cloud-api://", "");
-              finalUrl = await mediaApi.fetchCloudAPIMedia(mediaId);
-            }
-
-            results[attachment.id] = finalUrl;
+            const response = await mediaApi.getThumbnailUrl(messageId, id);
+            newUrls[id] = response;
           } catch (err) {
-            console.error(`Failed to load media ${attachment.id}:`, err);
-            results[attachment.id] = null;
+            newErrors[id] =
+              err instanceof Error ? err.message : "Failed to load";
           }
-        });
+        })
+      );
 
-        await Promise.all(promises);
-
-        if (isMounted && !abortControllerRef.current?.signal.aborted) {
-          setUrls(results);
-          setError(null);
-        }
-      } catch (err) {
-        if (isMounted && !abortControllerRef.current?.signal.aborted) {
-          setError(err instanceof Error ? err.message : "Failed to load media");
-        }
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
+      if (isMounted) {
+        setUrls(newUrls);
+        setErrors(newErrors);
+        setLoading(false);
       }
     };
 
-    loadUrls();
+    loadAll();
 
     return () => {
       isMounted = false;
-      abortControllerRef.current?.abort();
     };
-  }, [attachments, options]);
+  }, [attachments]);
 
-  return { urls, loading, error };
+  return { urls, loading, errors };
 }

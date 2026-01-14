@@ -92,9 +92,15 @@ export const StickerAttachment = memo(function StickerAttachment({
   }, []);
 
   // Error state
+  // IMPORTANT: Must include data-media-loading="false" to signal scroll system
+  // that this media is "done" (even though it failed)
   if (error || hasError) {
     return (
-      <div className="flex items-center justify-center text-muted-foreground">
+      <div
+        className="flex items-center justify-center text-muted-foreground"
+        data-media-container="sticker"
+        data-media-loading="false"
+      >
         <div
           className="bg-muted/50 rounded-lg flex items-center justify-center"
           style={{ width: maxSize, height: maxSize }}

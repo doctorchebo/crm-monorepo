@@ -130,8 +130,6 @@ export function usePins(options: UsePinsOptions): UsePinsReturn {
   useEffect(() => {
     if (!enabled) return;
 
-    console.log("[usePins] Connecting to WebSocket...");
-
     const socket = io(
       process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001",
       {
@@ -146,19 +144,15 @@ export function usePins(options: UsePinsOptions): UsePinsReturn {
     socketRef.current = socket;
 
     socket.on("connect", () => {
-      console.log("[usePins] Connected");
       setIsConnected(true);
     });
 
     socket.on("disconnect", (reason) => {
-      console.log("[usePins] Disconnected:", reason);
       setIsConnected(false);
     });
 
     // Handle pin added
     socket.on("pin:added", (event: PinAddedEvent) => {
-      console.log("[usePins] Pin added:", event);
-
       // Only update if it's for our current chat
       if (event.chatId !== chatId) return;
 
@@ -179,8 +173,6 @@ export function usePins(options: UsePinsOptions): UsePinsReturn {
 
     // Handle pin removed
     socket.on("pin:removed", (event: PinRemovedEvent) => {
-      console.log("[usePins] Pin removed:", event);
-
       // Only update if it's for our current chat
       if (event.chatId !== chatId) return;
 
@@ -196,7 +188,6 @@ export function usePins(options: UsePinsOptions): UsePinsReturn {
     });
 
     return () => {
-      console.log("[usePins] Cleaning up...");
       socket.disconnect();
     };
   }, [enabled, chatId]);
