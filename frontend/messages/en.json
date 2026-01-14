@@ -373,6 +373,88 @@
       "noResults": "No senders match your search.",
       "select": "Select",
       "startingChat": "Starting chat..."
+    },
+    "fields": {
+      "firstName": "First Name",
+      "lastName": "Last Name",
+      "phoneNumber": "Phone Number",
+      "email": "Email",
+      "countryCode": "Country Code",
+      "language": "Language"
+    },
+    "importText": "Import",
+    "import": {
+      "title": "Contacts Import",
+      "steps": {
+        "upload": "Upload",
+        "mapping": "Map Fields",
+        "review": "Review",
+        "import": "Import"
+      },
+      "actions": {
+        "upload": "Upload File",
+        "back": "Back",
+        "continue": "Continue",
+        "continueReview": "Continue to Review",
+        "import": "Import {count} Contacts",
+        "goToContacts": "Go to Contacts",
+        "cancel": "Cancel",
+        "retry": "Retry"
+      },
+      "upload": {
+        "title": "Upload File",
+        "description": "Drag and drop your CSV or Excel file, or click to browse",
+        "dropZone": {
+          "active": "Drop the file here...",
+          "inactive": "Drag & drop a file here, or click to select",
+          "isUploading": "Uploading and parsing..."
+        },
+        "error": {
+          "invalidType": "Please upload a CSV or Excel file",
+          "uploadFailed": "Upload failed",
+          "noRows": "No contacts found in file"
+        },
+        "success": "Found {count} rows"
+      },
+      "mapping": {
+        "title": "Map Fields",
+        "description": "Match your file columns to contact fields",
+        "skipColumn": "Skip this column",
+        "required": "Required",
+        "error": {
+          "firstNameRequired": "First Name mapping is required",
+          "phoneOrEmailRequired": "Either Phone Number or Email mapping is required",
+          "saveFailed": "Failed to save mapping"
+        }
+      },
+      "review": {
+        "title": "Review Import",
+        "description": "Review the validation results before importing",
+        "validating": "Validating contacts...",
+        "table": {
+          "row": "Row",
+          "status": "Status",
+          "data": "Data",
+          "errors": "Errors",
+          "valid": "Valid",
+          "invalid": "Invalid",
+          "duplicate": "Duplicate"
+        },
+        "pagination": {
+          "previous": "Previous",
+          "next": "Next",
+          "rowsPerPage": "Rows per page:",
+          "of": "of"
+        }
+      },
+      "progress": {
+        "title": "Importing Contacts",
+        "description": "Please wait while we import your contacts...",
+        "success": "Import complete!",
+        "failed": "Import failed",
+        "completeDescription": "Successfully imported {valid} contacts. {invalid} failed.",
+        "failedDescription": "Import failed. Please try again."
+      }
     }
   },
   "kanban": {

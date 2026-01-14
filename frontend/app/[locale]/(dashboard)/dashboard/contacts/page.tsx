@@ -309,7 +309,7 @@ export default function ContactsPage() {
               onClick={() => router.push(`/${locale}/dashboard/contacts/import`)}
             >
               <Upload className="mr-2 h-4 w-4" />
-              Import
+              {t("importText")}
             </Button>
             <Button
               onClick={() => router.push(`/${locale}/dashboard/contacts/form`)}

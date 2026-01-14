@@ -8,6 +8,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useNotification } from "@/hooks/use-notification";
 import { backendApi } from "@/lib/api/endpoints";
 import { ArrowLeft, Check, Upload, MapPin, Eye, Loader2, FileSpreadsheet, ChevronLeft, ChevronRight, CheckCircle } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useState, useEffect, useMemo } from "react";
 import useSWR from "swr";
@@ -75,6 +76,7 @@ export default function ContactsImportPage() {
     const router = useRouter();
     const params = useParams();
     const locale = params.locale as string;
+    const t = useTranslations("contacts");
     const { addNotification } = useNotification();
 
     // State
@@ -182,7 +184,7 @@ export default function ContactsImportPage() {
         const validTypes = [".csv", ".xlsx", ".xls"];
         const ext = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
         if (!validTypes.includes(ext)) {
-            addNotification("Please upload a CSV or Excel file", "error");
+            addNotification(t("import.upload.error.invalidType"), "error");
             return;
         }
 
@@ -218,7 +220,7 @@ export default function ContactsImportPage() {
                         setJobId(newJobId);
                         setHighestCompletedStep(0); // Upload complete
                         setCurrentStep("mapping");
-                        addNotification(`Found ${jobData.totalRows} rows`, "success");
+                        addNotification(t("import.upload.success", { count: jobData.totalRows }), "success");
                     } else if (jobData.status === "FAILED") {
                         throw new Error(jobData.errorMessage || "Parsing failed");
                     }
@@ -232,7 +234,7 @@ export default function ContactsImportPage() {
             }
         } catch (err) {
             console.error("Upload error:", err);
-            addNotification((err as Error).message || "Upload failed", "error");
+            addNotification((err as Error).message || t("import.upload.error.uploadFailed"), "error");
         } finally {
             setIsUploading(false);
         }
@@ -248,11 +250,11 @@ export default function ContactsImportPage() {
         // Validate required mappings
         const mappedFields = Object.values(fieldMapping).filter(Boolean);
         if (!mappedFields.includes("first_name")) {
-            addNotification("First Name mapping is required", "error");
+            addNotification(t("import.mapping.error.firstNameRequired"), "error");
             return;
         }
         if (!mappedFields.includes("phone_number") && !mappedFields.includes("email")) {
-            addNotification("Either Phone Number or Email mapping is required", "error");
+            addNotification(t("import.mapping.error.phoneOrEmailRequired"), "error");
             return;
         }
 
@@ -269,7 +271,7 @@ export default function ContactsImportPage() {
             await mutateJob();
         } catch (err) {
             console.error("Mapping error:", err);
-            addNotification("Failed to save mapping", "error");
+            addNotification(t("import.mapping.error.saveFailed"), "error");
         } finally {
             setIsProcessing(false);
         }
@@ -290,7 +292,7 @@ export default function ContactsImportPage() {
             addNotification("Import started", "success");
         } catch (err) {
             console.error("Import error:", err);
-            addNotification("Failed to start import", "error");
+            addNotification(t("import.progress.failed"), "error");
         } finally {
             setIsProcessing(false);
         }
@@ -331,9 +333,9 @@ export default function ContactsImportPage() {
                     <ArrowLeft className="h-5 w-5" />
                 </Button>
                 <div>
-                    <h1 className="text-2xl font-bold">Import Contacts</h1>
+                    <h1 className="text-2xl font-bold">{t("import.title")}</h1>
                     <p className="text-muted-foreground">
-                        Upload a CSV or Excel file to import contacts
+                        {t("import.upload.description")}
                     </p>
                 </div>
             </div>
@@ -374,7 +376,7 @@ export default function ContactsImportPage() {
                                 </button>
                                 <span className={`text-xs mt-2 font-medium ${isCurrent ? "text-primary" : isCompleted ? "text-foreground" : "text-muted-foreground"
                                     }`}>
-                                    {step.label}
+                                    {t(`import.steps.${step.id}`)}
                                 </span>
                             </div>
                             {idx < STEP_CONFIG.length - 1 && (
@@ -396,10 +398,10 @@ export default function ContactsImportPage() {
                         <CardHeader>
                             <CardTitle className="flex items-center gap-2">
                                 <Upload className="h-5 w-5" />
-                                Upload File
+                                {t("import.upload.title")}
                             </CardTitle>
                             <CardDescription>
-                                Drag and drop your CSV or Excel file, or click to browse
+                                {t("import.upload.description")}
                             </CardDescription>
                         </CardHeader>
                         <CardContent>
@@ -429,7 +431,7 @@ export default function ContactsImportPage() {
                                     <FileSpreadsheet className="h-12 w-12 mx-auto text-muted-foreground" />
                                 )}
                                 <p className="mt-4 text-lg font-medium">
-                                    {isUploading ? "Uploading and parsing..." : "Drop your file here"}
+                                    {isUploading ? t("import.upload.dropZone.isUploading") : t("import.upload.dropZone.active")}
                                 </p>
                                 <p className="text-sm text-muted-foreground">
                                     Supports CSV, XLSX, XLS
@@ -445,11 +447,11 @@ export default function ContactsImportPage() {
                         <CardHeader>
                             <CardTitle className="flex items-center gap-2">
                                 <MapPin className="h-5 w-5" />
-                                Map Fields
+                                {t("import.mapping.title")}
                             </CardTitle>
                             <CardDescription>
-                                Match your file columns to contact fields.
-                                {job.totalRows > 0 && ` Found ${job.totalRows} rows.`}
+                                {t("import.mapping.description")}
+                                {job.totalRows > 0 && ` ${t("import.upload.success", { count: job.totalRows })}`}
                             </CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-4">
@@ -467,12 +469,15 @@ export default function ContactsImportPage() {
                                             })
                                         }
                                     >
-                                        <option value="">Skip this column</option>
-                                        {INTERNAL_FIELDS.map((f) => (
-                                            <option key={f.key} value={f.key}>
-                                                {f.label} {f.required && "*"}
-                                            </option>
-                                        ))}
+                                        <option value="">{t("import.mapping.skipColumn")}</option>
+                                        {INTERNAL_FIELDS.map((f) => {
+                                            const fieldKey = f.key.replace(/_([a-z])/g, g => g[1].toUpperCase());
+                                            return (
+                                                <option key={f.key} value={f.key}>
+                                                    {t(`fields.${fieldKey}`)} {f.required && `(${t("import.mapping.required")})`}
+                                                </option>
+                                            );
+                                        })}
                                     </select>
                                 </div>
                             ))}
@@ -482,11 +487,11 @@ export default function ContactsImportPage() {
                                     variant="outline"
                                     onClick={() => setCurrentStep("upload")}
                                 >
-                                    Back
+                                    {t("import.actions.back")}
                                 </Button>
                                 <Button onClick={handleSaveMapping} disabled={isProcessing}>
                                     {isProcessing && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-                                    Continue to Review
+                                    {t("import.actions.continueReview")}
                                 </Button>
                             </div>
                         </CardContent>
@@ -499,12 +504,12 @@ export default function ContactsImportPage() {
                         <CardHeader>
                             <CardTitle className="flex items-center gap-2">
                                 <Eye className="h-5 w-5" />
-                                Review Import
+                                {t("import.review.title")}
                             </CardTitle>
                             <CardDescription>
                                 {job.status === "VALIDATING"
-                                    ? "Validating contacts..."
-                                    : "Review the validation results before importing"
+                                    ? t("import.review.validating")
+                                    : t("import.review.description")
                                 }
                             </CardDescription>
                         </CardHeader>
@@ -514,17 +519,17 @@ export default function ContactsImportPage() {
                                 <div className="space-y-3 py-8">
                                     <div className="flex items-center justify-center gap-2 text-lg">
                                         <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                                        <span>Validating contacts...</span>
+                                        <span>{t("import.review.validating")}</span>
                                     </div>
                                     <Progress value={validationProgress.percentage} className="h-3" />
                                     <div className="text-center text-sm text-muted-foreground">
-                                        {validationProgress.processed.toLocaleString()} / {validationProgress.total.toLocaleString()} rows processed
+                                        {validationProgress.processed.toLocaleString()} / {validationProgress.total.toLocaleString()} {t("import.review.table.row")}
                                         ({validationProgress.percentage}%)
                                     </div>
                                     <div className="flex justify-center gap-4 text-sm">
-                                        <span className="text-green-600">✓ Valid: {job.validRows || 0}</span>
-                                        <span className="text-red-600">✗ Invalid: {job.invalidRows || 0}</span>
-                                        <span className="text-yellow-600">⚠ Duplicates: {job.duplicateRows || 0}</span>
+                                        <span className="text-green-600">✓ {t("import.review.table.valid")}: {job.validRows || 0}</span>
+                                        <span className="text-red-600">✗ {t("import.review.table.invalid")}: {job.invalidRows || 0}</span>
+                                        <span className="text-yellow-600">⚠ {t("import.review.table.duplicate")}: {job.duplicateRows || 0}</span>
                                     </div>
                                 </div>
                             )}
@@ -535,13 +540,13 @@ export default function ContactsImportPage() {
                                     {/* Status badges */}
                                     <div className="flex gap-4 flex-wrap">
                                         <Badge variant="default" className="text-sm">
-                                            ✓ Valid: {job.validRows ?? 0}
+                                            ✓ {t("import.review.table.valid")}: {job.validRows ?? 0}
                                         </Badge>
                                         <Badge variant="destructive" className="text-sm">
-                                            ✗ Invalid: {job.invalidRows ?? 0}
+                                            ✗ {t("import.review.table.invalid")}: {job.invalidRows ?? 0}
                                         </Badge>
                                         <Badge variant="secondary" className="text-sm">
-                                            ⚠ Duplicates: {job.duplicateRows ?? 0}
+                                            ⚠ {t("import.review.table.duplicate")}: {job.duplicateRows ?? 0}
                                         </Badge>
                                     </div>
 
@@ -552,10 +557,10 @@ export default function ContactsImportPage() {
                                                 <table className="w-full text-sm">
                                                     <thead className="bg-muted sticky top-0">
                                                         <tr>
-                                                            <th className="px-3 py-2 text-left w-16">Row</th>
-                                                            <th className="px-3 py-2 text-left w-24">Status</th>
-                                                            <th className="px-3 py-2 text-left">Data</th>
-                                                            <th className="px-3 py-2 text-left w-48">Errors</th>
+                                                            <th className="px-3 py-2 text-left w-16">{t("import.review.table.row")}</th>
+                                                            <th className="px-3 py-2 text-left w-24">{t("import.review.table.status")}</th>
+                                                            <th className="px-3 py-2 text-left">{t("import.review.table.data")}</th>
+                                                            <th className="px-3 py-2 text-left w-48">{t("import.review.table.errors")}</th>
                                                         </tr>
                                                     </thead>
                                                     <tbody>
@@ -617,7 +622,10 @@ export default function ContactsImportPage() {
                                     {preview && preview.total > PAGE_SIZE && (
                                         <div className="flex items-center justify-between pt-2">
                                             <span className="text-sm text-muted-foreground">
-                                                Showing {previewPage * PAGE_SIZE + 1}-{Math.min((previewPage + 1) * PAGE_SIZE, preview.total)} of {preview.total}
+                                                {t("pagination.page", {
+                                                    current: previewPage + 1,
+                                                    total: Math.ceil(preview.total / PAGE_SIZE)
+                                                })}
                                             </span>
                                             <div className="flex gap-2">
                                                 <Button
@@ -627,7 +635,7 @@ export default function ContactsImportPage() {
                                                     disabled={previewPage === 0}
                                                 >
                                                     <ChevronLeft className="h-4 w-4" />
-                                                    Previous
+                                                    {t("pagination.previous")}
                                                 </Button>
                                                 <Button
                                                     variant="outline"
@@ -635,7 +643,7 @@ export default function ContactsImportPage() {
                                                     onClick={() => setPreviewPage(p => p + 1)}
                                                     disabled={(previewPage + 1) * PAGE_SIZE >= preview.total}
                                                 >
-                                                    Next
+                                                    {t("pagination.next")}
                                                     <ChevronRight className="h-4 w-4" />
                                                 </Button>
                                             </div>
@@ -648,14 +656,14 @@ export default function ContactsImportPage() {
                                             variant="outline"
                                             onClick={() => setCurrentStep("mapping")}
                                         >
-                                            Back
+                                            {t("import.actions.back")}
                                         </Button>
                                         <Button
                                             onClick={handleCommitImport}
                                             disabled={isProcessing || validContactCount === 0}
                                         >
                                             {isProcessing && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-                                            Import {validContactCount} Contacts
+                                            {t("import.actions.import", { count: validContactCount })}
                                         </Button>
                                     </div>
                                 </>
@@ -668,13 +676,13 @@ export default function ContactsImportPage() {
                 {currentStep === "import" && job && (
                     <>
                         <CardHeader>
-                            <CardTitle>Importing Contacts</CardTitle>
+                            <CardTitle>{t("import.progress.title")}</CardTitle>
                             <CardDescription>
                                 {job.status === "IMPORTED"
-                                    ? "Import complete!"
+                                    ? t("import.progress.success")
                                     : job.status === "FAILED"
-                                        ? "Import failed"
-                                        : "Please wait while we import your contacts..."
+                                        ? t("import.progress.failed")
+                                        : t("import.progress.description")
                                 }
                             </CardDescription>
                         </CardHeader>
@@ -692,11 +700,11 @@ export default function ContactsImportPage() {
                             <div className="text-center text-lg font-medium">
                                 {job.status === "IMPORTED" ? (
                                     <span className="text-green-600">
-                                        ✓ {job.validRows} contacts imported
+                                        ✓ {t("import.progress.completeDescription", { valid: job.validRows, invalid: job.invalidRows })}
                                     </span>
                                 ) : job.status === "FAILED" ? (
                                     <span className="text-red-600">
-                                        ✗ Import failed: {job.errorMessage || "Unknown error"}
+                                        ✗ {t("import.progress.failedDescription")}: {job.errorMessage || t("error")}
                                     </span>
                                 ) : (
                                     <span className="flex items-center justify-center gap-2">
@@ -711,7 +719,7 @@ export default function ContactsImportPage() {
                                     <Button
                                         onClick={() => router.push(`/${locale}/dashboard/contacts`)}
                                     >
-                                        Go to Contacts
+                                        {t("import.actions.goToContacts")}
                                     </Button>
                                 </div>
                             )}

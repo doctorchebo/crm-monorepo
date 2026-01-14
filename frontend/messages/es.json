@@ -374,6 +374,88 @@
       "noResults": "Ningún remitente coincide con tu búsqueda.",
       "select": "Seleccionar",
       "startingChat": "Iniciando chat..."
+    },
+    "fields": {
+      "firstName": "Nombre",
+      "lastName": "Apellido",
+      "phoneNumber": "Número de Teléfono",
+      "email": "Correo Electrónico",
+      "countryCode": "Código de País",
+      "language": "Idioma"
+    },
+    "importText": "Importar",
+    "import": {
+      "title": "Importar Contactos",
+      "steps": {
+        "upload": "Subir",
+        "mapping": "Mapear Campos",
+        "review": "Revisar",
+        "import": "Importar"
+      },
+      "actions": {
+        "upload": "Subir Archivo",
+        "back": "Atrás",
+        "continue": "Continuar",
+        "continueReview": "Continuar a Revisión",
+        "import": "Importar {count} Contactos",
+        "goToContacts": "Ir a Contactos",
+        "cancel": "Cancelar",
+        "retry": "Reintentar"
+      },
+      "upload": {
+        "title": "Subir Archivo",
+        "description": "Arrastra y suelta tu archivo CSV o Excel, o haz clic para buscar",
+        "dropZone": {
+          "active": "Suelta el archivo aquí...",
+          "inactive": "Arrastra y suelta un archivo aquí, o haz clic para seleccionar",
+          "isUploading": "Subiendo y procesando..."
+        },
+        "error": {
+          "invalidType": "Por favor sube un archivo CSV o Excel",
+          "uploadFailed": "Error al subir",
+          "noRows": "No se encontraron contactos en el archivo"
+        },
+        "success": "Se encontraron {count} filas"
+      },
+      "mapping": {
+        "title": "Mapear Campos",
+        "description": "Combina las columnas de tu archivo con los campos de contacto",
+        "skipColumn": "Omitir esta columna",
+        "required": "Requerido",
+        "error": {
+          "firstNameRequired": "El mapeo del Nombre es obligatorio",
+          "phoneOrEmailRequired": "Se requiere mapeo de Teléfono o Correo Electrónico",
+          "saveFailed": "Error al guardar el mapeo"
+        }
+      },
+      "review": {
+        "title": "Revisar Importación",
+        "description": "Revisa los resultados de validación antes de importar",
+        "validating": "Validando contactos...",
+        "table": {
+          "row": "Fila",
+          "status": "Estado",
+          "data": "Datos",
+          "errors": "Errores",
+          "valid": "Válido",
+          "invalid": "Inválido",
+          "duplicate": "Duplicado"
+        },
+        "pagination": {
+          "previous": "Anterior",
+          "next": "Siguiente",
+          "rowsPerPage": "Filas por página:",
+          "of": "de"
+        }
+      },
+      "progress": {
+        "title": "Importando Contactos",
+        "description": "Por favor espera mientras importamos tus contactos...",
+        "success": "¡Importación completada!",
+        "failed": "Importación fallida",
+        "completeDescription": "Se importaron exitosamente {valid} contactos. {invalid} fallaron.",
+        "failedDescription": "Importación fallida. Por favor, intenta de nuevo."
+      }
     }
   },
   "kanban": {
