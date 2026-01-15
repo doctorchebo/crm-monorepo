@@ -177,6 +177,10 @@ export class CreateTemplateDto {
   category?: string;
 
   @IsOptional()
+  @IsBoolean()
+  hasMedia?: boolean;
+
+  @IsOptional()
   @IsString()
   @MaxLength(5000)
   aiUsageHints?: string;
@@ -232,6 +236,10 @@ export class UpdateTemplateDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  hasMedia?: boolean;
 
   @IsOptional()
   @IsString()
@@ -298,6 +306,10 @@ export class CreateObjectDto {
   @IsOptional()
   @IsBoolean()
   publishImmediately?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  isTransient?: boolean;
 }
 
 export class UpdateObjectDto {
@@ -317,6 +329,10 @@ export class UpdateObjectDto {
   @ValidateNested({ each: true })
   @Type(() => FieldValueDto)
   fieldValues?: FieldValueDto[];
+
+  @IsOptional()
+  @IsBoolean()
+  isTransient?: boolean;
 }
 
 export class BulkUpdateStatusDto {

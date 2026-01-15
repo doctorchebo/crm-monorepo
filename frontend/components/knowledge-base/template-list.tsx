@@ -73,7 +73,7 @@ interface TemplateCardProps {
   template: KbObjectTemplate;
   onDuplicate: (template: KbObjectTemplate) => void;
   onDelete: (template: KbObjectTemplate) => void;
-  t: ReturnType<typeof useTranslations<"knowledgeBase.templates">>;
+  t: ReturnType<typeof useTranslations<"knowledgeBase.templates.list">>;
 }
 
 function TemplateCard({
@@ -212,7 +212,7 @@ interface DuplicateDialogProps {
   onOpenChange: (open: boolean) => void;
   onConfirm: (name: string) => void;
   isLoading: boolean;
-  t: ReturnType<typeof useTranslations<"knowledgeBase.templates">>;
+  t: ReturnType<typeof useTranslations<"knowledgeBase.templates.list">>;
 }
 
 function DuplicateDialog({
@@ -281,7 +281,7 @@ interface DeleteDialogProps {
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
   isLoading: boolean;
-  t: ReturnType<typeof useTranslations<"knowledgeBase.templates">>;
+  t: ReturnType<typeof useTranslations<"knowledgeBase.templates.list">>;
 }
 
 function DeleteDialog({
@@ -335,7 +335,7 @@ function DeleteDialog({
 
 export function TemplateList() {
   const router = useRouter();
-  const t = useTranslations("knowledgeBase.templates");
+  const t = useTranslations("knowledgeBase.templates.list");
   const tCategories = useTranslations("knowledgeBase.templates.categories");
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -414,12 +414,12 @@ export function TemplateList() {
     if (knownCategories.includes(category)) {
       return tCategories(
         category as
-          | "real_estate"
-          | "services"
-          | "ecommerce"
-          | "hospitality"
-          | "support"
-          | "other"
+        | "real_estate"
+        | "services"
+        | "ecommerce"
+        | "hospitality"
+        | "support"
+        | "other"
       );
     }
     return category.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());

@@ -398,7 +398,9 @@ export interface TemplateSummary {
   category: string;
   isSystem: boolean;
   isActive: boolean;
+  hasMedia: boolean;
   objectCount?: number;
+  objectsWithMediaCount?: number;
   fieldCount?: number;
 }
 

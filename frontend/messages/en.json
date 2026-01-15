@@ -962,7 +962,157 @@
         "ecommerce": "E-commerce",
         "hospitality": "Hospitality",
         "support": "Support",
+        "custom": "Custom",
         "other": "Other"
+      },
+      "editor": {
+        "title": {
+          "new": "New Template",
+          "edit": "Edit Template: {name}"
+        },
+        "breadcrumbs": {
+          "templates": "Templates",
+          "new": "New Template",
+          "edit": "Edit"
+        },
+        "save": "Save",
+        "saving": "Saving...",
+        "loading": "Loading...",
+        "success": {
+          "created": "Template created successfully",
+          "updated": "Template updated successfully",
+          "partialUpdate": "Template updated with warnings"
+        },
+        "errors": {
+          "loadFailed": "Failed to load template",
+          "saveFailed": "Failed to save template",
+          "couldNotDeleteFields": "Some fields could not be deleted",
+          "fieldHasData": "\"{field}\" has data in existing objects",
+          "deleteFieldFailed": "Failed to delete \"{field}\": {error}",
+          "deleteFieldUnknown": "Unknown error",
+          "someFieldsNotDeleted": "{count} field(s) could not be deleted",
+          "fieldInUseHint": "To delete these fields, first remove or clear their values from all objects using this template."
+        }
+      },
+      "form": {
+        "title": "Template Details",
+        "description": "Configure the basic settings for this template",
+        "basicInfo": "Basic Information",
+        "basicInfoDescription": "Set the core details for this template",
+        "hasMedia": "Allow Media Attachments",
+        "hasMediaDescription": "Enable the media section for objects created from this template",
+        "hasMediaLockedDescription": "Cannot disable because this template has objects with media attached.",
+        "advanced": "Advanced & AI",
+        "displayName": "Display Name",
+        "slug": "Slug (ID)",
+        "slugDescription": "Unique identifier for this template (auto-generated)",
+        "descriptionLabel": "Description",
+        "descriptionPlaceholder": "Describe what this template is for",
+        "category": "Category",
+        "icon": "Icon",
+        "color": "Color",
+        "aiConfiguration": "AI Configuration",
+        "aiConfigurationDescription": "Configure how the AI interacts with this template",
+        "aiUsageHints": "AI Usage Hints",
+        "aiUsageHintsPlaceholder": "e.g., Use this when the user asks about property details...",
+        "aiUsageHintsDescription": "Instructions for the AI on when to use this template",
+        "aiRetrievalContext": "AI Retrieval Context",
+        "aiRetrievalContextPlaceholder": "e.g., This represents a real estate property...",
+        "aiRetrievalContextDescription": "Context to help the AI understand this data",
+        "placeholders": {
+          "displayName": "e.g., Property Listing",
+          "slug": "property_listing"
+        }
+      },
+      "fieldsManager": {
+        "title": "Template Fields",
+        "description": "Define the fields that make up this template",
+        "addField": "Add Field",
+        "noFields": "No fields added yet. Click 'Add Field' to get started.",
+        "columns": {
+          "name": "Name",
+          "type": "Type",
+          "attributes": "Attributes",
+          "ai": "AI Settings",
+          "actions": "Actions"
+        },
+        "required": "Required",
+        "unique": "Unique",
+        "aiRelevance": "AI Relevance",
+        "excludedFromEmbedding": "Not indexed",
+        "edit": "Edit",
+        "delete": "Delete"
+      },
+      "fieldEditor": {
+        "title": {
+          "add": "Add Field",
+          "edit": "Edit Field"
+        },
+        "description": "Configure the field settings",
+        "addField": "Add Field",
+        "editField": "Edit Field",
+        "save": "Save",
+        "cancel": "Cancel",
+        "displayName": "Display Name",
+        "fieldName": "Internal Name",
+        "fieldNameDescription": "Unique key for this field (lowercase, underscores only)",
+        "fieldType": "Field Type",
+        "fieldDescription": "Description",
+        "fieldDescriptionPlaceholder": "Help text for this field",
+        "placeholder": "Placeholder",
+        "placeholderPlaceholder": "e.g., Enter value here...",
+        "required": "Required",
+        "requiredDescription": "Mark this field as mandatory",
+        "indexed": "Indexed",
+        "indexedDescription": "Optimize this field for filtering and sorting",
+        "aiSettings": "AI Settings",
+        "aiRelevance": "AI Relevance",
+        "aiRelevanceDescription": "How important is this field for AI understanding",
+        "aiRelevanceOptions": {
+          "low": "Low",
+          "medium": "Medium",
+          "high": "High",
+          "critical": "Critical"
+        },
+        "includeInEmbedding": "Include in Semantic Search",
+        "includeInEmbeddingDescription": "Index this field for AI retrieval",
+        "aiHints": "AI Hints",
+        "aiHintsPlaceholder": "e.g., This field contains the property address...",
+        "aiHintsDescription": "Additional context for the AI about this field"
+      },
+      "list": {
+        "title": "Templates",
+        "description": "Manage your knowledge base templates",
+        "newTemplate": "New Template",
+        "searchPlaceholder": "Search templates...",
+        "noTemplatesFound": "No templates found",
+        "noTemplatesHint": "Get started by creating your first template",
+        "tryDifferentSearch": "Try a different search term",
+        "createTemplate": "Create Template",
+        "system": "System",
+        "fields": "{count} fields",
+        "objects": "{count} objects",
+        "editTemplate": "Edit Template",
+        "duplicate": "Duplicate",
+        "createObjectFromTemplate": "Create Object",
+        "deleteTemplate": "Delete",
+        "duplicateDialog": {
+          "title": "Duplicate Template",
+          "description": "Create a copy of \"{name}\" with all its fields.",
+          "nameLabel": "New Template Name",
+          "namePlaceholder": "Enter template name",
+          "cancel": "Cancel",
+          "duplicate": "Duplicate",
+          "duplicating": "Duplicating..."
+        },
+        "deleteDialog": {
+          "title": "Delete Template",
+          "description": "Are you sure you want to delete \"{name}\"? This action cannot be undone.",
+          "objectsWarning": "Warning: This template has {count} objects that will also be deleted.",
+          "cancel": "Cancel",
+          "delete": "Delete",
+          "deleting": "Deleting..."
+        }
       }
     },
     "objects": {
@@ -1024,6 +1174,7 @@
     "editor": {
       "newObject": "New Object",
       "editObject": "Edit Object",
+      "draftObject": "Untitled Draft",
       "back": "Back",
       "unsavedChanges": "Unsaved changes",
       "saveAndPublish": "Save & Publish",

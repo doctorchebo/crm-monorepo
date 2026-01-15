@@ -964,6 +964,164 @@
         "hospitality": "Hospitalidad",
         "support": "Soporte",
         "other": "Otros"
+      },
+      "editor": {
+        "title": {
+          "new": "Nueva Plantilla",
+          "edit": "Editar Plantilla: {name}"
+        },
+        "breadcrumbs": {
+          "templates": "Plantillas",
+          "new": "Nueva Plantilla",
+          "edit": "Editar"
+        },
+        "save": "Guardar",
+        "saving": "Guardando...",
+        "loading": "Cargando...",
+        "success": {
+          "created": "Plantilla creada exitosamente",
+          "updated": "Plantilla actualizada exitosamente",
+          "partialUpdate": "Plantilla actualizada con advertencias"
+        },
+        "errors": {
+          "loadFailed": "Error al cargar la plantilla",
+          "saveFailed": "Error al guardar la plantilla",
+          "couldNotDeleteFields": "Algunos campos no pudieron ser eliminados",
+          "fieldHasData": "\"{field}\" tiene datos en objetos existentes",
+          "deleteFieldFailed": "Error al eliminar \"{field}\": {error}",
+          "deleteFieldUnknown": "Error desconocido",
+          "someFieldsNotDeleted": "{count} campo(s) no pudieron ser eliminados",
+          "fieldInUseHint": "Para eliminar estos campos, primero elimina o limpia sus valores de todos los objetos que usan esta plantilla."
+        }
+      },
+      "form": {
+        "title": "Detalles de la Plantilla",
+        "description": "Configura los ajustes básicos para esta plantilla",
+        "basicInfo": "Información Básica",
+        "basicInfoDescription": "Establece los detalles principales de esta plantilla",
+        "hasMedia": "Permitir Adjuntos Multimedia",
+        "hasMediaDescription": "Habilitar la sección multimedia para objetos creados con esta plantilla",
+        "hasMediaLockedDescription": "No se puede desactivar porque esta plantilla tiene objetos con medios adjuntos.",
+        "advanced": "Avanzado e IA",
+        "displayName": "Nombre para Mostrar",
+        "slug": "Slug (ID)",
+        "slugDescription": "Identificador único para esta plantilla (autogenerado)",
+        "descriptionLabel": "Descripción",
+        "descriptionPlaceholder": "Describe para qué es esta plantilla",
+        "category": "Categoría",
+        "icon": "Ícono",
+        "color": "Color",
+        "aiConfiguration": "Configuración de IA",
+        "aiConfigurationDescription": "Configura cómo la IA interactúa con esta plantilla",
+        "aiUsageHints": "Sugerencias de Uso de IA",
+        "aiUsageHintsPlaceholder": "ej., Usa esto cuando el usuario pregunte sobre detalles de la propiedad...",
+        "aiUsageHintsDescription": "Instrucciones para la IA sobre cuándo usar esta plantilla",
+        "aiRetrievalContext": "Contexto de Recuperación de IA",
+        "aiRetrievalContextPlaceholder": "ej., Esto representa una propiedad inmobiliaria...",
+        "aiRetrievalContextDescription": "Contexto para ayudar a la IA a entender estos datos",
+        "placeholders": {
+          "displayName": "ej., Listado de Propiedades",
+          "slug": "listado_propiedades"
+        }
+      },
+      "fieldsManager": {
+        "title": "Campos de Plantilla",
+        "description": "Define los campos que componen esta plantilla",
+        "addField": "Agregar Campo",
+        "noFields": "No hay campos agregados. Haz clic en 'Agregar Campo' para comenzar.",
+        "columns": {
+          "name": "Nombre",
+          "type": "Tipo",
+          "attributes": "Atributos",
+          "ai": "Config. IA",
+          "actions": "Acciones"
+        },
+        "required": "Requerido",
+        "unique": "Único",
+        "aiRelevance": "Relevancia IA",
+        "excludedFromEmbedding": "No indexado",
+        "edit": "Editar",
+        "delete": "Eliminar"
+      },
+      "fieldEditor": {
+        "title": {
+          "add": "Agregar Campo",
+          "edit": "Editar Campo"
+        },
+        "description": "Configura los ajustes del campo",
+        "addField": "Agregar Campo",
+        "editField": "Editar Campo",
+        "save": "Guardar",
+        "cancel": "Cancelar",
+        "displayName": "Nombre para Mostrar",
+        "fieldName": "Nombre Interno",
+        "fieldNameDescription": "Clave única para este campo (minúsculas, solo guiones bajos)",
+        "fieldType": "Tipo de Campo",
+        "fieldDescription": "Descripción",
+        "fieldDescriptionPlaceholder": "Texto de ayuda para este campo",
+        "placeholder": "Marcador de Posición",
+        "placeholderPlaceholder": "ej., Ingresa el valor aquí...",
+        "required": "Requerido",
+        "requiredDescription": "Marcar este campo como obligatorio",
+        "indexed": "Indexado",
+        "indexedDescription": "Optimizar este campo para filtrado y ordenamiento",
+        "aiSettings": "Configuración de IA",
+        "aiRelevance": "Relevancia de IA",
+        "aiRelevanceDescription": "Qué tan importante es este campo para la IA",
+        "aiRelevanceOptions": {
+          "low": "Baja",
+          "medium": "Media",
+          "high": "Alta",
+          "critical": "Crítica"
+        },
+        "includeInEmbedding": "Incluir en Búsqueda Semántica",
+        "includeInEmbeddingDescription": "Indexar este campo para recuperación de IA",
+        "aiHints": "Sugerencias de IA",
+        "aiHintsPlaceholder": "ej., Este campo contiene la dirección de la propiedad...",
+        "aiHintsDescription": "Contexto adicional para la IA sobre este campo"
+      },
+      "list": {
+        "title": "Plantillas",
+        "description": "Gestiona tus plantillas de base de conocimiento",
+        "newTemplate": "Nueva Plantilla",
+        "searchPlaceholder": "Buscar plantillas...",
+        "noTemplatesFound": "No se encontraron plantillas",
+        "noTemplatesHint": "Comienza creando tu primera plantilla",
+        "tryDifferentSearch": "Intenta con un término de búsqueda diferente",
+        "createTemplate": "Crear Plantilla",
+        "system": "Sistema",
+        "fields": "{count} campos",
+        "objects": "{count} objetos",
+        "editTemplate": "Editar Plantilla",
+        "duplicate": "Duplicar",
+        "createObjectFromTemplate": "Crear Objeto",
+        "deleteTemplate": "Eliminar",
+        "duplicateDialog": {
+          "title": "Duplicar Plantilla",
+          "description": "Crear una copia de \"{name}\" con todos sus campos.",
+          "nameLabel": "Nombre de la Nueva Plantilla",
+          "namePlaceholder": "Ingresa el nombre de la plantilla",
+          "cancel": "Cancelar",
+          "duplicate": "Duplicar",
+          "duplicating": "Duplicando..."
+        },
+        "deleteDialog": {
+          "title": "Eliminar Plantilla",
+          "description": "¿Estás seguro de que quieres eliminar \"{name}\"? Esta acción no se puede deshacer.",
+          "objectsWarning": "Advertencia: Esta plantilla tiene {count} objetos que también serán eliminados.",
+          "cancel": "Cancelar",
+          "delete": "Eliminar",
+          "deleting": "Eliminando..."
+        },
+        "categories": {
+          "real_estate": "Bienes Raíces",
+          "services": "Servicios",
+          "ecommerce": "Comercio Electrónico",
+          "hospitality": "Hospitalidad",
+          "support": "Soporte",
+          "custom": "Personalizado",
+          "other": "Otros"
+        }
       }
     },
     "objects": {
@@ -1025,6 +1183,7 @@
     "editor": {
       "newObject": "Nuevo Objeto",
       "editObject": "Editar Objeto",
+      "draftObject": "Borrador sin título",
       "back": "Volver",
       "unsavedChanges": "Cambios sin guardar",
       "saveAndPublish": "Guardar y Publicar",

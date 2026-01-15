@@ -40,7 +40,7 @@ export class ObjectService {
     private readonly indexingService: IndexingService,
     @Inject(forwardRef(() => KbMediaService))
     private readonly mediaService: KbMediaService,
-  ) {}
+  ) { }
 
   /**
    * Get objects for a user with pagination and filters
@@ -171,6 +171,7 @@ export class ObjectService {
       name: dto.name,
       externalId: dto.externalId,
       status: dto.publishImmediately ? 'pending' : 'draft',
+      isTransient: dto.isTransient ?? false,
     });
 
     // Create field values
@@ -248,6 +249,7 @@ export class ObjectService {
         externalId: dto.externalId,
         // Reset to pending if object was indexed (needs re-indexing)
         status: object.status === 'indexed' ? 'pending' : object.status,
+        isTransient: dto.isTransient,
       });
     }
 

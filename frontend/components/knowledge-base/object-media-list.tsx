@@ -90,9 +90,10 @@ import useSWR, { mutate } from "swr";
 import { MediaUploadDialog } from "./media-upload-dialog";
 
 interface ObjectMediaListProps {
-  objectId: string;
+  objectId?: string | null;
   fieldId?: string;
   editable?: boolean;
+  onEnsureObject?: () => Promise<string>;
 }
 
 function getMediaIcon(mimeType: string) {
@@ -750,8 +751,22 @@ export function ObjectMediaList({
   objectId,
   fieldId,
   editable = true,
+  onEnsureObject,
 }: ObjectMediaListProps) {
   const t = useTranslations("knowledgeBase.media");
+
+  // Handle upload click - ensure object exists first
+  const handleUploadClick = async () => {
+    if (!objectId && onEnsureObject) {
+      try {
+        await onEnsureObject();
+      } catch (err) {
+        console.error("Failed to ensure object existence:", err);
+        return;
+      }
+    }
+    setUploadDialogOpen(true);
+  };
 
   // Stable cache key - memoize to prevent SWR from re-fetching on every render
   // SWR uses stable-hash internally, but we need the reference to be stable
@@ -924,9 +939,9 @@ export function ObjectMediaList({
             <CardDescription>
               {mediaList?.length
                 ? t("mediaCountWithLimit", {
-                    count: mediaList.length,
-                    limit: KB_OBJECT_MEDIA_LIMIT,
-                  })
+                  count: mediaList.length,
+                  limit: KB_OBJECT_MEDIA_LIMIT,
+                })
                 : t("noMedia")}
             </CardDescription>
           </div>
@@ -944,7 +959,7 @@ export function ObjectMediaList({
                   <TooltipTrigger asChild>
                     <span>
                       <Button
-                        onClick={() => setUploadDialogOpen(true)}
+                        onClick={handleUploadClick}
                         disabled={!canUploadMore}
                       >
                         <Plus className="h-4 w-4 mr-2" />
@@ -978,7 +993,7 @@ export function ObjectMediaList({
                     // Use real-time progress from WebSocket if available,
                     // otherwise fall back to status-based display
                     getStatus(media.id) === "processing" ||
-                    media.compressionStatus === "processing"
+                      media.compressionStatus === "processing"
                       ? getProgress(media.id)
                       : undefined
                   }
@@ -997,7 +1012,7 @@ export function ObjectMediaList({
                 <Button
                   variant="outline"
                   className="mt-4"
-                  onClick={() => setUploadDialogOpen(true)}
+                  onClick={handleUploadClick}
                 >
                   <Plus className="h-4 w-4 mr-2" />
                   {t("uploadFirst")}
@@ -1012,7 +1027,7 @@ export function ObjectMediaList({
       <MediaUploadDialog
         open={uploadDialogOpen}
         onOpenChange={setUploadDialogOpen}
-        objectId={objectId}
+        objectId={objectId || ""} // Ensure string, though dialog might check validity
         fieldId={fieldId}
         onSuccess={handleRefresh}
       />

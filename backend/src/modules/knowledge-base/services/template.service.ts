@@ -28,7 +28,7 @@ import { TemplateDetail, TemplateSummary } from '../types';
 export class TemplateService {
   private readonly logger = new Logger(TemplateService.name);
 
-  constructor(private readonly repository: KnowledgeBaseRepository) {}
+  constructor(private readonly repository: KnowledgeBaseRepository) { }
 
   /**
    * Get all templates available to a user (system + user-created)
@@ -49,9 +49,16 @@ export class TemplateService {
         const objectCount = await this.repository.getObjectsCountByTemplate(
           template.id,
         );
+        const objectsWithMediaCount =
+          await this.repository.getObjectsWithMediaCountByTemplate(template.id);
         const fields = await this.repository.getTemplateFields(template.id);
 
-        return this.mapToTemplateSummary(template, objectCount, fields.length);
+        return this.mapToTemplateSummary(
+          template,
+          objectCount,
+          objectsWithMediaCount,
+          fields.length,
+        );
       }),
     );
 
@@ -79,8 +86,15 @@ export class TemplateService {
     const fields = await this.repository.getTemplateFields(templateId);
     const objectCount =
       await this.repository.getObjectsCountByTemplate(templateId);
+    const objectsWithMediaCount =
+      await this.repository.getObjectsWithMediaCountByTemplate(templateId);
 
-    return this.mapToTemplateDetail(template, fields, objectCount);
+    return this.mapToTemplateDetail(
+      template,
+      fields,
+      objectCount,
+      objectsWithMediaCount,
+    );
   }
 
   /**
@@ -100,8 +114,15 @@ export class TemplateService {
     const objectCount = await this.repository.getObjectsCountByTemplate(
       template.id,
     );
+    const objectsWithMediaCount =
+      await this.repository.getObjectsWithMediaCountByTemplate(template.id);
 
-    return this.mapToTemplateDetail(template, fields, objectCount);
+    return this.mapToTemplateDetail(
+      template,
+      fields,
+      objectCount,
+      objectsWithMediaCount,
+    );
   }
 
   /**
@@ -130,6 +151,7 @@ export class TemplateService {
       color: dto.color || '#3b82f6',
       category: dto.category || 'custom',
       isSystem: false,
+      hasMedia: dto.hasMedia ?? false,
       isActive: true,
       aiUsageHints: dto.aiUsageHints,
       aiRetrievalContext: dto.aiRetrievalContext,
@@ -167,7 +189,7 @@ export class TemplateService {
       })),
     );
 
-    return this.mapToTemplateDetail(template, fields, 0);
+    return this.mapToTemplateDetail(template, fields, 0, 0);
   }
 
   /**
@@ -184,13 +206,8 @@ export class TemplateService {
       throw new NotFoundException(`Template ${templateId} not found`);
     }
 
-    // Cannot update system templates
-    if (template.isSystem) {
-      throw new ForbiddenException('Cannot modify system templates');
-    }
-
-    // Check ownership
-    if (template.userId !== userId) {
+    // Check ownership (system templates can be modified by any authenticated user)
+    if (!template.isSystem && template.userId !== userId) {
       throw new ForbiddenException('Access denied to this template');
     }
 
@@ -199,6 +216,7 @@ export class TemplateService {
       description: dto.description,
       icon: dto.icon,
       color: dto.color,
+      hasMedia: dto.hasMedia,
       isActive: dto.isActive,
       aiUsageHints: dto.aiUsageHints,
       aiRetrievalContext: dto.aiRetrievalContext,
@@ -210,8 +228,15 @@ export class TemplateService {
     const fields = await this.repository.getTemplateFields(templateId);
     const objectCount =
       await this.repository.getObjectsCountByTemplate(templateId);
+    const objectsWithMediaCount =
+      await this.repository.getObjectsWithMediaCountByTemplate(templateId);
 
-    return this.mapToTemplateDetail(updated!, fields, objectCount);
+    return this.mapToTemplateDetail(
+      updated!,
+      fields,
+      objectCount,
+      objectsWithMediaCount,
+    );
   }
 
   /**
@@ -228,11 +253,8 @@ export class TemplateService {
       throw new NotFoundException(`Template ${templateId} not found`);
     }
 
-    if (template.isSystem) {
-      throw new ForbiddenException('Cannot modify system templates');
-    }
-
-    if (template.userId !== userId) {
+    // Check ownership (system templates can be modified by any authenticated user)
+    if (!template.isSystem && template.userId !== userId) {
       throw new ForbiddenException('Access denied to this template');
     }
 
@@ -285,11 +307,8 @@ export class TemplateService {
       throw new NotFoundException(`Template ${templateId} not found`);
     }
 
-    if (template.isSystem) {
-      throw new ForbiddenException('Cannot modify system templates');
-    }
-
-    if (template.userId !== userId) {
+    // Check ownership (system templates can be modified by any authenticated user)
+    if (!template.isSystem && template.userId !== userId) {
       throw new ForbiddenException('Access denied to this template');
     }
 
@@ -319,12 +338,17 @@ export class TemplateService {
       throw new NotFoundException(`Template ${templateId} not found`);
     }
 
-    if (template.isSystem) {
-      throw new ForbiddenException('Cannot modify system templates');
+    // Check ownership (system templates can be modified by any authenticated user)
+    if (!template.isSystem && template.userId !== userId) {
+      throw new ForbiddenException('Access denied to this template');
     }
 
-    if (template.userId !== userId) {
-      throw new ForbiddenException('Access denied to this template');
+    // Protect fields that have data in existing objects
+    const hasValues = await this.repository.hasFieldValues(fieldId);
+    if (hasValues) {
+      throw new ConflictException(
+        'Cannot delete field that has data in existing objects. Remove or clear the data first.',
+      );
     }
 
     const deleted = await this.repository.deleteTemplateField(fieldId);
@@ -332,6 +356,46 @@ export class TemplateService {
     if (!deleted) {
       throw new NotFoundException(`Field ${fieldId} not found`);
     }
+  }
+
+  /**
+   * Reorder template fields
+   */
+  async reorderTemplateFields(
+    userId: number,
+    templateId: string,
+    fieldIds: string[],
+  ): Promise<KbTemplateField[]> {
+    const template = await this.repository.getTemplateById(templateId);
+
+    if (!template) {
+      throw new NotFoundException(`Template ${templateId} not found`);
+    }
+
+    // Check ownership (system templates can be modified by any authenticated user)
+    if (!template.isSystem && template.userId !== userId) {
+      throw new ForbiddenException('Access denied to this template');
+    }
+
+    // Verify all fields belong to the template
+    const existingFields = await this.repository.getTemplateFields(templateId);
+    const existingFieldIds = new Set(existingFields.map((f) => f.id));
+
+    const invalidIds = fieldIds.filter((id) => !existingFieldIds.has(id));
+    if (invalidIds.length > 0) {
+      throw new ConflictException(
+        `Fields not found in template: ${invalidIds.join(', ')}`,
+      );
+    }
+
+    // Update sort orders
+    await Promise.all(
+      fieldIds.map((fieldId, index) =>
+        this.repository.updateTemplateField(fieldId, { sortOrder: index }),
+      ),
+    );
+
+    return this.repository.getTemplateFields(templateId);
   }
 
   /**
@@ -437,7 +501,7 @@ export class TemplateService {
       })),
     );
 
-    return this.mapToTemplateDetail(newTemplate, newFields, 0);
+    return this.mapToTemplateDetail(newTemplate, newFields, 0, 0);
   }
 
   // ============================================================================
@@ -447,6 +511,7 @@ export class TemplateService {
   private mapToTemplateSummary(
     template: KbObjectTemplate,
     objectCount: number,
+    objectsWithMediaCount: number,
     fieldCount: number,
   ): TemplateSummary {
     return {
@@ -460,7 +525,9 @@ export class TemplateService {
       category: template.category,
       isSystem: template.isSystem || false,
       isActive: template.isActive || true,
+      hasMedia: template.hasMedia || false,
       objectCount,
+      objectsWithMediaCount,
       fieldCount,
     };
   }
@@ -469,6 +536,7 @@ export class TemplateService {
     template: KbObjectTemplate,
     fields: KbTemplateField[],
     objectCount: number,
+    objectsWithMediaCount: number,
   ): TemplateDetail {
     return {
       id: template.id,
@@ -481,7 +549,9 @@ export class TemplateService {
       category: template.category,
       isSystem: template.isSystem || false,
       isActive: template.isActive || true,
+      hasMedia: template.hasMedia || false,
       objectCount,
+      objectsWithMediaCount,
       fieldCount: fields.length,
       fields: fields.map((field) => ({
         id: field.id,

@@ -91,9 +91,9 @@ export class KnowledgeBaseRepository {
         eq(kbObjectTemplates.slug, slug),
         userId
           ? or(
-              eq(kbObjectTemplates.userId, userId),
-              eq(kbObjectTemplates.isSystem, true),
-            )
+            eq(kbObjectTemplates.userId, userId),
+            eq(kbObjectTemplates.isSystem, true),
+          )
           : eq(kbObjectTemplates.isSystem, true),
       ),
     });
@@ -264,6 +264,9 @@ export class KnowledgeBaseRepository {
 
     const conditions = [eq(kbObjects.userId, userId)];
 
+    // Filter out transient objects (media placeholders that weren't saved)
+    conditions.push(eq(kbObjects.isTransient, false));
+
     if (templateId) {
       conditions.push(eq(kbObjects.templateId, templateId));
     }
@@ -347,6 +350,17 @@ export class KnowledgeBaseRepository {
       .select({ count: count() })
       .from(kbObjects)
       .where(eq(kbObjects.templateId, templateId));
+    return result[0]?.count || 0;
+  }
+
+  async getObjectsWithMediaCountByTemplate(templateId: string): Promise<number> {
+    const result = await db
+      .select({ count: count() })
+      .from(kbObjects)
+      .where(and(
+        eq(kbObjects.templateId, templateId),
+        sql`${kbObjects.mediaCount} > 0`
+      ));
     return result[0]?.count || 0;
   }
 
@@ -435,6 +449,21 @@ export class KnowledgeBaseRepository {
       .where(eq(kbObjectFieldValues.objectId, objectId))
       .returning({ id: kbObjectFieldValues.id });
     return result.length;
+  }
+
+  /**
+   * Check if a template field has any values stored in objects.
+   * Used to determine if a field can be safely deleted.
+   * Uses EXISTS for performance - stops at first match.
+   */
+  async hasFieldValues(fieldId: string): Promise<boolean> {
+    const result = await db
+      .select({ count: count() })
+      .from(kbObjectFieldValues)
+      .where(eq(kbObjectFieldValues.fieldId, fieldId))
+      .limit(1);
+
+    return (result[0]?.count ?? 0) > 0;
   }
 
   // ============================================================================

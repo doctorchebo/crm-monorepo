@@ -112,6 +112,7 @@ export const kbObjectTemplates = pgTable(
     // Template classification
     category: varchar('category', { length: 50 }).notNull().default('custom'),
     isSystem: boolean('is_system').default(false),
+    hasMedia: boolean('has_media').default(false),
     isActive: boolean('is_active').default(true),
     // AI Behavior Metadata
     aiUsageHints: text('ai_usage_hints'),
@@ -232,6 +233,8 @@ export const kbObjects = pgTable(
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
     archivedAt: timestamp('archived_at'),
+    // Draft mechanism
+    isTransient: boolean('is_transient').default(false),
   },
   (table) => ({
     userIdIndex: index('idx_kb_objects_user_id').on(table.userId),

@@ -25,7 +25,7 @@ export interface CompressionStatusEvent {
 
 interface UseCompressionUpdatesOptions {
   /** Object ID to filter updates for specific object's media */
-  objectId?: string;
+  objectId?: string | null;
   /** Callback when compression status changes */
   onStatusChange?: (event: CompressionStatusEvent) => void;
   /** Callback when compression completes */

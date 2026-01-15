@@ -57,8 +57,10 @@ export interface KbObjectTemplate {
   icon: string;
   color: string;
   isSystem: boolean; // System-provided template
+  hasMedia: boolean;
   isActive: boolean;
   objectCount?: number;
+  objectsWithMediaCount?: number;
   fieldCount?: number;
   fields?: KbTemplateField[];
   // AI-specific metadata
@@ -221,40 +223,53 @@ export interface KnowledgeBaseStats {
 
 export interface CreateTemplateDto {
   name: string;
+  slug: string;
+  displayName: string;
   description?: string;
   category?: string;
   icon?: string;
   color?: string;
+  hasMedia?: boolean;
   fields?: CreateFieldDto[];
+  aiUsageHints?: string;
+  aiRetrievalContext?: string;
 }
 
 export interface UpdateTemplateDto {
   name?: string;
+  slug?: string;
+  displayName?: string;
   description?: string;
   category?: string;
   icon?: string;
   color?: string;
+  hasMedia?: boolean;
   isActive?: boolean;
+  aiUsageHints?: string;
+  aiRetrievalContext?: string;
 }
 
 export interface CreateFieldDto {
-  fieldName: string;
+  name: string;
+  slug: string;
   displayName: string;
+  description?: string;
+  placeholder?: string;
   fieldType: FieldType;
   isRequired?: boolean;
-  isIndexed?: boolean;
-  indexWeight?: number;
-  config?: Record<string, unknown>;
+  isUnique?: boolean;
   defaultValue?: unknown;
-  placeholder?: string;
-  helpText?: string;
-  validationRules?: Record<string, unknown>;
+  fieldConfig?: Record<string, unknown>;
+  validation?: Record<string, unknown>;
+  aiRelevance?: AiRelevance;
+  aiIncludeInEmbedding?: boolean;
+  aiFieldHints?: string;
   sortOrder?: number;
-  showInListView?: boolean;
-  showInCardView?: boolean;
+  groupName?: string;
+  isHidden?: boolean;
 }
 
-export interface UpdateFieldDto extends Partial<CreateFieldDto> {}
+export interface UpdateFieldDto extends Partial<CreateFieldDto> { }
 
 // Field value structure as expected by backend
 export interface FieldValueDto {
@@ -268,12 +283,14 @@ export interface CreateObjectDto {
   externalId?: string;
   fieldValues: FieldValueDto[];
   publishImmediately?: boolean;
+  isTransient?: boolean;
 }
 
 export interface UpdateObjectDto {
   name?: string;
   externalId?: string;
   fieldValues?: FieldValueDto[];
+  isTransient?: boolean;
 }
 
 export interface RetrieveDto {

@@ -1,0 +1,2 @@
+ALTER TABLE kb_object_templates ADD COLUMN IF NOT EXISTS has_media BOOLEAN DEFAULT false;
+ALTER TABLE kb_objects ADD COLUMN IF NOT EXISTS is_transient BOOLEAN DEFAULT false;

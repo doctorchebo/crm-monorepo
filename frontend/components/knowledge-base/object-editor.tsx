@@ -542,6 +542,7 @@ export function ObjectEditor({
   const [pendingNavigation, setPendingNavigation] = useState<string | null>(
     null
   );
+  const [draftId, setDraftId] = useState<string | null>(null);
 
   // Fetch templates list for dropdown (summary only, no fields)
   const { data: templates, isLoading: isLoadingTemplates } = useSWR<
@@ -649,6 +650,31 @@ export function ObjectEditor({
       }));
   }, [selectedTemplate?.fields, fieldValues]);
 
+  // Create a draft object if it doesn't exist (for media uploads)
+  const handleEnsureObject = async () => {
+    if (objectId) return objectId;
+    if (draftId) return draftId;
+
+    try {
+      // Create a transient draft
+      const data: CreateObjectDto = {
+        templateId: selectedTemplateId,
+        name: name.trim() || t("draftObject"), // Use placeholder if empty
+        fieldValues: [], // No fields yet
+        publishImmediately: false,
+        isTransient: true,
+      };
+
+      const newObject = await knowledgeBaseApi.createObject(data);
+      setDraftId(newObject.id);
+      setHasChanges(true); // Ensure we warn before leaving
+      return newObject.id;
+    } catch (error) {
+      console.error("Failed to create draft object:", error);
+      throw error;
+    }
+  };
+
   // Save handler
   const handleSave = async (publish = false) => {
     if (!validate()) return;
@@ -657,24 +683,37 @@ export function ObjectEditor({
     try {
       const convertedFieldValues = convertFieldValues();
 
-      if (isNew) {
+      if (isNew && !draftId) {
         const data: CreateObjectDto = {
           templateId: selectedTemplateId,
           name: name.trim(),
           fieldValues: convertedFieldValues,
           publishImmediately: publish,
+          isTransient: false,
         };
         const newObject = await knowledgeBaseApi.createObject(data);
         setHasChanges(false);
         router.push(`/dashboard/knowledge-base/objects/${newObject.id}`);
       } else {
+        // Update existing object or finalize draft
+        const targetId = objectId || draftId;
+
         const data: UpdateObjectDto = {
           name: name.trim(),
           fieldValues: convertedFieldValues,
+          isTransient: false, // Ensure it's no longer transient
         };
-        await knowledgeBaseApi.updateObject(objectId!, data);
-        if (publish) {
-          await knowledgeBaseApi.publishObject(objectId!);
+
+        if (targetId) {
+          await knowledgeBaseApi.updateObject(targetId, data);
+          if (publish) {
+            await knowledgeBaseApi.publishObject(targetId);
+          }
+
+          if (draftId) {
+            // If we just saved a draft, redirect to the permanent URL to avoid confusion
+            router.push(`/dashboard/knowledge-base/objects/${targetId}`);
+          }
         }
         setHasChanges(false);
       }
@@ -686,12 +725,26 @@ export function ObjectEditor({
   };
 
   // Navigation with unsaved changes check
-  const handleNavigation = (path: string) => {
+  const handleNavigation = async (path: string) => {
     if (hasChanges) {
       setPendingNavigation(path);
       setShowUnsavedDialog(true);
     } else {
+      // If we have a draft and we are leaving without changes (e.g. just uploaded media but didn't change form?), 
+      // actually if hasChanges is false, we assume it's safe. 
+      // But for draftId, we should cleanup if we are navigating away and NOT saving.
+      // However, hasChanges is set to true when draft is created.
       router.push(path);
+    }
+  };
+
+  const cleanupDraft = async () => {
+    if (draftId) {
+      try {
+        await knowledgeBaseApi.deleteObject(draftId);
+      } catch (e) {
+        console.error("Failed to cleanup draft:", e);
+      }
     }
   };
 
@@ -749,8 +802,8 @@ export function ObjectEditor({
                     object.status === "indexed"
                       ? "default"
                       : object.status === "archived"
-                      ? "secondary"
-                      : "outline"
+                        ? "secondary"
+                        : "outline"
                   }
                 >
                   {object.status}
@@ -844,6 +897,18 @@ export function ObjectEditor({
             </CardContent>
           </Card>
 
+          {/* Media Section */}
+          {selectedTemplate?.hasMedia && (
+            <ObjectMediaList
+              objectId={objectId || draftId}
+              fieldId="media" // Optional context
+              editable={true}
+              onEnsureObject={handleEnsureObject}
+            />
+          )}
+
+          {/* Fields */}
+
           {/* Dynamic Fields - Loading State */}
           {selectedTemplateId && isLoadingTemplateDetails && (
             <Card>
@@ -894,8 +959,7 @@ export function ObjectEditor({
               </Card>
             )}
 
-          {/* Media Section - Only for existing objects */}
-          {!isNew && objectId && <ObjectMediaList objectId={objectId} />}
+
         </div>
 
         {/* Sidebar */}
@@ -1053,7 +1117,8 @@ export function ObjectEditor({
           <DialogFooter>
             <Button
               variant="ghost"
-              onClick={() => {
+              onClick={async () => {
+                await cleanupDraft();
                 setShowUnsavedDialog(false);
                 if (pendingNavigation) {
                   router.push(pendingNavigation);

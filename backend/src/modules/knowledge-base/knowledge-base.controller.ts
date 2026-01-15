@@ -45,7 +45,7 @@ export class KnowledgeBaseController {
     private readonly objectService: ObjectService,
     private readonly retrievalService: RetrievalService,
     private readonly repository: KnowledgeBaseRepository,
-  ) {}
+  ) { }
 
   // ============================================================================
   // TEMPLATES
@@ -141,6 +141,19 @@ export class KnowledgeBaseController {
     @Param('fieldId', ParseUUIDPipe) fieldId: string,
   ) {
     await this.templateService.deleteTemplateField(req.user.userId, id, fieldId);
+  }
+
+  @Post('templates/:id/fields/reorder')
+  async reorderFields(
+    @Request() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { fieldIds: string[] },
+  ) {
+    return this.templateService.reorderTemplateFields(
+      req.user.userId,
+      id,
+      body.fieldIds,
+    );
   }
 
   // ============================================================================
