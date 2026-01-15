@@ -53,6 +53,8 @@ export class RetrievalService {
     options: RetrievalOptions = {},
   ): Promise<RetrievalResponse> {
     const startTime = Date.now();
+    let embeddingMs = 0;
+    let searchMs = 0;
 
     const {
       topK = this.defaultTopK,
@@ -70,10 +72,11 @@ export class RetrievalService {
 
     this.logger.debug(
       `[KB Retrieve] Query: "${query.substring(0, 50)}...", userId: ${userId}, minSimilarity: ${minSimilarity}` +
-        (conversationContext ? `, with conversation context` : ''),
+      (conversationContext ? `, with conversation context` : ''),
     );
 
-    // Generate embedding for the enhanced query
+    // Generate embedding
+    const embedStart = Date.now();
     const embeddingResult = await this.embeddingService.embed({
       id: 'query',
       content: enhancedQuery,
@@ -88,8 +91,10 @@ export class RetrievalService {
         importanceScore: 1,
       },
     });
+    embeddingMs = Date.now() - embedStart;
 
     // Search for similar chunks
+    const searchStart = Date.now();
     const searchResults = await this.repository.searchChunksByVector(
       userId,
       embeddingResult.vector,
@@ -102,6 +107,7 @@ export class RetrievalService {
         chunkTypes,
       },
     );
+    searchMs = Date.now() - searchStart;
 
     // If no results, log diagnostic info to help debug
     if (searchResults.length === 0) {
@@ -109,8 +115,8 @@ export class RetrievalService {
         const kbStatus = await this.repository.getKBStatusForUser(userId);
         this.logger.warn(
           `[KB Retrieve] No results found. KB Status for user ${userId}: ` +
-            `Objects: ${kbStatus.totalObjects} total, ${kbStatus.indexedObjects} indexed (${JSON.stringify(kbStatus.objectsByStatus)}), ` +
-            `Chunks: ${kbStatus.totalChunks} total, ${kbStatus.embeddedChunks} embedded (${JSON.stringify(kbStatus.chunksByStatus)})`,
+          `Objects: ${kbStatus.totalObjects} total, ${kbStatus.indexedObjects} indexed (${JSON.stringify(kbStatus.objectsByStatus)}), ` +
+          `Chunks: ${kbStatus.totalChunks} total, ${kbStatus.embeddedChunks} embedded (${JSON.stringify(kbStatus.chunksByStatus)})`,
         );
       } catch (error) {
         this.logger.warn(
@@ -138,7 +144,7 @@ export class RetrievalService {
       },
     }));
 
-    const latencyMs = Date.now() - startTime;
+    const totalMs = Date.now() - startTime;
 
     // Log retrieval for analytics
     try {
@@ -151,20 +157,25 @@ export class RetrievalService {
         topK,
         minSimilarity: Math.round(minSimilarity * 100),
         filterTemplateIds: templateIds,
-        latencyMs,
+        latencyMs: totalMs,
         totalResults: results.length,
       });
     } catch (error) {
       this.logger.warn(`Failed to log retrieval: ${error.message}`);
     }
 
-    this.logger.debug(`Retrieved ${results.length} results in ${latencyMs}ms`);
+    this.logger.debug(`Retrieved ${results.length} results in ${totalMs}ms`);
 
     return {
       query,
       results,
       totalResults: results.length,
-      latencyMs,
+      latencyMs: totalMs,
+      timing: {
+        embeddingMs,
+        searchMs,
+        totalMs,
+      },
     };
   }
 
@@ -202,6 +213,7 @@ export class RetrievalService {
       results: deduplicatedResults,
       totalResults: deduplicatedResults.length,
       latencyMs: response.latencyMs,
+      timing: response.timing,
     };
   }
 
@@ -250,39 +262,66 @@ export class RetrievalService {
     // Retrieve relevant content
     const response = await this.retrieveByObject(userId, query, options);
 
-    // Build context for "mock" AI response
-    const retrievedObjects = response.results.map((r) => ({
-      objectId: r.objectId,
-      objectName: r.objectName,
-      templateName: r.templateName,
-      relevantContent: r.content,
-      similarity: r.similarity,
-    }));
+    // Enhance results with full object details (fields, media)
+    const enhancedResults = await Promise.all(
+      response.results.map(async (result) => {
+        const [fieldValues, media] = await Promise.all([
+          this.repository.getFieldValuesByObject(result.objectId),
+          this.repository.getMediaByObject(result.objectId),
+        ]);
 
-    // Generate a simple mock response based on retrieved content
-    let mockResponse: string;
+        // Transform field values to a simple Record<string, unknown> map
+        const fieldValuesMap: Record<string, unknown> = {};
 
-    if (response.results.length === 0) {
-      mockResponse =
-        'No relevant information found in the knowledge base for this query. ' +
-        'The AI would need to rely on general knowledge or ask for clarification.';
-    } else {
-      const topResult = response.results[0];
-      mockResponse =
-        `Based on the knowledge base, here's what I found:\n\n` +
-        `From "${topResult.objectName}" (${topResult.templateName}):\n` +
-        `${topResult.content.substring(0, 500)}${topResult.content.length > 500 ? '...' : ''}\n\n` +
-        `[This is a preview response. In production, the AI would synthesize information ` +
-        `from ${response.results.length} retrieved objects to provide a comprehensive answer.]`;
-    }
+        // We need field definitions to map IDs to slugs
+        const templateFields = await this.repository.getTemplateFields(
+          result.templateId,
+        );
 
-    const latencyMs = Date.now() - startTime;
+        for (const fv of fieldValues) {
+          const field = templateFields.find((f) => f.id === fv.fieldId);
+          if (field) {
+            fieldValuesMap[field.slug] = fv.value;
+          } else {
+            fieldValuesMap[fv.fieldId] = fv.value;
+          }
+        }
+
+        return {
+          ...result,
+          fieldValues: fieldValuesMap,
+          media: media.map((m) => ({
+            id: m.id,
+            fileName: m.fileName,
+            url: '', // Frontend will need to fetch presigned URLs if needed, or use ID
+            mimeType: m.mimeType,
+            fileSize: m.fileSize,
+            altText: m.altText || undefined,
+            caption: m.caption || undefined,
+          })),
+        };
+      }),
+    );
+
+    // Generate context string
+    const contextParts: string[] = [
+      '--- KNOWLEDGE BASE CONTEXT ---',
+      ...enhancedResults.map(
+        (r) => `[${r.templateName}: ${r.objectName}]\n${r.content}\n`,
+      ),
+      '--- END KNOWLEDGE BASE CONTEXT ---',
+    ];
+    const generatedContext = contextParts.join('\n');
 
     return {
       query,
-      response: mockResponse,
-      retrievedObjects,
-      latencyMs,
+      results: enhancedResults,
+      generatedContext,
+      timing: response.timing || {
+        embeddingMs: 0,
+        searchMs: 0,
+        totalMs: response.latencyMs,
+      },
     };
   }
 

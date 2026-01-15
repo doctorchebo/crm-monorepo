@@ -66,9 +66,8 @@ function StatCard({ title, value, description, icon, trend }: StatCardProps) {
         )}
         {trend && (
           <p
-            className={`text-xs mt-1 flex items-center ${
-              trend.isPositive ? "text-green-600" : "text-red-600"
-            }`}
+            className={`text-xs mt-1 flex items-center ${trend.isPositive ? "text-green-600" : "text-red-600"
+              }`}
           >
             <TrendingUp
               className={`h-3 w-3 mr-1 ${!trend.isPositive && "rotate-180"}`}
@@ -140,9 +139,8 @@ function TemplateDistribution({
                 return (
                   <div
                     key={item.templateId}
-                    className={`${
-                      colors[index % colors.length]
-                    } transition-all`}
+                    className={`${colors[index % colors.length]
+                      } transition-all`}
                     style={{ width: `${percentage}%` }}
                     title={`${item.templateName}: ${item.count}`}
                   />
@@ -154,9 +152,8 @@ function TemplateDistribution({
               {data.map((item, index) => (
                 <div key={item.templateId} className="flex items-center gap-2">
                   <div
-                    className={`h-3 w-3 rounded-full ${
-                      colors[index % colors.length]
-                    }`}
+                    className={`h-3 w-3 rounded-full ${colors[index % colors.length]
+                      }`}
                   />
                   <span className="text-sm truncate flex-1">
                     {item.templateName}
@@ -468,51 +465,7 @@ export function KnowledgeBaseDashboard() {
         ) : null}
       </div>
 
-      {/* Quick Actions */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{t("quickActions")}</CardTitle>
-          <CardDescription>{t("quickActionsDescription")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <Button
-              variant="outline"
-              className="h-auto flex-col gap-2 py-4"
-              onClick={() => router.push("/dashboard/knowledge-base/templates")}
-            >
-              <Layers className="h-5 w-5" />
-              <span>{t("manageTemplates")}</span>
-            </Button>
-            <Button
-              variant="outline"
-              className="h-auto flex-col gap-2 py-4"
-              onClick={() => router.push("/dashboard/knowledge-base/objects")}
-            >
-              <FileText className="h-5 w-5" />
-              <span>{t("browseObjects")}</span>
-            </Button>
-            <Button
-              variant="outline"
-              className="h-auto flex-col gap-2 py-4"
-              onClick={() =>
-                router.push("/dashboard/knowledge-base/objects/new")
-              }
-            >
-              <Plus className="h-5 w-5" />
-              <span>{t("createObject")}</span>
-            </Button>
-            <Button
-              variant="outline"
-              className="h-auto flex-col gap-2 py-4"
-              onClick={() => router.push("/dashboard/knowledge-base/test")}
-            >
-              <Search className="h-5 w-5" />
-              <span>{t("testQueries")}</span>
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+
     </div>
   );
 }

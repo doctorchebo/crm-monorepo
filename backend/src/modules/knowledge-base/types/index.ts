@@ -272,6 +272,8 @@ export interface RetrievalResult {
   content: string;
   similarity: number;
   metadata: ChunkMetadata;
+  fieldValues?: Record<string, unknown>;
+  media?: MediaValue[];
 }
 
 export interface RetrievalResponse {
@@ -279,6 +281,11 @@ export interface RetrievalResponse {
   results: RetrievalResult[];
   totalResults: number;
   latencyMs: number;
+  timing?: {
+    embeddingMs: number;
+    searchMs: number;
+    totalMs: number;
+  };
 }
 
 // ============================================================================
@@ -443,14 +450,11 @@ export interface TestQueryRequest {
 
 export interface TestQueryResponse {
   query: string;
-  response: string;
-  retrievedObjects: Array<{
-    objectId: string;
-    objectName: string;
-    templateName: string;
-    relevantContent: string;
-    similarity: number;
-  }>;
-  latencyMs: number;
-  tokensUsed?: number;
+  results: RetrievalResult[];
+  generatedContext: string;
+  timing: {
+    embeddingMs: number;
+    searchMs: number;
+    totalMs: number;
+  };
 }

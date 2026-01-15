@@ -83,13 +83,12 @@ function ResultCard({ result, index, isExpanded, onToggle }: ResultCardProps) {
                 </Badge>
                 <Badge
                   variant="secondary"
-                  className={`text-xs ${
-                    result.score >= 0.8
+                  className={`text-xs ${result.score >= 0.8
                       ? "bg-green-500/10 text-green-700"
                       : result.score >= 0.6
-                      ? "bg-yellow-500/10 text-yellow-700"
-                      : "bg-gray-500/10 text-gray-700"
-                  }`}
+                        ? "bg-yellow-500/10 text-yellow-700"
+                        : "bg-gray-500/10 text-gray-700"
+                    }`}
                 >
                   {(result.score * 100).toFixed(1)}% match
                 </Badge>
@@ -259,7 +258,14 @@ export function TestInterface() {
         templateIds: templateFilter !== "all" ? [templateFilter] : undefined,
         limit,
       });
-      setResults(response);
+      // Ensure response structure is valid before setting state to prevent crashes
+      const safeResponse = {
+        ...response,
+        results: response?.results || [],
+        timing: response?.timing || { embeddingMs: 0, searchMs: 0, totalMs: 0 },
+      };
+
+      setResults(safeResponse);
       setExpandedResults(new Set([0]));
 
       // Add to history
@@ -267,8 +273,8 @@ export function TestInterface() {
         {
           query: query.trim(),
           timestamp: new Date(),
-          resultCount: response.results.length,
-          timing: response.timing.totalMs,
+          resultCount: safeResponse.results.length,
+          timing: safeResponse.timing.totalMs,
         },
         ...prev.slice(0, 9),
       ]);
@@ -359,7 +365,7 @@ export function TestInterface() {
                     <SelectItem value="all">All Templates</SelectItem>
                     {templates?.map((t) => (
                       <SelectItem key={t.id} value={t.id}>
-                        {t.name}
+                        {t.displayName || t.name}
                       </SelectItem>
                     ))}
                   </SelectContent>

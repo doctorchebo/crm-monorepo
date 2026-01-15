@@ -29,6 +29,9 @@
     "connectWhatsapp": "Connect WhatsApp",
     "kanban": "Kanban",
     "knowledgeBase": "Knowledge Base",
+    "overview": "Overview",
+    "objects": "Objects",
+    "testQueries": "Test Queries",
     "team": "Team",
     "general": "General",
     "activity": "Activity",
@@ -915,13 +918,7 @@
       "recentActivityDescription": "Latest changes to your knowledge base",
       "noRecentActivity": "No recent activity",
       "created": "Created",
-      "updated": "Updated",
-      "quickActions": "Quick Actions",
-      "quickActionsDescription": "Common tasks for managing your knowledge base",
-      "manageTemplates": "Manage Templates",
-      "browseObjects": "Browse Objects",
-      "createObject": "Create Object",
-      "testQueries": "Test Queries"
+      "updated": "Updated"
     },
     "templates": {
       "title": "Templates",

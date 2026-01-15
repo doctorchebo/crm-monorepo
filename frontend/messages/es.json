@@ -29,6 +29,9 @@
     "connectWhatsapp": "Conectar WhatsApp",
     "kanban": "Kanban",
     "knowledgeBase": "Base de Conocimiento",
+    "overview": "Resumen",
+    "objects": "Objetos",
+    "testQueries": "Probar Consultas",
     "team": "Equipo",
     "general": "General",
     "activity": "Actividad",
@@ -916,13 +919,7 @@
       "recentActivityDescription": "Últimos cambios en tu base de conocimiento",
       "noRecentActivity": "Sin actividad reciente",
       "created": "Creado",
-      "updated": "Actualizado",
-      "quickActions": "Acciones Rápidas",
-      "quickActionsDescription": "Tareas comunes para gestionar tu base de conocimiento",
-      "manageTemplates": "Gestionar Plantillas",
-      "browseObjects": "Explorar Objetos",
-      "createObject": "Crear Objeto",
-      "testQueries": "Probar Consultas"
+      "updated": "Actualizado"
     },
     "templates": {
       "title": "Plantillas",
