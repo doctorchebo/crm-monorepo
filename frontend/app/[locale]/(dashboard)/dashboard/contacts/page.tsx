@@ -354,17 +354,17 @@ export default function ContactsPage() {
         {selectedIds.size > 0 && (
           <div className="flex items-center justify-between p-2 bg-muted/50 rounded-lg border animate-in fade-in slide-in-from-top-1">
             <div className="flex items-center gap-4 px-2">
-              <span className="text-sm font-medium">
-                {t("selectedCount", { count: selectedIds.size })}
-              </span>
               <Button
                 variant="ghost"
-                size="sm"
+                size="icon"
                 onClick={clearSelection}
-                className="h-8 text-muted-foreground hover:text-foreground"
+                className="h-8 w-8 text-muted-foreground hover:text-foreground"
               >
-                {t("clearSelection")}
+                <X className="h-4 w-4" />
               </Button>
+              <span className="text-sm font-medium">
+                {selectedIds.size} selected
+              </span>
             </div>
             <Button
               variant="destructive"
@@ -372,8 +372,7 @@ export default function ContactsPage() {
               onClick={() => setBulkDeleteDialogOpen(true)}
               className="h-8"
             >
-              <Trash2 className="h-4 w-4 mr-2" />
-              {t("deleteSelected")}
+              <Trash2 className="h-4 w-4" />
             </Button>
           </div>
         )}
@@ -417,16 +416,18 @@ export default function ContactsPage() {
         ) : (
           <>
             {/* Select All Header */}
-            <div className="flex items-center gap-3 px-3 py-2 border-b mb-2">
-              <Checkbox
-                checked={selectedIds.size === contacts.length && contacts.length > 0}
-                onCheckedChange={toggleSelectAll}
-                aria-label="Select all contacts"
-              />
-              <span className="text-sm text-muted-foreground">
-                {t("selectAll")}
-              </span>
-            </div>
+            {selectedIds.size > 0 && (
+              <div className="flex items-center gap-3 px-3 py-2 border-b mb-2">
+                <Checkbox
+                  checked={selectedIds.size === contacts.length && contacts.length > 0}
+                  onCheckedChange={toggleSelectAll}
+                  aria-label="Select all contacts"
+                />
+                <span className="text-sm text-muted-foreground">
+                  {t("selectAll")}
+                </span>
+              </div>
+            )}
 
             {/* Contact List */}
             <div className="space-y-1">
@@ -438,13 +439,15 @@ export default function ContactsPage() {
                 >
                   <div className="flex items-center gap-3 flex-1 min-w-0">
                     {/* Checkbox */}
-                    <div onClick={(e) => e.stopPropagation()}>
-                      <Checkbox
-                        checked={selectedIds.has(contact.contactId)}
-                        onCheckedChange={() => toggleSelect(contact.contactId)}
-                        aria-label={`Select ${contact.firstName}`}
-                      />
-                    </div>
+                    {selectedIds.size > 0 && (
+                      <div onClick={(e) => e.stopPropagation()}>
+                        <Checkbox
+                          checked={selectedIds.has(contact.contactId)}
+                          onCheckedChange={() => toggleSelect(contact.contactId)}
+                          aria-label={`Select ${contact.firstName}`}
+                        />
+                      </div>
+                    )}
 
                     {/* Avatar */}
                     <Avatar className="h-12 w-12 shrink-0">
@@ -501,7 +504,10 @@ export default function ContactsPage() {
                           {t("startChat")}
                         </DropdownMenuItem>
                         <DropdownMenuItem
-                          onClick={() => handleDeleteClick(contact)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedIds(new Set([contact.contactId]));
+                          }}
                           className="text-red-600 dark:text-red-400 focus:bg-red-50 dark:focus:bg-red-900/20"
                         >
                           {tCommon("delete")}

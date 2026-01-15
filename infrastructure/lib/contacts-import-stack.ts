@@ -188,22 +188,10 @@ export class ContactsImportStack extends Stack {
             exportName: `${resourcePrefix}-bucket-arn`,
         });
 
-        new CfnOutput(this, "ParserFunctionName", {
-            value: this.lambda.parserFunctionName,
-            description: "File parser Lambda function name",
-            exportName: `${resourcePrefix}-parser-lambda`,
-        });
-
-        new CfnOutput(this, "ValidatorFunctionName", {
-            value: this.lambda.validatorFunctionName,
-            description: "Validator Lambda function name",
-            exportName: `${resourcePrefix}-validator-lambda`,
-        });
-
-        new CfnOutput(this, "ExecutorFunctionName", {
-            value: this.lambda.executorFunctionName,
-            description: "Import executor Lambda function name",
-            exportName: `${resourcePrefix}-executor-lambda`,
+        new CfnOutput(this, "ProcessorFunctionName", {
+            value: this.lambda.functionName,
+            description: "Contacts Import Processor Lambda function name",
+            exportName: `${resourcePrefix}-processor-lambda`,
         });
     }
 }

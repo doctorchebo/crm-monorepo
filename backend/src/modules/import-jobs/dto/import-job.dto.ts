@@ -64,7 +64,7 @@ export class StagingPreviewQueryDto {
 
     @IsOptional()
     @IsString()
-    status?: ImportStagingStatus;
+    status?: string;
 }
 
 /**

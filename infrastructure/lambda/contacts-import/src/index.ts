@@ -1,10 +1,10 @@
 /**
  * Contacts Import Lambda Entry Point
  *
- * Exports handlers for:
- * - handleFileParse: Parse CSV/XLSX files from S3
- * - handleValidation: Validate staging rows
- * - handleImportExecution: Move valid rows to contacts table
+ * Exports a single unified handler for all import actions:
+ * - PARSE: Parse CSV/XLSX files from S3
+ * - VALIDATE: Validate staging rows
+ * - EXECUTE: Move valid rows to contacts table
  */
 
 import { SQSEvent, SQSBatchResponse, SQSBatchItemFailure } from "aws-lambda";
@@ -25,7 +25,6 @@ import {
     ValidationError,
     BATCH_SIZE,
     DEFAULT_COUNTRY_CODE,
-    REQUIRED_FIELDS,
 } from "./types";
 import { detectHeaders, hasFullNameColumn } from "./utils/header-detector";
 import {
@@ -41,121 +40,31 @@ const sqsClient = new SQSClient({});
 const QUEUE_URL = process.env.QUEUE_URL || "";
 const IMPORT_BUCKET = process.env.IMPORT_BUCKET || "";
 
-// ============================================================================
-// FILE PARSER HANDLER
-// ============================================================================
-export async function handleFileParse(
-    event: SQSEvent
-): Promise<SQSBatchResponse> {
+export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
     const batchItemFailures: SQSBatchItemFailure[] = [];
 
     for (const record of event.Records) {
         try {
-            const message: ParseMessage = JSON.parse(record.body);
+            const body = JSON.parse(record.body) as ImportMessage;
+            console.log(`Processing message: ${body.action} for job ${body.jobId}`);
 
-            if (message.action !== "PARSE") {
-                console.log(`Skipping non-PARSE message: ${message.action}`);
-                continue;
+            switch (body.action) {
+                case "PARSE":
+                    await processParse(body as ParseMessage);
+                    break;
+                case "VALIDATE":
+                    await processValidate(body as ValidateMessage);
+                    break;
+                case "EXECUTE":
+                    await processExecute(body as ExecuteMessage);
+                    break;
+                default:
+                    console.warn(`Unknown action: ${(body as any).action}`);
             }
 
-            console.log(`Processing PARSE job: ${message.jobId}`);
-
-            // Download file from S3
-            const s3Response = await s3Client.send(
-                new GetObjectCommand({
-                    Bucket: IMPORT_BUCKET,
-                    Key: message.s3Key,
-                })
-            );
-
-            if (!s3Response.Body) {
-                throw new Error("Empty S3 response body");
-            }
-
-            // Convert stream to buffer
-            const chunks: Uint8Array[] = [];
-            const stream = s3Response.Body as Readable;
-            for await (const chunk of stream) {
-                chunks.push(chunk as Uint8Array);
-            }
-            const buffer = Buffer.concat(chunks);
-
-            // Parse based on file extension
-            const isExcel =
-                message.originalFilename.endsWith(".xlsx") ||
-                message.originalFilename.endsWith(".xls");
-            const parsedRows = isExcel
-                ? parseExcel(buffer)
-                : parseCSV(buffer.toString("utf-8"));
-
-            console.log(`Parsed ${parsedRows.rows.length} rows from file`);
-
-            // Auto-detect headers
-            const headerSuggestions = detectHeaders(parsedRows.headers);
-            const fullNameColumn = hasFullNameColumn(parsedRows.headers);
-
-            // Insert rows into staging table
-            await withClient(async (client) => {
-                // Start transaction
-                await client.query("BEGIN");
-
-                try {
-                    // Insert staging rows in batches
-                    for (let i = 0; i < parsedRows.rows.length; i += 500) {
-                        const batch = parsedRows.rows.slice(i, i + 500);
-                        const values: unknown[] = [];
-                        const placeholders: string[] = [];
-
-                        batch.forEach((row, idx) => {
-                            const offset = idx * 4;
-                            placeholders.push(
-                                `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4})`
-                            );
-                            values.push(
-                                message.jobId,
-                                JSON.stringify(row.data),
-                                row.rowNumber,
-                                "PENDING"
-                            );
-                        });
-
-                        await client.query(
-                            `INSERT INTO import_contacts_staging 
-               (import_job_id, raw_data, row_number, status) 
-               VALUES ${placeholders.join(", ")}`,
-                            values
-                        );
-                    }
-
-                    // Update job with total rows and suggested mappings
-                    await client.query(
-                        `UPDATE import_jobs 
-             SET status = 'UPLOADED', 
-                 total_rows = $1,
-                 field_mapping = $2,
-                 updated_at = NOW()
-             WHERE id = $3`,
-                        [
-                            parsedRows.totalRows,
-                            JSON.stringify({
-                                suggestions: headerSuggestions,
-                                fullNameColumn,
-                                headers: parsedRows.headers,
-                            }),
-                            message.jobId,
-                        ]
-                    );
-
-                    await client.query("COMMIT");
-                } catch (err) {
-                    await client.query("ROLLBACK");
-                    throw err;
-                }
-            });
-
-            console.log(`Successfully processed PARSE job: ${message.jobId}`);
+            console.log(`Successfully processed ${body.action} for job ${body.jobId}`);
         } catch (error) {
-            console.error(`Error processing record:`, error);
+            console.error(`Error processing record ${record.messageId}:`, error);
             batchItemFailures.push({ itemIdentifier: record.messageId });
         }
     }
@@ -164,296 +73,344 @@ export async function handleFileParse(
 }
 
 // ============================================================================
-// VALIDATION HANDLER
+// ACTION PROCESSORS
 // ============================================================================
-export async function handleValidation(
-    event: SQSEvent
-): Promise<SQSBatchResponse> {
-    const batchItemFailures: SQSBatchItemFailure[] = [];
 
-    for (const record of event.Records) {
+async function processParse(message: ParseMessage): Promise<void> {
+    // Download file from S3
+    const s3Response = await s3Client.send(
+        new GetObjectCommand({
+            Bucket: IMPORT_BUCKET,
+            Key: message.s3Key,
+        })
+    );
+
+    if (!s3Response.Body) {
+        throw new Error("Empty S3 response body");
+    }
+
+    // Convert stream to buffer
+    const chunks: Uint8Array[] = [];
+    const stream = s3Response.Body as Readable;
+    for await (const chunk of stream) {
+        chunks.push(chunk as Uint8Array);
+    }
+    const buffer = Buffer.concat(chunks);
+
+    // Parse based on file extension
+    const isExcel =
+        message.originalFilename.endsWith(".xlsx") ||
+        message.originalFilename.endsWith(".xls");
+    const parsedRows = isExcel
+        ? parseExcel(buffer)
+        : parseCSV(buffer.toString("utf-8"));
+
+    console.log(`Parsed ${parsedRows.rows.length} rows from file`);
+
+    // Auto-detect headers
+    const headerSuggestions = detectHeaders(parsedRows.headers);
+    const fullNameColumn = hasFullNameColumn(parsedRows.headers);
+
+    // Insert rows into staging table
+    await withClient(async (client) => {
+        // Start transaction
+        await client.query("BEGIN");
+
         try {
-            const message: ValidateMessage = JSON.parse(record.body);
+            // Insert staging rows in batches
+            for (let i = 0; i < parsedRows.rows.length; i += 500) {
+                const batch = parsedRows.rows.slice(i, i + 500);
+                const values: unknown[] = [];
+                const placeholders: string[] = [];
 
-            if (message.action !== "VALIDATE") {
-                console.log(`Skipping non-VALIDATE message: ${message.action}`);
-                continue;
+                batch.forEach((row, idx) => {
+                    const offset = idx * 4;
+                    placeholders.push(
+                        `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4})`
+                    );
+                    values.push(
+                        message.jobId,
+                        JSON.stringify(row.data),
+                        row.rowNumber,
+                        "PENDING"
+                    );
+                });
+
+                await client.query(
+                    `INSERT INTO import_contacts_staging 
+               (import_job_id, raw_data, row_number, status) 
+               VALUES ${placeholders.join(", ")}`,
+                    values
+                );
             }
 
-            console.log(`Processing VALIDATE job: ${message.jobId}`);
-            const batchSize = message.batchSize || BATCH_SIZE;
-            const batchStart = message.batchStart || 0;
+            // Update job with total rows and suggested mappings
+            await client.query(
+                `UPDATE import_jobs 
+             SET status = 'UPLOADED', 
+                 total_rows = $1,
+                 field_mapping = $2,
+                 updated_at = NOW()
+             WHERE id = $3`,
+                [
+                    parsedRows.totalRows,
+                    JSON.stringify({
+                        suggestions: headerSuggestions,
+                        fullNameColumn,
+                        headers: parsedRows.headers,
+                    }),
+                    message.jobId,
+                ]
+            );
 
-            await withClient(async (client) => {
-                // Get job and field mapping
-                const jobResult = await client.query(
-                    `SELECT id, field_mapping FROM import_jobs WHERE id = $1`,
-                    [message.jobId]
-                );
+            await client.query("COMMIT");
+        } catch (err) {
+            await client.query("ROLLBACK");
+            throw err;
+        }
+    });
+}
 
-                if (jobResult.rows.length === 0) {
-                    throw new Error(`Job not found: ${message.jobId}`);
-                }
+async function processValidate(message: ValidateMessage): Promise<void> {
+    const batchSize = message.batchSize || BATCH_SIZE;
+    const batchStart = message.batchStart || 0;
 
-                const fieldMapping = jobResult.rows[0].field_mapping as {
-                    mapping: FieldMapping;
-                    fullNameColumn?: string;
-                };
+    await withClient(async (client) => {
+        // Get job and field mapping
+        const jobResult = await client.query(
+            `SELECT id, field_mapping FROM import_jobs WHERE id = $1`,
+            [message.jobId]
+        );
 
-                if (!fieldMapping?.mapping) {
-                    throw new Error("No field mapping configured for job");
-                }
+        if (jobResult.rows.length === 0) {
+            throw new Error(`Job not found: ${message.jobId}`);
+        }
 
-                // Get staging rows to validate
-                const stagingResult = await client.query(
-                    `SELECT id, raw_data, row_number 
+        const fieldMapping = jobResult.rows[0].field_mapping as {
+            mapping: FieldMapping;
+            fullNameColumn?: string;
+        };
+
+        if (!fieldMapping?.mapping) {
+            throw new Error("No field mapping configured for job");
+        }
+
+        // Get staging rows to validate
+        const stagingResult = await client.query(
+            `SELECT id, raw_data, row_number 
            FROM import_contacts_staging 
            WHERE import_job_id = $1 AND status = 'PENDING'
            ORDER BY row_number
            LIMIT $2 OFFSET $3`,
-                    [message.jobId, batchSize, batchStart]
+            [message.jobId, batchSize, batchStart]
+        );
+
+        console.log(`Validating ${stagingResult.rows.length} rows`);
+
+        let validCount = 0;
+        let invalidCount = 0;
+        let duplicateCount = 0;
+
+        for (const row of stagingResult.rows) {
+            const rawData = row.raw_data as Record<string, unknown>;
+            const mapped = applyMapping(
+                rawData,
+                fieldMapping.mapping,
+                fieldMapping.fullNameColumn
+            );
+            const errors = validateMappedData(mapped);
+
+            let status = "VALID";
+            if (errors.length > 0) {
+                status = "INVALID";
+                invalidCount++;
+            } else {
+                // Check for duplicates
+                const isDuplicate = await checkDuplicate(
+                    client,
+                    mapped.phone_number,
+                    mapped.email
                 );
+                if (isDuplicate) {
+                    status = "DUPLICATE";
+                    duplicateCount++;
+                } else {
+                    validCount++;
+                }
+            }
 
-                console.log(`Validating ${stagingResult.rows.length} rows`);
-
-                let validCount = 0;
-                let invalidCount = 0;
-                let duplicateCount = 0;
-
-                for (const row of stagingResult.rows) {
-                    const rawData = row.raw_data as Record<string, unknown>;
-                    const mapped = applyMapping(
-                        rawData,
-                        fieldMapping.mapping,
-                        fieldMapping.fullNameColumn
-                    );
-                    const errors = validateMappedData(mapped);
-
-                    let status = "VALID";
-                    if (errors.length > 0) {
-                        status = "INVALID";
-                        invalidCount++;
-                    } else {
-                        // Check for duplicates
-                        const isDuplicate = await checkDuplicate(
-                            client,
-                            mapped.phone_number,
-                            mapped.email
-                        );
-                        if (isDuplicate) {
-                            status = "DUPLICATE";
-                            duplicateCount++;
-                        } else {
-                            validCount++;
-                        }
-                    }
-
-                    // Update staging row
-                    await client.query(
-                        `UPDATE import_contacts_staging 
+            // Update staging row
+            await client.query(
+                `UPDATE import_contacts_staging 
              SET mapped_data = $1, validation_errors = $2, status = $3
              WHERE id = $4`,
-                        [
-                            JSON.stringify(mapped),
-                            JSON.stringify(errors),
-                            status,
-                            row.id,
-                        ]
-                    );
-                }
+                [
+                    JSON.stringify(mapped),
+                    JSON.stringify(errors),
+                    status,
+                    row.id,
+                ]
+            );
+        }
 
-                // Check if more rows to process
-                const remainingResult = await client.query(
-                    `SELECT COUNT(*) as count FROM import_contacts_staging 
+        // Check if more rows to process
+        const remainingResult = await client.query(
+            `SELECT COUNT(*) as count FROM import_contacts_staging 
            WHERE import_job_id = $1 AND status = 'PENDING'`,
-                    [message.jobId]
-                );
+            [message.jobId]
+        );
 
-                const remainingCount = parseInt(remainingResult.rows[0].count, 10);
+        const remainingCount = parseInt(remainingResult.rows[0].count, 10);
 
-                if (remainingCount > 0) {
-                    // Queue next batch
-                    await sqsClient.send(
-                        new SendMessageCommand({
-                            QueueUrl: QUEUE_URL,
-                            MessageBody: JSON.stringify({
-                                action: "VALIDATE",
-                                jobId: message.jobId,
-                                batchStart: batchStart + batchSize,
-                                batchSize,
-                            }),
-                        })
-                    );
-                } else {
-                    // All rows validated, update job status
-                    const countsResult = await client.query(
-                        `SELECT 
+        if (remainingCount > 0) {
+            // Queue next batch
+            await sqsClient.send(
+                new SendMessageCommand({
+                    QueueUrl: QUEUE_URL,
+                    MessageBody: JSON.stringify({
+                        action: "VALIDATE",
+                        jobId: message.jobId,
+                        batchStart: batchStart + batchSize,
+                        batchSize,
+                    }),
+                })
+            );
+        } else {
+            // All rows validated, update job status
+            const countsResult = await client.query(
+                `SELECT 
                COUNT(*) FILTER (WHERE status = 'VALID') as valid_count,
                COUNT(*) FILTER (WHERE status = 'INVALID') as invalid_count,
                COUNT(*) FILTER (WHERE status = 'DUPLICATE') as duplicate_count
              FROM import_contacts_staging 
              WHERE import_job_id = $1`,
-                        [message.jobId]
-                    );
+                [message.jobId]
+            );
 
-                    await client.query(
-                        `UPDATE import_jobs 
+            await client.query(
+                `UPDATE import_jobs 
              SET status = 'VALIDATED',
                  valid_rows = $1,
                  invalid_rows = $2,
                  duplicate_rows = $3,
                  updated_at = NOW()
              WHERE id = $4`,
-                        [
-                            countsResult.rows[0].valid_count,
-                            countsResult.rows[0].invalid_count,
-                            countsResult.rows[0].duplicate_count,
-                            message.jobId,
-                        ]
-                    );
-                }
-            });
-
-            console.log(`Successfully processed VALIDATE job: ${message.jobId}`);
-        } catch (error) {
-            console.error(`Error processing record:`, error);
-            batchItemFailures.push({ itemIdentifier: record.messageId });
+                [
+                    countsResult.rows[0].valid_count,
+                    countsResult.rows[0].invalid_count,
+                    countsResult.rows[0].duplicate_count,
+                    message.jobId,
+                ]
+            );
         }
-    }
-
-    return { batchItemFailures };
+    });
 }
 
-// ============================================================================
-// IMPORT EXECUTOR HANDLER
-// ============================================================================
-export async function handleImportExecution(
-    event: SQSEvent
-): Promise<SQSBatchResponse> {
-    const batchItemFailures: SQSBatchItemFailure[] = [];
+async function processExecute(message: ExecuteMessage): Promise<void> {
+    const batchSize = message.batchSize || BATCH_SIZE;
 
-    for (const record of event.Records) {
-        try {
-            const message: ExecuteMessage = JSON.parse(record.body);
+    await withClient(async (client) => {
+        // Update job status to PROCESSING
+        await client.query(
+            `UPDATE import_jobs SET status = 'PROCESSING', updated_at = NOW() WHERE id = $1`,
+            [message.jobId]
+        );
 
-            if (message.action !== "EXECUTE") {
-                console.log(`Skipping non-EXECUTE message: ${message.action}`);
-                continue;
-            }
-
-            console.log(`Processing EXECUTE job: ${message.jobId}`);
-            const batchSize = message.batchSize || BATCH_SIZE;
-
-            await withClient(async (client) => {
-                // Update job status to PROCESSING
-                await client.query(
-                    `UPDATE import_jobs SET status = 'PROCESSING', updated_at = NOW() WHERE id = $1`,
-                    [message.jobId]
-                );
-
-                // Get valid staging rows
-                const stagingResult = await client.query(
-                    `SELECT id, mapped_data 
+        // Get valid staging rows
+        const stagingResult = await client.query(
+            `SELECT id, mapped_data 
            FROM import_contacts_staging 
            WHERE import_job_id = $1 AND status = 'VALID'
            LIMIT $2`,
-                    [message.jobId, batchSize]
-                );
+            [message.jobId, batchSize]
+        );
 
-                console.log(`Importing ${stagingResult.rows.length} contacts`);
+        console.log(`Importing ${stagingResult.rows.length} contacts`);
 
-                if (stagingResult.rows.length === 0) {
-                    // Check if more to process
-                    const remainingResult = await client.query(
-                        `SELECT COUNT(*) as count FROM import_contacts_staging 
+        if (stagingResult.rows.length === 0) {
+            // Check if more to process
+            const remainingResult = await client.query(
+                `SELECT COUNT(*) as count FROM import_contacts_staging 
              WHERE import_job_id = $1 AND status = 'VALID'`,
-                        [message.jobId]
-                    );
+                [message.jobId]
+            );
 
-                    if (parseInt(remainingResult.rows[0].count, 10) === 0) {
-                        // All done
-                        await client.query(
-                            `UPDATE import_jobs SET status = 'IMPORTED', updated_at = NOW() WHERE id = $1`,
-                            [message.jobId]
-                        );
-                    }
-                    return;
-                }
-
-                // Insert contacts in transaction
-                await client.query("BEGIN");
-
-                try {
-                    for (const row of stagingResult.rows) {
-                        const data = row.mapped_data as MappedContactData;
-
-                        await client.query(
-                            `INSERT INTO contacts 
-               (first_name, last_name, country_code, phone_number, email, language, source, import_job_id)
-               VALUES ($1, $2, $3, $4, $5, $6, 'IMPORT', $7)`,
-                            [
-                                data.first_name,
-                                data.last_name || null,
-                                data.country_code || DEFAULT_COUNTRY_CODE,
-                                normalizePhoneNumber(data.phone_number || "", data.country_code),
-                                data.email || null,
-                                data.language || null,
-                                message.jobId,
-                            ]
-                        );
-
-                        // Mark staging row as processed (change status so it's not picked up again)
-                        await client.query(
-                            `UPDATE import_contacts_staging SET status = 'IMPORTED' WHERE id = $1`,
-                            [row.id]
-                        );
-                    }
-
-                    await client.query("COMMIT");
-                } catch (err) {
-                    await client.query("ROLLBACK");
-                    throw err;
-                }
-
-                // Check if more rows to process
-                const remainingResult = await client.query(
-                    `SELECT COUNT(*) as count FROM import_contacts_staging 
-           WHERE import_job_id = $1 AND status = 'VALID'`,
+            if (parseInt(remainingResult.rows[0].count, 10) === 0) {
+                // All done
+                await client.query(
+                    `UPDATE import_jobs SET status = 'IMPORTED', updated_at = NOW() WHERE id = $1`,
                     [message.jobId]
                 );
-
-                const remainingCount = parseInt(remainingResult.rows[0].count, 10);
-
-                if (remainingCount > 0) {
-                    // Queue next batch
-                    await sqsClient.send(
-                        new SendMessageCommand({
-                            QueueUrl: QUEUE_URL,
-                            MessageBody: JSON.stringify({
-                                action: "EXECUTE",
-                                jobId: message.jobId,
-                                batchSize,
-                            }),
-                        })
-                    );
-                } else {
-                    // All done
-                    await client.query(
-                        `UPDATE import_jobs SET status = 'IMPORTED', updated_at = NOW() WHERE id = $1`,
-                        [message.jobId]
-                    );
-                }
-            });
-
-            console.log(`Successfully processed EXECUTE job: ${message.jobId}`);
-        } catch (error) {
-            console.error(`Error processing record:`, error);
-            batchItemFailures.push({ itemIdentifier: record.messageId });
+            }
+            return;
         }
-    }
 
-    return { batchItemFailures };
+        // Insert contacts in transaction
+        await client.query("BEGIN");
+
+        try {
+            for (const row of stagingResult.rows) {
+                const data = row.mapped_data as MappedContactData;
+
+                await client.query(
+                    `INSERT INTO contacts 
+               (first_name, last_name, country_code, phone_number, email, language, source, import_job_id)
+               VALUES ($1, $2, $3, $4, $5, $6, 'IMPORT', $7)`,
+                    [
+                        data.first_name,
+                        data.last_name || null,
+                        data.country_code || DEFAULT_COUNTRY_CODE,
+                        normalizePhoneNumber(data.phone_number || "", data.country_code),
+                        data.email || null,
+                        data.language || null,
+                        message.jobId,
+                    ]
+                );
+
+                // Mark staging row as processed (change status so it's not picked up again)
+                await client.query(
+                    `UPDATE import_contacts_staging SET status = 'IMPORTED' WHERE id = $1`,
+                    [row.id]
+                );
+            }
+
+            await client.query("COMMIT");
+        } catch (err) {
+            await client.query("ROLLBACK");
+            throw err;
+        }
+
+        // Check if more rows to process
+        const remainingResult = await client.query(
+            `SELECT COUNT(*) as count FROM import_contacts_staging 
+           WHERE import_job_id = $1 AND status = 'VALID'`,
+            [message.jobId]
+        );
+
+        const remainingCount = parseInt(remainingResult.rows[0].count, 10);
+
+        if (remainingCount > 0) {
+            // Queue next batch
+            await sqsClient.send(
+                new SendMessageCommand({
+                    QueueUrl: QUEUE_URL,
+                    MessageBody: JSON.stringify({
+                        action: "EXECUTE",
+                        jobId: message.jobId,
+                        batchSize,
+                    }),
+                })
+            );
+        } else {
+            // All done
+            await client.query(
+                `UPDATE import_jobs SET status = 'IMPORTED', updated_at = NOW() WHERE id = $1`,
+                [message.jobId]
+            );
+        }
+    });
 }
+
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -596,11 +553,4 @@ async function checkDuplicate(
     );
 
     return result.rows.length > 0;
-}
-
-// Add IMPORTED status to types for tracking
-declare module "./types" {
-    interface StagingRowStatus {
-        IMPORTED: "IMPORTED";
-    }
 }

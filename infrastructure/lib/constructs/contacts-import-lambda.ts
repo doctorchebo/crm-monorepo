@@ -2,13 +2,10 @@
  * ContactsImportLambda Construct
  *
  * Creates the Lambda functions for contacts import processing:
- * - File Parser: Parses CSV/XLSX files from S3
- * - Validator: Validates rows and checks for duplicates
- * - Import Executor: Moves valid rows to contacts table
+ * - Processing Function: Unified handler for parsing, validation, and execution
  */
 
 import { Duration, RemovalPolicy } from "aws-cdk-lib";
-import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import { SqsEventSource } from "aws-cdk-lib/aws-lambda-event-sources";
 import * as logs from "aws-cdk-lib/aws-logs";
@@ -65,9 +62,7 @@ export interface ContactsImportLambdaProps {
 }
 
 export class ContactsImportLambda extends Construct {
-    public readonly parserFunction: lambda.Function;
-    public readonly validatorFunction: lambda.Function;
-    public readonly executorFunction: lambda.Function;
+    public readonly processingFunction: lambda.Function;
 
     constructor(scope: Construct, id: string, props: ContactsImportLambdaProps) {
         super(scope, id);
@@ -93,113 +88,42 @@ export class ContactsImportLambda extends Construct {
                 IMPORT_BUCKET: props.importBucket.bucketName,
                 QUEUE_URL: props.queue.queueUrl,
             },
-            logRetention: logRetentionDays as logs.RetentionDays,
         };
 
-        // File Parser Lambda - triggered via SQS when file is uploaded
-        this.parserFunction = new lambda.Function(this, "ParserFunction", {
+        // Processing Lambda - triggered via SQS for all actions (PARSE, VALIDATE, EXECUTE)
+        this.processingFunction = new lambda.Function(this, "ProcessingFunction", {
             ...commonProps,
-            functionName: `${resourcePrefix}-file-parser`,
-            handler: "index.handleFileParse",
+            functionName: `${resourcePrefix}-processor`,
+            handler: "index.handler",
             code: lambda.Code.fromAsset(lambdaCodePath),
-            description: "Parses CSV/XLSX files and inserts rows into staging table",
+            description: "Unified processor for contact imports (Parse/Validate/Execute)",
         });
 
-        // Validator Lambda - triggered via SQS after parsing
-        this.validatorFunction = new lambda.Function(this, "ValidatorFunction", {
-            ...commonProps,
-            functionName: `${resourcePrefix}-validator`,
-            handler: "index.handleValidation",
-            code: lambda.Code.fromAsset(lambdaCodePath),
-            description: "Validates staging rows and checks for duplicates",
-        });
+        // Grant S3 read permissions
+        props.importBucket.grantRead(this.processingFunction);
 
-        // Import Executor Lambda - triggered via SQS after user approval
-        this.executorFunction = new lambda.Function(this, "ExecutorFunction", {
-            ...commonProps,
-            functionName: `${resourcePrefix}-executor`,
-            handler: "index.handleImportExecution",
-            code: lambda.Code.fromAsset(lambdaCodePath),
-            description: "Moves valid staging rows to contacts table",
-        });
+        // Grant SQS send permissions (for chaining)
+        props.queue.grantSendMessages(this.processingFunction);
 
-        // Grant S3 read permissions to parser
-        props.importBucket.grantRead(this.parserFunction);
-
-        // Grant SQS send permissions to all functions (for chaining)
-        props.queue.grantSendMessages(this.parserFunction);
-        props.queue.grantSendMessages(this.validatorFunction);
-        props.queue.grantSendMessages(this.executorFunction);
-
-        // Add SQS event source to all functions
-        const eventSourceConfig = {
-            batchSize: batchSize,
-            maxBatchingWindow: Duration.seconds(5),
-            reportBatchItemFailures: true,
-        };
-
-        this.parserFunction.addEventSource(
+        // Add SQS event source
+        // No filters needed because this one function handles all message types on the queue
+        this.processingFunction.addEventSource(
             new SqsEventSource(props.queue, {
-                ...eventSourceConfig,
-                filters: [
-                    lambda.FilterCriteria.filter({
-                        body: { action: lambda.FilterRule.isEqual("PARSE") },
-                    }),
-                ],
+                batchSize: batchSize,
+                maxBatchingWindow: Duration.seconds(5),
+                reportBatchItemFailures: true,
             })
         );
 
-        this.validatorFunction.addEventSource(
-            new SqsEventSource(props.queue, {
-                ...eventSourceConfig,
-                filters: [
-                    lambda.FilterCriteria.filter({
-                        body: { action: lambda.FilterRule.isEqual("VALIDATE") },
-                    }),
-                ],
-            })
-        );
-
-        this.executorFunction.addEventSource(
-            new SqsEventSource(props.queue, {
-                ...eventSourceConfig,
-                filters: [
-                    lambda.FilterCriteria.filter({
-                        body: { action: lambda.FilterRule.isEqual("EXECUTE") },
-                    }),
-                ],
-            })
-        );
-
-        // Log groups with retention
-        new logs.LogGroup(this, "ParserLogGroup", {
-            logGroupName: `/aws/lambda/${this.parserFunction.functionName}`,
-            retention: logRetentionDays as logs.RetentionDays,
-            removalPolicy: RemovalPolicy.DESTROY,
-        });
-
-        new logs.LogGroup(this, "ValidatorLogGroup", {
-            logGroupName: `/aws/lambda/${this.validatorFunction.functionName}`,
-            retention: logRetentionDays as logs.RetentionDays,
-            removalPolicy: RemovalPolicy.DESTROY,
-        });
-
-        new logs.LogGroup(this, "ExecutorLogGroup", {
-            logGroupName: `/aws/lambda/${this.executorFunction.functionName}`,
+        // Log group with retention
+        new logs.LogGroup(this, "ProcessorLogGroup", {
+            logGroupName: `/aws/lambda/${this.processingFunction.functionName}`,
             retention: logRetentionDays as logs.RetentionDays,
             removalPolicy: RemovalPolicy.DESTROY,
         });
     }
 
-    get parserFunctionName(): string {
-        return this.parserFunction.functionName;
-    }
-
-    get validatorFunctionName(): string {
-        return this.validatorFunction.functionName;
-    }
-
-    get executorFunctionName(): string {
-        return this.executorFunction.functionName;
+    get functionName(): string {
+        return this.processingFunction.functionName;
     }
 }

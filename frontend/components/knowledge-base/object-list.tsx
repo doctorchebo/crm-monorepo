@@ -52,6 +52,7 @@ import {
   AlertTriangle,
   Archive,
   BookOpen,
+  CheckCircle2,
   Clock,
   Copy,
   Edit,
@@ -494,42 +495,46 @@ export function ObjectList({ templateId: initialTemplateId }: ObjectListProps) {
 
           {/* Bulk Actions */}
           {selectedIds.size > 0 && (
-            <div className="flex items-center gap-2 mt-4 pt-4 border-t">
-              <span className="text-sm text-muted-foreground">
-                {t("selectedCount", { count: selectedIds.size })}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setBulkAction({ action: "publish", open: true })}
-              >
-                <BookOpen className="h-4 w-4 mr-2" />
-                {t("actions.publish")}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setBulkAction({ action: "archive", open: true })}
-              >
-                <Archive className="h-4 w-4 mr-2" />
-                {t("actions.archive")}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setBulkAction({ action: "draft", open: true })}
-              >
-                <Edit className="h-4 w-4 mr-2" />
-                {t("actions.setDraft")}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setSelectedIds(new Set())}
-              >
-                <X className="h-4 w-4 mr-2" />
-                {tCommon("clear")}
-              </Button>
+            <div className="flex items-center justify-between p-2 mt-4 bg-muted/50 rounded-lg border animate-in fade-in slide-in-from-top-1">
+              <div className="flex items-center gap-4 px-2">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setSelectedIds(new Set())}
+                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+                <span className="text-sm font-medium">
+                  {selectedIds.size} selected
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setBulkAction({ action: "publish", open: true })}
+                >
+                  <BookOpen className="h-4 w-4 mr-2" />
+                  {t("actions.publish")}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setBulkAction({ action: "archive", open: true })}
+                >
+                  <Archive className="h-4 w-4 mr-2" />
+                  {t("actions.archive")}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setBulkAction({ action: "draft", open: true })}
+                >
+                  <Edit className="h-4 w-4 mr-2" />
+                  {t("actions.setDraft")}
+                </Button>
+              </div>
             </div>
           )}
         </CardContent>
@@ -575,15 +580,17 @@ export function ObjectList({ templateId: initialTemplateId }: ObjectListProps) {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-12">
-                      <Checkbox
-                        checked={
-                          selectedIds.size === objects.length &&
-                          objects.length > 0
-                        }
-                        onCheckedChange={toggleSelectAll}
-                      />
-                    </TableHead>
+                    {selectedIds.size > 0 && (
+                      <TableHead className="w-12">
+                        <Checkbox
+                          checked={
+                            selectedIds.size === objects.length &&
+                            objects.length > 0
+                          }
+                          onCheckedChange={toggleSelectAll}
+                        />
+                      </TableHead>
+                    )}
                     <TableHead>{t("table.name")}</TableHead>
                     <TableHead>{t("table.template")}</TableHead>
                     <TableHead>{t("table.status")}</TableHead>
@@ -602,14 +609,16 @@ export function ObjectList({ templateId: initialTemplateId }: ObjectListProps) {
                         )
                       }
                     >
-                      <TableCell
-                        onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                      >
-                        <Checkbox
-                          checked={selectedIds.has(object.id)}
-                          onCheckedChange={() => toggleSelect(object.id)}
-                        />
-                      </TableCell>
+                      {selectedIds.size > 0 && (
+                        <TableCell
+                          onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                        >
+                          <Checkbox
+                            checked={selectedIds.has(object.id)}
+                            onCheckedChange={() => toggleSelect(object.id)}
+                          />
+                        </TableCell>
+                      )}
                       <TableCell className="font-medium">
                         {object.name}
                       </TableCell>
@@ -641,6 +650,15 @@ export function ObjectList({ templateId: initialTemplateId }: ObjectListProps) {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedIds(new Set([object.id]));
+                              }}
+                            >
+                              <CheckCircle2 className="h-4 w-4 mr-2" />
+                              {tCommon("select")}
+                            </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() =>
                                 router.push(
