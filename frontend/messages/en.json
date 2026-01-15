@@ -1132,7 +1132,8 @@
       "cancel": "Cancel",
       "save": "Save",
       "create": "Create",
-      "update": "Update"
+      "update": "Update",
+      "select": "Select"
     },
     "media": {
       "uploadTitle": "Upload Media",

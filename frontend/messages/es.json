@@ -1133,7 +1133,8 @@
       "cancel": "Cancelar",
       "save": "Guardar",
       "create": "Crear",
-      "update": "Actualizar"
+      "update": "Actualizar",
+      "select": "Seleccionar"
     },
     "media": {
       "uploadTitle": "Subir Medio",
