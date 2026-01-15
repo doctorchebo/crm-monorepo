@@ -71,6 +71,7 @@ interface ChatsModalsProps {
   deletingMessageId: string;
   onCloseDeleteDialog: () => void;
   onConfirmDelete: (messageId: string) => Promise<void>;
+  selectedMessageCount?: number;
 
   // Video preview
   videoPreview: { videoId: string; url: string; title?: string } | null;
@@ -161,6 +162,7 @@ export function ChatsModals({
   deletingMessageId,
   onCloseDeleteDialog,
   onConfirmDelete,
+  selectedMessageCount,
   videoPreview,
   onCloseVideoPreview,
   cameraOpen,
@@ -242,6 +244,7 @@ export function ChatsModals({
       <DeleteMessageDialog
         open={deleteDialogOpen}
         messageId={deletingMessageId}
+        count={selectedMessageCount || 1}
         onClose={onCloseDeleteDialog}
         onConfirm={onConfirmDelete}
       />
@@ -316,16 +319,16 @@ export function ChatsModals({
         initialData={
           contactToSave
             ? {
-                firstName:
-                  contactToSave.name.first_name ||
-                  contactToSave.name.formatted_name ||
-                  "",
-                lastName: contactToSave.name.last_name || "",
-                phoneNumber:
-                  contactToSave.phones?.[0]?.phone ||
-                  contactToSave.phones?.[0]?.wa_id ||
-                  "",
-              }
+              firstName:
+                contactToSave.name.first_name ||
+                contactToSave.name.formatted_name ||
+                "",
+              lastName: contactToSave.name.last_name || "",
+              phoneNumber:
+                contactToSave.phones?.[0]?.phone ||
+                contactToSave.phones?.[0]?.wa_id ||
+                "",
+            }
             : undefined
         }
         isLoading={isSavingContact}
@@ -339,10 +342,10 @@ export function ChatsModals({
         contact={
           contactToStartChat
             ? {
-                firstName: contactToStartChat.firstName,
-                lastName: contactToStartChat.lastName,
-                phoneNumber: contactToStartChat.phoneNumber,
-              }
+              firstName: contactToStartChat.firstName,
+              lastName: contactToStartChat.lastName,
+              phoneNumber: contactToStartChat.phoneNumber,
+            }
             : undefined
         }
         senders={senders}

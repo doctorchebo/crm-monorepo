@@ -8,5 +8,6 @@ export { MessageSearchPanel } from "./message-search-panel";
 export { MessagesList } from "./messages-list";
 export { PinDurationModal, PinReplaceModal } from "./pin-modals";
 export { PinnedMessagesSection } from "./pinned-messages-section";
+export { SelectionBanner } from "./selection-banner";
 export { StickyDateHeader } from "./sticky-date-header";
 export { TemplatesPanel } from "./templates-panel";

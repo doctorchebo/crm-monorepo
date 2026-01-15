@@ -1,7 +1,6 @@
 "use client";
 
-import { ContactMessageBubble } from "@/components/contacts/contact-message-bubble";
-import { StickerMessageBubble } from "@/components/media/sticker-message-bubble";
+import { MessageListItem } from "./message-list-item";
 import { Attachment } from "@/lib/media/types";
 import { ReceivedContact } from "@/lib/types/contact-message.types";
 import { getDateKey } from "@/lib/utils/date-formatter";
@@ -9,8 +8,8 @@ import { Loader } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { Chat, Message, MessageReaction } from "../types";
 import { DateSeparator } from "./date-separator";
-import { MessageBubble } from "./message-bubble";
 import { StickyDateHeader } from "./sticky-date-header";
+import { Checkbox } from "@/components/ui/checkbox";
 
 // ============================================================
 // CONFIGURATION
@@ -183,6 +182,11 @@ interface MessagesListProps {
    * When outside the 24-hour window, reactions should be disabled
    */
   conversationWindow?: ConversationWindowStatus;
+
+  // Selection Mode
+  isSelectionMode?: boolean;
+  selectedMessageIds?: Set<string>;
+  onToggleSelection?: (messageId: string) => void;
 }
 
 export function MessagesList({
@@ -215,16 +219,20 @@ export function MessagesList({
   handlePinMessage,
   handleUnpinMessage,
   conversationWindow,
+  isSelectionMode,
+  selectedMessageIds,
+  onToggleSelection,
 }: MessagesListProps) {
   // Determine if reactions should be disabled (outside 24-hour window)
-  const isReactionDisabled =
-    conversationWindow !== undefined && !conversationWindow.isWithinWindow;
+  // This logic is now moved into the map function for each message
+  // const isReactionDisabled =
+  //   conversationWindow !== undefined && !conversationWindow.isWithinWindow;
 
   // Tooltip text for disabled reactions
-  const reactionDisabledTooltip = isReactionDisabled
-    ? t("reactions.disabledOutsideWindow") ||
-      "Reactions are only available within the 24-hour conversation window"
-    : undefined;
+  // const reactionDisabledTooltip = isReactionDisabled
+  //   ? t("reactions.disabledOutsideWindow") ||
+  //   "Reactions are only available within the 24-hour conversation window"
+  //   : undefined;
 
   // Track previous chat ID to detect chat switches (for GIF auto-play on chat open)
   const previousChatIdRef = useRef<string | undefined>(undefined);
@@ -390,164 +398,110 @@ export function MessagesList({
           {messages.map((message, index) => {
             // Check if we need a date separator before this message
             const previousMessage = index > 0 ? messages[index - 1] : null;
-            const separatorDate = shouldShowDateSeparator(
+            const showDateSeparator = shouldShowDateSeparator(
               message,
               previousMessage
             );
+            const separatorDate = showDateSeparator
+              ? new Date(message.timestamp)
+              : null;
 
             const isOutbound = message.direction === "outbound";
-            const timestamp = new Date(message.timestamp);
-            const timeString = timestamp.toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            });
-            const isDeleted = message.isDeleted ?? false;
-
-            // Handle contact message type
-            if (message.type === "contacts" && !isDeleted) {
-              const contacts = parseContactsFromMessage(message);
-              if (contacts && contacts.length > 0) {
-                return (
-                  <React.Fragment key={message.messageId || message.id}>
-                    {separatorDate && <DateSeparator date={separatorDate} />}
-                    <ContactMessageBubble
-                      contacts={contacts}
-                      isOutbound={isOutbound}
-                      timestamp={message.timestamp}
-                      messageId={message.messageId}
-                      status={message.status}
-                      deliveredAt={message.deliveredAt}
-                      readAt={message.readAt}
-                      onViewAll={() => handleViewAllContacts(contacts)}
-                      onStartChat={handleStartChatWithContact}
-                      onReply={handleReplyById}
-                      onDelete={isOutbound ? handleDeleteMessage : undefined}
-                      isHighlighted={highlightedMessageId === message.messageId}
-                    />
-                  </React.Fragment>
-                );
-              }
-            }
-
-            // Handle sticker message type - render without bubble background
-            if (message.type === "sticker" && !isDeleted) {
-              const stickerAttachment = message.attachments?.find(
-                (a) => a.type === "sticker"
-              );
-              if (stickerAttachment) {
-                const isHighlighted =
-                  highlightedMessageId === message.messageId;
-                return (
-                  <React.Fragment key={message.messageId || message.id}>
-                    {separatorDate && <DateSeparator date={separatorDate} />}
-                    <div
-                      ref={(el) => {
-                        if (el && message.messageId) {
-                          messageRefs.current.set(message.messageId, el);
-                        }
-                      }}
-                      className={`flex ${
-                        isOutbound ? "justify-end" : "justify-start"
-                      } ${
-                        isHighlighted
-                          ? "bg-yellow-100 dark:bg-yellow-900/30 animate-pulse"
-                          : ""
-                      } transition-colors duration-500 -mx-2 px-2 rounded`}
-                    >
-                      <StickerMessageBubble
-                        attachment={stickerAttachment}
-                        messageId={message.messageId}
-                        isOutbound={isOutbound}
-                        timestamp={timeString}
-                        messageTimestamp={message.timestamp}
-                        status={message.status}
-                        deliveredAt={message.deliveredAt}
-                        readAt={message.readAt}
-                        onReply={handleReplyById}
-                        onDelete={isOutbound ? handleDeleteMessage : undefined}
-                      />
-                    </div>
-                  </React.Fragment>
-                );
-              }
-            }
-
+            const isDeleted = !!message.isDeleted;
             const isHighlighted = highlightedMessageId === message.messageId;
 
-            // Get reactions for this message
-            const messageReactions = reactionsMap[message.messageId] || [];
-            const userReaction = currentUserId
-              ? messageReactions.find((r) => r.userId === currentUserId)
-              : undefined;
-            const customerReaction =
-              customerReactionsMap[message.messageId] || undefined;
+            // Optimization: Check selection state using Set
+            const isSelected =
+              isSelectionMode &&
+              selectedMessageIds &&
+              !!message.messageId &&
+              selectedMessageIds.has(message.messageId);
 
-            const isReactionAnimating = animatingReactionIds.has(
-              message.messageId
+            const timeString = new Date(message.timestamp).toLocaleTimeString(
+              [],
+              {
+                hour: "2-digit",
+                minute: "2-digit",
+              }
             );
 
+            // Reactions logic
+            const messageReactions =
+              reactionsMap[message.messageId!] || [];
+            const userReaction = messageReactions.find(
+              (r) => r.userId === currentUserId
+            );
+            const customerReaction =
+              customerReactionsMap[message.messageId!] || undefined;
+            const reactionAnimating =
+              animatingReactionIds.has(message.messageId!);
+            const isPinned = pinnedMessageIds.has(message.messageId!);
+
+            // Check if reactions are disabled (outside window)
+            let isReactionDisabled = false;
+            let reactionDisabledTooltip = undefined;
+
+            if (
+              conversationWindow &&
+              !conversationWindow.isWithinWindow &&
+              !isOutbound
+            ) {
+              isReactionDisabled = true;
+              reactionDisabledTooltip = t("reactions.disabledOutsideWindow");
+            }
+
             return (
-              <React.Fragment key={message.messageId || message.id}>
-                {separatorDate && <DateSeparator date={separatorDate} />}
-                <div
-                  key={message.messageId || message.id}
-                  ref={(el) => {
-                    if (el && message.messageId) {
-                      messageRefs.current.set(message.messageId, el);
-                    }
-                  }}
-                  className={`flex ${
-                    isOutbound ? "justify-end" : "justify-start"
-                  } ${
-                    isHighlighted
-                      ? "bg-yellow-100 dark:bg-yellow-900/30 animate-pulse"
-                      : ""
-                  } transition-colors duration-500 -mx-2 px-2 rounded`}
-                >
-                  <MessageBubble
-                    message={message}
-                    isOutbound={isOutbound}
-                    isDeleted={isDeleted}
-                    isHighlighted={isHighlighted}
-                    timeString={timeString}
-                    selectedChat={selectedChat}
-                    autoPlayGifs={
-                      message.messageId
-                        ? combinedAutoPlayGifIds.has(message.messageId)
-                        : false
-                    }
-                    currentUserId={currentUserId}
-                    userReaction={userReaction}
-                    customerReaction={customerReaction}
-                    reactions={messageReactions}
-                    reactionAnimating={isReactionAnimating}
-                    isPinned={
-                      message.messageId
-                        ? pinnedMessageIds.has(message.messageId)
-                        : false
-                    }
-                    isReactionDisabled={isReactionDisabled}
-                    reactionDisabledTooltip={reactionDisabledTooltip}
-                    onReply={handleReplyById}
-                    onDelete={isOutbound ? handleDeleteMessage : undefined}
-                    onDownload={handleDownloadById}
-                    onImageClick={handleImageClick}
-                    onShowDownloadMenu={handleShowDownloadMenu}
-                    onVideoPlay={handleVideoPlay}
-                    onScrollToMessage={handleScrollToMessage}
-                    onReactionSelect={handleReactionSelect}
-                    onPin={handlePinMessage}
-                    onUnpin={handleUnpinMessage}
-                    t={t}
-                  />
-                </div>
-              </React.Fragment>
+              <MessageListItem
+                key={message.messageId || message.id}
+                message={message}
+                selectedChat={selectedChat}
+                currentUserId={currentUserId}
+                isOutbound={isOutbound}
+                isDeleted={!!message.isDeleted}
+                isSelected={!!isSelected}
+                isSelectionMode={!!isSelectionMode}
+                isHighlighted={isHighlighted}
+                separatorDate={separatorDate}
+                timeString={timeString}
+                userReaction={userReaction}
+                customerReaction={customerReaction}
+                reactions={messageReactions}
+                reactionAnimating={reactionAnimating}
+                isReactionDisabled={isReactionDisabled}
+                reactionDisabledTooltip={reactionDisabledTooltip}
+                isPinned={isPinned}
+                autoPlayGifs={
+                  message.messageId
+                    ? combinedAutoPlayGifIds.has(message.messageId)
+                    : false
+                }
+                onToggleSelection={onToggleSelection}
+                onSetMessageRef={(el) => {
+                  if (el && message.messageId) {
+                    messageRefs.current.set(message.messageId, el);
+                  }
+                }}
+                onViewAllContacts={handleViewAllContacts}
+                onStartChat={handleStartChatWithContact}
+                onReply={handleReplyById}
+                onDelete={isOutbound ? handleDeleteMessage : undefined}
+                onDownload={handleDownloadById}
+                onImageClick={handleImageClick}
+                onShowDownloadMenu={handleShowDownloadMenu}
+                onVideoPlay={handleVideoPlay}
+                onScrollToMessage={handleScrollToMessage}
+                onReactionSelect={handleReactionSelect}
+                onPin={handlePinMessage}
+                onUnpin={handleUnpinMessage}
+                parseContactsFromMessage={parseContactsFromMessage}
+                t={t}
+              />
             );
           })}
 
           <div ref={messagesEndRef} />
-        </div>
+        </div >
       )}
-    </div>
+    </div >
   );
 }

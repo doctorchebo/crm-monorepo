@@ -59,6 +59,7 @@ interface MessageBubbleProps {
    * Tooltip text explaining why reactions are disabled
    */
   reactionDisabledTooltip?: string;
+  isSelectionMode?: boolean;
   // Event handlers
   onReply?: (messageId: string) => void;
   onDelete?: (messageId: string) => void;
@@ -98,6 +99,7 @@ export const MessageBubble = memo(function MessageBubble({
   reactionAnimating = false,
   isReactionDisabled = false,
   reactionDisabledTooltip,
+  isSelectionMode,
   onReply,
   onDelete,
   onDownload,
@@ -224,7 +226,7 @@ export const MessageBubble = memo(function MessageBubble({
         )}
       >
         {/* Actions menu - positioned in top-right corner */}
-        {!isDeleted && (
+        {!isDeleted && !isSelectionMode && (
           <div className="absolute -top-1 -right-1 opacity-0 group-hover:opacity-100 transition-opacity z-20">
             <MessageActionsMenu
               messageId={message.messageId}
@@ -262,7 +264,7 @@ export const MessageBubble = memo(function MessageBubble({
                   senderName:
                     message.replyPreview.senderType === "customer"
                       ? selectedChat?.participantName ||
-                        message.replyPreview.senderName
+                      message.replyPreview.senderName
                       : message.replyPreview.senderName,
                 }}
                 originalMessageId={message.replyPreview.messageId}
@@ -305,7 +307,7 @@ export const MessageBubble = memo(function MessageBubble({
                     isOutbound
                       ? "You"
                       : selectedChat?.participantName ||
-                        selectedChat?.participantPhone
+                      selectedChat?.participantPhone
                   }
                   autoPlayGifs={autoPlayGifs}
                 />

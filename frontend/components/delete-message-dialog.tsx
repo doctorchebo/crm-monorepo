@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 interface DeleteMessageDialogProps {
   open: boolean;
   messageId: string;
+  count?: number;
   onClose: () => void;
   onConfirm: (messageId: string) => Promise<void>;
 }
@@ -15,6 +16,7 @@ interface DeleteMessageDialogProps {
 export function DeleteMessageDialog({
   open,
   messageId,
+  count = 1,
   onClose,
   onConfirm,
 }: DeleteMessageDialogProps) {
@@ -55,10 +57,14 @@ export function DeleteMessageDialog({
         </button>
 
         <h2 className="text-lg font-semibold mb-2">
-          {t("deleteConfirmTitle")}
+          {count > 1
+            ? t("deleteMessagesConfirmTitle", { count })
+            : t("deleteConfirmTitle")}
         </h2>
         <p className="text-sm text-muted-foreground mb-4">
-          {t("deleteConfirmDescription")}
+          {count > 1
+            ? t("deleteMessagesConfirmDescription")
+            : t("deleteConfirmDescription")}
         </p>
 
         <div className="flex justify-end gap-2">
@@ -76,7 +82,7 @@ export function DeleteMessageDialog({
                 {t("deletingMessage")}
               </>
             ) : (
-              t("deleteConfirmButton")
+              t("deleteForMe")
             )}
           </Button>
         </div>

@@ -90,6 +90,14 @@ interface UseMessageHandlersReturn {
   setDeleteDialogOpen: React.Dispatch<React.SetStateAction<boolean>>;
   deletingMessageId: string;
   setDeletingMessageId: React.Dispatch<React.SetStateAction<string>>;
+
+  // Selection mode state
+  isSelectionMode: boolean;
+  selectedMessageIds: Set<string>;
+  handleEnterSelectionMode: (initialMessageId: string) => void;
+  handleToggleSelection: (messageId: string) => void;
+  handleExitSelectionMode: () => void;
+  handleDeleteSelected: () => void;
 }
 
 export function useMessageHandlers(
@@ -126,6 +134,12 @@ export function useMessageHandlers(
   // Delete dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletingMessageId, setDeletingMessageId] = useState<string>("");
+
+  // Selection mode state
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(
+    new Set()
+  );
 
   // WebSocket for real-time updates
   const {
@@ -355,7 +369,7 @@ export function useMessageHandlers(
           const errorData = err.response.data;
           setError(
             errorData.message ||
-              "Cannot send message: Outside 24-hour conversation window. Use an approved template."
+            "Cannot send message: Outside 24-hour conversation window. Use an approved template."
           );
         } else {
           setError("Failed to send message");
@@ -376,14 +390,80 @@ export function useMessageHandlers(
     ]
   );
 
-  // Delete message handler
-  const handleDeleteMessage = useCallback((messageId: string) => {
-    setDeletingMessageId(messageId);
-    setDeleteDialogOpen(true);
+  // Selection handlers
+  const handleEnterSelectionMode = useCallback((initialMessageId: string) => {
+    setIsSelectionMode(true);
+    setSelectedMessageIds(new Set([initialMessageId]));
   }, []);
+
+  const handleToggleSelection = useCallback((messageId: string) => {
+    setSelectedMessageIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(messageId)) {
+        next.delete(messageId);
+      } else {
+        next.add(messageId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleExitSelectionMode = useCallback(() => {
+    setIsSelectionMode(false);
+    setSelectedMessageIds(new Set());
+  }, []);
+
+  const handleDeleteSelected = useCallback(() => {
+    if (selectedMessageIds.size > 0) {
+      setDeleteDialogOpen(true);
+    }
+  }, [selectedMessageIds.size]);
+
+  // Delete message handler
+  const handleDeleteMessage = useCallback(
+    (messageId: string) => {
+      handleEnterSelectionMode(messageId);
+    },
+    [handleEnterSelectionMode]
+  );
 
   const handleConfirmDeleteMessage = useCallback(
     async (messageId: string) => {
+      // If we are in selection mode, delete all selected
+      if (selectedMessageIds.size > 0) {
+        try {
+          // Delete all selected messages in parallel
+          const deletePromises = Array.from(selectedMessageIds).map((id) =>
+            backendApi.whatsapp.deleteMessage(id, {
+              chatId: selectedChatId || undefined,
+            })
+          );
+
+          await Promise.all(deletePromises);
+
+          // Update local state
+          setMessages((prevMessages) =>
+            prevMessages.map((msg) =>
+              selectedMessageIds.has(msg.messageId)
+                ? {
+                  ...msg,
+                  text: null,
+                  isDeleted: true,
+                  deletedAt: new Date().toISOString(),
+                }
+                : msg
+            )
+          );
+
+          // Exit selection mode
+          handleExitSelectionMode();
+        } catch (err) {
+          console.error("Failed to delete messages:", err);
+          setError("Failed to delete messages");
+        }
+        return;
+      }
+
       try {
         await backendApi.whatsapp.deleteMessage(messageId, {
           chatId: selectedChatId || undefined,
@@ -392,11 +472,11 @@ export function useMessageHandlers(
           prevMessages.map((msg) =>
             msg.messageId === messageId
               ? {
-                  ...msg,
-                  text: null,
-                  isDeleted: true,
-                  deletedAt: new Date().toISOString(),
-                }
+                ...msg,
+                text: null,
+                isDeleted: true,
+                deletedAt: new Date().toISOString(),
+              }
               : msg
           )
         );
@@ -405,7 +485,13 @@ export function useMessageHandlers(
         setError("Failed to delete message");
       }
     },
-    [selectedChatId, setMessages, setError]
+    [
+      selectedChatId,
+      setMessages,
+      setError,
+      selectedMessageIds,
+      handleExitSelectionMode,
+    ]
   );
 
   // Apply template - resolves variables against actual contact data via backend API
@@ -540,7 +626,7 @@ export function useMessageHandlers(
     const container = messagesContainerRef.current;
     const isCurrentlyAtBottom = container
       ? container.scrollHeight - container.scrollTop - container.clientHeight <
-        100
+      100
       : true;
 
     // Track how many messages were actually added
@@ -569,11 +655,11 @@ export function useMessageHandlers(
           // For inbound messages, default to 'delivered'
           const messageStatus = wsMsg.status
             ? (wsMsg.status as
-                | "pending"
-                | "sent"
-                | "delivered"
-                | "read"
-                | "failed")
+              | "pending"
+              | "sent"
+              | "delivered"
+              | "read"
+              | "failed")
             : wsMsg.direction === "outbound"
               ? "sent"
               : "delivered";
@@ -589,25 +675,25 @@ export function useMessageHandlers(
             status: messageStatus,
             attachments: wsMsg.attachments
               ? wsMsg.attachments.map((att: any) => ({
-                  id: att.id || att.mediaId,
-                  type: att.type as "image" | "video" | "audio" | "document",
-                  mediaId: att.id || att.mediaId,
-                  fileName: att.fileName || "",
-                  mimeType: att.mimeType || "application/octet-stream",
-                  size: att.size || 0,
-                  s3Key: att.s3Key || att.id || att.mediaId,
-                  // Thumbnail fields - critical for displaying thumbnails instead of originals
-                  thumbnailKey: att.thumbnailKey,
-                  thumbnailStatus: att.thumbnailStatus,
-                  width: att.width,
-                  height: att.height,
-                  blurhash: att.blurhash,
-                  duration: att.duration,
-                  status: att.status || ("success" as const),
-                  uploadedAt: wsMsg.timestamp,
-                  isVoiceNote: att.isVoiceNote || false,
-                  isAnimated: att.isAnimated,
-                }))
+                id: att.id || att.mediaId,
+                type: att.type as "image" | "video" | "audio" | "document",
+                mediaId: att.id || att.mediaId,
+                fileName: att.fileName || "",
+                mimeType: att.mimeType || "application/octet-stream",
+                size: att.size || 0,
+                s3Key: att.s3Key || att.id || att.mediaId,
+                // Thumbnail fields - critical for displaying thumbnails instead of originals
+                thumbnailKey: att.thumbnailKey,
+                thumbnailStatus: att.thumbnailStatus,
+                width: att.width,
+                height: att.height,
+                blurhash: att.blurhash,
+                duration: att.duration,
+                status: att.status || ("success" as const),
+                uploadedAt: wsMsg.timestamp,
+                isVoiceNote: att.isVoiceNote || false,
+                isAnimated: att.isAnimated,
+              }))
               : undefined,
             sentAt: wsMsg.timestamp,
             deliveredAt: new Date().toISOString(),
@@ -805,9 +891,9 @@ export function useMessageHandlers(
           }
           console.log(
             `📷 Updated messages cache for chat ${targetChatId} with thumbnail data` +
-              (targetChatId !== selectedChatId
-                ? ` (while viewing chat ${selectedChatId})`
-                : "")
+            (targetChatId !== selectedChatId
+              ? ` (while viewing chat ${selectedChatId})`
+              : "")
           );
         }
       } else if (targetChatId) {
@@ -820,8 +906,8 @@ export function useMessageHandlers(
       if (container) {
         const isAtBottom =
           container.scrollHeight -
-            container.scrollTop -
-            container.clientHeight <
+          container.scrollTop -
+          container.clientHeight <
           100;
         if (isAtBottom) {
           setTimeout(() => {
@@ -861,5 +947,11 @@ export function useMessageHandlers(
     setDeleteDialogOpen,
     deletingMessageId,
     setDeletingMessageId,
+    isSelectionMode,
+    selectedMessageIds,
+    handleEnterSelectionMode,
+    handleToggleSelection,
+    handleExitSelectionMode,
+    handleDeleteSelected,
   };
 }

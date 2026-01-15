@@ -46,6 +46,7 @@ import {
   PinDurationModal,
   PinnedMessagesSection,
   PinReplaceModal,
+  SelectionBanner,
   TemplatesPanel,
 } from "./components";
 import {
@@ -297,7 +298,7 @@ export default function ChatsPage() {
       if (contact && typeof contact === "object" && "language" in contact) {
         setCustomerLanguage(
           (contact as { language?: SupportedLanguage | null }).language ||
-            undefined
+          undefined
         );
       }
     } catch {
@@ -549,8 +550,8 @@ export default function ChatsPage() {
       // Use passed participantName, or fall back to chat data, or phone number
       setDeleteChatName(
         participantName ||
-          effectiveChat?.participantName ||
-          effectiveChat?.participantPhone
+        effectiveChat?.participantName ||
+        effectiveChat?.participantPhone
       );
     },
     [chatState.chats, viewedArchivedChat]
@@ -732,11 +733,11 @@ export default function ChatsPage() {
               <p className="text-xs text-muted-foreground mt-2">
                 {chatSearch.totalResults === 0
                   ? t("chatList.noResultsFor", {
-                      query: chatSearch.searchQuery,
-                    })
+                    query: chatSearch.searchQuery,
+                  })
                   : t("chatList.resultsCount", {
-                      count: chatSearch.totalResults,
-                    })}
+                    count: chatSearch.totalResults,
+                  })}
               </p>
             )}
           </div>
@@ -748,7 +749,7 @@ export default function ChatsPage() {
             ) : chatSearch.isSearchMode ? (
               /* Search Results Mode */
               chatSearch.searchResults.length === 0 &&
-              !chatSearch.isSearching ? (
+                !chatSearch.isSearching ? (
                 <div className="flex flex-col items-center justify-center h-full p-4 text-center">
                   <Search className="h-12 w-12 text-muted-foreground mb-3 opacity-40" />
                   <p className="text-muted-foreground">
@@ -882,6 +883,9 @@ export default function ChatsPage() {
                       handlePinMessage={handlePinMessage}
                       handleUnpinMessage={handleUnpinMessage}
                       conversationWindow={conversationWindow}
+                      isSelectionMode={messageHandlers.isSelectionMode}
+                      selectedMessageIds={messageHandlers.selectedMessageIds}
+                      onToggleSelection={messageHandlers.handleToggleSelection}
                     />
 
                     {/* Scroll to Bottom Button - shows when viewing old messages or when there are new messages */}
@@ -908,6 +912,15 @@ export default function ChatsPage() {
                     )}
                   </div>
 
+                  {/* Selection Banner - Shows above templates when in selection mode */}
+                  {messageHandlers.isSelectionMode && (
+                    <SelectionBanner
+                      selectedCount={messageHandlers.selectedMessageIds.size}
+                      onCancel={messageHandlers.handleExitSelectionMode}
+                      onDelete={messageHandlers.handleDeleteSelected}
+                    />
+                  )}
+
                   {/* Templates Panel */}
                   <TemplatesPanel
                     templates={visibleTemplates}
@@ -918,25 +931,27 @@ export default function ChatsPage() {
                     t={t}
                   />
 
-                  {/* Input Area */}
-                  <MessageInputArea
-                    messageInputRef={messageInputRef}
-                    addMoreInputRef={mediaHandlers.addMoreInputRef}
-                    replyingToMessage={messageHandlers.replyingToMessage}
-                    selectedChat={effectiveSelectedChat}
-                    currentAttachmentType={mediaHandlers.currentAttachmentType}
-                    templateInput={messageHandlers.templateInput}
-                    isUploading={isUploading}
-                    t={t}
-                    onSend={messageHandlers.handleSendMessage}
-                    onSendVoiceNote={mediaHandlers.handleSendVoiceNote}
-                    onTemplateUsed={messageHandlers.handleTemplateUsed}
-                    onCancelReply={messageHandlers.handleCancelReply}
-                    onFilesSelected={mediaHandlers.handleFilesSelected}
-                    onContactsClick={contactHandlers.handleContactsClick}
-                    onCameraClick={mediaHandlers.handleCameraClick}
-                    conversationWindow={conversationWindow}
-                  />
+                  {/* Input Area - Hidden in selection mode */}
+                  {!messageHandlers.isSelectionMode && (
+                    <MessageInputArea
+                      messageInputRef={messageInputRef}
+                      addMoreInputRef={mediaHandlers.addMoreInputRef}
+                      replyingToMessage={messageHandlers.replyingToMessage}
+                      selectedChat={effectiveSelectedChat}
+                      currentAttachmentType={mediaHandlers.currentAttachmentType}
+                      templateInput={messageHandlers.templateInput}
+                      isUploading={isUploading}
+                      t={t}
+                      onSend={messageHandlers.handleSendMessage}
+                      onSendVoiceNote={mediaHandlers.handleSendVoiceNote}
+                      onTemplateUsed={messageHandlers.handleTemplateUsed}
+                      onCancelReply={messageHandlers.handleCancelReply}
+                      onFilesSelected={mediaHandlers.handleFilesSelected}
+                      onContactsClick={contactHandlers.handleContactsClick}
+                      onCameraClick={mediaHandlers.handleCameraClick}
+                      conversationWindow={conversationWindow}
+                    />
+                  )}
 
                   {/* Media Staging and Preview Modals (within messages area) */}
                   <ChatsModals
@@ -1099,7 +1114,7 @@ export default function ChatsPage() {
                         notesLoading={notesLoading}
                         onAddNote={handleAddNote}
                         onDeleteNote={handleDeleteNote}
-                        onProfileUpdate={() => {}}
+                        onProfileUpdate={() => { }}
                         participantPhone={
                           effectiveSelectedChat?.participantPhone
                         }
