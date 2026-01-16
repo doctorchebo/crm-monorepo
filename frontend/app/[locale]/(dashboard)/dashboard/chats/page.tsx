@@ -25,17 +25,21 @@ import {
 } from "@/components/archived-chats-drawer";
 import { ChatsSenderSection } from "@/components/chats-sender-section";
 import { DeleteChatDialog } from "@/components/dialogs/delete-chat-dialog";
+import { RateLimitBanner } from "@/components/rate-limit-banner";
 import { Button } from "@/components/ui/button";
 import { ChatSidebar } from "@/components/ui/chat-sidebar";
 import { Input } from "@/components/ui/input";
 import { useAuthProtection } from "@/hooks/use-auth";
 import { useMediaUpload } from "@/hooks/use-media-upload";
 import { useNotification } from "@/hooks/use-notification";
+import { useChatNotifications } from "@/hooks/use-chat-notifications";
+import { useAIEvents } from "@/hooks/use-ai-events";
 import { backendApi } from "@/lib/api/endpoints";
 import { PendingUpload } from "@/lib/media/types";
 
 // Local imports
 import type { SupportedLanguage } from "@/lib/api/endpoints";
+import type { RateLimitInfo } from "@/hooks/use-ai-events";
 import {
   ChatHeader,
   ChatSearchResults,
@@ -49,6 +53,9 @@ import {
   SelectionBanner,
   TemplatesPanel,
 } from "./components";
+import { AiReplyPreviewPanel } from "@/components/chat/AiReplyPreviewPanel";
+import { AiRegenerateBanner } from "@/components/chat/AiRegenerateBanner";
+import { useHandoff } from "@/hooks/use-handoff";
 import {
   useChatSearch,
   useChatState,
@@ -72,7 +79,6 @@ export default function ChatsPage() {
   const separatorRef = useRef<HTMLDivElement>(null);
   const notesPanelRef = useRef<HTMLDivElement>(null);
   const { addNotification } = useNotification();
-
   // Protect this route
   useAuthProtection();
 
@@ -84,8 +90,8 @@ export default function ChatsPage() {
   >;
   const { isUploading } = hookResult;
 
-  // Automation state
-  const [automationEnabled, setAutomationEnabled] = useState(false);
+  // Rate limit state
+  const [fetchedRateLimitInfo, setFetchedRateLimitInfo] = useState<RateLimitInfo | null>(null);
 
   // Archive/Delete state
   const [isArchivedDrawerOpen, setIsArchivedDrawerOpen] = useState(false);
@@ -98,6 +104,9 @@ export default function ChatsPage() {
   const [lastDeletedChatId, setLastDeletedChatId] = useState<string | null>(
     null
   );
+
+  // Sync automation enabled state with backend - MOVED DOWN
+
 
   // Notes state
   const [notes, setNotes] = useState<any>(null);
@@ -116,6 +125,124 @@ export default function ChatsPage() {
 
   // Chat state hook - manages chats, messages, pagination, scroll
   const chatState = useChatState();
+
+  // Get socket for AI events
+  const { socket } = useChatNotifications();
+  // AI Events hook - handles typing indicator, rate limits, and pending reviews
+  const {
+    isAITyping,
+    isAIProcessing,
+    rateLimitInfo,
+    pendingReview,
+    clearPendingReview,
+    setAIProcessing,
+  } = useAIEvents(chatState.selectedChatId, socket);
+
+  // AI state from useHandoff - source of truth for AI toggle
+  // Must be after chatState is defined
+  const {
+    aiStatus,
+    isAIPaused,
+    pauseAI,
+    resumeAI,
+    refetch: refetchHandoff,
+  } = useHandoff(chatState.selectedChatId);
+
+  // Derived state: AI is enabled in config AND not paused
+  const aiConfigEnabled = aiStatus?.aiConfigEnabled ?? false;
+  const automationEnabled = aiConfigEnabled && !isAIPaused;
+
+  // Combined rate limit info (socket takes precedence for updates, fetches for init)
+  const activeRateLimit = rateLimitInfo || fetchedRateLimitInfo;
+
+  // Sync rate limit state with backend on chat change
+  useEffect(() => {
+    if (!chatState.selectedChatId) return;
+    
+    const fetchRateLimitStatus = async () => {
+        try {
+            const status = await backendApi.aiWorkflow.getAIStatus(chatState.selectedChatId!);
+            
+            // If rate limited, set the rate limit info
+            if (status.isRateLimited) {
+                setFetchedRateLimitInfo({
+                    chatId: status.chatId,
+                    currentCount: status.rateLimitCurrentCount || 0,
+                    maxCount: status.rateLimitMaxCount || 0,
+                    resetTime: status.rateLimitReset?.toString(),
+                    timestamp: new Date().toISOString()
+                });
+            } else {
+                setFetchedRateLimitInfo(null);
+            }
+        } catch (error) {
+            console.error("Failed to fetch AI status:", error);
+        }
+    };
+    
+    fetchRateLimitStatus();
+  }, [chatState.selectedChatId]);
+
+  // If socket rate limit event comes in, trigger refetch
+  useEffect(() => {
+      if (rateLimitInfo) {
+          refetchHandoff();
+      }
+  }, [rateLimitInfo, refetchHandoff]);
+
+  // Handler for when AI is toggled ON - auto-trigger response if last message is inbound
+  const handleAIToggle = useCallback(async (shouldEnable: boolean) => {
+    if (shouldEnable) {
+      await resumeAI();
+      // Check if last message is inbound and trigger AI response
+      const lastMessage = chatState.messages[chatState.messages.length - 1];
+      if (lastMessage?.direction === 'inbound' && chatState.selectedChatId) {
+        try {
+          await backendApi.aiReview.regenerate(chatState.selectedChatId);
+        } catch (error) {
+          console.error("Failed to trigger AI response:", error);
+        }
+      }
+    } else {
+      await pauseAI();
+    }
+  }, [resumeAI, pauseAI, chatState.messages, chatState.selectedChatId]);
+    
+
+
+  // AI Review Handlers
+  const handleAiSend = useCallback(
+    async (content: string, mediaAttachment?: any, interactiveData?: any) => {
+      if (!chatState.selectedChatId) return;
+      try {
+        await backendApi.aiReview.sendReviewed({
+          chatId: chatState.selectedChatId,
+          content,
+          mediaAttachment,
+          interactiveData,
+        });
+        clearPendingReview();
+        // Optimistically add message or rely on socket? 
+        // Socket should handle incoming message or we can refresh messages.
+        // For now, let's assume we rely on standard refresh or socket.
+      } catch (error) {
+        console.error("Failed to send reviewed AI response:", error);
+        addNotification(t("failedToSendAiResponse") || "Failed to send AI response", "error");
+      }
+    },
+    [chatState.selectedChatId, clearPendingReview, addNotification, t]
+  );
+
+  const handleAiDiscard = useCallback(async () => {
+    if (!chatState.selectedChatId) return;
+    try {
+      await backendApi.aiReview.discardPending(chatState.selectedChatId);
+      clearPendingReview();
+    } catch (error) {
+      console.error("Failed to discard AI review:", error);
+      clearPendingReview(); // Clear locally anyway
+    }
+  }, [chatState.selectedChatId, clearPendingReview]);
 
   // Chat search hook - manages searching through chat list
   const chatSearch = useChatSearch({ debounceMs: 200, minChars: 1 });
@@ -666,15 +793,6 @@ export default function ChatsPage() {
           <h1 className="text-xl font-semibold">{t("title")}</h1>
           <p className="text-xs text-muted-foreground">{t("description")}</p>
         </div>
-        <div className="flex items-center gap-3">
-          <Button
-            variant={automationEnabled ? "default" : "outline"}
-            onClick={() => setAutomationEnabled(!automationEnabled)}
-            className="gap-2"
-          >
-            {automationEnabled ? t("automationOn") : t("automateReplies")}
-          </Button>
-        </div>
       </div>
 
       {/* Error Banner */}
@@ -822,12 +940,21 @@ export default function ChatsPage() {
                 chat={effectiveSelectedChat}
                 onSearchClick={messageSearch.toggleSearch}
                 isSearchOpen={messageSearch.isSearchOpen}
+                onAIToggle={handleAIToggle}
+                isRateLimited={!!activeRateLimit}
+                onConfigSaved={() => {
+                  // Clear rate limit info when config is saved (user may have increased limit)
+                  setFetchedRateLimitInfo(null);
+                  refetchHandoff();
+                }}
               />
 
               {/* Messages + Notes/Search Container */}
               <div className="flex flex-1 overflow-hidden" ref={containerRef}>
                 {/* Messages Area */}
                 <div className="flex-1 flex flex-col overflow-hidden min-h-0 relative">
+
+
                   {/* Pinned Messages Section */}
                   {pins.pinnedMessages.length > 0 && (
                     <PinnedMessagesSection
@@ -886,6 +1013,7 @@ export default function ChatsPage() {
                       isSelectionMode={messageHandlers.isSelectionMode}
                       selectedMessageIds={messageHandlers.selectedMessageIds}
                       onToggleSelection={messageHandlers.handleToggleSelection}
+                      isAITyping={isAITyping}
                     />
 
                     {/* Scroll to Bottom Button - shows when viewing old messages or when there are new messages */}
@@ -921,36 +1049,71 @@ export default function ChatsPage() {
                     />
                   )}
 
-                  {/* Templates Panel */}
-                  <TemplatesPanel
-                    templates={visibleTemplates}
-                    templatesLoading={templatesLoading}
-                    onApplyTemplate={messageHandlers.handleApplyTemplate}
-                    conversationWindow={conversationWindow}
-                    customerLanguage={customerLanguage}
-                    t={t}
-                  />
+                  {/* Rate Limit Banner */}
+                  {activeRateLimit && (
+                     <RateLimitBanner
+                        resetTime={activeRateLimit.resetTime}
+                        currentCount={activeRateLimit.currentCount}
+                        maxCount={activeRateLimit.maxCount}
+                     />
+                  )}
 
-                  {/* Input Area - Hidden in selection mode */}
-                  {!messageHandlers.isSelectionMode && (
-                    <MessageInputArea
-                      messageInputRef={messageInputRef}
-                      addMoreInputRef={mediaHandlers.addMoreInputRef}
-                      replyingToMessage={messageHandlers.replyingToMessage}
-                      selectedChat={effectiveSelectedChat}
-                      currentAttachmentType={mediaHandlers.currentAttachmentType}
-                      templateInput={messageHandlers.templateInput}
-                      isUploading={isUploading}
-                      t={t}
-                      onSend={messageHandlers.handleSendMessage}
-                      onSendVoiceNote={mediaHandlers.handleSendVoiceNote}
-                      onTemplateUsed={messageHandlers.handleTemplateUsed}
-                      onCancelReply={messageHandlers.handleCancelReply}
-                      onFilesSelected={mediaHandlers.handleFilesSelected}
-                      onContactsClick={contactHandlers.handleContactsClick}
-                      onCameraClick={mediaHandlers.handleCameraClick}
-                      conversationWindow={conversationWindow}
+                  {/* AI Regeneration Banner */}
+                  {!pendingReview && !activeRateLimit && !isAITyping && !isAIProcessing &&
+                   automationEnabled && 
+                   chatState.messages[chatState.messages.length - 1]?.direction === 'inbound' && (
+                    <AiRegenerateBanner
+                      chatId={effectiveSelectedChat.chatId}
+                      onRegenerateTriggered={() => {
+                         // Optional: add loading state or notification
+                         console.log("Regeneration triggered");
+                      }}
                     />
+                  )}
+
+                  {/* Templates Panel - Only show if automation is DISABLED */}
+                  {!automationEnabled && (
+                    <TemplatesPanel
+                      templates={visibleTemplates}
+                      templatesLoading={templatesLoading}
+                      onApplyTemplate={messageHandlers.handleApplyTemplate}
+                      conversationWindow={conversationWindow}
+                      customerLanguage={customerLanguage}
+                      t={t}
+                    />
+                  )}
+
+                  {/* Input Area - Hidden in selection mode or when AI review is pending */}
+                  {!messageHandlers.isSelectionMode && pendingReview ? (
+                    <AiReplyPreviewPanel
+                      content={pendingReview.content}
+                      mediaAttachment={pendingReview.mediaAttachment}
+                      interactiveData={pendingReview.interactiveData}
+                      onSend={handleAiSend}
+                      onDiscard={handleAiDiscard}
+                      isSending={false} // Todo: Add sending state if needed
+                    />
+                  ) : (
+                    !messageHandlers.isSelectionMode && !automationEnabled && (
+                      <MessageInputArea
+                        messageInputRef={messageInputRef}
+                        addMoreInputRef={mediaHandlers.addMoreInputRef}
+                        replyingToMessage={messageHandlers.replyingToMessage}
+                        selectedChat={effectiveSelectedChat}
+                        currentAttachmentType={mediaHandlers.currentAttachmentType}
+                        templateInput={messageHandlers.templateInput}
+                        isUploading={isUploading}
+                        t={t}
+                        onSend={messageHandlers.handleSendMessage}
+                        onSendVoiceNote={mediaHandlers.handleSendVoiceNote}
+                        onTemplateUsed={messageHandlers.handleTemplateUsed}
+                        onCancelReply={messageHandlers.handleCancelReply}
+                        onFilesSelected={mediaHandlers.handleFilesSelected}
+                        onContactsClick={contactHandlers.handleContactsClick}
+                        onCameraClick={mediaHandlers.handleCameraClick}
+                        conversationWindow={conversationWindow}
+                      />
+                    )
                   )}
 
                   {/* Media Staging and Preview Modals (within messages area) */}
@@ -1148,16 +1311,6 @@ export default function ChatsPage() {
           )}
         </div>
       </div>
-
-      {/* Info about Automation */}
-      {automationEnabled && (
-        <div className="border-t bg-blue-50 dark:bg-blue-950 p-4">
-          <p className="text-sm text-blue-700 dark:text-blue-200">
-            ✓ Automatic replies are enabled. Messages matching automation rules
-            will be responded to automatically.
-          </p>
-        </div>
-      )}
 
       {/* Delete Chat Confirmation Dialog */}
       <DeleteChatDialog

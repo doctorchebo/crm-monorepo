@@ -30,8 +30,7 @@ import { Server, Socket } from 'socket.io';
   transports: ['websocket', 'polling'],
 })
 export class WhatsAppGateway
-  implements OnGatewayConnection, OnGatewayDisconnect
-{
+  implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server!: Server;
   private readonly logger = new Logger(WhatsAppGateway.name);
   private connectedClients = new Set<string>();
@@ -439,6 +438,114 @@ export class WhatsAppGateway
     this.server.emit('customer-reaction', {
       ...data,
       timestamp: new Date().toISOString(),
+    });
+  }
+
+  // ==========================================================================
+  // AI Events
+  // ==========================================================================
+
+  /**
+   * Emit AI rate limit exceeded event to all connected clients
+   * Called when AI message limit is reached for a chat
+   *
+   * @param data - Rate limit exceeded event data
+   */
+  emitAIRateLimitExceeded(data: {
+    chatId: string;
+    currentCount: number;
+    maxCount: number;
+    resetTime?: Date;
+  }): void {
+    if (this.connectedClients.size === 0) {
+      return; // No clients connected
+    }
+
+    console.log(
+      `📡 Emitting ai:rate_limit_exceeded for ${data.chatId} (${data.currentCount}/${data.maxCount}) to ${this.connectedClients.size} clients`,
+    );
+
+    this.server.emit('ai:rate_limit_exceeded', {
+      ...data,
+      resetTime: data.resetTime?.toISOString(),
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Emit AI typing start event to all connected clients
+   * Called when AI starts generating a response
+   *
+   * @param chatId - The chat ID where AI is typing
+   */
+  emitAITypingStart(chatId: string): void {
+    if (this.connectedClients.size === 0) {
+      return; // No clients connected
+    }
+
+    console.log(
+      `📡 Emitting ai:typing_start for ${chatId} to ${this.connectedClients.size} clients`,
+    );
+
+    this.server.emit('ai:typing_start', {
+      chatId,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Emit AI typing stop event to all connected clients
+   * Called when AI finishes generating a response (success or failure)
+   *
+   * @param chatId - The chat ID where AI stopped typing
+   */
+  emitAITypingStop(chatId: string): void {
+    if (this.connectedClients.size === 0) {
+      return; // No clients connected
+    }
+
+    console.log(
+      `📡 Emitting ai:typing_stop for ${chatId} to ${this.connectedClients.size} clients`,
+    );
+
+    this.server.emit('ai:typing_stop', {
+      chatId,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Emit AI pending review event to all connected clients
+   * Called when AI generates a response that needs user review before sending
+   *
+   * @param data - The pending review data
+   */
+  emitAIPendingReview(data: {
+    chatId: string;
+    content: string;
+    mediaAttachment?: {
+      fileName: string;
+      mediaType: string;
+      s3Key: string;
+      mimeType: string;
+    };
+    interactiveData?: {
+      type: string;
+      buttons?: Array<{ id: string; title: string }>;
+      sections?: Array<{ title: string; rows: Array<{ id: string; title: string; description?: string }> }>;
+    };
+  }): void {
+    if (this.connectedClients.size === 0) {
+      return; // No clients connected
+    }
+
+    console.log(
+      `📡 Emitting ai:pending_review for ${data.chatId} to ${this.connectedClients.size} clients`,
+    );
+
+    this.server.emit('ai:pending_review', {
+      ...data,
+      generatedAt: new Date().toISOString(),
     });
   }
 

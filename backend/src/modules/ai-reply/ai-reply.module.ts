@@ -8,6 +8,7 @@ import { AiMemoryModule } from '@modules/ai-memory/ai-memory.module';
 import { KnowledgeBaseModule } from '@modules/knowledge-base/knowledge-base.module';
 import { TemplatesModule } from '@modules/templates/templates.module';
 import { WhatsAppModule } from '@modules/whatsapp/whatsapp.module';
+import { WorkflowModule } from '@modules/workflow/workflow.module';
 import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AIReplyController } from './ai-reply.controller';
@@ -27,6 +28,7 @@ import {
     forwardRef(() => TemplatesModule),
     forwardRef(() => AiMemoryModule),
     forwardRef(() => KnowledgeBaseModule),
+    forwardRef(() => WorkflowModule), // For RateLimiterService dependency
   ],
   controllers: [AIReplyController],
   providers: [
@@ -46,4 +48,4 @@ import {
     TemplateSelectorService,
   ],
 })
-export class AIReplyModule {}
+export class AIReplyModule { }

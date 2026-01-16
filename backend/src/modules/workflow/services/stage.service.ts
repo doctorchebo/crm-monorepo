@@ -14,6 +14,7 @@ import {
   chatStageHistory,
   chats,
   workflowStages,
+  chatAiOverrides,
 } from '@database/schema';
 import { Injectable, Logger } from '@nestjs/common';
 import { and, asc, desc, eq } from 'drizzle-orm';
@@ -557,9 +558,12 @@ export class StageService {
         lastMessageType: chats.lastMessageType,
         unreadCount: chats.unreadCount,
         isActive: chats.isActive,
+        // AI Override fields
+        aiOverrideEnabled: chatAiOverrides.aiEnabled,
       })
       .from(chatStageAssignments)
       .innerJoin(chats, eq(chatStageAssignments.chatId, chats.chatId))
+      .leftJoin(chatAiOverrides, eq(chatStageAssignments.chatId, chatAiOverrides.chatId))
       .where(eq(chatStageAssignments.stageId, stageId))
       .orderBy(desc(chats.lastMessageTime))
       .limit(limit)

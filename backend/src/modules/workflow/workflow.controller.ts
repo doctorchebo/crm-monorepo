@@ -40,6 +40,8 @@ import {
   UpdateAiConfigurationDto,
   UpdateRuleDto,
   UpdateStageDto,
+  SendReviewedAiResponseDto,
+  DiscardPendingReviewDto,
 } from './dto';
 import {
   AiActionLoggerService,
@@ -56,6 +58,8 @@ import {
   UsageTrackingService,
   WorkflowEngineService,
 } from './services';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
+
 
 @Controller('workflow')
 @UseGuards(JwtAuthGuard)
@@ -74,7 +78,8 @@ export class WorkflowController {
     private readonly usageTracking: UsageTrackingService,
     private readonly usageThrottle: UsageThrottleService,
     private readonly aiConfigService: AiConfigurationService,
-  ) {}
+    private readonly whatsAppService: WhatsAppService,
+  ) { }
 
   // ==========================================================================
   // Workflow Summary & Status
@@ -414,13 +419,29 @@ export class WorkflowController {
   async resumeAI(@Req() req: any, @Param('chatId') chatId: string) {
     const userId = req.user.userId;
     await this.handoffService.resumeAI(chatId, userId);
+
+    // Trigger AI response for any pending customer message
+    // Run in background to avoid blocking the response
+    this.whatsAppService.triggerAiResponseForResume(chatId, userId).catch(err => {
+      console.error(`Error triggering AI response on resume for chat ${chatId}:`, err);
+    });
+
     return { success: true, message: 'AI resumed' };
   }
 
   @Get('ai/status/:chatId')
   async getAIStatus(@Param('chatId') chatId: string) {
     const result = await this.handoffService.canAISend(chatId);
-    return { chatId, aiEnabled: result.canSend, reason: result.reason };
+    return {
+      chatId,
+      aiEnabled: result.canSend,
+      aiConfigEnabled: result.configEnabled, // New field for UI config visibility
+      reason: result.reason,
+      isRateLimited: result.isRateLimited,
+      rateLimitReset: result.rateLimitReset,
+      rateLimitCurrentCount: result.rateLimitCurrentCount,
+      rateLimitMaxCount: result.rateLimitMaxCount,
+    };
   }
 
   // ==========================================================================
@@ -1109,5 +1130,72 @@ export class WorkflowController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteStageSettings(@Param('stageId') stageId: string) {
     await this.aiConfigService.deleteStageSettings(stageId);
+  }
+
+  // ==========================================================================
+  // AI Review Endpoints
+  // ==========================================================================
+
+  /**
+   * Send a reviewed AI response
+   */
+  @Post('ai/send-reviewed')
+  @HttpCode(HttpStatus.OK)
+  async sendReviewedAiResponse(
+    @Req() req: any,
+    @Body() dto: SendReviewedAiResponseDto,
+  ) {
+    const userId = req.user.userId;
+    await this.workflowEngine.sendReviewedAiResponse(
+      userId,
+      dto.chatId,
+      dto.content,
+      dto.mediaAttachment,
+      dto.interactiveData,
+    );
+    return { success: true };
+  }
+
+  /**
+   * Discard a pending AI review
+   */
+  @Post('ai/discard-pending')
+  @HttpCode(HttpStatus.OK)
+  async discardPendingReview(
+    @Req() req: any,
+    @Body() dto: DiscardPendingReviewDto,
+  ) {
+    // We just log this action for analytics
+    this.actionLogger.logAction({
+      userId: req.user.userId,
+      chatId: dto.chatId,
+      actionType: 'auto_reply',
+      actionStatus: 'blocked',
+      guardrailTriggered: true,
+      guardrailType: 'manual_pause',
+      guardrailReason: 'User discarded review',
+      metadata: { source: 'review_panel' },
+    });
+
+    // Also emit stop typing to be safe
+    // Since we don't have direct access to gateway here easily without injecting it,
+    // we rely on frontend clearing state. But ideally backend should conform logic.
+    // For now logging is sufficient.
+    return { success: true };
+  }
+
+  /**
+   * Get AI status for a specific chat (enabled, paused, rate limited)
+   */
+  @Get('ai/status/:chatId')
+  async getAiStatus(@Param('chatId') chatId: string) {
+    return this.workflowEngine.getAIStatus(chatId);
+  }
+
+  @Post('ai/regenerate')
+  @HttpCode(HttpStatus.OK)
+  async regenerateAiResponse(@Body() dto: { chatId: string }) {
+    await this.workflowEngine.regenerateResponse(dto.chatId);
+    return { success: true, message: 'Renegeration triggered' };
   }
 }

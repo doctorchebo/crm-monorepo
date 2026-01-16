@@ -62,11 +62,14 @@ import {
 } from './services';
 import { WorkflowController } from './workflow.controller';
 
+import { WhatsAppModule } from '@modules/whatsapp/whatsapp.module'; // Import module
+
 @Module({
   imports: [
     AiMemoryModule,
     forwardRef(() => AIReplyModule),
     forwardRef(() => KnowledgeBaseModule),
+    forwardRef(() => WhatsAppModule), // Fix circular dependency
     EventEmitterModule.forRoot(),
   ],
   controllers: [WorkflowController],
@@ -119,4 +122,4 @@ import { WorkflowController } from './workflow.controller';
     UsageThrottleService,
   ],
 })
-export class WorkflowModule {}
+export class WorkflowModule { }

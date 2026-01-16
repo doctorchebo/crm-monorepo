@@ -917,3 +917,30 @@ export interface AiConfigOptionsResponseDto {
   styles: Array<{ value: string; label: string; description: string }>;
   formalities: Array<{ value: string; label: string; description: string }>;
 }
+// ============================================================================
+// AI Review DTOs
+// ============================================================================
+
+export class SendReviewedAiResponseDto {
+  @IsString()
+  @IsNotEmpty()
+  chatId: string;
+
+  @IsString()
+  @IsNotEmpty()
+  content: string;
+
+  @IsObject()
+  @IsOptional()
+  mediaAttachment?: unknown;
+
+  @IsObject()
+  @IsOptional()
+  interactiveData?: unknown;
+}
+
+export class DiscardPendingReviewDto {
+  @IsString()
+  @IsNotEmpty()
+  chatId: string;
+}

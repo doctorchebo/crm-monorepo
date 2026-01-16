@@ -29,7 +29,12 @@
  */
 
 import { db } from '@database/db.connection';
-import { chatStageAssignments, contacts, messages } from '@database/schema';
+import {
+  chatStageAssignments,
+  chats,
+  contacts,
+  messages,
+} from '@database/schema';
 import {
   AIReplyService,
   InteractiveMessageService,
@@ -37,13 +42,25 @@ import {
 import { AIReplyInteractiveData } from '@modules/ai-reply/types';
 import { RetrievalService } from '@modules/knowledge-base/services';
 import { MediaOrchestratorService } from '@modules/knowledge-base/services/media-orchestrator.service';
-import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { WhatsAppGateway } from '@modules/whatsapp/whatsapp.gateway';
+import { WhatsAppService } from '@modules/whatsapp/whatsapp.service';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  OnModuleInit,
+  Optional,
+  forwardRef,
+  NotFoundException,
+} from '@nestjs/common';
 import { desc, eq } from 'drizzle-orm';
 import type { EvaluateRulesRequest, WorkflowStageConfig } from '../types';
 import { HandoffService } from './handoff.service';
 import { ClassificationResult, LLMService } from './llm.service';
 import { PolicySimulationService } from './policy-simulation.service';
 import { RuleEngineService } from './rule-engine.service';
+import { AiConfigurationService } from './ai-configuration.service';
+import { RateLimiterService } from './rate-limiter.service';
 import { StageService } from './stage.service';
 
 // ============================================================================
@@ -163,11 +180,19 @@ export class WorkflowEngineService implements OnModuleInit {
     private readonly policySimulationService: PolicySimulationService,
     private readonly retrievalService: RetrievalService,
     @Optional()
+    private readonly whatsappGateway?: WhatsAppGateway,
+    @Optional()
     private readonly mediaOrchestratorService?: MediaOrchestratorService,
     @Optional()
     private readonly aiReplyService?: AIReplyService,
     @Optional()
     private readonly interactiveMessageService?: InteractiveMessageService,
+    @Optional()
+    private readonly aiConfigService?: AiConfigurationService,
+    @Optional()
+    private readonly rateLimiter?: RateLimiterService,
+    @Inject(forwardRef(() => WhatsAppService))
+    private readonly whatsappService?: WhatsAppService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -243,6 +268,22 @@ export class WorkflowEngineService implements OnModuleInit {
         `[AI Check] Chat ${chatId}: canAI=${canAI}, reason=${canAIResult.reason || 'allowed'}`,
       );
 
+      // RATE LIMIT AUTO-PAUSE LOGIC
+      if (!canAI && canAIResult.isRateLimited) {
+        this.logger.warn(
+          `[Rate Limit] Rate limit exceeded for chat ${chatId}. Pausing AI automatically.`,
+        );
+        await this.handoffService.pauseAI(chatId, userId);
+
+        // Emit WebSocket event to notify frontend
+        this.whatsappGateway?.emitAIRateLimitExceeded({
+          chatId,
+          currentCount: canAIResult.rateLimitCurrentCount || 0,
+          maxCount: canAIResult.rateLimitMaxCount || 0,
+          resetTime: canAIResult.rateLimitReset,
+        });
+      }
+
       // Step 4: Get current stage assignment
       const currentAssignment = await this.stageService.getChatStage(chatId);
       const currentStageId = currentAssignment?.stageId ?? undefined;
@@ -308,6 +349,9 @@ export class WorkflowEngineService implements OnModuleInit {
         this.logger.log(
           `[AI Response] Generating AI response for chat ${chatId}...`,
         );
+
+        // Emit typing indicator start
+        this.whatsappGateway?.emitAITypingStart(chatId);
 
         // Check for auto-handoff categories
         if (
@@ -590,6 +634,40 @@ export class WorkflowEngineService implements OnModuleInit {
               mediaAttachment,
               interactiveData,
             };
+
+            // Check if "Review Before Send" is enabled for this chat
+            if (
+              this.aiConfigService &&
+              aiResponse.shouldSend &&
+              aiResponse.content
+            ) {
+              const chatOverride =
+                await this.aiConfigService.getChatOverride(chatId);
+
+              if (chatOverride?.reviewBeforeSend) {
+                this.logger.log(
+                  `[AI Response] "Review Before Send" enabled for chat ${chatId}. Emitting pending review event.`,
+                );
+
+                // Emit pending review event
+                this.whatsappGateway?.emitAIPendingReview({
+                  chatId,
+                  content: aiResponse.content,
+                  mediaAttachment: aiResponse.mediaAttachment,
+                  interactiveData: aiResponse.interactiveData
+                    ? {
+                        type: 'button_reply', // Simplify for now, assuming all interactive are buttons/lists
+                        buttons: aiResponse.interactiveData.buttons.map(
+                          (b) => ({ id: b.id, title: b.title }),
+                        ),
+                      }
+                    : undefined,
+                });
+
+                // DO NOT SEND the message
+                aiResponse.shouldSend = false;
+              }
+            }
           } catch (error) {
             // Check if AI is disabled for this chat (via chat_ai_overrides)
             if (error?.message === 'AI_DISABLED_FOR_CHAT') {
@@ -662,6 +740,23 @@ export class WorkflowEngineService implements OnModuleInit {
     this.logger.log(
       `[Interactive] Processing ${interactiveResponse.type}: id=${actionId}, title=${actionTitle}`,
     );
+
+    // Guard: Check if AI can send messages (paused/disabled/handoff)
+    const canAiStatus = await this.handoffService.canAISend(chatId);
+    if (!canAiStatus.canSend) {
+      this.logger.warn(
+        `[Interactive] AI cannot respond to interaction. Reason: ${canAiStatus.reason}`,
+      );
+      return {
+        success: true,
+        aiResponse: {
+          content: '', // Or a fallback message if needed, but empty prevents sending
+          confidence: 0,
+          shouldSend: false,
+          requiresHandoff: false,
+        },
+      };
+    }
 
     // Map action IDs to response types
     const actionHandlers: Record<
@@ -1540,6 +1635,320 @@ ${!mediaContext?.willHaveMedia ? "3. If the customer is asking for specific deta
     }
 
     return results;
+  }
+
+  /**
+   * Send a reviewed AI response (triggered manually after review)
+   */
+  async sendReviewedAiResponse(
+    userId: number,
+    chatId: string,
+    content: string,
+    mediaAttachment?: any,
+    interactiveData?: any,
+  ): Promise<void> {
+    this.logger.log(
+      `[AI Response] Sending reviewed response for chat ${chatId}`,
+    );
+
+    // Send the message via WhatsApp service
+    if (mediaAttachment) {
+      // Logic for media sending would go here
+      // For now, we'll focus on text + interactive
+      // TODO: Implement full media sending logic similar to processMessage
+    }
+
+    // Look up the chat to get the correct senderId and participantPhone
+    const chat = await db.query.chats.findFirst({
+      where: eq(chats.chatId, chatId),
+    });
+
+    if (!chat) {
+      throw new NotFoundException(`Chat ${chatId} not found`);
+    }
+
+    // Send text message (with optional interactive buttons)
+    if (
+      interactiveData &&
+      interactiveData.buttons &&
+      interactiveData.buttons.length > 0
+    ) {
+      // Send interactive message
+      // Note: mapping back from simplified DTO to full structure might be needed
+      // For this implementation we'll send as text first if interactive structure is complex
+      // or implement basic button sending
+
+      // Sending as text for now to ensure reliability until interactive DTO is fully typed
+      await this.whatsappService?.sendMessage(
+        {
+          to: chat.participantPhone,
+          body: content,
+          senderId: chat.senderId,
+        },
+        userId,
+      );
+    } else {
+      await this.whatsappService?.sendMessage(
+        {
+          to: chat.participantPhone,
+          body: content,
+          senderId: chat.senderId,
+        },
+        userId,
+      );
+    }
+
+    // Record usage for rate limiting
+    // We attribute this to the AI even though human reviewed it, as it counts towards the limit
+    if (this.rateLimiter) {
+      await this.rateLimiter.recordMessage(userId, chatId, {
+        isAiMessage: true,
+      });
+    }
+
+    this.whatsappGateway?.emitAITypingStop(chatId);
+  }
+
+  /**
+   * Helper to check if AI processing should occur for a chat
+   */
+  private async shouldProcessMessage(
+    userId: number,
+    chatId: string,
+  ): Promise<boolean> {
+    // 1. Check if AI is paused/handed off
+    const canAIResult = await this.handoffService.canAISend(chatId);
+    if (!canAIResult.allowed) {
+      return false;
+    }
+
+    // 2. Check rate limits if enabled
+    if (this.rateLimiter) {
+      try {
+        // We use checkLimit for pre-validation without incrementing
+        // The actual increment happens after successful generation/send
+        const rateLimitStatus = await this.rateLimiter.checkLimit(
+          userId,
+          chatId,
+          { isAiMessage: true },
+        );
+        if (!rateLimitStatus.allowed) {
+          return false;
+        }
+      } catch (e) {
+        this.logger.error(`[RateLimit] Error checking limit for ${chatId}`, e);
+        // Fail open or closed? Closed for safety
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * Get formatted AI status for a chat
+   */
+  async getAIStatus(chatId: string): Promise<{
+    chatId: string;
+    aiEnabled: boolean;
+    aiConfigEnabled: boolean;
+    reason?: string;
+    isRateLimited: boolean;
+    rateLimitReset?: Date;
+    rateLimitCurrentCount?: number;
+    rateLimitMaxCount?: number;
+  }> {
+    const chat = await db.query.chats.findFirst({
+      where: eq(chats.chatId, chatId),
+    });
+
+    if (!chat) {
+      throw new NotFoundException(`Chat ${chatId} not found`);
+    }
+
+    const userId = chat.userId || 1;
+
+    // 1. Check basic AI permission (Handoff service checks config + paused state)
+    const canAIResult = await this.handoffService.canAISend(chatId);
+
+    const result = {
+      chatId,
+      aiEnabled: canAIResult.allowed,
+      aiConfigEnabled: canAIResult.configEnabled,
+      reason: canAIResult.reason,
+      isRateLimited: false,
+      rateLimitReset: undefined,
+      rateLimitCurrentCount: undefined,
+      rateLimitMaxCount: undefined,
+    };
+
+    // 2. Check Rate Limits
+    if (this.rateLimiter) {
+      try {
+        // We use checkRateLimit for pre-validation without incrementing
+        const rateLimitStatus = await this.rateLimiter.checkRateLimit(
+          userId,
+          chatId,
+          { isAiMessage: true },
+        );
+        if (!rateLimitStatus.allowed) {
+          result.isRateLimited = true;
+          result.aiEnabled = false; // Override enablement
+          result.reason = 'Rate limit exceeded';
+          result.rateLimitReset = rateLimitStatus.resetTime;
+          // Extract limits for the smallest window (usually minute or hour) that is blocking
+          // or just the first one if multiple
+          if (rateLimitStatus.limits && rateLimitStatus.limits.length > 0) {
+            // Sort by percent used descending to show the most critical limit
+            const criticalLimit = rateLimitStatus.limits.sort(
+              (a, b) => b.percentUsed - a.percentUsed,
+            )[0];
+            result.rateLimitCurrentCount = criticalLimit.current;
+            result.rateLimitMaxCount = criticalLimit.max;
+          }
+        }
+      } catch (e) {
+        this.logger.error(
+          `[Status] Error checking rate limit for ${chatId}`,
+          e,
+        );
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Regenerate AI response for a chat
+   */
+  async regenerateResponse(chatId: string): Promise<void> {
+    const chat = await db.query.chats.findFirst({
+      where: eq(chats.chatId, chatId),
+    });
+
+    if (!chat) {
+      throw new NotFoundException(`Chat ${chatId} not found`);
+    }
+
+    const userId = chat.userId || 1;
+
+    // Check if we can send (rate limits, paused, etc)
+    // 1. Check if AI is paused/handed off
+    const canAIResult = await this.handoffService.canAISend(chatId);
+    if (!canAIResult.allowed) {
+      // If simply paused/disabled, just return/log, or maybe emit a generic error?
+      // logic below was mainly primarily checking rate limits via shouldProcessMessage which does both.
+      // Let's check rate limits specifically to provide correct feedback.
+    }
+
+    if (this.rateLimiter) {
+      const rateLimitStatus = await this.rateLimiter.checkRateLimit(
+        userId,
+        chatId,
+        { isAiMessage: true },
+      );
+
+      if (!rateLimitStatus.allowed) {
+        let currentCount = 0;
+        let maxCount = 0;
+
+        if (rateLimitStatus.limits && rateLimitStatus.limits.length > 0) {
+          // Sort by percent used descending to show the most critical limit
+          const criticalLimit = rateLimitStatus.limits.sort(
+            (a, b) => b.percentUsed - a.percentUsed,
+          )[0];
+          currentCount = criticalLimit.current;
+          maxCount = criticalLimit.max;
+        }
+
+        this.whatsappGateway?.emitAIRateLimitExceeded({
+          chatId,
+          currentCount,
+          maxCount,
+          resetTime: rateLimitStatus.resetTime || new Date(Date.now() + 60000),
+        });
+        return;
+      }
+    }
+
+    this.whatsappGateway?.emitAITypingStart(chatId);
+
+    try {
+      // Fetch last inbound message to re-process context
+      const recentMessages = await db
+        .select()
+        .from(messages)
+        .where(eq(messages.chatId, chatId))
+        .orderBy(desc(messages.timestamp))
+        .limit(20);
+
+      const lastInbound = recentMessages.find((m) => m.direction === 'inbound');
+
+      if (!lastInbound || !lastInbound.text) {
+        this.whatsappGateway?.emitAITypingStop(chatId);
+        throw new Error('No inbound message found to regenerate response for');
+      }
+
+      // Re-classify (lightweight)
+      const classification = await this.classifyMessage(
+        lastInbound.text,
+        userId,
+      );
+
+      // Generate response
+      // Note: passing undefined for mediaPreCheck for simple regeneration for now
+      // to avoid complex orchestration in this fallback method
+      const response = await this.generateAIResponse(
+        chatId,
+        lastInbound.text,
+        classification,
+        userId,
+        undefined,
+      );
+
+      this.whatsappGateway?.emitAITypingStop(chatId);
+
+      // Handle response (Review or Send)
+      if (response) {
+        // Check config for review
+        const aiConfig = await this.aiConfigService.resolveConfiguration(
+          userId,
+          chatId,
+        );
+
+        if (aiConfig.reviewBeforeSend) {
+          this.whatsappGateway?.emitAIPendingReview({
+            chatId,
+            content: response,
+          });
+        } else {
+          // Look up the chat to get the correct senderId
+          const chat = await db.query.chats.findFirst({
+            where: eq(chats.chatId, chatId),
+          });
+
+          if (!chat) {
+            throw new Error(`Chat ${chatId} not found`);
+          }
+
+          await this.whatsappService?.sendMessage(
+            {
+              to: chat.participantPhone,
+              body: response,
+              senderId: chat.senderId,
+            },
+            userId,
+          );
+          this.rateLimiter?.recordMessage(userId, chatId, {
+            isAiMessage: true,
+          });
+        }
+      }
+    } catch (error) {
+      this.whatsappGateway?.emitAITypingStop(chatId);
+      this.logger.error(`Failed to regenerate response for ${chatId}`, error);
+      throw error;
+    }
   }
 
   /**

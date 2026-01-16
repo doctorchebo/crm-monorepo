@@ -1276,52 +1276,53 @@ export type AiActionLog = typeof aiActionLogs.$inferSelect;
 export type NewAiActionLog = typeof aiActionLogs.$inferInsert;
 
 /**
- * Rate Limit Tracking table - tracks message counts per chat and per sender for rate limiting
+ * Rate Limit Tracking table
+ * Tracks message counts per user/chat within time windows
+ * Used to enforce policy limits (e.g. 50 AI messages/hour, 24h session window)
  */
 export const rateLimitTracking = pgTable(
   'rate_limit_tracking',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
-    // Tracking target
+    id: serial('id').primaryKey(),
     userId: integer('user_id')
-      .references(() => users.id)
-      .notNull(),
-    chatId: varchar('chat_id'), // Per-chat tracking (optional)
-    senderId: integer('sender_id'), // Per-sender tracking (optional)
-    // Window tracking
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    chatId: varchar('chat_id').notNull(),
+    senderId: integer('sender_id'), // Optional, for sender-specific limits
+
+    // Window definition
     windowType: varchar('window_type', { length: 20 }).notNull(), // 'minute', 'hour', 'day', '24h_session'
     windowStart: timestamp('window_start').notNull(),
     windowEnd: timestamp('window_end').notNull(),
-    // Counts
-    messageCount: integer('message_count').default(0),
-    aiMessageCount: integer('ai_message_count').default(0), // AI-generated messages only
-    templateMessageCount: integer('template_message_count').default(0),
-    // Last customer message (for 24h window tracking)
+
+    // Counters
+    messageCount: integer('message_count').default(0).notNull(),
+    aiMessageCount: integer('ai_message_count').default(0).notNull(),
+    templateMessageCount: integer('template_message_count').default(0).notNull(),
+
+    // Session tracking (specific to 24h window)
     lastCustomerMessageAt: timestamp('last_customer_message_at'),
-    // Status
+
+    // Blocking status
     isBlocked: boolean('is_blocked').default(false),
-    blockedAt: timestamp('blocked_at'),
     blockReason: text('block_reason'),
-    // Timestamps
+    blockedAt: timestamp('blocked_at'),
+
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
   },
   (table) => ({
-    userIdIndex: index('idx_rate_limit_tracking_user_id').on(table.userId),
-    chatIdIndex: index('idx_rate_limit_tracking_chat_id').on(table.chatId),
-    windowTypeIndex: index('idx_rate_limit_tracking_window').on(
-      table.windowType,
-    ),
-    windowEndIndex: index('idx_rate_limit_tracking_window_end').on(
-      table.windowEnd,
-    ),
+    // Unique constraint ensures we only have one row per window per user/chat
     uniqueWindow: unique().on(
       table.userId,
       table.chatId,
       table.senderId,
       table.windowType,
-      table.windowStart,
+      table.windowStart
     ),
+    userIdIndex: index('idx_rate_limit_user_id').on(table.userId),
+    chatIdIndex: index('idx_rate_limit_chat_id').on(table.chatId),
+    windowEndIndex: index('idx_rate_limit_window_end').on(table.windowEnd), // For cleaning up old windows
   }),
 );
 
@@ -1760,6 +1761,7 @@ export const chatAiOverrides = pgTable(
     // AI behavior flags
     aiEnabled: boolean('ai_enabled').default(true), // Master switch for AI in this chat
     useTemplatesOnly: boolean('use_templates_only').default(false), // Only use templates, no free text
+    reviewBeforeSend: boolean('review_before_send').default(false), // Show AI response for review before sending
     // Reason for override
     overrideReason: text('override_reason'),
     // Timestamps
@@ -2112,3 +2114,4 @@ export * from './knowledge-base.schema';
 
 // Export AI context schema (lightweight replacement for AI memory)
 export * from './ai-context.schema';
+

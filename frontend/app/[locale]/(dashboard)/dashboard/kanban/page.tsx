@@ -120,16 +120,16 @@ function KanbanCardComponent({
             Handoff
           </Badge>
         )}
-        {card.aiPaused && (
+        {(card.aiPaused || card.aiOverrideEnabled === false) && (
           <Badge
             variant="outline"
             className="text-xs bg-red-50 text-red-700 border-red-200"
           >
             <Pause className="h-3 w-3 mr-1" />
-            AI Paused
+            {card.aiOverrideEnabled === false ? "AI Disabled" : "AI Paused"}
           </Badge>
         )}
-        {!card.aiPaused && !card.awaitingHandoff && (
+        {!card.aiPaused && card.aiOverrideEnabled !== false && !card.awaitingHandoff && (
           <Badge
             variant="outline"
             className="text-xs bg-green-50 text-green-700 border-green-200"
@@ -212,9 +212,8 @@ function KanbanColumnComponent({
 
   return (
     <div
-      className={`flex-shrink-0 w-80 flex flex-col transition-opacity ${
-        isStageDragging ? "opacity-50" : ""
-      }`}
+      className={`flex-shrink-0 w-80 flex flex-col transition-opacity ${isStageDragging ? "opacity-50" : ""
+        }`}
       draggable={editMode}
       onDragStart={(e) => {
         if (editMode) {
@@ -310,11 +309,10 @@ function KanbanColumnComponent({
                     }
                   >
                     <Trash2
-                      className={`h-3.5 w-3.5 ${
-                        canDelete
-                          ? "text-red-600"
-                          : "text-muted-foreground opacity-50"
-                      }`}
+                      className={`h-3.5 w-3.5 ${canDelete
+                        ? "text-red-600"
+                        : "text-muted-foreground opacity-50"
+                        }`}
                     />
                   </Button>
                 </>
@@ -361,11 +359,10 @@ function KanbanColumnComponent({
       <div
         onDragOver={editMode ? undefined : onDragOver}
         onDrop={editMode ? undefined : (e) => onDrop(e, stage.id)}
-        className={`flex-1 rounded-lg p-3 space-y-3 min-h-[400px] transition-colors ${
-          isDragOver
-            ? "bg-primary/10 border-2 border-dashed border-primary"
-            : "bg-muted/20"
-        }`}
+        className={`flex-1 rounded-lg p-3 space-y-3 min-h-[400px] transition-colors ${isDragOver
+          ? "bg-primary/10 border-2 border-dashed border-primary"
+          : "bg-muted/20"
+          }`}
       >
         {cards.length > 0 ? (
           cards.map((card) => (
@@ -757,7 +754,10 @@ export default function KanbanPage() {
           <CardContent>
             <p className="text-2xl font-bold">
               {Array.from(chatsByStage.values()).reduce(
-                (sum, chats) => sum + chats.filter((c) => c.aiPaused).length,
+                (sum, chats) =>
+                  sum +
+                  chats.filter((c) => c.aiPaused || c.aiOverrideEnabled === false)
+                    .length,
                 0
               )}
             </p>
@@ -778,8 +778,8 @@ export default function KanbanPage() {
               editMode
                 ? undefined
                 : (e) => {
-                    if (e.currentTarget === e.target) setDragOverStageId(null);
-                  }
+                  if (e.currentTarget === e.target) setDragOverStageId(null);
+                }
             }
           >
             <KanbanColumnComponent

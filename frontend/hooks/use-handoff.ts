@@ -25,11 +25,11 @@ export interface HandoffStatus {
   // Extended fields for banner display
   priority?: "low" | "medium" | "high" | "critical";
   status?:
-    | "pending"
-    | "acknowledged"
-    | "in_progress"
-    | "resolved"
-    | "escalated";
+  | "pending"
+  | "acknowledged"
+  | "in_progress"
+  | "resolved"
+  | "escalated";
   reason?: string;
   aiReasoning?: string;
   triggeredAt?: string;
@@ -39,7 +39,10 @@ export interface HandoffStatus {
 export interface AIStatus {
   chatId: string;
   aiEnabled: boolean;
+  aiConfigEnabled?: boolean; // New field from backend
   reason?: string;
+  isRateLimited?: boolean;
+  rateLimitReset?: string;
 }
 
 export function useHandoff(chatId: string | null) {

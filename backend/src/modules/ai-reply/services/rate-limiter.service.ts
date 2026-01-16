@@ -1,17 +1,20 @@
 /**
- * Rate Limiter Service
- * Anti-ban guardrails for WhatsApp messaging compliance
- *
- * Features:
- * - Per-chat hourly/daily rate limits
- * - Repetitive content detection
- * - Cooldown enforcement
- * - Policy violation tracking
+ * AI Reply Rate Limiter Adapter
+ * 
+ * This is an ADAPTER that delegates to the workflow module's RateLimiterService
+ * for actual rate limiting and tracking. It provides a compatibility layer for
+ * the ai-reply module's legacy interface.
+ * 
+ * Key changes:
+ * - Rate checks now use chatAiOverrides.maxMessagesPerHour
+ * - Messages are tracked in rate_limit_tracking table
+ * - Legacy in-memory cooldown preserved for repetitive content detection
  */
 
 import { db } from '@database/db.connection';
-import { messages } from '@database/schema';
-import { Injectable, Logger } from '@nestjs/common';
+import { chatAiOverrides, messages } from '@database/schema';
+import { RateLimiterService as WorkflowRateLimiterService } from '@modules/workflow/services/rate-limiter.service';
+import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { and, desc, eq, gte, sql } from 'drizzle-orm';
 import {
   BlockReason,
@@ -21,7 +24,7 @@ import {
 } from '../types';
 
 // ============================================================================
-// In-Memory Cache for Rate Limiting
+// In-Memory Cache for Cooldown and Repetition Detection Only
 // ============================================================================
 
 interface ChatRateLimitCache {
@@ -32,16 +35,16 @@ interface ChatRateLimitCache {
 }
 
 /**
- * Rate Limiter Service
- * Provides anti-ban guardrails for WhatsApp messaging
+ * Rate Limiter Adapter for AI Reply Module
+ * Delegates to workflow's RateLimiterService for rate limiting + tracking
  */
 @Injectable()
 export class RateLimiterService {
-  private readonly logger = new Logger(RateLimiterService.name);
+  private readonly logger = new Logger('AIReplyRateLimiter');
 
   /**
-   * In-memory cache for quick rate limit checks
-   * Key: chatId, Value: cached rate limit data
+   * In-memory cache for quick cooldown and repetition checks only
+   * Actual rate limiting is done via workflow's RateLimiterService
    */
   private readonly cache = new Map<string, ChatRateLimitCache>();
 
@@ -50,9 +53,16 @@ export class RateLimiterService {
    */
   private readonly CACHE_TTL_MS = 5 * 60 * 1000;
 
+  constructor(
+    @Inject(forwardRef(() => WorkflowRateLimiterService))
+    private readonly workflowRateLimiter: WorkflowRateLimiterService,
+  ) {
+    this.logger.log('AI Reply Rate Limiter initialized (using workflow rate limiter)');
+  }
+
   /**
    * Check if sending a message is allowed for a chat
-   * Combines database lookups with in-memory caching for performance
+   * Now delegates to workflow's rate limiter which checks chatAiOverrides
    */
   async checkRateLimit(
     chatId: string,
@@ -60,7 +70,7 @@ export class RateLimiterService {
   ): Promise<RateLimitStatus> {
     const now = new Date();
 
-    // Check cooldown first (fastest check)
+    // Check local cooldown first (fastest check)
     const cached = this.cache.get(chatId);
     if (cached?.cooldownUntil && cached.cooldownUntil > now) {
       const cooldownRemaining = Math.ceil(
@@ -68,7 +78,7 @@ export class RateLimiterService {
       );
       return {
         canSend: false,
-        messagesLastHour: 0, // Will be fetched if needed
+        messagesLastHour: 0,
         messagesToday: 0,
         cooldownRemaining,
         blockReason: 'anti_ban_cooldown',
@@ -96,7 +106,36 @@ export class RateLimiterService {
       }
     }
 
-    // Query database for message counts
+    // Get userId from chatAiOverrides for workflow rate limiter
+    const [override] = await db
+      .select({ userId: chatAiOverrides.userId })
+      .from(chatAiOverrides)
+      .where(eq(chatAiOverrides.chatId, chatId))
+      .limit(1);
+
+    const userId = override?.userId ?? 1; // Fallback if no override exists
+
+    // Delegate to workflow rate limiter for actual rate check
+    // This checks chatAiOverrides.maxMessagesPerHour and rate_limit_tracking
+    const workflowCheck = await this.workflowRateLimiter.checkRateLimit(
+      userId,
+      chatId,
+      { isAiMessage: true },
+    );
+
+    if (!workflowCheck.allowed) {
+      return {
+        canSend: false,
+        messagesLastHour: workflowCheck.limits.find(l => l.type === 'hour')?.current ?? 0,
+        messagesToday: workflowCheck.limits.find(l => l.type === 'day')?.current ?? 0,
+        cooldownRemaining: 0,
+        blockReason: 'hourly_limit_reached',
+        hourlyResetAt: workflowCheck.resetTime ?? this.getHourlyResetTime(now),
+        dailyResetAt: this.getDailyResetTime(now),
+      };
+    }
+
+    // Also query messages table for display purposes
     const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
     const startOfDay = new Date(now);
     startOfDay.setHours(0, 0, 0, 0);
@@ -105,33 +144,6 @@ export class RateLimiterService {
       this.getOutboundMessageCount(chatId, hourAgo),
       this.getOutboundMessageCount(chatId, startOfDay),
     ]);
-
-    // Check hourly limit
-    if (hourlyCount >= config.maxMessagesPerHour) {
-      this.applyCooldown(chatId, config.cooldownSeconds);
-      return {
-        canSend: false,
-        messagesLastHour: hourlyCount,
-        messagesToday: dailyCount,
-        cooldownRemaining: config.cooldownSeconds,
-        blockReason: 'hourly_limit_reached',
-        hourlyResetAt: this.getHourlyResetTime(now),
-        dailyResetAt: this.getDailyResetTime(now),
-      };
-    }
-
-    // Check daily limit
-    if (dailyCount >= config.maxMessagesPerDay) {
-      return {
-        canSend: false,
-        messagesLastHour: hourlyCount,
-        messagesToday: dailyCount,
-        cooldownRemaining: 0,
-        blockReason: 'daily_limit_reached',
-        hourlyResetAt: this.getHourlyResetTime(now),
-        dailyResetAt: this.getDailyResetTime(now),
-      };
-    }
 
     return {
       canSend: true,
@@ -185,12 +197,14 @@ export class RateLimiterService {
   }
 
   /**
-   * Record that a message was sent (update cache)
+   * Record that a message was sent
+   * Now delegates to workflow rate limiter to populate rate_limit_tracking
    */
-  recordMessageSent(chatId: string, content: string): void {
+  async recordMessageSent(chatId: string, content: string, userId?: number): Promise<void> {
     const now = new Date();
     const contentHash = this.hashContent(content);
 
+    // Update local cache for repetition detection
     let cached = this.cache.get(chatId);
     if (!cached) {
       cached = {
@@ -211,6 +225,18 @@ export class RateLimiterService {
     );
 
     this.cache.set(chatId, cached);
+
+    // Record in workflow rate limiter for rate_limit_tracking table
+    if (userId) {
+      try {
+        await this.workflowRateLimiter.recordMessage(userId, chatId, {
+          isAiMessage: true,
+        });
+        this.logger.debug(`[RateLimit] Recorded AI message for chat ${chatId} in tracking table`);
+      } catch (error) {
+        this.logger.error(`[RateLimit] Failed to record message: ${error.message}`);
+      }
+    }
   }
 
   /**
@@ -406,3 +432,4 @@ export class RateLimiterService {
     };
   }
 }
+

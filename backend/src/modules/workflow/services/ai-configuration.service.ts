@@ -74,6 +74,7 @@ export interface ResolvedAiConfig {
 
   // AI behavior flags
   aiEnabled: boolean;
+  reviewBeforeSend: boolean;
 
   // Stage-specific
   systemPromptAddition: string | null;
@@ -120,6 +121,7 @@ export interface ChatAiOverrideDto {
   avoidTopics?: string[] | null;
   aiEnabled?: boolean;
   useTemplatesOnly?: boolean;
+  reviewBeforeSend?: boolean;
   overrideReason?: string | null;
 }
 
@@ -166,6 +168,7 @@ const DEFAULT_CONFIG: Omit<ResolvedAiConfig, 'source'> = {
   temperature: 70,
   // AI is disabled by default - users must explicitly enable per chat
   aiEnabled: false,
+  reviewBeforeSend: false,
   systemPromptAddition: null,
   goalDescription: null,
   customInstructions: null,
@@ -294,6 +297,7 @@ export class AiConfigurationService {
             : undefined,
           aiEnabled: dto.aiEnabled,
           useTemplatesOnly: dto.useTemplatesOnly,
+          reviewBeforeSend: dto.reviewBeforeSend,
           overrideReason: dto.overrideReason,
           updatedAt: new Date(),
         })
@@ -323,6 +327,7 @@ export class AiConfigurationService {
           : undefined,
         aiEnabled: dto.aiEnabled ?? true,
         useTemplatesOnly: dto.useTemplatesOnly ?? false,
+        reviewBeforeSend: dto.reviewBeforeSend ?? false,
         overrideReason: dto.overrideReason,
       })
       .returning();
@@ -693,6 +698,8 @@ export class AiConfigurationService {
 
       // AI behavior flags
       aiEnabled: chatOverride?.aiEnabled ?? DEFAULT_CONFIG.aiEnabled,
+      reviewBeforeSend:
+        chatOverride?.reviewBeforeSend ?? DEFAULT_CONFIG.reviewBeforeSend,
 
       // Stage-specific additions
       systemPromptAddition:

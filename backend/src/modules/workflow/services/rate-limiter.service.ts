@@ -11,7 +11,11 @@
  */
 
 import { db } from '@database/db.connection';
-import { rateLimitTracking } from '@database/schema';
+import {
+  aiConfigurations,
+  chatAiOverrides,
+  rateLimitTracking,
+} from '@database/schema';
 import { Injectable, Logger } from '@nestjs/common';
 import { and, desc, eq, gte, lte, sql } from 'drizzle-orm';
 
@@ -121,6 +125,9 @@ export class RateLimiterService {
     let earliestReset: Date | undefined;
     let minRemaining = Infinity;
 
+    // Fetch Rate Limit Overrides
+    const limitConfig = await this.getRateLimitConfig(userId, chatId);
+
     for (const windowType of windows) {
       const status = await this.getWindowStatus(
         userId,
@@ -128,7 +135,11 @@ export class RateLimiterService {
         windowType,
         senderId,
       );
-      const limit = this.getLimitForWindow(windowType, isAiMessage);
+      const limit = this.getLimitForWindow(
+        windowType,
+        isAiMessage,
+        limitConfig,
+      );
       const count = isAiMessage ? status.aiMessageCount : status.messageCount;
       const percentUsed = (count / limit) * 100;
 
@@ -160,6 +171,10 @@ export class RateLimiterService {
 
       // Check if at limit
       if (count >= limit) {
+        // Log the specific limit hit
+        this.logger.warn(
+          `Rate limit hit for ${windowType}: ${count} >= ${limit} (Config: ${JSON.stringify(limitConfig)})`,
+        );
         allowed = false;
         reason =
           reason || `${windowType} rate limit exceeded (${count}/${limit})`;
@@ -193,6 +208,46 @@ export class RateLimiterService {
   }
 
   /**
+   * Get effective rate limit configuration for a chat
+   * Checks Chat Override -> User Config -> Defaults
+   */
+  private async getRateLimitConfig(
+    userId: number,
+    chatId: string,
+  ): Promise<RateLimitConfig> {
+    // Start with defaults
+    let effectiveConfig = { ...this.config };
+
+    try {
+      // 1. Check Chat Override
+      const chatOverride = await db.query.chatAiOverrides.findFirst({
+        where: eq(chatAiOverrides.chatId, chatId),
+      });
+
+      if (chatOverride?.maxMessagesPerHour) {
+        effectiveConfig.aiMessagesPerHour = chatOverride.maxMessagesPerHour;
+        // Inherit per-day roughly (or keep default) if not specified
+        // Assume simplistic override for now
+      }
+
+      // 2. Check User Configuration (if no chat override or partial)
+      // (Assuming user config is secondary to chat override)
+      if (!chatOverride?.maxMessagesPerHour) {
+        const userConfig = await db.query.aiConfigurations.findFirst({
+          where: eq(aiConfigurations.userId, userId),
+        });
+        if (userConfig?.maxMessagesPerHour) {
+          effectiveConfig.aiMessagesPerHour = userConfig.maxMessagesPerHour;
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`Failed to fetch rate limit overrides: ${err.message}`);
+    }
+
+    return effectiveConfig;
+  }
+
+  /**
    * Record a message being sent (increment counters)
    */
   async recordMessage(
@@ -217,19 +272,27 @@ export class RateLimiterService {
       windows.push('24h_session');
     }
 
-    for (const windowType of windows) {
-      await this.incrementWindowCounter(
-        userId,
-        chatId,
-        windowType,
-        { isAiMessage, isTemplateMessage },
-        senderId,
+    this.logger.debug(
+      `[RateLimit] Recording message START: userId=${userId}, chatId=${chatId}, ai=${isAiMessage}, template=${isTemplateMessage}, sender=${senderId}`,
+    );
+
+    try {
+      for (const windowType of windows) {
+        await this.incrementWindowCounter(
+          userId,
+          chatId,
+          windowType,
+          { isAiMessage, isTemplateMessage },
+          senderId,
+        );
+      }
+      this.logger.debug(`[RateLimit] Recorded message SUCCESS`);
+    } catch (err) {
+      this.logger.error(
+        `[RateLimit] Failed to record message: ${err.message}`,
+        err,
       );
     }
-
-    this.logger.debug(
-      `Recorded message: userId=${userId}, chatId=${chatId}, ai=${isAiMessage}, template=${isTemplateMessage}`,
-    );
   }
 
   /**
@@ -346,6 +409,10 @@ export class RateLimiterService {
         windowType,
         senderId,
       );
+      // Pass overrides here too? For 'status' we might want the *actual* limit
+      // But getRateLimitStatus doesn't natively check overrides currently.
+      // To be robust, let's fetch config first.
+      // Optimization: Fetch config once outside loop (TODO - for now, just default limits or update method signature)
       const limit = this.getLimitForWindow(windowType, true); // Use AI limits as reference
 
       statuses.push({
@@ -463,6 +530,28 @@ export class RateLimiterService {
     return { blocked, triggeredAt, reason };
   }
 
+  /**
+   * Clear all rate limit tracking for a chat
+   * Called when a chat is deleted to ensure fresh limits for new conversations
+   */
+  async clearChatRateLimits(chatId: string): Promise<void> {
+    try {
+      const result = await db
+        .delete(rateLimitTracking)
+        .where(eq(rateLimitTracking.chatId, chatId))
+        .returning();
+
+      this.logger.log(
+        `Cleared ${result.length} rate limit records for chat ${chatId}`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Failed to clear rate limits for chat ${chatId}: ${error.message}`,
+      );
+      // Don't throw - this is cleanup, shouldn't block deletion
+    }
+  }
+
   // ==========================================================================
   // Private Helpers
   // ==========================================================================
@@ -502,22 +591,20 @@ export class RateLimiterService {
   private getLimitForWindow(
     windowType: WindowType,
     isAiMessage: boolean,
+    customConfig?: RateLimitConfig,
   ): number {
+    const config = customConfig || this.config;
     switch (windowType) {
       case 'minute':
         return isAiMessage
-          ? this.config.aiMessagesPerMinute
-          : this.config.messagesPerMinute;
+          ? config.aiMessagesPerMinute
+          : config.messagesPerMinute;
       case 'hour':
-        return isAiMessage
-          ? this.config.aiMessagesPerHour
-          : this.config.messagesPerHour;
+        return isAiMessage ? config.aiMessagesPerHour : config.messagesPerHour;
       case 'day':
-        return isAiMessage
-          ? this.config.aiMessagesPerDay
-          : this.config.messagesPerDay;
+        return isAiMessage ? config.aiMessagesPerDay : config.messagesPerDay;
       case '24h_session':
-        return this.config.aiMessagesPerChatPerHour * 24; // Max AI messages in 24h session
+        return config.aiMessagesPerChatPerHour * 24; // Max AI messages in 24h session
       default:
         return 100;
     }
@@ -541,18 +628,24 @@ export class RateLimiterService {
     const now = new Date();
     const { start, end } = this.getWindowBounds(windowType, now);
 
+    const filters = [
+      eq(rateLimitTracking.userId, userId),
+      eq(rateLimitTracking.chatId, chatId),
+      eq(rateLimitTracking.windowType, windowType),
+      lte(rateLimitTracking.windowStart, now),
+      gte(rateLimitTracking.windowEnd, now),
+    ];
+
+    if (senderId !== undefined && senderId !== null) {
+      filters.push(eq(rateLimitTracking.senderId, senderId));
+    } else {
+      filters.push(sql`${rateLimitTracking.senderId} IS NULL`);
+    }
+
     const [record] = await db
       .select()
       .from(rateLimitTracking)
-      .where(
-        and(
-          eq(rateLimitTracking.userId, userId),
-          eq(rateLimitTracking.chatId, chatId),
-          eq(rateLimitTracking.windowType, windowType),
-          lte(rateLimitTracking.windowStart, now),
-          gte(rateLimitTracking.windowEnd, now),
-        ),
-      )
+      .where(and(...filters))
       .limit(1);
 
     if (!record) {
@@ -600,33 +693,64 @@ export class RateLimiterService {
     const incrementAi = options.isAiMessage ? 1 : 0;
     const incrementTemplate = options.isTemplateMessage ? 1 : 0;
 
-    await db
-      .insert(rateLimitTracking)
-      .values({
-        userId,
-        chatId,
-        senderId,
-        windowType,
-        windowStart: start,
-        windowEnd: end,
-        messageCount: 1,
-        aiMessageCount: incrementAi,
-        templateMessageCount: incrementTemplate,
-      })
-      .onConflictDoUpdate({
-        target: [
-          rateLimitTracking.userId,
-          rateLimitTracking.chatId,
-          rateLimitTracking.senderId,
-          rateLimitTracking.windowType,
-          rateLimitTracking.windowStart,
-        ],
-        set: {
-          messageCount: sql`${rateLimitTracking.messageCount} + 1`,
-          aiMessageCount: sql`${rateLimitTracking.aiMessageCount} + ${incrementAi}`,
-          templateMessageCount: sql`${rateLimitTracking.templateMessageCount} + ${incrementTemplate}`,
+    // Use Find First + Update/Insert logic to ensure index consistency
+    // Drizzle's ON CONFLICT with partial unique index (COALESCE) is tricky
+
+    // 1. Check if row exists
+    const filters = [
+      eq(rateLimitTracking.userId, userId),
+      eq(rateLimitTracking.chatId, chatId),
+      eq(rateLimitTracking.windowType, windowType),
+      eq(rateLimitTracking.windowStart, start),
+    ];
+
+    if (senderId !== undefined && senderId !== null) {
+      filters.push(eq(rateLimitTracking.senderId, senderId));
+    } else {
+      // If senderId is null, we must explicitly check only rows where it is null to match "unique" logic
+      filters.push(sql`${rateLimitTracking.senderId} IS NULL`);
+    }
+
+    const existing = await db
+      .select({ id: rateLimitTracking.id })
+      .from(rateLimitTracking)
+      .where(and(...filters))
+      .limit(1);
+
+    if (existing && existing.length > 0) {
+      // 2a. Update existing
+      await db
+        .update(rateLimitTracking)
+        .set({
+          messageCount: sql`message_count + 1`,
+          aiMessageCount: sql`ai_message_count + ${incrementAi}`,
+          templateMessageCount: sql`template_message_count + ${incrementTemplate}`,
           updatedAt: now,
-        },
-      });
+        })
+        .where(eq(rateLimitTracking.id, existing[0].id));
+    } else {
+      // 2b. Insert new
+      try {
+        await db.insert(rateLimitTracking).values({
+          userId,
+          chatId,
+          senderId: senderId ?? null, // explicit null
+          windowType,
+          windowStart: start,
+          windowEnd: end,
+          messageCount: 1,
+          aiMessageCount: incrementAi,
+          templateMessageCount: incrementTemplate,
+          updatedAt: now,
+        });
+      } catch (insertError) {
+        // Handle race condition: Duplicate key? Retry update?
+        // If unique constraint violation, it means it appeared between select and insert.
+        // Just ignore (count off by 1 is acceptable) or try update again.
+        this.logger.warn(
+          `[RateLimit] Race condition on insert: ${insertError.message}. Ignoring.`,
+        );
+      }
+    }
   }
 }

@@ -70,6 +70,7 @@ interface ConfigFormData {
   maxResponseLength: number | null;
   customInstructions: string | null;
   useTemplatesOnly: boolean;
+  reviewBeforeSend: boolean;
   overrideReason: string | null;
 }
 
@@ -156,6 +157,7 @@ export function ChatAiConfigModal({
     maxResponseLength: null,
     customInstructions: null,
     useTemplatesOnly: false,
+    reviewBeforeSend: false,
     overrideReason: null,
   });
 
@@ -180,6 +182,7 @@ export function ChatAiConfigModal({
           maxResponseLength: override.maxResponseLength,
           customInstructions: override.customInstructions,
           useTemplatesOnly: override.useTemplatesOnly ?? false,
+          reviewBeforeSend: override.reviewBeforeSend ?? false,
           overrideReason: override.overrideReason,
         });
       } else {
@@ -193,6 +196,7 @@ export function ChatAiConfigModal({
           maxResponseLength: null,
           customInstructions: null,
           useTemplatesOnly: false,
+          reviewBeforeSend: false,
           overrideReason: null,
         });
       }
@@ -224,6 +228,7 @@ export function ChatAiConfigModal({
         maxResponseLength: formData.maxResponseLength,
         customInstructions: formData.customInstructions,
         useTemplatesOnly: formData.useTemplatesOnly,
+        reviewBeforeSend: formData.reviewBeforeSend,
         overrideReason: formData.overrideReason || "User configuration",
       };
 
@@ -257,6 +262,7 @@ export function ChatAiConfigModal({
         maxResponseLength: null,
         customInstructions: null,
         useTemplatesOnly: false,
+        reviewBeforeSend: false,
         overrideReason: null,
       });
       onSaved?.();
@@ -484,6 +490,21 @@ export function ChatAiConfigModal({
                       checked={formData.useTemplatesOnly}
                       onCheckedChange={(checked) =>
                         updateField("useTemplatesOnly", checked)
+                      }
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 rounded-lg border border-violet-200 dark:border-violet-800 bg-violet-50/50 dark:bg-violet-950/20">
+                    <div>
+                      <Label className="text-violet-700 dark:text-violet-300">Review Before Send</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Preview and edit AI responses before they are sent
+                      </p>
+                    </div>
+                    <Switch
+                      checked={formData.reviewBeforeSend}
+                      onCheckedChange={(checked) =>
+                        updateField("reviewBeforeSend", checked)
                       }
                     />
                   </div>

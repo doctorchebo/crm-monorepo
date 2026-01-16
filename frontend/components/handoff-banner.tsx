@@ -59,6 +59,7 @@ interface HandoffBannerProps {
   acknowledgedAt?: string;
   isAIPaused: boolean;
   onResolve?: () => Promise<void>;
+  onResolveManual?: () => Promise<void>;
   onAcknowledge?: () => Promise<void>;
   onResumeAI?: () => Promise<void>;
   onPauseAI?: () => Promise<void>;
@@ -115,6 +116,7 @@ export function HandoffBanner({
   acknowledgedAt,
   isAIPaused,
   onResolve,
+  onResolveManual,
   onAcknowledge,
   onResumeAI,
   onPauseAI,
@@ -268,6 +270,24 @@ export function HandoffBanner({
                 <CheckCircle className="h-3 w-3 mr-1" />
               )}
               Resolve & Resume AI
+            </Button>
+          )}
+
+          {/* Resolve (Manual) button - Keep AI paused */}
+          {onResolveManual && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => handleAction(onResolveManual, "resolveManual")}
+              disabled={isLoading !== null}
+              className="h-7 text-xs"
+            >
+              {isLoading === "resolveManual" ? (
+                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              ) : (
+                <User className="h-3 w-3 mr-1" />
+              )}
+              Resolve (Manual)
             </Button>
           )}
 

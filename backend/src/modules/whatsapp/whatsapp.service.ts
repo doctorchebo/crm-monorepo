@@ -9,13 +9,17 @@ import {
   senders,
 } from '@database/schema';
 import { MessageMemoryIntegration } from '@modules/ai-memory/services/message-memory-integration.service';
+import { RateLimiterService } from '@modules/workflow/services/rate-limiter.service';
 import { WorkflowEngineService } from '@modules/workflow/services/workflow-engine.service';
 import {
   BadRequestException,
+  Inject,
   Injectable,
   Logger,
   Optional,
+  OnModuleInit,
 } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { MetaCloudAPIConfigService } from '@shared/services/meta-cloud-api.config';
 import { S3Service } from '@shared/services/s3.service';
@@ -71,13 +75,15 @@ import { whatsAppGatewayInstance } from './whatsapp.gateway';
  * - Support for future chat history sync
  */
 @Injectable()
-export class WhatsAppService {
+export class WhatsAppService implements OnModuleInit {
   private readonly logger = new Logger(WhatsAppService.name);
 
   private readonly metaAccessToken: string;
   private readonly metaVerifyToken: string;
   private readonly metaAppSecret: string | undefined;
   private readonly wabaId: string | undefined;
+  
+  private workflowEngine: WorkflowEngineService;
 
   constructor(
     private configService: ConfigService,
@@ -87,7 +93,8 @@ export class WhatsAppService {
     private audioConverterService: AudioConverterService,
     private s3Service: S3Service,
     private conversationWindowService: ConversationWindowService,
-    private workflowEngine: WorkflowEngineService,
+    private rateLimiter: RateLimiterService,
+    private moduleRef: ModuleRef,
     @Optional() private memoryIntegration: MessageMemoryIntegration,
   ) {
     this.metaAccessToken =
@@ -103,6 +110,14 @@ export class WhatsAppService {
     }
 
     this.logger.log('Cloud API Service initialized');
+  }
+
+  async onModuleInit() {
+    try {
+      this.workflowEngine = await this.moduleRef.get(WorkflowEngineService, { strict: false });
+    } catch (error) {
+      this.logger.warn('Failed to resolve WorkflowEngineService lazily - this is expected in some test environments');
+    }
   }
 
   /**
@@ -433,10 +448,16 @@ export class WhatsAppService {
         throw new Error(`Sender with ID ${senderId} not found`);
       }
 
-      if (!senderRecord.phoneNumberId) {
+      let phoneNumberId = senderRecord.phoneNumberId;
+      if (!phoneNumberId) {
+        // Fallback to environment variable for sandbox/testing
+        phoneNumberId = this.configService.get<string>('META_PHONE_NUMBER_ID');
+      }
+
+      if (!phoneNumberId) {
         throw new Error(
           `Sender ${senderId} (${senderPhoneNumber}) does not have a phoneNumberId set. ` +
-            `Please verify the sender in the UI and try again.`,
+          `Please verify the sender in the UI and try again.`,
         );
       }
 
@@ -570,7 +591,7 @@ export class WhatsAppService {
         // Send via Cloud API using the sender's phoneNumberId
         const response = await this.sendCloudAPIMessage(
           message,
-          senderRecord.phoneNumberId,
+          phoneNumberId,
         );
 
         if (!response.messages || response.messages.length === 0) {
@@ -657,7 +678,7 @@ export class WhatsAppService {
       if (!senderRecord.phoneNumberId) {
         throw new Error(
           `Sender ${senderId} does not have a phoneNumberId set. ` +
-            `Please verify the sender in the UI and try again.`,
+          `Please verify the sender in the UI and try again.`,
         );
       }
 
@@ -1700,7 +1721,7 @@ export class WhatsAppService {
       if (existingMessage) {
         this.logger.warn(
           `⚠️ Duplicate message detected: ${messageId} (already stored). ` +
-            `This is likely a Meta webhook retry. Skipping.`,
+          `This is likely a Meta webhook retry. Skipping.`,
         );
         console.log(
           `🔄 DUPLICATE: Message ${messageId} already exists - this is a Meta webhook retry`,
@@ -1769,28 +1790,28 @@ export class WhatsAppService {
       let mediaMetadata: MediaMetadata | undefined;
       let contactsData:
         | {
-            type: 'contacts';
-            contacts: Array<{
-              name: {
-                formatted_name?: string;
-                first_name?: string;
-                last_name?: string;
-                middle_name?: string;
-                prefix?: string;
-                suffix?: string;
-              };
-              phones?: Array<{
-                phone: string;
-                type?: string;
-                wa_id?: string;
-              }>;
-              emails?: any[];
-              addresses?: any[];
-              org?: any;
-              birthday?: string;
-              urls?: any[];
+          type: 'contacts';
+          contacts: Array<{
+            name: {
+              formatted_name?: string;
+              first_name?: string;
+              last_name?: string;
+              middle_name?: string;
+              prefix?: string;
+              suffix?: string;
+            };
+            phones?: Array<{
+              phone: string;
+              type?: string;
+              wa_id?: string;
             }>;
-          }
+            emails?: any[];
+            addresses?: any[];
+            org?: any;
+            birthday?: string;
+            urls?: any[];
+          }>;
+        }
         | undefined;
 
       switch (message.type) {
@@ -2113,23 +2134,23 @@ export class WhatsAppService {
         const attachments =
           storedMessage?.attachments && Array.isArray(storedMessage.attachments)
             ? (storedMessage.attachments as any[]).map((att) => ({
-                id: att.id,
-                type: att.type,
-                mediaId: att.id, // For backwards compatibility
-                fileName: att.fileName,
-                mimeType: att.mimeType,
-                size: att.size,
-                s3Key: att.s3Key,
-                thumbnailKey: att.thumbnailKey,
-                thumbnailStatus: att.thumbnailStatus,
-                width: att.width,
-                height: att.height,
-                blurhash: att.blurhash,
-                duration: att.duration,
-                status: att.status,
-                isVoiceNote: att.isVoiceNote || false,
-                isAnimated: att.isAnimated || false,
-              }))
+              id: att.id,
+              type: att.type,
+              mediaId: att.id, // For backwards compatibility
+              fileName: att.fileName,
+              mimeType: att.mimeType,
+              size: att.size,
+              s3Key: att.s3Key,
+              thumbnailKey: att.thumbnailKey,
+              thumbnailStatus: att.thumbnailStatus,
+              width: att.width,
+              height: att.height,
+              blurhash: att.blurhash,
+              duration: att.duration,
+              status: att.status,
+              isVoiceNote: att.isVoiceNote || false,
+              isAnimated: att.isAnimated || false,
+            }))
             : undefined;
 
         whatsAppGatewayInstance.emitMessage({
@@ -2157,13 +2178,13 @@ export class WhatsAppService {
           // Extract interactive response data if this was a button/list click
           let interactiveResponse:
             | {
-                type: 'button_reply' | 'list_reply';
-                buttonId?: string;
-                buttonTitle?: string;
-                rowId?: string;
-                rowTitle?: string;
-                rowDescription?: string;
-              }
+              type: 'button_reply' | 'list_reply';
+              buttonId?: string;
+              buttonTitle?: string;
+              rowId?: string;
+              rowTitle?: string;
+              rowDescription?: string;
+            }
             | undefined;
 
           // Check if this is an interactive response (stored in mediaMetadata)
@@ -2228,6 +2249,19 @@ export class WhatsAppService {
                 if (!sender?.phoneNumberId) {
                   throw new Error(
                     `Sender ${senderId} does not have a phoneNumberId configured`,
+                  );
+                }
+
+                // **RATE LIMIT TRACKING: Record AI message BEFORE sending**
+                // This ensures the rate_limit_tracking table is populated
+                if (chat.userId) {
+                  await this.rateLimiter.recordMessage(
+                    chat.userId,
+                    chatId,
+                    { isAiMessage: true, senderId }
+                  );
+                  this.logger.debug(
+                    `[RateLimit] Recorded AI message for chat ${chatId}`,
                   );
                 }
 
@@ -2671,6 +2705,505 @@ export class WhatsAppService {
     } catch (error) {
       this.logger.error('Error handling inbound message:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Manually trigger AI response for a chat (used when Resuming AI)
+   * Reprocesses the last customer message and dispatches a response if AI generates one.
+   */
+  async triggerAiResponseForResume(chatId: string, userId: number): Promise<void> {
+    try {
+      this.logger.log(`[Resume AI] Triggering AI response for chat ${chatId}`);
+
+      // 1. Get Chat details
+      const chat = await db.query.chats.findFirst({
+        where: eq(chats.chatId, chatId),
+      });
+
+      if (!chat) {
+        this.logger.warn(`[Resume AI] Chat not found: ${chatId}`);
+        return;
+      }
+
+      // 2. Get Last Message (must be inbound)
+      const lastMessage = await db.query.messages.findFirst({
+        where: eq(messages.chatId, chatId),
+        orderBy: desc(messages.timestamp),
+      });
+
+      if (!lastMessage || lastMessage.direction !== 'inbound') {
+        this.logger.log(`[Resume AI] Last message was not inbound or undefined. No reply needed.`);
+        return;
+      }
+
+      // 3. Get Sender details (for phoneNumberId)
+      const sender = await db.query.senders.findFirst({
+        where: eq(senders.id, chat.senderId),
+      });
+
+      if (!sender || !sender.phoneNumberId) {
+        this.logger.error(`[Resume AI] Sender configuration missing for chat ${chatId}`);
+        return;
+      }
+
+      // 4. Call Workflow Engine
+      this.logger.log(`[Resume AI] Processing message ${lastMessage.messageId} for AI response...`);
+
+      const workflowResult = await this.workflowEngine.processMessage({
+        chatId,
+        messageId: lastMessage.messageId,
+        messageContent: lastMessage.text || '', // Handle text-less messages?
+        senderId: chat.senderId,
+        userId,
+        isFromCustomer: true,
+      });
+
+      // 5. Dispatch Response
+      if (
+        workflowResult.success &&
+        workflowResult.aiResponse?.shouldSend &&
+        workflowResult.aiResponse.content
+      ) {
+        this.logger.log(`[Resume AI] Response generated. Dispatching...`);
+        await this.dispatchAiResponse(
+          chatId,
+          lastMessage.sender, // recipient phone (customer)
+          chat.businessPhone,
+          sender.phoneNumberId,
+          workflowResult.aiResponse,
+          userId,
+          chat.senderId,
+          sender
+        );
+      } else {
+        this.logger.log(`[Resume AI] No response generated or shouldSend=false.`);
+      }
+
+    } catch (error) {
+      this.logger.error(`[Resume AI] Error triggering response: ${error.message}`, error);
+    }
+  }
+
+  /**
+   * Internal helper: Dispatch AI Response (Text, Media, or Interactive) via Cloud API
+   */
+  private async dispatchAiResponse(
+    chatId: string,
+    recipientPhone: string,
+    businessPhone: string,
+    phoneNumberId: string,
+    aiResponse: {
+      content: string;
+      interactiveData?: any;
+      mediaAttachment?: any;
+    },
+    userId: number | undefined,
+    senderId: number,
+    sender: any
+  ): Promise<void> {
+
+    // Check if we have a media attachment to send
+    const mediaAttachment = aiResponse.mediaAttachment;
+
+    // STEP 0: Record Rate Limit Usage
+    // We record this BEFORE trying to send to ensure we account for the attempt
+    // regardless of whether the specific API call succeeds (fail-safe accounting)
+    if (userId) { // Should always be present for AI responses
+      await this.rateLimiter.recordMessage(
+        userId,
+        chatId,
+        { isAiMessage: true, senderId }
+      );
+    }
+
+    if (mediaAttachment) {
+      // Send media with the text as caption or as a separate message
+      this.logger.log(
+        `[Workflow] Sending media attachment: ${mediaAttachment.fileName} (${mediaAttachment.mediaType})`,
+      );
+
+      // Upload media to WhatsApp servers first to get a media_id
+      // This is more reliable than using presigned URLs
+      const whatsappMediaId = await this.uploadMediaToWhatsApp(
+        mediaAttachment.s3Key,
+        mediaAttachment.mimeType,
+        phoneNumberId,
+      );
+
+      // Prepare text response (sent first if media doesn't support caption)
+      const aiResponseText = aiResponse.content;
+
+      // For documents/videos/images, we can include caption with the media
+      const mediaSupportsCaption = [
+        'image',
+        'video',
+        'document',
+      ].includes(mediaAttachment.mediaType);
+
+      // WhatsApp caption limits:
+      // - Images: 1024 characters
+      // - Videos: 1024 characters
+      // - Documents: 1024 characters (filename is separate)
+      const MAX_CAPTION_LENGTH = 1024;
+
+      // Determine caption: use AI response text or media's built-in caption
+      // Truncate if needed to stay within WhatsApp's limits
+      let caption: string | undefined;
+      let textToSendSeparately: string | undefined;
+
+      if (mediaSupportsCaption && aiResponseText) {
+        if (aiResponseText.length <= MAX_CAPTION_LENGTH) {
+          caption = aiResponseText;
+        } else {
+          // Caption too long - send text separately, media without caption
+          this.logger.warn(
+            `[Workflow] AI response (${aiResponseText.length} chars) exceeds caption limit (${MAX_CAPTION_LENGTH}). Sending text separately.`,
+          );
+          textToSendSeparately = aiResponseText;
+          caption = undefined; // Don't include caption with media
+        }
+      }
+
+      // Send text first if media doesn't support caption OR if caption was too long
+      if (
+        textToSendSeparately ||
+        (!mediaSupportsCaption && aiResponseText)
+      ) {
+        const textToSend = textToSendSeparately || aiResponseText;
+        const textMessage = {
+          messaging_product: 'whatsapp' as const,
+          to: recipientPhone,
+          type: 'text' as const,
+          text: {
+            preview_url: true,
+            body: textToSend,
+          },
+        };
+
+        const textResponse = await this.sendCloudAPIMessage(
+          textMessage,
+          phoneNumberId,
+        );
+
+        const textMessageId = textResponse.messages?.[0]?.id;
+        if (textMessageId) {
+          // Store text message
+          await this.storeOutboundMessage({
+            waMessageId: textMessageId,
+            chatId,
+            from: businessPhone,
+            to: recipientPhone,
+            body: textToSend,
+            userId: userId,
+            senderId,
+            isAiGenerated: true,
+          });
+        }
+      }
+
+      // Construct media message using WhatsApp media_id (not URL)
+      const mediaPayload: any = {
+        id: whatsappMediaId, // Use uploaded media ID instead of link
+      };
+
+      if (caption) {
+        mediaPayload.caption = caption;
+      }
+
+      if (mediaAttachment.mediaType === 'document') {
+        mediaPayload.filename = mediaAttachment.fileName;
+      }
+
+      const mediaMessage = {
+        messaging_product: 'whatsapp' as const,
+        to: recipientPhone,
+        type: mediaAttachment.mediaType,
+        [mediaAttachment.mediaType]: mediaPayload,
+      };
+
+      // Debug: Log the exact message being sent
+      this.logger.debug(
+        `[Media Message] Sending to WhatsApp: ${JSON.stringify(mediaMessage, null, 2)}`,
+      );
+
+      const mediaResponse = await this.sendCloudAPIMessage(
+        mediaMessage,
+        phoneNumberId,
+      );
+
+      const mediaMessageId = mediaResponse.messages?.[0]?.id;
+      if (!mediaMessageId) {
+        throw new Error(
+          'No message ID returned from Cloud API for media',
+        );
+      }
+
+      this.logger.log(
+        `[Workflow] AI media response sent successfully to ${recipientPhone} with ID: ${mediaMessageId}`,
+      );
+
+      // Build a proper AttachmentMetadata object that includes all required fields
+      // This ensures the frontend can display and stream the media correctly
+      const attachmentData = {
+        id: mediaAttachment.mediaId,
+        type: mediaAttachment.mediaType,
+        fileName: mediaAttachment.fileName,
+        mimeType: mediaAttachment.mimeType,
+        s3Key: mediaAttachment.s3Key, // Required for media streaming
+        size: 0, // KB media doesn't track size, but field is required
+        uploadedAt: new Date().toISOString(),
+        status: 'success' as const,
+      };
+
+      // Store the media message in the database
+      await this.storeOutboundMessage({
+        waMessageId: mediaMessageId,
+        chatId,
+        from: businessPhone,
+        to: recipientPhone,
+        body: caption || '',
+        attachments: [attachmentData],
+        userId: userId,
+        senderId,
+        isAiGenerated: true,
+      });
+
+      // Update chat with last message preview
+      await this.updateChatLastMessage(
+        chatId,
+        caption || `[${mediaAttachment.mediaType}]`,
+        mediaAttachment.mediaType,
+      );
+
+      // Emit message via WebSocket for real-time UI update
+      if (whatsAppGatewayInstance) {
+        whatsAppGatewayInstance.emitMessage({
+          messageId: mediaMessageId,
+          chatId,
+          sender: businessPhone,
+          text: caption || '',
+          type: mediaAttachment.mediaType,
+          timestamp: new Date(),
+          direction: 'outbound',
+          status: 'sent',
+          attachments: [attachmentData],
+        });
+      }
+
+      // STEP: Send interactive CTA buttons AFTER media message
+      const interactiveData = aiResponse.interactiveData;
+
+      if (
+        interactiveData?.enabled &&
+        interactiveData.buttons &&
+        interactiveData.buttons.length > 0
+      ) {
+        this.logger.log(
+          `[Workflow] Sending CTA buttons after media: ${interactiveData.buttons.map((b: any) => b.title).join(', ')}`,
+        );
+
+        try {
+          const interactiveResult =
+            await this.sendInteractiveButtons(
+              senderId,
+              recipientPhone,
+              'What would you like to do next?', // Simple followup text
+              interactiveData.buttons,
+              interactiveData.footerText,
+              undefined, // headerText
+              { isAiGenerated: true },
+            );
+
+          if (!interactiveResult.success) {
+            this.logger.warn(
+              `[Workflow] CTA buttons after media failed (${interactiveResult.error}). This is non-critical.`,
+            );
+          } else {
+            this.logger.log(
+              `[Workflow] CTA buttons sent successfully after media`,
+            );
+          }
+        } catch (ctaError) {
+          this.logger.warn(
+            `[Workflow] Error sending CTA buttons after media: ${ctaError.message}. Continuing.`,
+          );
+        }
+      }
+    } else {
+      // No media - check if we should send interactive buttons or plain text
+      const interactiveData = aiResponse.interactiveData;
+
+      if (
+        interactiveData?.enabled &&
+        interactiveData.buttons &&
+        interactiveData.buttons.length > 0
+      ) {
+        // Send interactive button message with CTAs
+        this.logger.log(
+          `[Workflow] Sending AI response WITH interactive CTAs: ${interactiveData.buttons.map((b: any) => b.title).join(', ')}`,
+        );
+
+        const interactiveResult = await this.sendInteractiveButtons(
+          senderId,
+          recipientPhone,
+          aiResponse.content,
+          interactiveData.buttons,
+          interactiveData.footerText,
+          undefined, // headerText
+          { isAiGenerated: true },
+        );
+
+        if (!interactiveResult.success) {
+          // If interactive message fails (e.g., outside window), fall back to plain text
+          this.logger.warn(
+            `[Workflow] Interactive message failed (${interactiveResult.error}), falling back to plain text`,
+          );
+
+          // Send as plain text
+          const aiMessage = {
+            messaging_product: 'whatsapp' as const,
+            to: recipientPhone,
+            type: 'text' as const,
+            text: {
+              preview_url: true,
+              body: aiResponse.content,
+            },
+          };
+
+          const response = await this.sendCloudAPIMessage(
+            aiMessage,
+            phoneNumberId,
+          );
+
+          const aiMessageId = response.messages?.[0]?.id;
+          if (!aiMessageId) {
+            throw new Error(
+              'No message ID returned from Cloud API',
+            );
+          }
+
+          this.logger.log(
+            `[Workflow] AI response sent (plain text fallback) to ${recipientPhone} with ID: ${aiMessageId}`,
+          );
+
+          await this.storeOutboundMessage({
+            waMessageId: aiMessageId,
+            chatId,
+            from: businessPhone,
+            to: recipientPhone,
+            body: aiResponse.content,
+            userId: userId,
+            senderId,
+            isAiGenerated: true,
+          });
+
+          await this.updateChatLastMessage(
+            chatId,
+            aiResponse.content,
+            'text',
+          );
+
+          if (whatsAppGatewayInstance) {
+            whatsAppGatewayInstance.emitMessage({
+              messageId: aiMessageId,
+              chatId,
+              sender: businessPhone,
+              text: aiResponse.content,
+              type: 'text',
+              timestamp: new Date(),
+              direction: 'outbound',
+              status: 'sent',
+            });
+          }
+        } else {
+          // Interactive message sent successfully
+          this.logger.log(
+            `[Workflow] AI response with CTAs sent successfully to ${recipientPhone} with ID: ${interactiveResult.waMessageId}`,
+          );
+
+          // Update chat with last message preview
+          await this.updateChatLastMessage(
+            chatId,
+            aiResponse.content,
+            'interactive',
+          );
+
+          // Emit message via WebSocket for real-time UI update
+          if (
+            whatsAppGatewayInstance &&
+            interactiveResult.waMessageId
+          ) {
+            whatsAppGatewayInstance.emitMessage({
+              messageId: interactiveResult.waMessageId,
+              chatId,
+              sender: businessPhone,
+              text: aiResponse.content,
+              type: 'interactive',
+              timestamp: new Date(),
+              direction: 'outbound',
+              status: 'sent',
+            });
+          }
+        }
+      } else {
+        // Send plain text response (no interactive CTAs)
+        const aiMessage = {
+          messaging_product: 'whatsapp' as const,
+          to: recipientPhone,
+          type: 'text' as const,
+          text: {
+            preview_url: true,
+            body: aiResponse.content,
+          },
+        };
+
+        // Send message and capture response with WhatsApp message ID
+        const response = await this.sendCloudAPIMessage(
+          aiMessage,
+          phoneNumberId,
+        );
+
+        // Extract the WhatsApp message ID from response
+        const aiMessageId = response.messages?.[0]?.id;
+        if (!aiMessageId) {
+          throw new Error('No message ID returned from Cloud API');
+        }
+
+        this.logger.log(
+          `[Workflow] AI response sent successfully to ${recipientPhone} with ID: ${aiMessageId}`,
+        );
+
+        await this.storeOutboundMessage({
+          waMessageId: aiMessageId,
+          chatId,
+          from: businessPhone,
+          to: recipientPhone,
+          body: aiResponse.content,
+          userId: userId,
+          senderId,
+          isAiGenerated: true,
+        });
+
+        await this.updateChatLastMessage(
+          chatId,
+          aiResponse.content,
+          'text',
+        );
+
+        if (whatsAppGatewayInstance) {
+          whatsAppGatewayInstance.emitMessage({
+            messageId: aiMessageId,
+            chatId,
+            sender: businessPhone,
+            text: aiResponse.content,
+            type: 'text',
+            timestamp: new Date(),
+            direction: 'outbound',
+            status: 'sent',
+          });
+        }
+      }
     }
   }
 
@@ -3180,9 +3713,9 @@ export class WhatsAppService {
         // Interactive message metadata stored in metadata jsonb
         metadata: messageData.isInteractive
           ? {
-              interactiveType: messageData.interactiveType,
-              interactiveData: messageData.interactiveData,
-            }
+            interactiveType: messageData.interactiveType,
+            interactiveData: messageData.interactiveData,
+          }
           : null,
       });
 
@@ -3369,31 +3902,31 @@ export class WhatsAppService {
 
       const attachments = messageData.mediaMetadata
         ? [
-            {
-              id: messageData.mediaMetadata.mediaId,
-              type: messageData.mediaMetadata.type, // Use the actual media type (gif, sticker, video, etc.)
-              fileName:
-                messageData.mediaMetadata.filename ||
-                `${messageData.mediaMetadata.type}_${messageData.mediaMetadata.mediaId}`,
-              mimeType: messageData.mediaMetadata.mimeType || '',
-              size: messageData.mediaMetadata.fileSize || 0,
-              s3Key: s3Key, // Will be empty string if caching failed, that's ok
-              thumbnailStatus: thumbnailStatus,
-              status: 'success',
-              uploadedAt: new Date().toISOString(),
-              // Only use cloud-api:// as fallback if S3 caching failed
-              mediaUrl: s3Key
-                ? ''
-                : `cloud-api://${messageData.mediaMetadata.mediaId}`,
-              // Voice note flag for audio messages
-              isVoiceNote: messageData.mediaMetadata.isVoiceNote || false,
-              // Animated flag for stickers and gifs
-              isAnimated: messageData.mediaMetadata.isAnimated || false,
-            },
-          ]
+          {
+            id: messageData.mediaMetadata.mediaId,
+            type: messageData.mediaMetadata.type, // Use the actual media type (gif, sticker, video, etc.)
+            fileName:
+              messageData.mediaMetadata.filename ||
+              `${messageData.mediaMetadata.type}_${messageData.mediaMetadata.mediaId}`,
+            mimeType: messageData.mediaMetadata.mimeType || '',
+            size: messageData.mediaMetadata.fileSize || 0,
+            s3Key: s3Key, // Will be empty string if caching failed, that's ok
+            thumbnailStatus: thumbnailStatus,
+            status: 'success',
+            uploadedAt: new Date().toISOString(),
+            // Only use cloud-api:// as fallback if S3 caching failed
+            mediaUrl: s3Key
+              ? ''
+              : `cloud-api://${messageData.mediaMetadata.mediaId}`,
+            // Voice note flag for audio messages
+            isVoiceNote: messageData.mediaMetadata.isVoiceNote || false,
+            // Animated flag for stickers and gifs
+            isAnimated: messageData.mediaMetadata.isAnimated || false,
+          },
+        ]
         : messageData.contactsData
           ? // For contacts, store the contact data in attachments as JSON
-            messageData.contactsData
+          messageData.contactsData
           : [];
 
       await db.insert(messages).values({

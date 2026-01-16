@@ -23,10 +23,13 @@ import {
 import { Injectable, Logger } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { HandoffRequest, HandoffStatus, ResolveHandoffRequest } from '../types';
+import { RateLimiterService } from './rate-limiter.service';
 
 @Injectable()
 export class HandoffService {
   private readonly logger = new Logger(HandoffService.name);
+
+  constructor(private readonly rateLimiter: RateLimiterService) { }
 
   /**
    * Get or create chat stage assignment
@@ -480,13 +483,41 @@ export class HandoffService {
    * Check if AI can send messages for a chat
    * Uses chat_stage_assignments if available, falls back to chat_ai_overrides
    */
+  /**
+   * Check if AI can send messages for a chat
+   * explicit checks: Override Disabled -> Assignment Paused/Handoff -> Stage Rules
+   */
   async canAISend(chatId: string): Promise<{
     canSend: boolean;
+    configEnabled: boolean; // Added: Master config switch state
     reason?: string;
+    isRateLimited?: boolean;
+    rateLimitReset?: Date;
+    rateLimitCurrentCount?: number;
+    rateLimitMaxCount?: number;
   }> {
     this.logger.debug(`[canAISend] Checking AI status for chat ${chatId}`);
 
-    // Try stage assignments first
+    // 1. Check Chat Override FIRST (highest priority for Disabling)
+    const [override] = await db
+      .select()
+      .from(chatAiOverrides)
+      .where(eq(chatAiOverrides.chatId, chatId))
+      .limit(1);
+
+    // Default to true if no override exists (or false if you prefer safe defaults)
+    // Based on getOrCreateAiOverride, we default to true.
+    const configEnabled = override?.aiEnabled ?? true;
+
+    if (override && override.aiEnabled === false) {
+      return {
+        canSend: false,
+        configEnabled: false,
+        reason: 'AI is disabled for this chat (User Setting)',
+      };
+    }
+
+    // 2. Check Stage Assignments (Paused, Handoff)
     try {
       const [assignment] = await db
         .select()
@@ -495,92 +526,113 @@ export class HandoffService {
         .limit(1);
 
       if (assignment) {
-        this.logger.debug(
-          `[canAISend] Found stage assignment for chat ${chatId}: aiPaused=${assignment.aiPaused}, awaitingHandoff=${assignment.awaitingHandoff}`,
-        );
-
-        if (assignment.aiPaused) {
-          return {
-            canSend: false,
-            reason: 'AI is paused for this chat',
-          };
-        }
-
+        // Handoff always takes precedence
         if (assignment.awaitingHandoff) {
           return {
             canSend: false,
+            configEnabled,
             reason: `Awaiting human handoff: ${assignment.handoffReason || 'No reason specified'}`,
           };
         }
 
-        // Check stage settings if assigned
-        if (assignment.stageId) {
-          const [stage] = await db
-            .select()
-            .from(workflowStages)
-            .where(eq(workflowStages.id, assignment.stageId))
-            .limit(1);
-
-          if (stage) {
-            if (!stage.aiAutoReply) {
-              return {
-                canSend: false,
-                reason: `AI auto-reply disabled for stage "${stage.name}"`,
-              };
-            }
-
-            if (stage.aiHandoffRequired && !assignment.awaitingHandoff) {
-              return {
-                canSend: false,
-                reason: `Stage "${stage.name}" requires human handoff`,
-              };
-            }
-          }
+        // Check if AI is paused
+        if (assignment.aiPaused) {
+          return {
+            canSend: false,
+            configEnabled,
+            reason: 'AI is paused for this chat',
+          };
         }
-
-        this.logger.debug(
-          `[canAISend] Stage assignment allows AI for chat ${chatId}`,
-        );
-        return { canSend: true };
       }
     } catch (error) {
-      this.logger.debug(`Stage assignments not available: ${error}`);
+      this.logger.error(`Error checking stage assignments: ${error}`);
+      // FAIL CLOSED: If we can't verify the assignment status, assume we shouldn't send.
+      return {
+        canSend: false,
+        configEnabled, // We know this from Step 1
+        reason: 'Error verifying chat status',
+      };
     }
 
-    // Fallback: check chat_ai_overrides
-    const [override] = await db
-      .select()
-      .from(chatAiOverrides)
-      .where(eq(chatAiOverrides.chatId, chatId))
-      .limit(1);
+    // 3. Check Rate Limits (Pre-send check)
+    // We assume userId is needed for rate limiter, but canAISend is often called by system
+    // We'll try to get the userId from the override or assignment if possible, or fallback
+    const userId = override?.userId || 1; // Fallback to 1 if unknown (robustness needed here ideally)
 
-    if (override) {
-      this.logger.debug(
-        `[canAISend] Found chat override for ${chatId}: aiEnabled=${override.aiEnabled}`,
-      );
+    // Note: We're checking potential AIReply, so isAiMessage=true
+    const rateLimit = await this.rateLimiter.checkRateLimit(userId, chatId, {
+      isAiMessage: true,
+    });
 
-      if (override.aiEnabled === false) {
-        return {
-          canSend: false,
-          reason: 'AI is disabled for this chat',
-        };
+    if (!rateLimit.allowed) {
+      // Extract hourly limit info for frontend banner
+      const hourLimit = rateLimit.limits.find(l => l.type === 'hour');
+      return {
+        canSend: false,
+        configEnabled,
+        reason: rateLimit.reason,
+        isRateLimited: true,
+        rateLimitReset: rateLimit.resetTime,
+        rateLimitCurrentCount: hourLimit?.current ?? 0,
+        rateLimitMaxCount: hourLimit?.max ?? 0,
+      };
+    }
+
+    // 4. Check Assignment/Stage Details again for other blocks
+    try {
+      const [assignment] = await db
+        .select()
+        .from(chatStageAssignments)
+        .where(eq(chatStageAssignments.chatId, chatId))
+        .limit(1);
+
+      if (assignment && assignment.stageId) {
+        const [stage] = await db
+          .select()
+          .from(workflowStages)
+          .where(eq(workflowStages.id, assignment.stageId))
+          .limit(1);
+
+        if (stage) {
+          // Stage auto-reply (unless explicitly enabled via override)
+          if (!stage.aiAutoReply && override?.aiEnabled !== true) {
+            return {
+              canSend: false,
+              configEnabled,
+              reason: `AI auto-reply disabled for stage "${stage.name}"`,
+            };
+          }
+
+          if (stage.aiHandoffRequired && !assignment.awaitingHandoff) {
+            return {
+              canSend: false,
+              configEnabled,
+              reason: `Stage "${stage.name}" requires human handoff`,
+            };
+          }
+        }
       }
-      // Override exists with aiEnabled = true
-      this.logger.log(
-        `[canAISend] AI is enabled for chat ${chatId} via override`,
-      );
-      return { canSend: true };
+    } catch (error) {
+      // Ignore
     }
 
-    // Default: AI is DISABLED for new chats with no configuration
-    // Users must explicitly enable AI per chat for safety
-    this.logger.debug(
-      `[canAISend] No config found for chat ${chatId}, defaulting to disabled`,
-    );
-    return {
-      canSend: false,
-      reason: 'AI not configured for this chat - enable in AI Settings',
+
+    // 5. Fallback: Check Override for ENABLED status or Default
+    const finalResult = {
+      canSend: override?.aiEnabled === true,
+      configEnabled,  // will be false if override didn't exist or was false
+      reason: override?.aiEnabled === true
+        ? undefined
+        : 'AI not configured for this chat - enable in AI Settings',
     };
+
+    if (finalResult.canSend) {
+      this.logger.debug(`[canAISend] Allowed by Fallback/Override. Assignment found? ${false}`);
+    } else {
+      this.logger.debug(`[canAISend] Blocked by Fallback/Default. Reason: ${finalResult.reason}`);
+    }
+
+    return finalResult;
   }
 
   /**

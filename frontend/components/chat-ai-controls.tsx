@@ -49,10 +49,15 @@ interface ChatAIControlsProps {
   hasActiveHandoff: boolean;
   handoffPriority?: "low" | "medium" | "high" | "critical";
   isLoading?: boolean;
+  isRateLimited?: boolean; // Disable toggle when rate limited
   onToggleAI: (enabled: boolean) => Promise<void>;
   onRequestHandoff: () => Promise<void>;
   onResolveHandoff?: () => Promise<void>;
   onConfigSaved?: () => void;
+  // Controlled modal state
+  isConfigModalOpen?: boolean;
+  onOpenConfigModal?: (open: boolean) => void;
+  aiConfigEnabled?: boolean;
   className?: string;
 }
 
@@ -63,15 +68,22 @@ export function ChatAIControls({
   hasActiveHandoff,
   handoffPriority,
   isLoading = false,
+  isRateLimited = false,
   onToggleAI,
   onRequestHandoff,
   onResolveHandoff,
   onConfigSaved,
+  isConfigModalOpen: controlledIsOpen,
+  onOpenConfigModal: controlledOnOpenChange,
+  aiConfigEnabled = true,
   className,
 }: ChatAIControlsProps) {
   const [isToggling, setIsToggling] = useState(false);
   const [isRequestingHandoff, setIsRequestingHandoff] = useState(false);
-  const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
+  const [internalIsConfigModalOpen, setInternalIsConfigModalOpen] = useState(false);
+
+  const isConfigModalOpen = controlledIsOpen ?? internalIsConfigModalOpen;
+  const setIsConfigModalOpen = controlledOnOpenChange ?? setInternalIsConfigModalOpen;
 
   const handleToggleAI = async () => {
     setIsToggling(true);
@@ -99,48 +111,50 @@ export function ChatAIControls({
 
   return (
     <div className={cn("flex items-center gap-2", className)}>
-      {/* AI Status indicator with toggle */}
-      <TooltipProvider delayDuration={100}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <div className="flex items-center gap-1.5">
-              <div
-                className={cn(
-                  "flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium transition-colors",
-                  isAIPaused
-                    ? "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
-                    : "bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400"
-                )}
-              >
-                {isToggling || isLoading ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : isAIPaused ? (
-                  <PauseCircle className="h-3 w-3" />
-                ) : (
-                  <Sparkles className="h-3 w-3" />
-                )}
-                <span className="hidden sm:inline">
-                  {isAIPaused ? "Paused" : "AI Active"}
-                </span>
+      {/* AI Status indicator with toggle - ONLY VISIBLE IF CONFIG ENABLED */}
+      {aiConfigEnabled && (
+        <TooltipProvider delayDuration={100}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="flex items-center gap-1.5">
+                <div
+                  className={cn(
+                    "flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium transition-colors",
+                    isAIPaused
+                      ? "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
+                      : "bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400"
+                  )}
+                >
+                  {isToggling || isLoading ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : isAIPaused ? (
+                    <PauseCircle className="h-3 w-3" />
+                  ) : (
+                    <Sparkles className="h-3 w-3" />
+                  )}
+                  <span className="hidden sm:inline">
+                    {isAIPaused ? "Paused" : "AI Active"}
+                  </span>
+                </div>
+                <Switch
+                  checked={!isAIPaused}
+                  onCheckedChange={() => handleToggleAI()}
+                  disabled={isToggling || isLoading || isRateLimited}
+                  className="scale-75"
+                />
               </div>
-              <Switch
-                checked={!isAIPaused}
-                onCheckedChange={() => handleToggleAI()}
-                disabled={isToggling || isLoading}
-                className="scale-75"
-              />
-            </div>
-          </TooltipTrigger>
-          <TooltipContent>
-            {isAIPaused
-              ? "AI responses are paused. Click to resume."
-              : "AI is actively responding. Click to pause."}
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+            </TooltipTrigger>
+            <TooltipContent>
+              {isAIPaused
+                ? "AI responses are paused. Click to resume."
+                : "AI is actively responding. Click to pause."}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )}
 
-      {/* Handoff button/indicator */}
-      {hasActiveHandoff ? (
+      {/* Handoff button/indicator - ONLY VISIBLE IF CONFIG ENABLED */}
+      {aiConfigEnabled && hasActiveHandoff ? (
         <TooltipProvider delayDuration={100}>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -151,11 +165,11 @@ export function ChatAIControls({
                 className={cn(
                   "h-7 gap-1",
                   handoffPriority === "critical" &&
-                    "border-red-500 text-red-600",
+                  "border-red-500 text-red-600",
                   handoffPriority === "high" &&
-                    "border-orange-500 text-orange-600",
+                  "border-orange-500 text-orange-600",
                   handoffPriority === "medium" &&
-                    "border-amber-500 text-amber-600"
+                  "border-amber-500 text-amber-600"
                 )}
               >
                 <Hand className="h-3 w-3" />
@@ -168,7 +182,7 @@ export function ChatAIControls({
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
-      ) : (
+      ) : aiConfigEnabled && !isAIPaused ? (
         <TooltipProvider delayDuration={100}>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -192,7 +206,7 @@ export function ChatAIControls({
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
-      )}
+      ) : null}
 
       {/* More options dropdown */}
       <DropdownMenu>
@@ -204,24 +218,30 @@ export function ChatAIControls({
         <DropdownMenuContent align="end" className="w-48">
           <DropdownMenuLabel className="text-xs">AI Controls</DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => handleToggleAI()}>
-            {isAIPaused ? (
-              <>
-                <PlayCircle className="h-4 w-4 mr-2" />
-                Resume AI
-              </>
-            ) : (
-              <>
-                <PauseCircle className="h-4 w-4 mr-2" />
-                Pause AI
-              </>
-            )}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={handleRequestHandoff}>
-            <Hand className="h-4 w-4 mr-2" />
-            Request Handoff
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
+          {aiConfigEnabled && (
+            <>
+              <DropdownMenuItem onClick={() => handleToggleAI()}>
+                {isAIPaused ? (
+                  <>
+                    <PlayCircle className="h-4 w-4 mr-2" />
+                    Resume AI
+                  </>
+                ) : (
+                  <>
+                    <PauseCircle className="h-4 w-4 mr-2" />
+                    Pause AI
+                  </>
+                )}
+              </DropdownMenuItem>
+              {!isAIPaused && (
+                <DropdownMenuItem onClick={handleRequestHandoff}>
+                  <Hand className="h-4 w-4 mr-2" />
+                  Request Handoff
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+            </>
+          )}
           <DropdownMenuItem onClick={() => setIsConfigModalOpen(true)}>
             <Settings className="h-4 w-4 mr-2" />
             AI Settings

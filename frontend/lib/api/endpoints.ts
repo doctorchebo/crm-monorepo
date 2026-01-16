@@ -1753,6 +1753,38 @@ export const backendApi = {
     deleteStageSetting: (stageId: string): Promise<void> =>
       apiClient.delete(`/workflow/ai-config/stage-settings/${stageId}`),
   },
+
+  // AI Review
+  aiReview: {
+    sendReviewed: (data: {
+      chatId: string;
+      content: string;
+      mediaAttachment?: unknown;
+      interactiveData?: unknown;
+    }) => apiClient.post("/workflow/ai/send-reviewed", data),
+
+    discardPending: (chatId: string) =>
+      apiClient.post("/workflow/ai/discard-pending", { chatId }),
+
+    regenerate: async (chatId: string) => {
+        return apiClient.post("/workflow/ai/regenerate", { chatId });
+    }
+  },
+
+  aiWorkflow: {
+    getAIStatus: (chatId: string): Promise<{
+        chatId: string;
+        aiEnabled: boolean;
+        aiConfigEnabled: boolean;
+        reason?: string;
+        isRateLimited: boolean;
+        rateLimitReset?: Date;
+        rateLimitCurrentCount?: number;
+        rateLimitMaxCount?: number;
+    }> => apiClient.get(`/workflow/ai/status/${chatId}`),
+  },
+
+  // ==================== Public Endpoints ====================
 };
 
 // ==================== AI Configuration Types ====================
@@ -1878,6 +1910,7 @@ export interface ChatStageAssignment {
   lastMessageType: string | null;
   unreadCount: number;
   isActive: boolean | null;
+  aiOverrideEnabled?: boolean;
 }
 
 export interface ChatWorkflowStatus {
@@ -1961,6 +1994,7 @@ export interface ChatAiOverride {
   languagePreference: string | null;
   allowFreeTextReplies: boolean | null;
   useTemplatesOnly: boolean;
+  reviewBeforeSend: boolean;
   maxResponseLength: number | null;
   customInstructions: string | null;
   avoidTopics: string[] | null;
@@ -1979,6 +2013,7 @@ export interface SetChatOverrideDto {
   languagePreference?: string | null;
   allowFreeTextReplies?: boolean | null;
   useTemplatesOnly?: boolean;
+  reviewBeforeSend?: boolean;
   maxResponseLength?: number | null;
   customInstructions?: string | null;
   avoidTopics?: string[] | null;

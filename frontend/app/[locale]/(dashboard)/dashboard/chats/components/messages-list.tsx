@@ -10,6 +10,7 @@ import type { Chat, Message, MessageReaction } from "../types";
 import { DateSeparator } from "./date-separator";
 import { StickyDateHeader } from "./sticky-date-header";
 import { Checkbox } from "@/components/ui/checkbox";
+import { AITypingIndicator } from "@/components/ai-typing-indicator";
 
 // ============================================================
 // CONFIGURATION
@@ -187,6 +188,7 @@ interface MessagesListProps {
   isSelectionMode?: boolean;
   selectedMessageIds?: Set<string>;
   onToggleSelection?: (messageId: string) => void;
+  isAITyping?: boolean;
 }
 
 export function MessagesList({
@@ -222,6 +224,7 @@ export function MessagesList({
   isSelectionMode,
   selectedMessageIds,
   onToggleSelection,
+  isAITyping,
 }: MessagesListProps) {
   // Determine if reactions should be disabled (outside 24-hour window)
   // This logic is now moved into the map function for each message
@@ -499,6 +502,11 @@ export function MessagesList({
             );
           })}
 
+          {isAITyping && (
+            <div className="px-4 py-2">
+              <AITypingIndicator />
+            </div>
+          )}
           <div ref={messagesEndRef} />
         </div >
       )}

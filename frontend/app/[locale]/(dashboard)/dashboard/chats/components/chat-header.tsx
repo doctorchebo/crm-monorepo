@@ -1,27 +1,36 @@
 "use client";
 
+import { backendApi } from "@/lib/api/endpoints";
 import { ChatAIControls } from "@/components/chat-ai-controls";
 import { HandoffBanner } from "@/components/handoff-banner";
 import { Button } from "@/components/ui/button";
 import { useHandoff } from "@/hooks/use-handoff";
 import { Search } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { useState, useEffect } from "react";
 import type { Chat } from "../types";
 
 interface ChatHeaderProps {
   chat: Chat;
   onSearchClick?: () => void;
   isSearchOpen?: boolean;
+  onAIToggle?: (enabled: boolean) => Promise<void>;
+  isRateLimited?: boolean;
+  onConfigSaved?: () => void;
 }
 
 export function ChatHeader({
   chat,
   onSearchClick,
   isSearchOpen,
+  onAIToggle,
+  isRateLimited,
+  onConfigSaved: parentOnConfigSaved,
 }: ChatHeaderProps) {
   const t = useTranslations("chats.search");
   const {
     handoffStatus,
+    aiStatus,
     isLoading,
     isAIPaused,
     isAwaitingHandoff,
@@ -32,31 +41,54 @@ export function ChatHeader({
     refetch,
   } = useHandoff(chat.chatId);
 
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+
+
+  // ... (maintain existing handlers) -> Replacing with actual code
   const handleToggleAI = async (shouldEnable: boolean) => {
-    // shouldEnable = true means user wants AI enabled (not paused)
-    // shouldEnable = false means user wants AI disabled (paused)
-    if (shouldEnable) {
-      await resumeAI();
-    } else {
-      await pauseAI();
+    // If parent provides a handler, use it (for auto-trigger logic)
+    if (onAIToggle) {
+      await onAIToggle(shouldEnable);
+      refetch();
+      return;
+    }
+    // Otherwise use local logic
+    try {
+      if (shouldEnable) {
+        await resumeAI();
+      } else {
+        await pauseAI();
+      }
+      refetch();
+    } catch (error) {
+      console.error("Failed to toggle AI:", error);
     }
   };
+
 
   const handleRequestHandoff = async () => {
     await requestHandoff("Manual handoff requested by user");
   };
 
   const handleResolveHandoff = async () => {
-    await resolveHandoff(true, "Resolved by user");
+    await resolveHandoff(true, "Resolved by user (AI Resumed)");
+  };
+
+  const handleResolveManual = async () => {
+    // Resolve handoff but keep AI paused (Manual Mode)
+    await resolveHandoff(false, "Resolved by user (Manual Mode)");
   };
 
   const handleConfigSaved = () => {
     // Refresh the AI status after configuration is saved
     refetch();
+    // Notify parent if handler provided (to clear rate limit)
+    parentOnConfigSaved?.();
   };
 
   // Determine if we should show the banner
-  const showBanner =
+  const showHandoffBanner =
     handoffStatus &&
     handoffStatus.awaitingHandoff &&
     handoffStatus.status !== "resolved";
@@ -82,10 +114,14 @@ export function ChatHeader({
             hasActiveHandoff={isAwaitingHandoff}
             handoffPriority={handoffStatus?.priority}
             isLoading={isLoading}
+            isRateLimited={isRateLimited}
             onToggleAI={handleToggleAI}
             onRequestHandoff={handleRequestHandoff}
             onResolveHandoff={handleResolveHandoff}
             onConfigSaved={handleConfigSaved}
+            isConfigModalOpen={isSettingsOpen}
+            onOpenConfigModal={setIsSettingsOpen}
+            aiConfigEnabled={aiStatus?.aiConfigEnabled ?? true}
           />
 
           {/* Search button */}
@@ -103,7 +139,7 @@ export function ChatHeader({
       </div>
 
       {/* Handoff banner - shown when intervention is needed */}
-      {showBanner && (
+      {showHandoffBanner && (
         <HandoffBanner
           chatId={chat.chatId}
           priority={handoffStatus.priority || "medium"}
@@ -118,11 +154,13 @@ export function ChatHeader({
           acknowledgedAt={handoffStatus.acknowledgedAt}
           isAIPaused={isAIPaused ?? false}
           onResolve={handleResolveHandoff}
+          onResolveManual={handleResolveManual}
           onResumeAI={resumeAI}
           onPauseAI={pauseAI}
           className="mx-4 mt-2"
         />
       )}
+
     </div>
   );
 }

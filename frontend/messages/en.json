@@ -13,6 +13,18 @@
     "success": "Success",
     "confirm": "Confirm"
   },
+  "chat": {
+    "aiReplyPreview": "AI Reply Preview",
+    "attachment": "Attachment",
+    "interactiveButtons": "Interactive Buttons",
+    "discard": "Discard",
+    "send": "Send",
+    "edit": "Edit",
+    "done": "Done",
+    "failedToSendAiResponse": "Failed to send AI response",
+    "regenerateAi": "Regenerate AI",
+    "aiRegenerateDescription": "AI reply not sent. You can regenerate it."
+  },
   "header": {
     "pricing": "Pricing",
     "signUp": "Sign Up",

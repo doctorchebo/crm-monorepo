@@ -115,7 +115,10 @@ interface ChatNotificationsContextValue {
   // Register callback for new chat events
   onNewChat: (callback: NewChatCallback) => () => void;
   // Register callback for chat deleted events
+  // Register callback for chat deleted events
   onChatDeleted: (callback: ChatDeletedCallback) => () => void;
+  // The underlying socket instance
+  socket: Socket | null;
 }
 
 const ChatNotificationsContext =
@@ -154,6 +157,7 @@ export function ChatNotificationsProvider({
   );
   const [isConnected, setIsConnected] = useState(false);
   const [activeChatId, setActiveChatIdState] = useState<string | null>(null);
+  const [socket, setSocket] = useState<Socket | null>(null);
   const socketRef = useRef<Socket | null>(null);
 
   // Refs to track current values without causing effect re-runs
@@ -462,7 +466,7 @@ export function ChatNotificationsProvider({
       return;
     }
 
-    const socket = io(
+    const newSocket = io(
       process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001",
       {
         transports: ["websocket", "polling"],
@@ -473,39 +477,41 @@ export function ChatNotificationsProvider({
       }
     );
 
-    socketRef.current = socket;
+    socketRef.current = newSocket;
+    setSocket(newSocket);
 
-    socket.on("connect", () => {
+    newSocket.on("connect", () => {
       setIsConnected(true);
     });
 
-    socket.on("disconnect", () => {
+    newSocket.on("disconnect", () => {
       setIsConnected(false);
     });
 
     // Listen for chat updates - use ref to always get latest handler
-    socket.on("chat:update", (update: ChatUpdateEvent) => {
+    newSocket.on("chat:update", (update: ChatUpdateEvent) => {
       handleChatUpdateRef.current(update);
     });
 
     // Listen for new messages - use ref to always get latest handler
-    socket.on("message:new", (message: NewMessageEvent) => {
+    newSocket.on("message:new", (message: NewMessageEvent) => {
       handleNewMessageRef.current(message);
     });
 
     // Listen for new chats (customer initiated conversations) - use ref to always get latest handler
-    socket.on("chat:new", (chat: NewChatEvent) => {
+    newSocket.on("chat:new", (chat: NewChatEvent) => {
       handleNewChatRef.current(chat);
     });
 
     // Listen for chat deletions - use ref to always get latest handler
-    socket.on("chat:deleted", (event: ChatDeletedEvent) => {
+    newSocket.on("chat:deleted", (event: ChatDeletedEvent) => {
       handleChatDeletedRef.current(event);
     });
 
     return () => {
-      socket.disconnect();
+      newSocket.disconnect();
       socketRef.current = null;
+      setSocket(null);
     };
   }, []); // Empty deps - socket connection is stable
 
@@ -524,6 +530,7 @@ export function ChatNotificationsProvider({
       setActiveChatId,
       onNewChat,
       onChatDeleted,
+      socket,
     }),
     [
       unreadCounts,
@@ -539,6 +546,7 @@ export function ChatNotificationsProvider({
       setActiveChatId,
       onNewChat,
       onChatDeleted,
+      socket,
     ]
   );
 
