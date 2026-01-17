@@ -10,7 +10,7 @@ import {
 } from '@database/schema';
 import { MessageMemoryIntegration } from '@modules/ai-memory/services/message-memory-integration.service';
 import { RateLimiterService } from '@modules/workflow/services/rate-limiter.service';
-import { WorkflowEngineService } from '@modules/workflow/services/workflow-engine.service';
+import { WorkflowEngineService } from '@modules/workflow/services';
 import {
   BadRequestException,
   Inject,
@@ -82,7 +82,7 @@ export class WhatsAppService implements OnModuleInit {
   private readonly metaVerifyToken: string;
   private readonly metaAppSecret: string | undefined;
   private readonly wabaId: string | undefined;
-  
+
   private workflowEngine: WorkflowEngineService;
 
   constructor(
@@ -114,9 +114,13 @@ export class WhatsAppService implements OnModuleInit {
 
   async onModuleInit() {
     try {
-      this.workflowEngine = await this.moduleRef.get(WorkflowEngineService, { strict: false });
+      this.workflowEngine = await this.moduleRef.get(WorkflowEngineService, {
+        strict: false,
+      });
     } catch (error) {
-      this.logger.warn('Failed to resolve WorkflowEngineService lazily - this is expected in some test environments');
+      this.logger.warn(
+        'Failed to resolve WorkflowEngineService lazily - this is expected in some test environments',
+      );
     }
   }
 
@@ -451,13 +455,14 @@ export class WhatsAppService implements OnModuleInit {
       let phoneNumberId = senderRecord.phoneNumberId;
       if (!phoneNumberId) {
         // Fallback to environment variable for sandbox/testing
-        phoneNumberId = this.configService.get<string>('META_PHONE_NUMBER_ID');
+        phoneNumberId =
+          this.configService.get<string>('META_PHONE_NUMBER_ID') ?? null;
       }
 
       if (!phoneNumberId) {
         throw new Error(
           `Sender ${senderId} (${senderPhoneNumber}) does not have a phoneNumberId set. ` +
-          `Please verify the sender in the UI and try again.`,
+            `Please verify the sender in the UI and try again.`,
         );
       }
 
@@ -589,10 +594,7 @@ export class WhatsAppService implements OnModuleInit {
         }
 
         // Send via Cloud API using the sender's phoneNumberId
-        const response = await this.sendCloudAPIMessage(
-          message,
-          phoneNumberId,
-        );
+        const response = await this.sendCloudAPIMessage(message, phoneNumberId);
 
         if (!response.messages || response.messages.length === 0) {
           throw new Error('No message ID returned from Cloud API');
@@ -678,7 +680,7 @@ export class WhatsAppService implements OnModuleInit {
       if (!senderRecord.phoneNumberId) {
         throw new Error(
           `Sender ${senderId} does not have a phoneNumberId set. ` +
-          `Please verify the sender in the UI and try again.`,
+            `Please verify the sender in the UI and try again.`,
         );
       }
 
@@ -1721,7 +1723,7 @@ export class WhatsAppService implements OnModuleInit {
       if (existingMessage) {
         this.logger.warn(
           `⚠️ Duplicate message detected: ${messageId} (already stored). ` +
-          `This is likely a Meta webhook retry. Skipping.`,
+            `This is likely a Meta webhook retry. Skipping.`,
         );
         console.log(
           `🔄 DUPLICATE: Message ${messageId} already exists - this is a Meta webhook retry`,
@@ -1790,28 +1792,28 @@ export class WhatsAppService implements OnModuleInit {
       let mediaMetadata: MediaMetadata | undefined;
       let contactsData:
         | {
-          type: 'contacts';
-          contacts: Array<{
-            name: {
-              formatted_name?: string;
-              first_name?: string;
-              last_name?: string;
-              middle_name?: string;
-              prefix?: string;
-              suffix?: string;
-            };
-            phones?: Array<{
-              phone: string;
-              type?: string;
-              wa_id?: string;
+            type: 'contacts';
+            contacts: Array<{
+              name: {
+                formatted_name?: string;
+                first_name?: string;
+                last_name?: string;
+                middle_name?: string;
+                prefix?: string;
+                suffix?: string;
+              };
+              phones?: Array<{
+                phone: string;
+                type?: string;
+                wa_id?: string;
+              }>;
+              emails?: any[];
+              addresses?: any[];
+              org?: any;
+              birthday?: string;
+              urls?: any[];
             }>;
-            emails?: any[];
-            addresses?: any[];
-            org?: any;
-            birthday?: string;
-            urls?: any[];
-          }>;
-        }
+          }
         | undefined;
 
       switch (message.type) {
@@ -2134,23 +2136,23 @@ export class WhatsAppService implements OnModuleInit {
         const attachments =
           storedMessage?.attachments && Array.isArray(storedMessage.attachments)
             ? (storedMessage.attachments as any[]).map((att) => ({
-              id: att.id,
-              type: att.type,
-              mediaId: att.id, // For backwards compatibility
-              fileName: att.fileName,
-              mimeType: att.mimeType,
-              size: att.size,
-              s3Key: att.s3Key,
-              thumbnailKey: att.thumbnailKey,
-              thumbnailStatus: att.thumbnailStatus,
-              width: att.width,
-              height: att.height,
-              blurhash: att.blurhash,
-              duration: att.duration,
-              status: att.status,
-              isVoiceNote: att.isVoiceNote || false,
-              isAnimated: att.isAnimated || false,
-            }))
+                id: att.id,
+                type: att.type,
+                mediaId: att.id, // For backwards compatibility
+                fileName: att.fileName,
+                mimeType: att.mimeType,
+                size: att.size,
+                s3Key: att.s3Key,
+                thumbnailKey: att.thumbnailKey,
+                thumbnailStatus: att.thumbnailStatus,
+                width: att.width,
+                height: att.height,
+                blurhash: att.blurhash,
+                duration: att.duration,
+                status: att.status,
+                isVoiceNote: att.isVoiceNote || false,
+                isAnimated: att.isAnimated || false,
+              }))
             : undefined;
 
         whatsAppGatewayInstance.emitMessage({
@@ -2178,13 +2180,13 @@ export class WhatsAppService implements OnModuleInit {
           // Extract interactive response data if this was a button/list click
           let interactiveResponse:
             | {
-              type: 'button_reply' | 'list_reply';
-              buttonId?: string;
-              buttonTitle?: string;
-              rowId?: string;
-              rowTitle?: string;
-              rowDescription?: string;
-            }
+                type: 'button_reply' | 'list_reply';
+                buttonId?: string;
+                buttonTitle?: string;
+                rowId?: string;
+                rowTitle?: string;
+                rowDescription?: string;
+              }
             | undefined;
 
           // Check if this is an interactive response (stored in mediaMetadata)
@@ -2255,11 +2257,10 @@ export class WhatsAppService implements OnModuleInit {
                 // **RATE LIMIT TRACKING: Record AI message BEFORE sending**
                 // This ensures the rate_limit_tracking table is populated
                 if (chat.userId) {
-                  await this.rateLimiter.recordMessage(
-                    chat.userId,
-                    chatId,
-                    { isAiMessage: true, senderId }
-                  );
+                  await this.rateLimiter.recordMessage(chat.userId, chatId, {
+                    isAiMessage: true,
+                    senderId,
+                  });
                   this.logger.debug(
                     `[RateLimit] Recorded AI message for chat ${chatId}`,
                   );
@@ -2712,7 +2713,10 @@ export class WhatsAppService implements OnModuleInit {
    * Manually trigger AI response for a chat (used when Resuming AI)
    * Reprocesses the last customer message and dispatches a response if AI generates one.
    */
-  async triggerAiResponseForResume(chatId: string, userId: number): Promise<void> {
+  async triggerAiResponseForResume(
+    chatId: string,
+    userId: number,
+  ): Promise<void> {
     try {
       this.logger.log(`[Resume AI] Triggering AI response for chat ${chatId}`);
 
@@ -2733,7 +2737,9 @@ export class WhatsAppService implements OnModuleInit {
       });
 
       if (!lastMessage || lastMessage.direction !== 'inbound') {
-        this.logger.log(`[Resume AI] Last message was not inbound or undefined. No reply needed.`);
+        this.logger.log(
+          `[Resume AI] Last message was not inbound or undefined. No reply needed.`,
+        );
         return;
       }
 
@@ -2743,12 +2749,16 @@ export class WhatsAppService implements OnModuleInit {
       });
 
       if (!sender || !sender.phoneNumberId) {
-        this.logger.error(`[Resume AI] Sender configuration missing for chat ${chatId}`);
+        this.logger.error(
+          `[Resume AI] Sender configuration missing for chat ${chatId}`,
+        );
         return;
       }
 
       // 4. Call Workflow Engine
-      this.logger.log(`[Resume AI] Processing message ${lastMessage.messageId} for AI response...`);
+      this.logger.log(
+        `[Resume AI] Processing message ${lastMessage.messageId} for AI response...`,
+      );
 
       const workflowResult = await this.workflowEngine.processMessage({
         chatId,
@@ -2774,14 +2784,18 @@ export class WhatsAppService implements OnModuleInit {
           workflowResult.aiResponse,
           userId,
           chat.senderId,
-          sender
+          sender,
         );
       } else {
-        this.logger.log(`[Resume AI] No response generated or shouldSend=false.`);
+        this.logger.log(
+          `[Resume AI] No response generated or shouldSend=false.`,
+        );
       }
-
     } catch (error) {
-      this.logger.error(`[Resume AI] Error triggering response: ${error.message}`, error);
+      this.logger.error(
+        `[Resume AI] Error triggering response: ${error.message}`,
+        error,
+      );
     }
   }
 
@@ -2800,21 +2814,20 @@ export class WhatsAppService implements OnModuleInit {
     },
     userId: number | undefined,
     senderId: number,
-    sender: any
+    sender: any,
   ): Promise<void> {
-
     // Check if we have a media attachment to send
     const mediaAttachment = aiResponse.mediaAttachment;
 
     // STEP 0: Record Rate Limit Usage
     // We record this BEFORE trying to send to ensure we account for the attempt
     // regardless of whether the specific API call succeeds (fail-safe accounting)
-    if (userId) { // Should always be present for AI responses
-      await this.rateLimiter.recordMessage(
-        userId,
-        chatId,
-        { isAiMessage: true, senderId }
-      );
+    if (userId) {
+      // Should always be present for AI responses
+      await this.rateLimiter.recordMessage(userId, chatId, {
+        isAiMessage: true,
+        senderId,
+      });
     }
 
     if (mediaAttachment) {
@@ -2835,11 +2848,9 @@ export class WhatsAppService implements OnModuleInit {
       const aiResponseText = aiResponse.content;
 
       // For documents/videos/images, we can include caption with the media
-      const mediaSupportsCaption = [
-        'image',
-        'video',
-        'document',
-      ].includes(mediaAttachment.mediaType);
+      const mediaSupportsCaption = ['image', 'video', 'document'].includes(
+        mediaAttachment.mediaType,
+      );
 
       // WhatsApp caption limits:
       // - Images: 1024 characters
@@ -2866,10 +2877,7 @@ export class WhatsAppService implements OnModuleInit {
       }
 
       // Send text first if media doesn't support caption OR if caption was too long
-      if (
-        textToSendSeparately ||
-        (!mediaSupportsCaption && aiResponseText)
-      ) {
+      if (textToSendSeparately || (!mediaSupportsCaption && aiResponseText)) {
         const textToSend = textToSendSeparately || aiResponseText;
         const textMessage = {
           messaging_product: 'whatsapp' as const,
@@ -2934,9 +2942,7 @@ export class WhatsAppService implements OnModuleInit {
 
       const mediaMessageId = mediaResponse.messages?.[0]?.id;
       if (!mediaMessageId) {
-        throw new Error(
-          'No message ID returned from Cloud API for media',
-        );
+        throw new Error('No message ID returned from Cloud API for media');
       }
 
       this.logger.log(
@@ -3004,16 +3010,15 @@ export class WhatsAppService implements OnModuleInit {
         );
 
         try {
-          const interactiveResult =
-            await this.sendInteractiveButtons(
-              senderId,
-              recipientPhone,
-              'What would you like to do next?', // Simple followup text
-              interactiveData.buttons,
-              interactiveData.footerText,
-              undefined, // headerText
-              { isAiGenerated: true },
-            );
+          const interactiveResult = await this.sendInteractiveButtons(
+            senderId,
+            recipientPhone,
+            'What would you like to do next?', // Simple followup text
+            interactiveData.buttons,
+            interactiveData.footerText,
+            undefined, // headerText
+            { isAiGenerated: true },
+          );
 
           if (!interactiveResult.success) {
             this.logger.warn(
@@ -3078,9 +3083,7 @@ export class WhatsAppService implements OnModuleInit {
 
           const aiMessageId = response.messages?.[0]?.id;
           if (!aiMessageId) {
-            throw new Error(
-              'No message ID returned from Cloud API',
-            );
+            throw new Error('No message ID returned from Cloud API');
           }
 
           this.logger.log(
@@ -3098,11 +3101,7 @@ export class WhatsAppService implements OnModuleInit {
             isAiGenerated: true,
           });
 
-          await this.updateChatLastMessage(
-            chatId,
-            aiResponse.content,
-            'text',
-          );
+          await this.updateChatLastMessage(chatId, aiResponse.content, 'text');
 
           if (whatsAppGatewayInstance) {
             whatsAppGatewayInstance.emitMessage({
@@ -3130,10 +3129,7 @@ export class WhatsAppService implements OnModuleInit {
           );
 
           // Emit message via WebSocket for real-time UI update
-          if (
-            whatsAppGatewayInstance &&
-            interactiveResult.waMessageId
-          ) {
+          if (whatsAppGatewayInstance && interactiveResult.waMessageId) {
             whatsAppGatewayInstance.emitMessage({
               messageId: interactiveResult.waMessageId,
               chatId,
@@ -3185,11 +3181,7 @@ export class WhatsAppService implements OnModuleInit {
           isAiGenerated: true,
         });
 
-        await this.updateChatLastMessage(
-          chatId,
-          aiResponse.content,
-          'text',
-        );
+        await this.updateChatLastMessage(chatId, aiResponse.content, 'text');
 
         if (whatsAppGatewayInstance) {
           whatsAppGatewayInstance.emitMessage({
@@ -3713,9 +3705,9 @@ export class WhatsAppService implements OnModuleInit {
         // Interactive message metadata stored in metadata jsonb
         metadata: messageData.isInteractive
           ? {
-            interactiveType: messageData.interactiveType,
-            interactiveData: messageData.interactiveData,
-          }
+              interactiveType: messageData.interactiveType,
+              interactiveData: messageData.interactiveData,
+            }
           : null,
       });
 
@@ -3902,31 +3894,31 @@ export class WhatsAppService implements OnModuleInit {
 
       const attachments = messageData.mediaMetadata
         ? [
-          {
-            id: messageData.mediaMetadata.mediaId,
-            type: messageData.mediaMetadata.type, // Use the actual media type (gif, sticker, video, etc.)
-            fileName:
-              messageData.mediaMetadata.filename ||
-              `${messageData.mediaMetadata.type}_${messageData.mediaMetadata.mediaId}`,
-            mimeType: messageData.mediaMetadata.mimeType || '',
-            size: messageData.mediaMetadata.fileSize || 0,
-            s3Key: s3Key, // Will be empty string if caching failed, that's ok
-            thumbnailStatus: thumbnailStatus,
-            status: 'success',
-            uploadedAt: new Date().toISOString(),
-            // Only use cloud-api:// as fallback if S3 caching failed
-            mediaUrl: s3Key
-              ? ''
-              : `cloud-api://${messageData.mediaMetadata.mediaId}`,
-            // Voice note flag for audio messages
-            isVoiceNote: messageData.mediaMetadata.isVoiceNote || false,
-            // Animated flag for stickers and gifs
-            isAnimated: messageData.mediaMetadata.isAnimated || false,
-          },
-        ]
+            {
+              id: messageData.mediaMetadata.mediaId,
+              type: messageData.mediaMetadata.type, // Use the actual media type (gif, sticker, video, etc.)
+              fileName:
+                messageData.mediaMetadata.filename ||
+                `${messageData.mediaMetadata.type}_${messageData.mediaMetadata.mediaId}`,
+              mimeType: messageData.mediaMetadata.mimeType || '',
+              size: messageData.mediaMetadata.fileSize || 0,
+              s3Key: s3Key, // Will be empty string if caching failed, that's ok
+              thumbnailStatus: thumbnailStatus,
+              status: 'success',
+              uploadedAt: new Date().toISOString(),
+              // Only use cloud-api:// as fallback if S3 caching failed
+              mediaUrl: s3Key
+                ? ''
+                : `cloud-api://${messageData.mediaMetadata.mediaId}`,
+              // Voice note flag for audio messages
+              isVoiceNote: messageData.mediaMetadata.isVoiceNote || false,
+              // Animated flag for stickers and gifs
+              isAnimated: messageData.mediaMetadata.isAnimated || false,
+            },
+          ]
         : messageData.contactsData
           ? // For contacts, store the contact data in attachments as JSON
-          messageData.contactsData
+            messageData.contactsData
           : [];
 
       await db.insert(messages).values({
@@ -4141,6 +4133,24 @@ export class WhatsAppService implements OnModuleInit {
         this.logger.log(
           `Chat created: ${chatId} for sender ${senderId} with participant name: ${participantName}`,
         );
+
+        // Initialize workflow for the new chat - assigns to first/default stage
+        // This ensures the chat appears in the Kanban board
+        if (this.workflowEngine && sender?.userId) {
+          try {
+            await this.workflowEngine.initializeChatWorkflow(
+              chatId,
+              sender.userId,
+            );
+            this.logger.log(`Workflow initialized for new chat: ${chatId}`);
+          } catch (workflowError) {
+            // Log but don't fail - workflow initialization is not critical for message delivery
+            this.logger.warn(
+              `Failed to initialize workflow for chat ${chatId}: ${(workflowError as Error).message}`,
+            );
+          }
+        }
+
         return { chat: newChat, isNewChat: true };
       }
 

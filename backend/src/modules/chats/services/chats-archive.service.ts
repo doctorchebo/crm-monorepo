@@ -2,7 +2,8 @@ import { db } from '@database/db.connection';
 import { Chat, chats } from '@database/schema';
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { and, desc, eq, sql } from 'drizzle-orm';
-import { CHAT_UPDATE_GATEWAY, IChatUpdateGateway } from './chat.types';
+import { CHAT_UPDATE_GATEWAY } from './chat.types';
+import type { IChatUpdateGateway } from './chat.types';
 import { ChatsCrudService } from './chats-crud.service';
 
 /**

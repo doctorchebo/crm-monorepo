@@ -59,6 +59,9 @@ import {
   UsageThrottleService,
   UsageTrackingService,
   WorkflowEngineService,
+  InteractiveResponseHandler,
+  AiResponseGenerator,
+  WorkflowStatusService,
 } from './services';
 import { WorkflowController } from './workflow.controller';
 
@@ -96,6 +99,11 @@ import { WhatsAppModule } from '@modules/whatsapp/whatsapp.module'; // Import mo
     UsageThrottleService,
     HandoffNotificationGateway,
 
+    // Workflow Engine components
+    InteractiveResponseHandler,
+    AiResponseGenerator,
+    WorkflowStatusService,
+
     // Main orchestrator
     WorkflowEngineService,
   ],
@@ -122,4 +130,4 @@ import { WhatsAppModule } from '@modules/whatsapp/whatsapp.module'; // Import mo
     UsageThrottleService,
   ],
 })
-export class WorkflowModule { }
+export class WorkflowModule {}

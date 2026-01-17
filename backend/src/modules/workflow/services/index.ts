@@ -8,7 +8,7 @@ export * from './llm.service';
 export * from './policy-simulation.service';
 export * from './rule-engine.service';
 export * from './stage.service';
-export * from './workflow-engine.service';
+export * from './workflow-engine';
 
 // Anti-ban safeguards
 export * from './ai-action-logger.service';

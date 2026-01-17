@@ -23,7 +23,8 @@ import {
   SearchChatsResponse,
   SearchChatsResult,
 } from '../dto/search-chats.dto';
-import { CHAT_UPDATE_GATEWAY, IChatUpdateGateway } from './chat.types';
+import { CHAT_UPDATE_GATEWAY } from './chat.types';
+import type { IChatUpdateGateway } from './chat.types';
 import { ChatsArchiveService } from './chats-archive.service';
 import { ChatsCrudService } from './chats-crud.service';
 
