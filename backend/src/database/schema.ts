@@ -87,7 +87,205 @@ export const userSettings = pgTable(
 export type UserSetting = typeof userSettings.$inferSelect;
 export type NewUserSetting = typeof userSettings.$inferInsert;
 
+// ==================== Team Collaboration Tables ====================
+
+/**
+ * Teams table - organizational units that own chats
+ * Teams enable multi-tenant collaboration where multiple users can work on the same chats
+ */
+export const teams = pgTable(
+  'teams',
+  {
+    id: serial('id').primaryKey(),
+    name: varchar('name', { length: 100 }).notNull(),
+    ownerId: integer('owner_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    description: text('description'),
+    isActive: boolean('is_active').default(true),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (table) => ({
+    ownerIdIndex: index('idx_teams_owner_id').on(table.ownerId),
+  }),
+);
+
+export type Team = typeof teams.$inferSelect;
+export type NewTeam = typeof teams.$inferInsert;
+
+/**
+ * Team Members table - users belonging to teams with role-based permissions
+ * Roles: owner (full control), admin (manage members/chats), agent (work on assigned chats), viewer (read-only)
+ */
+export const teamMembers = pgTable(
+  'team_members',
+  {
+    id: serial('id').primaryKey(),
+    teamId: integer('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    role: varchar('role', { length: 20 }).notNull().default('agent'), // 'owner', 'admin', 'agent', 'viewer'
+    joinedAt: timestamp('joined_at').defaultNow(),
+    invitedBy: integer('invited_by').references(() => users.id),
+    isActive: boolean('is_active').default(true),
+  },
+  (table) => ({
+    teamIdIndex: index('idx_team_members_team_id').on(table.teamId),
+    userIdIndex: index('idx_team_members_user_id').on(table.userId),
+    roleIndex: index('idx_team_members_role').on(table.role),
+    uniqueTeamUser: unique().on(table.teamId, table.userId),
+  }),
+);
+
+export type TeamMember = typeof teamMembers.$inferSelect;
+export type NewTeamMember = typeof teamMembers.$inferInsert;
+
+/**
+ * Invitations table - email-based team invitations with signed tokens
+ * Invitations can be accepted by existing users or trigger account creation
+ */
+export const invitations = pgTable(
+  'invitations',
+  {
+    id: serial('id').primaryKey(),
+    teamId: integer('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    email: varchar('email', { length: 255 }).notNull(),
+    role: varchar('role', { length: 20 }).notNull().default('agent'), // 'owner', 'admin', 'agent', 'viewer'
+    invitedBy: integer('invited_by')
+      .notNull()
+      .references(() => users.id),
+    status: varchar('status', { length: 20 }).notNull().default('pending'), // 'pending', 'accepted', 'expired', 'revoked'
+    token: text('token').unique(), // Signed JWT token for secure acceptance
+    tokenHash: varchar('token_hash', { length: 255 }), // Hashed token for security
+    expiresAt: timestamp('expires_at'), // Token expiration
+    acceptedAt: timestamp('accepted_at'), // When invitation was accepted
+    emailSentAt: timestamp('email_sent_at'), // When email was successfully sent
+    deliveryStatus: varchar('delivery_status', { length: 20 }).default(
+      'PENDING',
+    ), // 'PENDING', 'SENT', 'FAILED'
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (table) => ({
+    tokenIndex: index('idx_invitations_token').on(table.token),
+    emailIndex: index('idx_invitations_email').on(table.email),
+    teamIdIndex: index('idx_invitations_team_id').on(table.teamId),
+    statusIndex: index('idx_invitations_status').on(table.status),
+    deliveryStatusIndex: index('idx_invitations_delivery_status').on(
+      table.deliveryStatus,
+    ),
+  }),
+);
+
+export type Invitation = typeof invitations.$inferSelect;
+export type NewInvitation = typeof invitations.$inferInsert;
+
+/**
+ * Invitation Rate Limits table - tracks invitation counts per user/team for rate limiting
+ */
+export const invitationRateLimits = pgTable(
+  'invitation_rate_limits',
+  {
+    id: serial('id').primaryKey(),
+    userId: integer('user_id').references(() => users.id, {
+      onDelete: 'cascade',
+    }),
+    teamId: integer('team_id').references(() => teams.id, {
+      onDelete: 'cascade',
+    }),
+    periodType: varchar('period_type', { length: 20 }).notNull(), // 'hourly' or 'daily'
+    periodStart: timestamp('period_start').notNull(),
+    count: integer('count').default(1),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (table) => ({
+    userPeriodIndex: index('idx_rate_limits_user_period').on(
+      table.userId,
+      table.periodStart,
+    ),
+    teamPeriodIndex: index('idx_rate_limits_team_period').on(
+      table.teamId,
+      table.periodStart,
+    ),
+  }),
+);
+
+export type InvitationRateLimit = typeof invitationRateLimits.$inferSelect;
+export type NewInvitationRateLimit = typeof invitationRateLimits.$inferInsert;
+
+/**
+ * Chat Locks table - exclusive control mechanism for chats
+ * Only ONE actor (human or AI) may control a chat at a time
+ * Lock TTLs: human=5min, ai=30sec, system=1min
+ *
+ * CRITICAL: AI MUST check locks before any action and release immediately after
+ */
+export const chatLocks = pgTable(
+  'chat_locks',
+  {
+    chatId: varchar('chat_id').notNull().primaryKey(),
+    lockedBy: integer('locked_by')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    lockType: varchar('lock_type', { length: 20 }).notNull(), // 'human', 'ai', 'system'
+    lockedAt: timestamp('locked_at').notNull().defaultNow(),
+    expiresAt: timestamp('expires_at').notNull(),
+    reason: text('reason'),
+  },
+  (table) => ({
+    lockedByIndex: index('idx_chat_locks_locked_by').on(table.lockedBy),
+    expiresAtIndex: index('idx_chat_locks_expires_at').on(table.expiresAt),
+    lockTypeIndex: index('idx_chat_locks_lock_type').on(table.lockType),
+  }),
+);
+
+export type ChatLock = typeof chatLocks.$inferSelect;
+export type NewChatLock = typeof chatLocks.$inferInsert;
+
+/**
+ * Activity Logs table - comprehensive audit trail for all system actions
+ * No frontend-only logging allowed - all logged server-side
+ */
+export const activityLogs = pgTable(
+  'activity_logs',
+  {
+    id: serial('id').primaryKey(),
+    userId: integer('user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    teamId: integer('team_id').references(() => teams.id, {
+      onDelete: 'set null',
+    }),
+    entityType: varchar('entity_type', { length: 50 }), // 'chat', 'message', 'team', 'invitation', etc.
+    entityId: text('entity_id'), // ID of the affected entity
+    action: varchar('action', { length: 50 }), // 'lock_acquired', 'message_sent', 'stage_moved', etc.
+    metadata: jsonb('metadata').default({}), // Additional context
+    ipAddress: varchar('ip_address', { length: 45 }),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (table) => ({
+    entityTypeIndex: index('idx_activity_logs_entity_type').on(
+      table.entityType,
+    ),
+    entityIdIndex: index('idx_activity_logs_entity_id').on(table.entityId),
+    actionIndex: index('idx_activity_logs_action').on(table.action),
+    teamIdIndex: index('idx_activity_logs_team_id').on(table.teamId),
+    userIdIndex: index('idx_activity_logs_user_id').on(table.userId),
+    createdAtIndex: index('idx_activity_logs_created_at').on(table.createdAt),
+  }),
+);
+
+export type ActivityLog = typeof activityLogs.$inferSelect;
+export type NewActivityLog = typeof activityLogs.$inferInsert;
+
 // Chats table - stores conversations with phone numbers
+// Extended with team ownership and assignment columns
 export const chats = pgTable(
   'chats',
   {
@@ -112,6 +310,17 @@ export const chats = pgTable(
     isActive: boolean('is_active').default(true),
     isArchived: boolean('is_archived').default(false), // Whether the chat is archived
     archivedAt: timestamp('archived_at'), // When the chat was archived
+    // Team ownership and assignment (from team collaboration system)
+    teamId: integer('team_id').references(() => teams.id, {
+      onDelete: 'set null',
+    }), // Team that owns this chat
+    assignedTo: integer('assigned_to').references(() => users.id, {
+      onDelete: 'set null',
+    }), // User assigned responsibility
+    assignedAt: timestamp('assigned_at'), // When assignment was made
+    assignedBy: integer('assigned_by').references(() => users.id, {
+      onDelete: 'set null',
+    }), // Who made the assignment
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
   },
@@ -121,6 +330,8 @@ export const chats = pgTable(
     lastActivityTypeIndex: index('idx_chats_last_activity_type').on(
       table.lastActivityType,
     ),
+    teamIdIndex: index('idx_chats_team_id').on(table.teamId),
+    assignedToIndex: index('idx_chats_assigned_to').on(table.assignedTo),
   }),
 );
 
@@ -575,9 +786,94 @@ export const notesRelations = relations(notes, ({ one }) => ({
   }),
 }));
 
-// Add relations to chats table for notes
-export const chatsRelations = relations(chats, ({ many }) => ({
+// ==================== Team Collaboration Relations ====================
+
+// Teams relations
+export const teamsRelations = relations(teams, ({ one, many }) => ({
+  owner: one(users, {
+    fields: [teams.ownerId],
+    references: [users.id],
+  }),
+  members: many(teamMembers),
+  invitations: many(invitations),
+  chats: many(chats),
+  activityLogs: many(activityLogs),
+}));
+
+// Team Members relations
+export const teamMembersRelations = relations(teamMembers, ({ one }) => ({
+  team: one(teams, {
+    fields: [teamMembers.teamId],
+    references: [teams.id],
+  }),
+  user: one(users, {
+    fields: [teamMembers.userId],
+    references: [users.id],
+  }),
+  inviter: one(users, {
+    fields: [teamMembers.invitedBy],
+    references: [users.id],
+    relationName: 'inviter',
+  }),
+}));
+
+// Invitations relations
+export const invitationsRelations = relations(invitations, ({ one }) => ({
+  team: one(teams, {
+    fields: [invitations.teamId],
+    references: [teams.id],
+  }),
+  inviter: one(users, {
+    fields: [invitations.invitedBy],
+    references: [users.id],
+  }),
+}));
+
+// Chat Locks relations
+export const chatLocksRelations = relations(chatLocks, ({ one }) => ({
+  chat: one(chats, {
+    fields: [chatLocks.chatId],
+    references: [chats.chatId],
+  }),
+  locker: one(users, {
+    fields: [chatLocks.lockedBy],
+    references: [users.id],
+  }),
+}));
+
+// Activity Logs relations
+export const activityLogsRelations = relations(activityLogs, ({ one }) => ({
+  user: one(users, {
+    fields: [activityLogs.userId],
+    references: [users.id],
+  }),
+  team: one(teams, {
+    fields: [activityLogs.teamId],
+    references: [teams.id],
+  }),
+}));
+
+// Add relations to chats table for notes, team, and assignment
+export const chatsRelations = relations(chats, ({ one, many }) => ({
   notes: many(notes),
+  team: one(teams, {
+    fields: [chats.teamId],
+    references: [teams.id],
+  }),
+  assignee: one(users, {
+    fields: [chats.assignedTo],
+    references: [users.id],
+    relationName: 'assignee',
+  }),
+  assigner: one(users, {
+    fields: [chats.assignedBy],
+    references: [users.id],
+    relationName: 'assigner',
+  }),
+  lock: one(chatLocks, {
+    fields: [chats.chatId],
+    references: [chatLocks.chatId],
+  }),
 }));
 
 // Add relations to messages table for notes
@@ -1298,7 +1594,9 @@ export const rateLimitTracking = pgTable(
     // Counters
     messageCount: integer('message_count').default(0).notNull(),
     aiMessageCount: integer('ai_message_count').default(0).notNull(),
-    templateMessageCount: integer('template_message_count').default(0).notNull(),
+    templateMessageCount: integer('template_message_count')
+      .default(0)
+      .notNull(),
 
     // Session tracking (specific to 24h window)
     lastCustomerMessageAt: timestamp('last_customer_message_at'),
@@ -1318,7 +1616,7 @@ export const rateLimitTracking = pgTable(
       table.chatId,
       table.senderId,
       table.windowType,
-      table.windowStart
+      table.windowStart,
     ),
     userIdIndex: index('idx_rate_limit_user_id').on(table.userId),
     chatIdIndex: index('idx_rate_limit_chat_id').on(table.chatId),
@@ -2114,4 +2412,3 @@ export * from './knowledge-base.schema';
 
 // Export AI context schema (lightweight replacement for AI memory)
 export * from './ai-context.schema';
-

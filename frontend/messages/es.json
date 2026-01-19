@@ -503,7 +503,10 @@
     "remove": "Eliminar",
     "removing": "Eliminando...",
     "inviteMember": "Invitar Miembro",
-    "inviting": "Invitando..."
+    "inviting": "Invitando...",
+    "invitationSent": "¡Invitación enviada! El invitado recibirá un correo electrónico en breve.",
+    "invitationFailed": "Error al enviar la invitación. Por favor, intenta de nuevo.",
+    "invitationEmailSent": "Se ha enviado un correo electrónico a {email}"
   },
   "general": {
     "title": "Configuración General",

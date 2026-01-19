@@ -514,7 +514,10 @@
     "remove": "Remove",
     "removing": "Removing...",
     "inviteMember": "Invite Member",
-    "inviting": "Inviting..."
+    "inviting": "Inviting...",
+    "invitationSent": "Invitation sent! The invitee will receive an email shortly.",
+    "invitationFailed": "Failed to send invitation. Please try again.",
+    "invitationEmailSent": "An email has been sent to {email}"
   },
   "general": {
     "title": "General Settings",

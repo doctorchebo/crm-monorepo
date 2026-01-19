@@ -29,7 +29,7 @@ async function logActivity(
   teamId: number | null | undefined,
   userId: number,
   type: ActivityType,
-  ipAddress?: string
+  ipAddress?: string,
 ) {
   if (teamId === null || teamId === undefined) {
     return;
@@ -45,7 +45,7 @@ async function logActivity(
 
 async function authenticateWithBackend(
   email: string,
-  password: string
+  password: string,
 ): Promise<{
   access_token: string;
   refresh_token: string;
@@ -73,7 +73,7 @@ async function authenticateWithBackend(
     const setCookieHeaders = response.headers.getSetCookie();
     console.log(
       "[authenticateWithBackend] Set-Cookie headers from backend:",
-      setCookieHeaders.length
+      setCookieHeaders.length,
     );
 
     return {
@@ -121,7 +121,7 @@ export const signIn = validatedAction(signInSchema, async (data, formData) => {
 
   const isPasswordValid = await comparePasswords(
     password,
-    foundUser.passwordHash
+    foundUser.passwordHash,
   );
 
   if (!isPasswordValid) {
@@ -202,7 +202,7 @@ export const signIn = validatedAction(signInSchema, async (data, formData) => {
       sameSite: "lax",
       path: "/",
       expires: refreshTokenExpiry,
-    }
+    },
   );
 
   console.log("[SignIn] All cookies set successfully");
@@ -279,8 +279,8 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
         and(
           eq(invitations.id, parseInt(inviteId)),
           eq(invitations.email, email),
-          eq(invitations.status, "pending")
-        )
+          eq(invitations.status, "pending"),
+        ),
       )
       .limit(1);
 
@@ -397,7 +397,7 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
       sameSite: "lax",
       path: "/",
       expires: refreshTokenExpiry,
-    }
+    },
   );
 
   console.log("[SignUp] All JWT cookies set successfully");
@@ -431,7 +431,7 @@ export const updatePassword = validatedActionWithUser(
 
     const isPasswordValid = await comparePasswords(
       currentPassword,
-      user.passwordHash
+      user.passwordHash,
     );
 
     if (!isPasswordValid) {
@@ -475,7 +475,7 @@ export const updatePassword = validatedActionWithUser(
     return {
       success: "Password updated successfully.",
     };
-  }
+  },
 );
 
 const deleteAccountSchema = z.object({
@@ -500,7 +500,7 @@ export const deleteAccount = validatedActionWithUser(
     await logActivity(
       userWithTeam?.teamId,
       user.id,
-      ActivityType.DELETE_ACCOUNT
+      ActivityType.DELETE_ACCOUNT,
     );
 
     // Soft delete
@@ -518,14 +518,14 @@ export const deleteAccount = validatedActionWithUser(
         .where(
           and(
             eq(teamMembers.userId, user.id),
-            eq(teamMembers.teamId, userWithTeam.teamId)
-          )
+            eq(teamMembers.teamId, userWithTeam.teamId),
+          ),
         );
     }
 
     (await cookies()).delete("session");
     redirect("/sign-in");
-  }
+  },
 );
 
 const updateAccountSchema = z.object({
@@ -545,7 +545,7 @@ export const updateAccount = validatedActionWithUser(
     ]);
 
     return { name, success: "Account updated successfully." };
-  }
+  },
 );
 
 const removeTeamMemberSchema = z.object({
@@ -567,23 +567,23 @@ export const removeTeamMember = validatedActionWithUser(
       .where(
         and(
           eq(teamMembers.id, memberId),
-          eq(teamMembers.teamId, userWithTeam.teamId)
-        )
+          eq(teamMembers.teamId, userWithTeam.teamId),
+        ),
       );
 
     await logActivity(
       userWithTeam.teamId,
       user.id,
-      ActivityType.REMOVE_TEAM_MEMBER
+      ActivityType.REMOVE_TEAM_MEMBER,
     );
 
     return { success: "Team member removed successfully" };
-  }
+  },
 );
 
 const inviteTeamMemberSchema = z.object({
   email: z.string().email("Invalid email address"),
-  role: z.enum(["member", "owner"]),
+  role: z.enum(["member", "owner", "admin", "agent", "viewer"]),
 });
 
 export const inviteTeamMember = validatedActionWithUser(
@@ -596,56 +596,48 @@ export const inviteTeamMember = validatedActionWithUser(
       return { error: "User is not part of a team" };
     }
 
-    const existingMember = await db
-      .select()
-      .from(users)
-      .leftJoin(teamMembers, eq(users.id, teamMembers.userId))
-      .where(
-        and(eq(users.email, email), eq(teamMembers.teamId, userWithTeam.teamId))
-      )
-      .limit(1);
+    try {
+      // Get JWT token from cookies to authenticate with backend
+      const cookieJar = await cookies();
+      const jwtToken = cookieJar.get("jwt_token")?.value;
 
-    if (existingMember.length > 0) {
-      return { error: "User is already a member of this team" };
+      if (!jwtToken) {
+        return { error: "Authentication required. Please sign in again." };
+      }
+
+      const backendUrl =
+        process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+
+      // Call backend API which handles SQS email delivery
+      const response = await fetch(
+        `${backendUrl}/teams/${userWithTeam.teamId}/invite`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${jwtToken}`,
+          },
+          body: JSON.stringify({ email, role }),
+        },
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const errorMessage =
+          errorData.message || `Failed to send invitation (${response.status})`;
+        console.error("[inviteTeamMember] Backend error:", errorMessage);
+        return { error: errorMessage };
+      }
+
+      const result = await response.json();
+      console.log("[inviteTeamMember] Invitation sent successfully:", result);
+
+      return { success: "Invitation sent successfully" };
+    } catch (error) {
+      console.error("[inviteTeamMember] Failed to send invitation:", error);
+      return { error: "Failed to send invitation. Please try again." };
     }
-
-    // Check if there's an existing invitation
-    const existingInvitation = await db
-      .select()
-      .from(invitations)
-      .where(
-        and(
-          eq(invitations.email, email),
-          eq(invitations.teamId, userWithTeam.teamId),
-          eq(invitations.status, "pending")
-        )
-      )
-      .limit(1);
-
-    if (existingInvitation.length > 0) {
-      return { error: "An invitation has already been sent to this email" };
-    }
-
-    // Create a new invitation
-    await db.insert(invitations).values({
-      teamId: userWithTeam.teamId,
-      email,
-      role,
-      invitedBy: user.id,
-      status: "pending",
-    });
-
-    await logActivity(
-      userWithTeam.teamId,
-      user.id,
-      ActivityType.INVITE_TEAM_MEMBER
-    );
-
-    // TODO: Send invitation email and include ?inviteId={id} to sign-up URL
-    // await sendInvitationEmail(email, userWithTeam.team.name, role)
-
-    return { success: "Invitation sent successfully" };
-  }
+  },
 );
 
 /**

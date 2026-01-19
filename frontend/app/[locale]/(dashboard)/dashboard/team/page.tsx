@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import {
   inviteTeamMember,
   removeTeamMember,
@@ -16,6 +17,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { useNotification } from "@/hooks/use-notification";
 import { TeamDataWithMembers, User } from "@/lib/db/schema";
 import { customerPortalAction } from "@/lib/payments/actions";
 import { Loader2, PlusCircle } from "lucide-react";
@@ -203,6 +205,22 @@ function InviteTeamMember() {
     ActionState,
     FormData
   >(inviteTeamMember, {});
+  const [lastProcessedState, setLastProcessedState] = React.useState<ActionState | null>(null);
+  const { addNotification } = useNotification();
+
+  // Show notifications when invitation state changes
+  React.useEffect(() => {
+    // Avoid showing notification for the same state twice
+    if (!inviteState || inviteState === lastProcessedState) return;
+    
+    if (inviteState.success) {
+      addNotification(t("invitationSent"), "success");
+      setLastProcessedState(inviteState);
+    } else if (inviteState.error) {
+      addNotification(inviteState.error, "error");
+      setLastProcessedState(inviteState);
+    }
+  }, [inviteState, lastProcessedState, addNotification, t]);
 
   return (
     <Card>
@@ -242,12 +260,6 @@ function InviteTeamMember() {
               </div>
             </RadioGroup>
           </div>
-          {inviteState?.error && (
-            <p className="text-red-500">{inviteState.error}</p>
-          )}
-          {inviteState?.success && (
-            <p className="text-green-500">{inviteState.success}</p>
-          )}
           <Button type="submit" disabled={isInvitePending || !isOwner}>
             {isInvitePending ? (
               <>

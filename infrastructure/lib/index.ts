@@ -6,6 +6,7 @@
 
 // Stacks
 export * from "./media-compression-stack";
+export * from "./invitation-email-stack";
 
 // Constructs
 export * from "./constructs";

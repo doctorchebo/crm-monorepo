@@ -11,17 +11,28 @@ import {
   ChatsCleanupService,
   ChatsCrudService,
   ChatsMessagesService,
+  ChatLockService,
+  ChatAssignmentService,
 } from './services';
+import { ChatLockController } from './controllers/chat-lock.controller';
+import { ChatAssignmentController } from './controllers/chat-assignment.controller';
+import { PermissionService } from '../../shared/services/permission.service';
+import { AuditService } from '../../shared/services/audit.service';
 
 @Module({
   imports: [forwardRef(() => WhatsAppModule), AiMemoryModule],
-  controllers: [ChatsController],
+  controllers: [ChatsController, ChatLockController, ChatAssignmentController],
   providers: [
     // Sub-services (order matters for dependency injection)
     ChatsCrudService,
     ChatsArchiveService,
     ChatsMessagesService,
     ChatsCleanupService,
+    // Team collaboration services
+    ChatLockService,
+    ChatAssignmentService,
+    PermissionService,
+    AuditService,
     // Main facade service
     ChatsService,
     // Shared services
@@ -37,6 +48,8 @@ import {
     ChatsArchiveService,
     ChatsMessagesService,
     ChatsCleanupService,
+    ChatLockService,
+    ChatAssignmentService,
   ],
 })
 export class ChatsModule {}

@@ -68,6 +68,9 @@ import { AiConfigurationService } from '../ai-configuration.service';
 import { RateLimiterService } from '../rate-limiter.service';
 import { StageService } from '../stage.service';
 
+// Chat Lock Service for AI Safety
+import { ChatLockService } from '@modules/chats/services/chat-lock.service';
+
 // Workflow Engine components
 import { InteractiveResponseHandler } from './interactive-response.handler';
 import { AiResponseGenerator } from './ai-response.generator';
@@ -118,6 +121,9 @@ export class WorkflowEngineService implements OnModuleInit {
     @Inject(forwardRef(() => WhatsAppService))
     @Optional()
     private readonly whatsappService?: WhatsAppService,
+    // Chat Lock Service for AI Safety (ensuring only one actor controls a chat)
+    @Optional()
+    private readonly chatLockService?: ChatLockService,
   ) {}
 
   onModuleInit(): void {
@@ -275,8 +281,46 @@ export class WorkflowEngineService implements OnModuleInit {
 
       // Step 6: Determine AI response (if enabled)
       let aiResponse: ProcessMessageResult['aiResponse'];
+      let aiLockAcquired = false;
 
       if (canAI) {
+        // CRITICAL: AI Safety - Acquire lock before any AI action
+        // AI MUST check for existing locks and cannot override human locks
+        if (this.chatLockService) {
+          const lockResult = await this.chatLockService.acquireLock(
+            chatId,
+            userId,
+            'ai',
+            'AI processing incoming message',
+          );
+
+          if (!lockResult.success) {
+            // Lock held by human - AI must NOT proceed
+            this.logger.warn(
+              `[AI Safety] AI blocked: chat ${chatId} is locked by ${lockResult.currentHolder?.lockType ?? 'unknown'}. ` +
+                `Lock holder: user ${lockResult.currentHolder?.lockedBy ?? 'unknown'}. AI yielding control.`,
+            );
+
+            // Return early - DO NOT generate AI response
+            return {
+              success: true,
+              classification,
+              stageTransition,
+              aiResponse: {
+                content: '',
+                confidence: 0,
+                shouldSend: false,
+                requiresHandoff: false,
+              },
+            };
+          }
+
+          aiLockAcquired = true;
+          this.logger.debug(
+            `[AI Safety] AI lock acquired for chat ${chatId}, expires at ${lockResult.lock?.expiresAt?.toISOString() ?? 'unknown'}`,
+          );
+        }
+
         this.logger.log(
           `[AI Response] Generating AI response for chat ${chatId}...`,
         );
@@ -362,7 +406,13 @@ export class WorkflowEngineService implements OnModuleInit {
         );
       }
 
-      // Step 7: Policy check (non-blocking)
+      // Step 7: Release AI lock if acquired
+      if (aiLockAcquired && this.chatLockService) {
+        await this.chatLockService.releaseLock(chatId, userId);
+        this.logger.debug(`[AI Safety] AI lock released for chat ${chatId}`);
+      }
+
+      // Step 8: Policy check (non-blocking)
       const policyCheck = await this.runPolicyCheck(
         userId,
         chatId,

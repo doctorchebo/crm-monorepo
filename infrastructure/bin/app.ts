@@ -28,6 +28,7 @@ import * as cdk from "aws-cdk-lib";
 import "source-map-support/register";
 import { MediaCompressionStack } from "../lib/media-compression-stack";
 import { ContactsImportStack } from "../lib/contacts-import-stack";
+import { InvitationEmailStack } from "../lib/invitation-email-stack";
 
 // Initialize CDK app
 const app = new cdk.App();
@@ -70,23 +71,32 @@ const chromiumLayerArn =
 const databaseUrl =
   process.env.DATABASE_URL || app.node.tryGetContext("databaseUrl") || "";
 
+// Mailgun configuration for invitation emails
+// API key is stored in SSM Parameter Store: /crm/mailgun/api-key
+const mailgunDomain = process.env.MAILGUN_DOMAIN || "mg.marceloautomates.store";
+// Application URL for invitation links
+// For local testing, set FRONTEND_URL environment variable or use localhost default
+const appUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+const senderEmail =
+  process.env.SENDER_EMAIL || "postmaster@mg.marceloautomates.store";
+
 // Validate required configuration
 if (!inputBucketArn) {
   console.warn(
     "⚠️  Warning: INPUT_BUCKET_ARN not set. Set it via environment variable or CDK context.\n" +
-    "   Example: cdk deploy -c inputBucketArn=arn:aws:s3:::my-media-bucket"
+      "   Example: cdk deploy -c inputBucketArn=arn:aws:s3:::my-media-bucket",
   );
 }
 
 if (!ffmpegLayerArn) {
   console.log(
-    "ℹ️  Info: FFMPEG_LAYER_ARN not set. Will create a local layer from layers/ffmpeg."
+    "ℹ️  Info: FFMPEG_LAYER_ARN not set. Will create a local layer from layers/ffmpeg.",
   );
 }
 
 if (!chromiumLayerArn) {
   console.log(
-    "ℹ️  Info: CHROMIUM_LAYER_ARN not set. PDF thumbnail generation will be disabled."
+    "ℹ️  Info: CHROMIUM_LAYER_ARN not set. PDF thumbnail generation will be disabled.",
   );
 }
 
@@ -135,7 +145,8 @@ new MediaCompressionStack(app, "MediaCompressionStack", {
 // ============================================================================
 new ContactsImportStack(app, "ContactsImportStack", {
   env,
-  description: "WhatsApp CRM - Contacts Import Infrastructure (S3 + SQS + Lambda)",
+  description:
+    "WhatsApp CRM - Contacts Import Infrastructure (S3 + SQS + Lambda)",
 
   // Database URL for Lambda functions
   databaseUrl: databaseUrl,
@@ -162,8 +173,50 @@ new ContactsImportStack(app, "ContactsImportStack", {
   resourcePrefix: "contacts-import",
 });
 
+// ============================================================================
+// Invitation Email Stack
+// ============================================================================
+new InvitationEmailStack(app, "InvitationEmailStack", {
+  env,
+  description:
+    "WhatsApp CRM - Invitation Email Infrastructure (SQS + Lambda + Mailgun)",
+
+  // Database URL for Lambda functions
+  databaseUrl: databaseUrl,
+
+  // Mailgun configuration - API key is fetched from SSM Parameter Store
+  // To set the API key: aws ssm put-parameter --name "/crm/mailgun/api-key" --type "SecureString" --value "YOUR_API_KEY"
+  mailgunApiKeyParam: "/crm/mailgun/api-key",
+  mailgunDomain: mailgunDomain,
+
+  // Application URL for invitation links
+  appUrl: appUrl,
+  senderEmail: senderEmail || undefined,
+
+  // Lambda configuration
+  lambda: {
+    memoryMb: 256,
+    timeoutSeconds: 30,
+  },
+
+  // Queue configuration
+  queue: {
+    maxReceiveCount: 3,
+    dlqRetentionDays: 14,
+  },
+
+  // Logging
+  logRetentionDays: 14,
+
+  // Enable cleanup Lambda (expires old invitations)
+  enableCleanup: true,
+  cleanupSchedule: "rate(1 hour)",
+
+  // Resource naming
+  resourcePrefix: "invitation-email",
+});
+
 // Add tags to all resources
 cdk.Tags.of(app).add("Project", "WhatsApp-CRM");
 cdk.Tags.of(app).add("Component", "MediaCompression");
 cdk.Tags.of(app).add("ManagedBy", "CDK");
-

@@ -4,48 +4,113 @@ import {
   Delete,
   Get,
   Param,
+  ParseIntPipe,
   Post,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/auth.guard';
 import { CreateTeamDto } from './dto/create-team.dto';
-import { InviteMemberDto } from './dto/invite-member.dto';
 import { TeamService } from './team.service';
+import { InvitationService } from './invitation.service';
+import { PermissionService } from '../../shared/services/permission.service';
+
+interface AuthenticatedRequest {
+  user: { userId: number };
+}
 
 @Controller('teams')
 @UseGuards(JwtAuthGuard)
 export class TeamController {
-  constructor(private teamService: TeamService) {}
+  constructor(
+    private readonly teamService: TeamService,
+    private readonly invitationService: InvitationService,
+    private readonly permissionService: PermissionService,
+  ) {}
 
   @Post()
-  async create(@Body() createTeamDto: CreateTeamDto) {
-    // TODO: Get userId from request context
-    return this.teamService.create('userId', createTeamDto);
+  async create(
+    @Req() req: AuthenticatedRequest,
+    @Body() createTeamDto: CreateTeamDto,
+  ) {
+    return this.teamService.create(req.user.userId, createTeamDto);
+  }
+
+  @Get()
+  async getUserTeams(@Req() req: AuthenticatedRequest) {
+    return this.teamService.getUserTeams(req.user.userId);
   }
 
   @Get(':id')
-  async findOne(@Param('id') id: string) {
+  async findOne(@Param('id', ParseIntPipe) id: number) {
     return this.teamService.findOne(id);
   }
 
   @Get(':id/members')
-  async getMembers(@Param('id') id: string) {
+  async getMembers(@Param('id', ParseIntPipe) id: number) {
     return this.teamService.getMembers(id);
   }
 
   @Post(':id/invite')
   async inviteMember(
-    @Param('id') teamId: string,
-    @Body() inviteMemberDto: InviteMemberDto,
+    @Req() req: AuthenticatedRequest,
+    @Param('id', ParseIntPipe) teamId: number,
+    @Body() inviteDto: { email: string; role: string },
   ) {
-    return this.teamService.inviteMember(teamId, inviteMemberDto);
+    // Check permission
+    await this.permissionService.enforcePermission(
+      req.user.userId,
+      teamId,
+      'invite_members',
+    );
+
+    return this.invitationService.sendInvitation(
+      teamId,
+      inviteDto.email,
+      inviteDto.role,
+      req.user.userId,
+    );
+  }
+
+  @Get(':id/invitations')
+  async getInvitations(
+    @Req() req: AuthenticatedRequest,
+    @Param('id', ParseIntPipe) teamId: number,
+  ) {
+    await this.permissionService.enforcePermission(
+      req.user.userId,
+      teamId,
+      'invite_members',
+    );
+    return this.invitationService.getTeamInvitations(teamId);
   }
 
   @Delete(':teamId/members/:memberId')
   async removeMember(
-    @Param('teamId') teamId: string,
-    @Param('memberId') memberId: string,
+    @Req() req: AuthenticatedRequest,
+    @Param('teamId', ParseIntPipe) teamId: number,
+    @Param('memberId', ParseIntPipe) memberId: number,
   ) {
+    await this.permissionService.enforcePermission(
+      req.user.userId,
+      teamId,
+      'remove_members',
+    );
     return this.teamService.removeMember(teamId, memberId);
+  }
+
+  @Post(':teamId/members/:memberId/role')
+  async changeRole(
+    @Req() req: AuthenticatedRequest,
+    @Param('teamId', ParseIntPipe) teamId: number,
+    @Param('memberId', ParseIntPipe) memberId: number,
+    @Body() body: { role: string },
+  ) {
+    await this.permissionService.enforcePermission(
+      req.user.userId,
+      teamId,
+      'change_roles',
+    );
+    return this.teamService.changeRole(teamId, memberId, body.role);
   }
 }
