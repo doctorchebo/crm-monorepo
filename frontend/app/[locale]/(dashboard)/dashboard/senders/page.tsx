@@ -3,6 +3,7 @@
 import { DeleteConfirmationDialog } from "@/components/dialogs/delete-confirmation-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PageLayout } from "@/components/ui/page-layout";
 import {
   Card,
   CardContent,
@@ -260,13 +261,10 @@ export default function SendersPage() {
   };
 
   return (
-    <div className="flex-1 space-y-4 p-4 md:p-8">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">{t("title")}</h1>
-          <p className="text-muted-foreground mt-2">{t("subtitle")}</p>
-        </div>
+    <PageLayout
+      title={t("title")}
+      description={t("subtitle")}
+      headerActions={
         <div className="flex gap-2">
           <Button
             variant="outline"
@@ -289,7 +287,9 @@ export default function SendersPage() {
             {t("addSender")}
           </Button>
         </div>
-      </div>
+      }
+      className="space-y-4"
+    >
 
       {/* WABA Info Card */}
       <Card>
@@ -548,6 +548,6 @@ export default function SendersPage() {
           setSenderToDelete(null);
         }}
       />
-    </div>
+    </PageLayout>
   );
 }

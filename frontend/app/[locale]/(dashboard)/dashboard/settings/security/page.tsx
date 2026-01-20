@@ -30,6 +30,7 @@ import { AlertTriangle, Check, Loader2, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { PageLayout } from "@/components/ui/page-layout";
 
 export default function SecuritySettingsPage() {
   const t = useTranslations();
@@ -128,16 +129,11 @@ export default function SecuritySettingsPage() {
   };
 
   return (
-    <div className="space-y-6 p-4 lg:p-8">
-      <div>
-        <h1 className="text-lg lg:text-2xl font-medium">
-          {t("security.title")}
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {t("security.description")}
-        </p>
-      </div>
-
+    <PageLayout
+      title={t("security.title")}
+      description={t("security.description")}
+      className="space-y-6"
+    >
       {/* Change Password Section */}
       <Card>
         <CardHeader>
@@ -349,6 +345,6 @@ export default function SecuritySettingsPage() {
           </Dialog>
         </CardContent>
       </Card>
-    </div>
+    </PageLayout>
   );
 }

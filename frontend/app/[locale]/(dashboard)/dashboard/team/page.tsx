@@ -7,6 +7,7 @@ import {
 } from "@/app/[locale]/(login)/actions";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { PageLayout } from "@/components/ui/page-layout";
 import {
   Card,
   CardContent,
@@ -288,9 +289,7 @@ function InviteTeamMember() {
 
 export default function SettingsPage() {
   const t = useTranslations("team");
-  return (
-    <section className="flex-1 p-4 lg:p-8">
-      <h1 className="text-lg lg:text-2xl font-medium mb-6">{t("title")}</h1>
+    <PageLayout title={t("title")}>
       <Suspense fallback={<SubscriptionSkeleton />}>
         <ManageSubscription />
       </Suspense>
@@ -300,6 +299,6 @@ export default function SettingsPage() {
       <Suspense fallback={<InviteTeamMemberSkeleton />}>
         <InviteTeamMember />
       </Suspense>
-    </section>
+    </PageLayout>
   );
 }

@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { PageLayout } from "@/components/ui/page-layout";
 import { Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
@@ -36,12 +37,11 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="space-y-6 p-4 lg:p-8">
-      <div>
-        <h1 className="text-lg lg:text-2xl font-medium">{t("title")}</h1>
-        <p className="text-sm text-muted-foreground">{t("description")}</p>
-      </div>
-
+    <PageLayout
+      title={t("title")}
+      description={t("description")}
+      className="space-y-6"
+    >
       {/* Profile Settings */}
       <Card>
         <CardHeader>
@@ -228,6 +228,6 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
-    </div>
+    </PageLayout>
   );
 }

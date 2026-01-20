@@ -2,6 +2,7 @@
 
 import { deleteAccount, updatePassword } from "@/app/[locale]/(login)/actions";
 import { Button } from "@/components/ui/button";
+import { PageLayout } from "@/components/ui/page-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,9 +36,7 @@ export default function SecurityPage() {
     FormData
   >(deleteAccount, {});
 
-  return (
-    <section className="flex-1 p-4 lg:p-8">
-      <h1 className="text-lg lg:text-2xl font-medium mb-6">{t("title")}</h1>
+    <PageLayout title={t("title")}>
       <Card className="mb-8">
         <CardHeader>
           <CardTitle>{t("password")}</CardTitle>
@@ -157,6 +156,6 @@ export default function SecurityPage() {
           </form>
         </CardContent>
       </Card>
-    </section>
+    </PageLayout>
   );
 }

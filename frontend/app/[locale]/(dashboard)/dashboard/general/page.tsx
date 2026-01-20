@@ -2,6 +2,7 @@
 
 import { updateAccount } from "@/app/[locale]/(login)/actions";
 import { Button } from "@/components/ui/button";
+import { PageLayout } from "@/components/ui/page-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -99,9 +100,7 @@ export default function GeneralPage() {
   );
 
   return (
-    <section className="flex-1 p-4 lg:p-8">
-      <h1 className="text-lg lg:text-2xl font-medium mb-6">{t("title")}</h1>
-
+    <PageLayout title={t("title")}>
       <Card>
         <CardHeader>
           <CardTitle>{t("accountInfo")}</CardTitle>
@@ -128,6 +127,6 @@ export default function GeneralPage() {
           </form>
         </CardContent>
       </Card>
-    </section>
+    </PageLayout>
   );
 }

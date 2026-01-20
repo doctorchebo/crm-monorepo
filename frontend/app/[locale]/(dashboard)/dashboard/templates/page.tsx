@@ -7,6 +7,7 @@ import {
   type TemplateLocaleData,
 } from "@/components/templates/template-card";
 import { Button } from "@/components/ui/button";
+import { PageLayout } from "@/components/ui/page-layout";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -329,16 +330,10 @@ export default function TemplatesPage() {
   }, [templates]);
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between p-6 border-b">
-        <div>
-          <h1 className="text-3xl font-bold">{t("title") || "Templates"}</h1>
-          <p className="text-sm text-gray-600 mt-1">
-            {t("subtitle") ||
-              "Create and manage message templates for all your platforms"}
-          </p>
-        </div>
+    <PageLayout
+      title={t("title") || "Templates"}
+      description={t("subtitle") || "Create and manage message templates for all your platforms"}
+      headerActions={
         <div className="flex items-center gap-2">
           {/* Sync All Pending Button */}
           {pendingTemplatesCount > 0 && (
@@ -379,19 +374,18 @@ export default function TemplatesPage() {
             {tCommon("create")}
           </Button>
         </div>
-      </div>
-
+      }
+      className="space-y-6"
+    >
       {/* Search */}
-      <div className="px-6 py-4 border-b">
-        <Input
-          placeholder={t("searchPlaceholder") || "Search templates..."}
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-        />
-      </div>
+      <Input
+        placeholder={t("searchPlaceholder") || "Search templates..."}
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+      />
 
       {/* Templates Grid */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div>
         {isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {[1, 2, 3, 4, 5, 6].map((i) => (
@@ -451,6 +445,6 @@ export default function TemplatesPage() {
         onConfirm={handleDelete}
         isLoading={isDeleting}
       />
-    </div>
+    </PageLayout>
   );
 }

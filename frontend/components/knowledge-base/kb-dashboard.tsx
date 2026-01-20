@@ -9,6 +9,7 @@
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PageLayout } from "@/components/ui/page-layout";
 import {
   Card,
   CardContent,
@@ -311,13 +312,10 @@ export function KnowledgeBaseDashboard() {
   };
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">{t("title")}</h1>
-          <p className="text-muted-foreground">{t("description")}</p>
-        </div>
+    <PageLayout
+      title={t("title")}
+      description={t("description")}
+      headerActions={
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={handleRefresh}>
             <RefreshCw className="h-4 w-4 mr-2" />
@@ -339,7 +337,9 @@ export function KnowledgeBaseDashboard() {
             {t("newObject")}
           </Button>
         </div>
-      </div>
+      }
+      className="space-y-6"
+    >
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -466,6 +466,6 @@ export function KnowledgeBaseDashboard() {
       </div>
 
 
-    </div>
+    </PageLayout>
   );
 }

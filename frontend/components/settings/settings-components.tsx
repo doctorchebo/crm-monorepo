@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { type ReactNode } from "react";
+import { PageLayout } from "@/components/ui/page-layout";
 
 /**
  * Individual setting item with title, description, and a control (switch, etc.)
@@ -127,6 +128,8 @@ export interface SettingsPageProps {
   className?: string;
 }
 
+
+
 export function SettingsPage({
   title,
   description,
@@ -134,14 +137,12 @@ export function SettingsPage({
   className,
 }: SettingsPageProps) {
   return (
-    <section className={cn("flex-1 p-4 lg:p-8", className)}>
-      <div className="mb-6">
-        <h1 className="text-lg lg:text-2xl font-medium">{title}</h1>
-        {description && (
-          <p className="text-muted-foreground mt-1">{description}</p>
-        )}
-      </div>
+    <PageLayout
+      title={title}
+      description={description}
+      className={className}
+    >
       <div className="space-y-6">{children}</div>
-    </section>
+    </PageLayout>
   );
 }

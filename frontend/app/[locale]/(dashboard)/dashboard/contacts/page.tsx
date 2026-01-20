@@ -4,6 +4,7 @@ import { DeleteConfirmationDialog } from "@/components/dialogs/delete-confirmati
 import { SelectSenderModal } from "@/components/dialogs/select-sender-modal";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { PageLayout } from "@/components/ui/page-layout";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -293,34 +294,29 @@ export default function ContactsPage() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-background gap-4 p-6">
-      {/* Header */}
-      <div className="flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">{t("title")}</h1>
-            <p className="text-muted-foreground mt-2">
-              {t("totalContacts", { count: pagination.totalItems })}
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={() => router.push(`/${locale}/dashboard/contacts/import`)}
-            >
-              <Upload className="mr-2 h-4 w-4" />
-              {t("importText")}
-            </Button>
-            <Button
-              onClick={() => router.push(`/${locale}/dashboard/contacts/form`)}
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              {t("newContact")}
-            </Button>
-          </div>
+    <PageLayout
+      className="gap-4"
+      title={t("title")}
+      description={t("totalContacts", { count: pagination.totalItems })}
+      headerActions={
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => router.push(`/${locale}/dashboard/contacts/import`)}
+          >
+            <Upload className="mr-2 h-4 w-4" />
+            {t("importText")}
+          </Button>
+          <Button
+            onClick={() => router.push(`/${locale}/dashboard/contacts/form`)}
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            {t("newContact")}
+          </Button>
         </div>
-
-        {/* Search and Pagination Controls */}
+      }
+    >
+      {/* Search and Pagination Controls */}
         <div className="flex flex-col sm:flex-row gap-4 justify-between items-end sm:items-center">
           <div className="relative w-full sm:w-auto sm:min-w-[300px]">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -376,7 +372,7 @@ export default function ContactsPage() {
             </Button>
           </div>
         )}
-      </div>
+
 
       {/* Main Content */}
       <div className="flex-1 space-y-4 overflow-hidden flex flex-col">
@@ -561,6 +557,6 @@ export default function ContactsPage() {
           contact={selectedContact}
         />
       )}
-    </div>
+    </PageLayout>
   );
 }
