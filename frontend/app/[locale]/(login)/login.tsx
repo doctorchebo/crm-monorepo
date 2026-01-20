@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PasswordInput } from "@/components/ui/password-input";
 import { ActionState } from "@/lib/auth/middleware";
 import { TokenManager } from "@/lib/auth/token-manager";
 import { CircleIcon, Loader2 } from "lucide-react";
@@ -101,10 +102,9 @@ export function Login({ mode = "signin" }: { mode?: "signin" | "signup" }) {
               {t("password")}
             </Label>
             <div className="mt-1">
-              <Input
+              <PasswordInput
                 id="password"
                 name="password"
-                type="password"
                 autoComplete={
                   mode === "signin" ? "current-password" : "new-password"
                 }

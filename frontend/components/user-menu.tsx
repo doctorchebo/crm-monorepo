@@ -91,6 +91,12 @@ export function UserMenu() {
         >
           {t("pricing")}
         </Link>
+        <Link
+          href="/sign-in"
+          className="text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
+        >
+          {t("signIn")}
+        </Link>
         <Button asChild className="rounded-full">
           <Link href="/sign-up">{t("signUp")}</Link>
         </Button>
