@@ -27,6 +27,7 @@
   },
   "header": {
     "pricing": "Pricing",
+    "signIn": "Sign In",
     "signUp": "Sign Up",
     "dashboard": "Dashboard",
     "signOut": "Sign out",

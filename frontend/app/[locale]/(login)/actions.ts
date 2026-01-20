@@ -551,8 +551,10 @@ export const deleteAccount = validatedActionWithUser(
         );
     }
 
-    (await cookies()).delete("session");
-    redirect("/sign-in");
+    // Clear session and tokens
+    await signOut();
+
+    return { success: "Account deleted successfully." };
   },
 );
 
@@ -702,9 +704,13 @@ export async function signOut() {
     console.error("[SignOut] Failed to call backend logout:", error);
   }
 
-  // Clear session cookie
+  // Clear all cookies
   const cookieJar = await cookies();
   cookieJar.delete("session");
+  cookieJar.delete("jwt_token");
+  cookieJar.delete("jwt_refresh_token");
+  cookieJar.delete("jwt_token_expires_at");
+  cookieJar.delete("jwt_refresh_token_expires_at");
 
-  console.debug("[SignOut] Session cookie cleared");
+  console.debug("[SignOut] All session and JWT cookies cleared");
 }
