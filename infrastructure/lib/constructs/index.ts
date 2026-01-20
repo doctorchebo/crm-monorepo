@@ -9,3 +9,5 @@ export * from "./media-compression-lambda";
 export * from "./media-processing-queue";
 export * from "./invitation-email-queue";
 export * from "./invitation-email-lambda";
+export * from "./password-reset-email-queue";
+export * from "./password-reset-email-lambda";

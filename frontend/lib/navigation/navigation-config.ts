@@ -134,6 +134,12 @@ export const navigationConfig: NavItem[] = [
         icon: MessageSquare,
         href: "/dashboard/settings/chats",
       },
+      {
+        id: "settings-security",
+        labelKey: "dashboard.security",
+        icon: Shield,
+        href: "/dashboard/settings/security",
+      },
     ],
   },
   {
@@ -141,12 +147,6 @@ export const navigationConfig: NavItem[] = [
     labelKey: "dashboard.activity",
     icon: Activity,
     href: "/dashboard/activity",
-  },
-  {
-    id: "security",
-    labelKey: "dashboard.security",
-    icon: Shield,
-    href: "/dashboard/security",
   },
 ];
 

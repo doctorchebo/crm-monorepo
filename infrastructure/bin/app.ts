@@ -29,6 +29,7 @@ import "source-map-support/register";
 import { MediaCompressionStack } from "../lib/media-compression-stack";
 import { ContactsImportStack } from "../lib/contacts-import-stack";
 import { InvitationEmailStack } from "../lib/invitation-email-stack";
+import { PasswordResetEmailStack } from "../lib/password-reset-email-stack";
 
 // Initialize CDK app
 const app = new cdk.App();
@@ -214,6 +215,48 @@ new InvitationEmailStack(app, "InvitationEmailStack", {
 
   // Resource naming
   resourcePrefix: "invitation-email",
+});
+
+// ============================================================================
+// Password Reset Email Stack
+// ============================================================================
+new PasswordResetEmailStack(app, "PasswordResetEmailStack", {
+  env,
+  description:
+    "WhatsApp CRM - Password Reset Email Infrastructure (SQS + Lambda + Mailgun)",
+
+  // Database URL for Lambda functions
+  databaseUrl: databaseUrl,
+
+  // Mailgun configuration
+  mailgunApiKeyParam: "/crm/mailgun/api-key",
+  mailgunDomain: mailgunDomain,
+
+  // Application URL for reset links
+  appUrl: appUrl,
+  senderEmail: senderEmail || undefined,
+
+  // Lambda configuration
+  lambda: {
+    memoryMb: 256,
+    timeoutSeconds: 30,
+  },
+
+  // Queue configuration
+  queue: {
+    maxReceiveCount: 3,
+    dlqRetentionDays: 14,
+  },
+
+  // Logging
+  logRetentionDays: 14,
+
+  // Enable cleanup Lambda
+  enableCleanup: true,
+  cleanupSchedule: "rate(1 hour)",
+
+  // Resource naming
+  resourcePrefix: "password-reset-email",
 });
 
 // Add tags to all resources

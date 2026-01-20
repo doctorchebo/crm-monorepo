@@ -10,6 +10,7 @@ import { getUser, getUserWithTeam } from "@/lib/db/queries";
 import {
   activityLogs,
   ActivityType,
+  chats,
   invitations,
   teamMembers,
   teams,
@@ -513,6 +514,33 @@ export const deleteAccount = validatedActionWithUser(
       .where(eq(users.id, user.id));
 
     if (userWithTeam?.teamId) {
+      // Find team owner to reassign chats
+      const teamOwner = await db.query.teamMembers.findFirst({
+        where: and(
+          eq(teamMembers.teamId, userWithTeam.teamId),
+          eq(teamMembers.role, "owner"),
+        ),
+        columns: { userId: true },
+      });
+
+      // If an owner exists (should always be true) and it's not the user deleting their account
+      if (teamOwner && teamOwner.userId !== user.id) {
+        // Reassign all chats assigned to this user to the team owner
+        await db
+          .update(chats)
+          .set({
+            assignedTo: teamOwner.userId,
+            assignedBy: null, // System reassignment
+            assignedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(chats.teamId, userWithTeam.teamId),
+              eq(chats.assignedTo, user.id),
+            ),
+          );
+      }
+
       await db
         .delete(teamMembers)
         .where(
