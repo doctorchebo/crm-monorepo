@@ -29,6 +29,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { TemplateForm } from "../../form";
+import { useTabState } from "@/hooks/use-tab-state";
 
 // Statuses that cannot be edited
 const IMMUTABLE_STATUSES: TemplateVersionStatus[] = [
@@ -42,6 +43,7 @@ const SUPPORTED_LOCALES = SUPPORTED_LANGUAGES.map((code) => ({
   code,
   name: LANGUAGE_DISPLAY_NAMES[code],
   flag: LANGUAGE_FLAGS[code],
+  
 }));
 
 interface Template {
@@ -75,9 +77,10 @@ export default function EditTemplatePage() {
 
   // Selected locale for editing (controls which locale's version history is shown)
   // Initialize from URL param if provided, otherwise default to "en"
-  const [selectedLocale, setSelectedLocale] = useState<string>(
-    localeFromUrl || "en"
-  );
+  const [selectedLocale, setSelectedLocale] = useTabState({
+    defaultValue: localeFromUrl || "en",
+    paramName: "locale"
+  });
 
   // Version management state
   const [versionInfo, setVersionInfo] = useState<TemplateVersionInfo | null>(

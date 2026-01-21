@@ -35,7 +35,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 /**
  * Locale data structure for template cards
@@ -249,14 +249,18 @@ export function TemplateCard({
 }: TemplateCardProps) {
   const t = useTranslations("templates");
   const tCommon = useTranslations("common");
+  // Track active slide index to know which locale is currently visible
+  const [activeIndex, setActiveIndex] = useState(0);
 
   const locales = template.locales || [];
   const hasMultipleLocales = locales.length > 1;
 
-  // Get the first syncable locale for the dropdown menu
-  const syncableLocale = useMemo(() => {
-    return locales.find((loc) => canSyncStatus?.(loc));
-  }, [locales, canSyncStatus]);
+  // Determine the currently active locale based on carousel index
+  const activeLocale = locales[activeIndex];
+
+  // Check if the ACTIVE locale is syncable (has metaTemplateId)
+  // This ensures we sync the status of the locale the user is actually looking at
+  const isSyncable = activeLocale && canSyncStatus?.(activeLocale);
 
   // Handle click on a locale slide
   const handleLocaleClick = (
@@ -294,7 +298,7 @@ export function TemplateCard({
 
       {/* Locale Carousel */}
       {locales.length > 0 ? (
-        <Carousel className="mb-3">
+        <Carousel className="mb-3" onIndexChange={setActiveIndex}>
           <CarouselContent>
             {locales.map((locale) => (
               <CarouselItem key={locale.id}>
@@ -349,10 +353,10 @@ export function TemplateCard({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            {/* Sync Status option */}
-            {syncableLocale && onSyncStatus && (
+            {/* Sync Status option - Only for currently visible locale */}
+            {isSyncable && onSyncStatus && activeLocale && (
               <DropdownMenuItem
-                onClick={() => onSyncStatus(syncableLocale)}
+                onClick={() => onSyncStatus(activeLocale)}
                 disabled={isSyncing}
               >
                 {isSyncing ? (
@@ -361,11 +365,15 @@ export function TemplateCard({
                   <RefreshCw className="h-4 w-4 mr-2" />
                 )}
                 {t("syncSingleStatus") || "Refresh Status"}
+                {/* Show locale name in tooltip or label to be clear */}
+                <span className="ml-2 text-xs text-muted-foreground uppercase bg-muted px-1 rounded">
+                   {activeLocale.locale}
+                </span>
               </DropdownMenuItem>
             )}
 
             {/* Add separator only if sync option exists */}
-            {syncableLocale && onSyncStatus && <DropdownMenuSeparator />}
+            {isSyncable && onSyncStatus && <DropdownMenuSeparator />}
 
             {/* Delete option */}
             <DropdownMenuItem onClick={onDelete} className="text-red-600">

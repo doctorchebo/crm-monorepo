@@ -9,6 +9,7 @@ import { eq, and } from 'drizzle-orm';
 import { db } from '../../database/db.connection';
 import { teams, teamMembers, users } from '../../database/schema';
 import { CreateTeamDto } from './dto/create-team.dto';
+import { RolesService } from './services/roles.service';
 
 export interface TeamWithMembers {
   id: number;
@@ -26,6 +27,7 @@ export interface TeamMemberInfo {
   userName: string;
   userEmail: string;
   role: string;
+  roleId?: number | null; // Added roleId support
   joinedAt: Date | null;
   isActive: boolean;
 }
@@ -39,6 +41,8 @@ export interface TeamMemberInfo {
 @Injectable()
 export class TeamService {
   private readonly logger = new Logger(TeamService.name);
+
+  constructor(private readonly rolesService: RolesService) {}
 
   /**
    * Create a new team
@@ -55,11 +59,24 @@ export class TeamService {
       })
       .returning();
 
+    // Initialize default roles for this new team
+    await this.rolesService.initializeDefaultRoles(team.id);
+
+    // Get Owner Role ID
+    const ownerRole = await this.rolesService.getRoleByName(team.id, 'Owner');
+    if (!ownerRole) {
+      this.logger.error(
+        `Failed to retrieve Owner role for new team ${team.id}`,
+      );
+      // Fallback? Should not happen if initialization works.
+    }
+
     // Add creator as owner member
     await db.insert(teamMembers).values({
       teamId: team.id,
       userId: userId,
       role: 'owner',
+      roleId: ownerRole?.id,
     });
 
     this.logger.log(`Team "${team.name}" created by user ${userId}`);
@@ -158,7 +175,6 @@ export class TeamService {
     const memberships = await db
       .select({
         teamId: teamMembers.teamId,
-        role: teamMembers.role,
       })
       .from(teamMembers)
       .where(
@@ -183,7 +199,7 @@ export class TeamService {
   async addMember(
     teamId: number,
     userId: number,
-    role: string,
+    roleOrId: string | number, // Accept either Role ID or Legacy Role String
     invitedBy: number,
   ): Promise<TeamMemberInfo> {
     // Check if user exists
@@ -195,6 +211,51 @@ export class TeamService {
 
     if (!user) {
       throw new NotFoundException(`User ${userId} not found`);
+    }
+
+    // Resolve Role ID and Name
+    let roleId: number | undefined;
+    let roleName: string;
+
+    if (typeof roleOrId === 'number') {
+      roleId = roleOrId;
+      const role = await this.rolesService.getRole(roleId, teamId); // Ensure checks teamId
+      roleName = role.name; // Use custom role name (may not match 'owner'/'admin' strictly lowercase)
+      // Map to legacy 'role' string if possible roughly
+      // If exact match to standard roles, keep it. Else 'agent'?
+      // Actually, let's keep roleName as is in 'role' column? No, 'role' column has constraints.
+      // CHECK CONSTRAINT: CHECK (role IN ('owner', 'admin', 'agent', 'viewer'))
+      // If the custom role is "Intern", we can't save "Intern" to `role` column.
+      // We must map custom roles to a fallback legacy role (e.g. 'agent')
+      // OR rely purely on roleId and ignore `role` column (but DB constraint forces it).
+      // Best approach: If new role matches one of the standards (case-insensitive), use it.
+      // If custom, default to 'agent' for legacy column.
+      const standardRoles = ['owner', 'admin', 'agent', 'viewer'];
+      const normalized = role.name.toLowerCase();
+      roleName = standardRoles.includes(normalized) ? normalized : 'agent';
+    } else {
+      roleName = roleOrId;
+      // Lookup ID
+      // Capitalize first letter strictly? Or just search.
+      // Try exact first (e.g. "Agent"), then title case "agent" -> "Agent".
+      // Let's rely on RolesService helper.
+      // If roleName is "agent", we look for "Agent".
+      let dbRole = await this.rolesService.getRoleByName(teamId, roleName);
+      if (!dbRole) {
+        // Try Capitalized
+        const cap = roleName.charAt(0).toUpperCase() + roleName.slice(1);
+        dbRole = await this.rolesService.getRoleByName(teamId, cap);
+      }
+
+      if (dbRole) {
+        roleId = dbRole.id;
+      } else {
+        // Failed to find role ID? Should we fail?
+        // If migration ran, defaults should exist.
+        this.logger.warn(
+          `Could not find Role ID for '${roleName}' in team ${teamId}. Adding with legacy string only.`,
+        );
+      }
     }
 
     // Check if already a member
@@ -213,7 +274,7 @@ export class TeamService {
       // Reactivate the membership
       await db
         .update(teamMembers)
-        .set({ isActive: true, role, invitedBy })
+        .set({ isActive: true, role: roleName, roleId: roleId, invitedBy })
         .where(eq(teamMembers.id, existing.id));
 
       return {
@@ -221,7 +282,8 @@ export class TeamService {
         userId: user.id,
         userName: user.name,
         userEmail: user.email,
-        role,
+        role: roleName,
+        roleId,
         joinedAt: new Date(),
         isActive: true,
       };
@@ -233,12 +295,15 @@ export class TeamService {
       .values({
         teamId,
         userId,
-        role,
+        role: roleName,
+        roleId,
         invitedBy,
       })
       .returning();
 
-    this.logger.log(`User ${userId} added to team ${teamId} as ${role}`);
+    this.logger.log(
+      `User ${userId} added to team ${teamId} as ${roleName} (RoleID: ${roleId})`,
+    );
 
     return {
       id: member.id,
@@ -246,6 +311,7 @@ export class TeamService {
       userName: user.name,
       userEmail: user.email,
       role: member.role,
+      roleId: member.roleId,
       joinedAt: member.joinedAt,
       isActive: member.isActive ?? true,
     };
@@ -283,8 +349,28 @@ export class TeamService {
   async changeRole(
     teamId: number,
     userId: number,
-    newRole: string,
+    newRoleOrId: string | number,
   ): Promise<TeamMemberInfo | null> {
+    // Resolve Role
+    let roleId: number | undefined;
+    let roleName: string;
+
+    if (typeof newRoleOrId === 'number') {
+      roleId = newRoleOrId;
+      const role = await this.rolesService.getRole(roleId, teamId);
+      const standardRoles = ['owner', 'admin', 'agent', 'viewer'];
+      const normalized = role.name.toLowerCase();
+      roleName = standardRoles.includes(normalized) ? normalized : 'agent';
+    } else {
+      roleName = newRoleOrId;
+      let dbRole = await this.rolesService.getRoleByName(teamId, roleName);
+      if (!dbRole) {
+        const cap = roleName.charAt(0).toUpperCase() + roleName.slice(1);
+        dbRole = await this.rolesService.getRoleByName(teamId, cap);
+      }
+      if (dbRole) roleId = dbRole.id;
+    }
+
     // Cannot change owner's role
     const [team] = await db
       .select({ ownerId: teams.ownerId })
@@ -292,13 +378,18 @@ export class TeamService {
       .where(eq(teams.id, teamId))
       .limit(1);
 
-    if (team?.ownerId === userId && newRole !== 'owner') {
+    if (
+      team?.ownerId === userId &&
+      (roleName !== 'owner' || (roleId && roleName !== 'owner'))
+    ) {
+      // Logic bit tricky: if current user is owner, they can only be changed TO owner (no-op)
+      // Or simpler: Can't demote owner.
       throw new ForbiddenException("Cannot change team owner's role");
     }
 
     const [member] = await db
       .update(teamMembers)
-      .set({ role: newRole })
+      .set({ role: roleName, roleId: roleId })
       .where(
         and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)),
       )
@@ -320,6 +411,7 @@ export class TeamService {
       userName: user?.name ?? '',
       userEmail: user?.email ?? '',
       role: member.role,
+      roleId: member.roleId,
       joinedAt: member.joinedAt,
       isActive: member.isActive ?? true,
     };
@@ -334,13 +426,16 @@ export class TeamService {
         id: teamMembers.id,
         userId: teamMembers.userId,
         role: teamMembers.role,
+        roleId: teamMembers.roleId,
         joinedAt: teamMembers.joinedAt,
         isActive: teamMembers.isActive,
         userName: users.name,
         userEmail: users.email,
+        customRoleName: roles.name, // Join with roles to get custom name
       })
       .from(teamMembers)
       .innerJoin(users, eq(teamMembers.userId, users.id))
+      .leftJoin(roles, eq(teamMembers.roleId, roles.id))
       .where(
         and(eq(teamMembers.teamId, teamId), eq(teamMembers.isActive, true)),
       );
@@ -350,7 +445,8 @@ export class TeamService {
       userId: m.userId,
       userName: m.userName,
       userEmail: m.userEmail,
-      role: m.role,
+      role: m.customRoleName || m.role, // Return custom role name if available, else legacy
+      roleId: m.roleId,
       joinedAt: m.joinedAt,
       isActive: m.isActive ?? true,
     }));

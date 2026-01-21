@@ -12,6 +12,7 @@ import {
   unique,
   uuid,
   varchar,
+  primaryKey,
 } from 'drizzle-orm/pg-core';
 
 /**
@@ -129,6 +130,7 @@ export const teamMembers = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     role: varchar('role', { length: 20 }).notNull().default('agent'), // 'owner', 'admin', 'agent', 'viewer'
+    roleId: integer('role_id').references(() => roles.id), // New dynamic role ID
     joinedAt: timestamp('joined_at').defaultNow(),
     invitedBy: integer('invited_by').references(() => users.id),
     isActive: boolean('is_active').default(true),
@@ -283,6 +285,69 @@ export const activityLogs = pgTable(
 
 export type ActivityLog = typeof activityLogs.$inferSelect;
 export type NewActivityLog = typeof activityLogs.$inferInsert;
+
+// ==================== Custom Roles & Permissions Tables ====================
+
+/**
+ * Permissions table - Catalog of all system actions
+ */
+export const permissions = pgTable('permissions', {
+  id: serial('id').primaryKey(),
+  key: varchar('key', { length: 100 }).notNull().unique(), // e.g. 'chat.delete'
+  description: text('description'),
+  category: varchar('category', { length: 50 }).notNull(), // e.g. 'chat', 'team', 'workflow'
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export type Permission = typeof permissions.$inferSelect;
+export type NewPermission = typeof permissions.$inferInsert;
+
+/**
+ * Roles table - Custom roles defined per team
+ */
+export const roles = pgTable(
+  'roles',
+  {
+    id: serial('id').primaryKey(),
+    teamId: integer('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 50 }).notNull(), // e.g. 'Supervisor'
+    description: text('description'),
+    isSystem: boolean('is_system').default(false), // If true, cannot be deleted
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (table) => ({
+    uniqueTeamRole: unique().on(table.teamId, table.name),
+    teamIdIndex: index('idx_roles_team_id').on(table.teamId),
+  }),
+);
+
+export type Role = typeof roles.$inferSelect;
+export type NewRole = typeof roles.$inferInsert;
+
+/**
+ * Role Permissions Junction Table
+ */
+export const rolePermissions = pgTable(
+  'role_permissions',
+  {
+    roleId: integer('role_id')
+      .notNull()
+      .references(() => roles.id, { onDelete: 'cascade' }),
+    permissionId: integer('permission_id')
+      .notNull()
+      .references(() => permissions.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.roleId, table.permissionId] }),
+  }),
+);
+
+export type RolePermission = typeof rolePermissions.$inferSelect;
+export type NewRolePermission = typeof rolePermissions.$inferInsert;
 
 // Chats table - stores conversations with phone numbers
 // Extended with team ownership and assignment columns
@@ -798,7 +863,35 @@ export const teamsRelations = relations(teams, ({ one, many }) => ({
   invitations: many(invitations),
   chats: many(chats),
   activityLogs: many(activityLogs),
+  roles: many(roles),
 }));
+
+export const permissionsRelations = relations(permissions, ({ many }) => ({
+  roles: many(rolePermissions),
+}));
+
+export const rolesRelations = relations(roles, ({ one, many }) => ({
+  team: one(teams, {
+    fields: [roles.teamId],
+    references: [teams.id],
+  }),
+  permissions: many(rolePermissions),
+  members: many(teamMembers),
+}));
+
+export const rolePermissionsRelations = relations(
+  rolePermissions,
+  ({ one }) => ({
+    role: one(roles, {
+      fields: [rolePermissions.roleId],
+      references: [roles.id],
+    }),
+    permission: one(permissions, {
+      fields: [rolePermissions.permissionId],
+      references: [permissions.id],
+    }),
+  }),
+);
 
 // Team Members relations
 export const teamMembersRelations = relations(teamMembers, ({ one }) => ({

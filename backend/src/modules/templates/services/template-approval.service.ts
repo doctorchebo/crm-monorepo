@@ -640,34 +640,20 @@ export class TemplateApprovalService {
       this.logger.log(
         `📝 Updated ${updatedVersions.length} version(s) status to ${versionStatus}`,
       );
-
-      // If approved, set the version as active
-      if (newStatus === TemplateApprovalStatus.APPROVED) {
-        const approvedVersion = await db.query.templateVersions.findFirst({
-          where: and(
-            eq(templateVersions.localeId, localeData.id),
-            eq(templateVersions.status, 'approved'),
-          ),
-          orderBy: [desc(templateVersions.versionNumber)],
-        });
-
-        if (approvedVersion) {
-          await db
-            .update(templateLocales)
-            .set({
-              activeVersion: approvedVersion.versionNumber,
-              updatedAt: new Date(),
-            })
-            .where(eq(templateLocales.id, localeData.id));
-          this.logger.log(
-            `📝 Set active version to v${approvedVersion.versionNumber}`,
-          );
-        }
-      }
     }
 
+    // Reconcile status and active version
+    await this.reconcileLocaleStatus(localeData.id);
+
+    // Fetch the updated locale to get the final status for the event emission
+    const updatedLocale = await db.query.templateLocales.findFirst({
+      where: eq(templateLocales.id, localeData.id),
+    });
+
+    const finalStatus = updatedLocale?.approvalStatus || newStatus || 'draft';
+
     this.logger.log(
-      `✅ Updated template ${localeData.id} (${payload.messageTemplateName}) status to ${newStatus}`,
+      `✅ Updated template ${localeData.id} (${payload.messageTemplateName}) status to ${finalStatus}`,
     );
 
     // Emit WebSocket event for real-time UI updates
@@ -675,7 +661,7 @@ export class TemplateApprovalService {
       templateId: payload.messageTemplateId,
       templateName: payload.messageTemplateName,
       language: payload.messageTemplateLanguage,
-      status: newStatus,
+      status: finalStatus,
       reason: payload.reason,
       timestamp: new Date(),
       localeId: localeData.id,
@@ -684,7 +670,7 @@ export class TemplateApprovalService {
     return {
       updated: true,
       localeId: localeData.id,
-      status: newStatus,
+      status: finalStatus,
     };
   }
 
@@ -811,6 +797,37 @@ export class TemplateApprovalService {
             })
             .where(eq(templateLocales.id, localeData.id));
 
+          // Also update templateVersions for pending versions logic
+          // (Copied and adapted from handleStatusWebhook to ensure consistency)
+          const versionStatus =
+            statusResult.status === TemplateApprovalStatus.APPROVED
+              ? 'approved'
+              : statusResult.status === TemplateApprovalStatus.REJECTED
+                ? 'rejected'
+                : statusResult.status === TemplateApprovalStatus.PENDING
+                  ? 'pending_approval'
+                  : statusResult.status === TemplateApprovalStatus.PAUSED ||
+                      statusResult.status === TemplateApprovalStatus.DISABLED
+                    ? 'disabled'
+                    : 'draft';
+
+          // Update pending_approval versions
+          await db
+            .update(templateVersions)
+            .set({
+              status: versionStatus,
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(templateVersions.localeId, localeData.id),
+                eq(templateVersions.status, 'pending_approval'),
+              ),
+            );
+
+          // Reconcile locale status to ensure consistency based on all versions
+          await this.reconcileLocaleStatus(localeData.id);
+
           this.logger.log(
             `✅ Synced ${localeData.template?.name} (${localeData.locale}): ${result.previousStatus} → ${statusResult.status}`,
           );
@@ -838,7 +855,7 @@ export class TemplateApprovalService {
           `Failed to sync template ${localeData.template?.name} (${localeData.locale}): ${error.message}`,
         );
       }
-
+      // Push result even if error
       results.push(result);
 
       // Small delay to avoid rate limiting (Meta API has rate limits)
@@ -924,6 +941,37 @@ export class TemplateApprovalService {
         `✅ Synced ${template.name} (${locale}): ${result.previousStatus} → ${statusResult.status}`,
       );
 
+      // Also update templateVersions for pending versions logic
+      const versionStatus =
+        statusResult.status === TemplateApprovalStatus.APPROVED
+          ? 'approved'
+          : statusResult.status === TemplateApprovalStatus.REJECTED
+            ? 'rejected'
+            : statusResult.status === TemplateApprovalStatus.PENDING
+              ? 'pending_approval'
+              : statusResult.status === TemplateApprovalStatus.PAUSED ||
+                  statusResult.status === TemplateApprovalStatus.DISABLED
+                ? 'disabled'
+                : 'draft';
+
+      // Update pending_approval versions
+      await db
+        .update(templateVersions)
+        .set({
+          status: versionStatus,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(templateVersions.localeId, localeData.id),
+            eq(templateVersions.status, 'pending_approval'),
+          ),
+        );
+
+      // Reconcile locale status to ensure consistency based on all versions
+      // This handles setting activeVersion if approved, etc.
+      await this.reconcileLocaleStatus(localeData.id);
+
       // Emit WebSocket event for real-time UI updates if status changed
       if (result.statusChanged) {
         this.emitStatusUpdate({
@@ -987,5 +1035,57 @@ export class TemplateApprovalService {
    */
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Reconcile the locale status with its versions.
+   * Ensures that the locale status matches the state of its versions.
+   * This acts as a single source of truth repair mechanism.
+   */
+  async reconcileLocaleStatus(localeId: string): Promise<void> {
+    // Fetch all versions for this locale
+    const versions = await db.query.templateVersions.findMany({
+      where: eq(templateVersions.localeId, localeId),
+      orderBy: [desc(templateVersions.versionNumber)],
+    });
+
+    const approvedVersion = versions.find((v) => v.status === 'approved');
+    const pendingVersion = versions.find(
+      (v) => v.status === 'pending_approval',
+    );
+    const rejectedVersion = versions.find((v) => v.status === 'rejected');
+
+    let newStatus = 'draft';
+    let newActiveVersion = null;
+
+    if (approvedVersion) {
+      newStatus = 'approved';
+      newActiveVersion = approvedVersion.versionNumber;
+    } else if (pendingVersion) {
+      newStatus = 'pending';
+    } else if (rejectedVersion) {
+      // Only set as rejected if we don't have an older approved version
+      // (Though if we had an approved version, we would have matched the first if block)
+      // Wait, if we have v2 Rejected and v1 Approved.
+      // The approvedVersion check finds v1. So status becomes Approved. Correct.
+      // If we have v2 Rejected and v1 Draft.
+      // approvedVersion is undefined. pendingVersion is undefined.
+      // rejectedVersion is v2. Status becomes Rejected. Correct.
+      newStatus = 'rejected';
+    }
+
+    // Update locale
+    await db
+      .update(templateLocales)
+      .set({
+        approvalStatus: newStatus,
+        activeVersion: newActiveVersion,
+        updatedAt: new Date(),
+      })
+      .where(eq(templateLocales.id, localeId));
+
+    this.logger.log(
+      `Reconciled locale ${localeId}: status=${newStatus}, activeVersion=${newActiveVersion}`,
+    );
   }
 }

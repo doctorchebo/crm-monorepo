@@ -8,7 +8,6 @@ import {
 } from './dto/search-messages.dto';
 import { UpdateChatDto } from './dto/update-chat.dto';
 import {
-  CHAT_UPDATE_GATEWAY,
   ChatsArchiveService,
   ChatsCleanupService,
   ChatsCrudService,
@@ -78,6 +77,14 @@ export class ChatsService {
 
   async close(chatId: string) {
     return this.crudService.close(chatId);
+  }
+
+  async assignChat(
+    chatId: string,
+    assignerId: number,
+    assigneeId: number | null,
+  ) {
+    return this.crudService.assignChat(chatId, assignerId, assigneeId);
   }
 
   // ========== Archive Operations ==========

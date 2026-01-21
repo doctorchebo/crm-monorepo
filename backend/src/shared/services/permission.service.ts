@@ -1,86 +1,71 @@
 import { Injectable, ForbiddenException, Logger } from '@nestjs/common';
 import { eq, and } from 'drizzle-orm';
 import { db } from '../../database/db.connection';
-import { teamMembers, teams, chats } from '../../database/schema';
-
-/**
- * Team member roles in order of privilege level
- */
-export type TeamRole = 'owner' | 'admin' | 'agent' | 'viewer';
+import {
+  teamMembers,
+  teams,
+  chats,
+  roles,
+  permissions as permissionsTable,
+  rolePermissions,
+} from '../../database/schema';
 
 /**
  * Actions that can be performed in the system
+ * Mapped to database permission keys
  */
 export type PermissionAction =
-  | 'invite_members'
-  | 'remove_members'
-  | 'change_roles'
-  | 'assign_chats'
-  | 'take_control'
-  | 'force_unlock'
-  | 'send_messages'
-  | 'add_notes'
-  | 'move_stage'
-  | 'edit_workflow'
-  | 'view_chats'
-  | 'view_team';
+  | 'invite_members' // team.member.add
+  | 'remove_members' // team.member.remove
+  | 'change_roles' // team.member.edit
+  | 'assign_chats' // chat.assign
+  | 'take_control' // chat.assign
+  | 'force_unlock' // chat.assign
+  | 'send_messages' // chat.send
+  | 'add_notes' // chat.view (or dedicated chat.note?)
+  | 'move_stage' // workflow.move
+  | 'edit_workflow' // workflow.manage
+  | 'view_chats' // chat.view
+  | 'view_team'; // team.manage
 
 /**
- * Permission matrix defining which roles can perform which actions
- * ⚠️ = restricted (requires additional checks)
+ * Mapping between legacy action names and DB permission keys
  */
-const PERMISSION_MATRIX: Record<PermissionAction, TeamRole[]> = {
-  invite_members: ['owner', 'admin'],
-  remove_members: ['owner', 'admin'],
-  change_roles: ['owner', 'admin'],
-  assign_chats: ['owner', 'admin', 'agent'], // agent: own only
-  take_control: ['owner', 'admin', 'agent'], // agent: assigned only
-  force_unlock: ['owner', 'admin'],
-  send_messages: ['owner', 'admin', 'agent'],
-  add_notes: ['owner', 'admin', 'agent'],
-  move_stage: ['owner', 'admin', 'agent'], // agent: assigned only
-  edit_workflow: ['owner'],
-  view_chats: ['owner', 'admin', 'agent', 'viewer'],
-  view_team: ['owner', 'admin', 'agent', 'viewer'],
+const ACTION_TO_KEY: Record<string, string> = {
+  invite_members: 'team.member.add',
+  remove_members: 'team.member.remove',
+  change_roles: 'team.member.edit',
+  assign_chats: 'chat.assign',
+  take_control: 'chat.assign',
+  force_unlock: 'chat.assign',
+  send_messages: 'chat.send',
+  add_notes: 'chat.view',
+  move_stage: 'workflow.move',
+  edit_workflow: 'workflow.manage',
+  view_chats: 'chat.view',
+  view_team: 'team.manage',
 };
-
-/**
- * Actions that require the user to be assigned to the chat (for agents)
- */
-const ASSIGNMENT_REQUIRED_ACTIONS: PermissionAction[] = [
-  'assign_chats',
-  'take_control',
-  'move_stage',
-];
 
 export interface PermissionCheckResult {
   allowed: boolean;
-  role?: TeamRole;
+  role?: string;
   reason?: string;
 }
 
-/**
- * PermissionService - Role-based access control for team collaboration
- *
- * Enforces the permission matrix defined in the requirements:
- * - Owner: Full control
- * - Admin: Manage members, assign chats, force unlock
- * - Agent: Work on assigned chats only
- * - Viewer: Read-only access
- *
- * All permission checks are server-side. Never trust the client.
- */
 @Injectable()
 export class PermissionService {
   private readonly logger = new Logger(PermissionService.name);
 
   /**
-   * Get a user's role in a team
+   * Get a user's role name in a team
    */
-  async getRole(userId: number, teamId: number): Promise<TeamRole | null> {
+  async getRole(userId: number, teamId: number): Promise<string | null> {
     const [member] = await db
-      .select({ role: teamMembers.role })
+      .select({
+        roleName: roles.name,
+      })
       .from(teamMembers)
+      .leftJoin(roles, eq(teamMembers.roleId, roles.id))
       .where(
         and(
           eq(teamMembers.userId, userId),
@@ -90,11 +75,7 @@ export class PermissionService {
       )
       .limit(1);
 
-    if (!member) {
-      return null;
-    }
-
-    return member.role as TeamRole;
+    return member?.roleName ?? null;
   }
 
   /**
@@ -103,54 +84,70 @@ export class PermissionService {
   async checkPermission(
     userId: number,
     teamId: number,
-    action: PermissionAction,
-    resourceId?: string,
+    action: string,
+    _resourceId?: string,
   ): Promise<PermissionCheckResult> {
-    const role = await this.getRole(userId, teamId);
+    // 1. Resolve DB permission key
+    const permissionKey = ACTION_TO_KEY[action] || action;
 
-    if (!role) {
-      return {
-        allowed: false,
-        reason: 'User is not a member of this team',
-      };
+    // 2. Get Member with Role (manual join to avoid TypeORM/Drizzle relation complexity if not perfectly set up)
+    const [memberWithRole] = await db
+      .select({
+        roleId: teamMembers.roleId,
+        roleName: roles.name,
+        isSystem: roles.isSystem,
+      })
+      .from(teamMembers)
+      .leftJoin(roles, eq(teamMembers.roleId, roles.id))
+      .where(
+        and(
+          eq(teamMembers.userId, userId),
+          eq(teamMembers.teamId, teamId),
+          eq(teamMembers.isActive, true),
+        ),
+      )
+      .limit(1);
+
+    if (!memberWithRole) {
+      return { allowed: false, reason: 'User is not a member of this team' };
     }
 
-    const allowedRoles = PERMISSION_MATRIX[action];
-    if (!allowedRoles) {
-      return {
-        allowed: false,
-        role,
-        reason: `Unknown action: ${action}`,
-      };
+    // OWNER OVERRIDE: Owners can do everything
+    if (memberWithRole.roleName === 'Owner') {
+      return { allowed: true, role: 'Owner' };
     }
 
-    if (!allowedRoles.includes(role)) {
-      return {
-        allowed: false,
-        role,
-        reason: `Role '${role}' is not allowed to perform '${action}'`,
-      };
+    if (!memberWithRole.roleId) {
+      return { allowed: false, reason: 'User has no role assigned' };
     }
 
-    // For agents, check if assignment is required for this action
-    if (
-      role === 'agent' &&
-      ASSIGNMENT_REQUIRED_ACTIONS.includes(action) &&
-      resourceId
-    ) {
-      const isAssigned = await this.isUserAssignedToChat(userId, resourceId);
-      if (!isAssigned) {
-        return {
-          allowed: false,
-          role,
-          reason: `Agents can only ${action.replace('_', ' ')} for chats assigned to them`,
-        };
-      }
+    // 3. Check if role has the permission
+    const [hasPerm] = await db
+      .select({ id: rolePermissions.permissionId })
+      .from(rolePermissions)
+      .innerJoin(
+        permissionsTable,
+        eq(rolePermissions.permissionId, permissionsTable.id),
+      )
+      .where(
+        and(
+          eq(rolePermissions.roleId, memberWithRole.roleId),
+          eq(permissionsTable.key, permissionKey),
+        ),
+      )
+      .limit(1);
+
+    if (!hasPerm) {
+      return {
+        allowed: false,
+        role: memberWithRole.roleName ?? undefined,
+        reason: `Role '${memberWithRole.roleName}' is missing permission '${permissionKey}'`,
+      };
     }
 
     return {
       allowed: true,
-      role,
+      role: memberWithRole.roleName ?? undefined,
     };
   }
 
@@ -160,9 +157,9 @@ export class PermissionService {
   async enforcePermission(
     userId: number,
     teamId: number,
-    action: PermissionAction,
+    action: string,
     resourceId?: string,
-  ): Promise<TeamRole> {
+  ): Promise<string> {
     const result = await this.checkPermission(
       userId,
       teamId,
@@ -211,29 +208,31 @@ export class PermissionService {
    */
   async getUserTeams(
     userId: number,
-  ): Promise<{ teamId: number; role: TeamRole }[]> {
+  ): Promise<{ teamId: number; role: string }[]> {
     const memberships = await db
       .select({
         teamId: teamMembers.teamId,
-        role: teamMembers.role,
+        roleName: roles.name,
       })
       .from(teamMembers)
+      .leftJoin(roles, eq(teamMembers.roleId, roles.id))
       .where(
         and(eq(teamMembers.userId, userId), eq(teamMembers.isActive, true)),
       );
 
     return memberships.map((m) => ({
       teamId: m.teamId,
-      role: m.role as TeamRole,
+      role: m.roleName || 'Unknown',
     }));
   }
 
   /**
    * Check if user is owner or admin of the team
+   * Kept for backward compatibility, checks strictly against role name 'Owner' or 'Admin'
    */
   async isAdminOrOwner(userId: number, teamId: number): Promise<boolean> {
     const role = await this.getRole(userId, teamId);
-    return role === 'owner' || role === 'admin';
+    return role === 'Owner' || role === 'Admin';
   }
 
   /**

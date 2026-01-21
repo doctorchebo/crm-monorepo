@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   ParseIntPipe,
+  Patch,
   Post,
   UseGuards,
   Req,
@@ -13,6 +14,7 @@ import { JwtAuthGuard } from '../auth/auth.guard';
 import { CreateTeamDto } from './dto/create-team.dto';
 import { TeamService } from './team.service';
 import { InvitationService } from './invitation.service';
+import { RolesService } from './services/roles.service';
 import { PermissionService } from '../../shared/services/permission.service';
 
 interface AuthenticatedRequest {
@@ -26,6 +28,7 @@ export class TeamController {
     private readonly teamService: TeamService,
     private readonly invitationService: InvitationService,
     private readonly permissionService: PermissionService,
+    private readonly rolesService: RolesService,
   ) {}
 
   @Post()
@@ -39,6 +42,11 @@ export class TeamController {
   @Get()
   async getUserTeams(@Req() req: AuthenticatedRequest) {
     return this.teamService.getUserTeams(req.user.userId);
+  }
+
+  @Get('config/permissions')
+  async getPermissions() {
+    return this.rolesService.getAllPermissions();
   }
 
   @Get(':id')
@@ -104,7 +112,7 @@ export class TeamController {
     @Req() req: AuthenticatedRequest,
     @Param('teamId', ParseIntPipe) teamId: number,
     @Param('memberId', ParseIntPipe) memberId: number,
-    @Body() body: { role: string },
+    @Body() body: { role: string | number }, // Support roleId or legacy string
   ) {
     await this.permissionService.enforcePermission(
       req.user.userId,
@@ -112,5 +120,55 @@ export class TeamController {
       'change_roles',
     );
     return this.teamService.changeRole(teamId, memberId, body.role);
+  }
+
+  // ========== Role Management ==========
+
+  @Get(':id/roles')
+  async getRoles(@Param('id', ParseIntPipe) teamId: number) {
+    return this.rolesService.getTeamRoles(teamId);
+  }
+
+  @Post(':id/roles')
+  async createRole(
+    @Req() req: AuthenticatedRequest,
+    @Param('id', ParseIntPipe) teamId: number,
+    @Body() body: any,
+  ) {
+    await this.permissionService.enforcePermission(
+      req.user.userId,
+      teamId,
+      'team.manage',
+    );
+    return this.rolesService.createRole(teamId, body);
+  }
+
+  @Patch(':id/roles/:roleId')
+  async updateRole(
+    @Req() req: AuthenticatedRequest,
+    @Param('id', ParseIntPipe) teamId: number,
+    @Param('roleId', ParseIntPipe) roleId: number,
+    @Body() body: any,
+  ) {
+    await this.permissionService.enforcePermission(
+      req.user.userId,
+      teamId,
+      'team.manage',
+    );
+    return this.rolesService.updateRole(teamId, roleId, body);
+  }
+
+  @Delete(':id/roles/:roleId')
+  async deleteRole(
+    @Req() req: AuthenticatedRequest,
+    @Param('id', ParseIntPipe) teamId: number,
+    @Param('roleId', ParseIntPipe) roleId: number,
+  ) {
+    await this.permissionService.enforcePermission(
+      req.user.userId,
+      teamId,
+      'team.manage',
+    );
+    return this.rolesService.deleteRole(teamId, roleId);
   }
 }

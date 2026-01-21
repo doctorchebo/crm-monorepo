@@ -318,6 +318,9 @@ export class MetaCloudApiProvider implements IMessagingProvider {
   /**
    * Get template status from Meta
    */
+  /**
+   * Get template status from Meta
+   */
   async getTemplateStatus(templateId: string): Promise<TemplateStatusResult> {
     try {
       const accessToken = this.getAccessToken();
@@ -340,8 +343,19 @@ export class MetaCloudApiProvider implements IMessagingProvider {
         );
       }
 
-      const status =
-        META_STATUS_MAP[responseData.status] || TemplateApprovalStatus.PENDING;
+      const rawStatus = responseData.status;
+      let status = META_STATUS_MAP[rawStatus];
+
+      if (!status) {
+        this.logger.warn(
+          `Unknown template status received from Meta: "${rawStatus}". Defaulting to DRAFT.`,
+        );
+        // Do NOT default to PENDING as that locks the UI.
+        // If it's unknown, better to show as DRAFT so user can potentially resubmit,
+        // or we need a new "UNKNOWN" status. For now, DRAFT is safer than PENDING.
+        status = TemplateApprovalStatus.DRAFT;
+      }
+
       const qualityRating = responseData.quality_score
         ? META_QUALITY_MAP[responseData.quality_score.score] ||
           TemplateQualityRating.PENDING

@@ -39,6 +39,9 @@ export interface Chat {
   userId?: number;
   createdAt?: string;
   updatedAt?: string;
+  assignedTo?: number | null;
+  assignedBy?: number | null;
+  assignedAt?: string | null;
 }
 
 export interface ReplyPreview {

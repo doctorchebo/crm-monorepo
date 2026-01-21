@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { Suspense, useActionState, useEffect, useState } from "react";
 import {
   inviteTeamMember,
   removeTeamMember,
@@ -23,8 +23,10 @@ import { TeamDataWithMembers, User } from "@/lib/db/schema";
 import { customerPortalAction } from "@/lib/payments/actions";
 import { Loader2, PlusCircle } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { Suspense, useActionState } from "react";
 import useSWR from "swr";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { RoleManager } from "@/components/team/role-manager";
+import { useTabState } from "@/hooks/use-tab-state";
 
 type ActionState = {
   error?: string;
@@ -138,15 +140,6 @@ function TeamMembers() {
             <li key={member.id} className="flex items-center justify-between">
               <div className="flex items-center space-x-4">
                 <Avatar>
-                  {/* 
-                    This app doesn't save profile images, but here
-                    is how you'd show them:
-
-                    <AvatarImage
-                      src={member.user.image || ''}
-                      alt={getUserDisplayName(member.user)}
-                    />
-                  */}
                   <AvatarFallback>
                     {getUserDisplayName(member.user)
                       .split(" ")
@@ -159,11 +152,13 @@ function TeamMembers() {
                     {getUserDisplayName(member.user)}
                   </p>
                   <p className="text-sm text-muted-foreground capitalize">
-                    {member.role}
+                    {member.roleId ? (
+                         member.role
+                    ) : member.role}
                   </p>
                 </div>
               </div>
-              {index > 1 ? (
+              {index > 0 ? (
                 <form action={removeAction}>
                   <input type="hidden" name="memberId" value={member.id} />
                   <Button
@@ -201,7 +196,9 @@ function InviteTeamMemberSkeleton() {
 function InviteTeamMember() {
   const t = useTranslations("team");
   const { data: user } = useSWR<User>("/api/user", fetcher);
-  const isOwner = user?.role === "owner";
+  
+  const isOwner = user?.role === "owner" || user?.role === "admin";
+  
   const [inviteState, inviteAction, isInvitePending] = useActionState<
     ActionState,
     FormData
@@ -209,9 +206,7 @@ function InviteTeamMember() {
   const [lastProcessedState, setLastProcessedState] = React.useState<ActionState | null>(null);
   const { addNotification } = useNotification();
 
-  // Show notifications when invitation state changes
   React.useEffect(() => {
-    // Avoid showing notification for the same state twice
     if (!inviteState || inviteState === lastProcessedState) return;
     
     if (inviteState.success) {
@@ -256,8 +251,16 @@ function InviteTeamMember() {
                 <Label htmlFor="member">{t("member")}</Label>
               </div>
               <div className="flex items-center space-x-2 mt-2">
-                <RadioGroupItem value="owner" id="owner" />
-                <Label htmlFor="owner">{t("owner")}</Label>
+                 <RadioGroupItem value="admin" id="admin" />
+                 <Label htmlFor="admin">Admin</Label>
+              </div>
+              <div className="flex items-center space-x-2 mt-2">
+                 <RadioGroupItem value="agent" id="agent" />
+                 <Label htmlFor="agent">Agent</Label>
+              </div>
+              <div className="flex items-center space-x-2 mt-2">
+                 <RadioGroupItem value="viewer" id="viewer" />
+                 <Label htmlFor="viewer">Viewer</Label>
               </div>
             </RadioGroup>
           </div>
@@ -287,18 +290,53 @@ function InviteTeamMember() {
   );
 }
 
-export default function SettingsPage() {
+function RoleManagerTab({ teamId }: { teamId: number }) {
+    return <RoleManager teamId={teamId} />;
+}
+
+export default function TeamCenterPage() {
   const t = useTranslations("team");
+  const { data: teamData } = useSWR<TeamDataWithMembers>("/api/team", fetcher);
+  const [currentTab, setCurrentTab] = useTabState({ defaultValue: "overview" });
+
+  return (
     <PageLayout title={t("title")}>
-      <Suspense fallback={<SubscriptionSkeleton />}>
-        <ManageSubscription />
-      </Suspense>
-      <Suspense fallback={<TeamMembersSkeleton />}>
-        <TeamMembers />
-      </Suspense>
-      <Suspense fallback={<InviteTeamMemberSkeleton />}>
-        <InviteTeamMember />
-      </Suspense>
+      <Tabs value={currentTab} onValueChange={setCurrentTab} className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="overview">{t("overview")}</TabsTrigger>
+          <TabsTrigger value="members">{t("members")}</TabsTrigger>
+          <TabsTrigger value="roles">{t("roles")}</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview">
+          <Suspense fallback={<SubscriptionSkeleton />}>
+            <ManageSubscription />
+          </Suspense>
+        </TabsContent>
+
+        <TabsContent value="members">
+            <div className="space-y-6">
+                <Suspense fallback={<TeamMembersSkeleton />}>
+                    <TeamMembers />
+                </Suspense>
+                <Suspense fallback={<InviteTeamMemberSkeleton />}>
+                    <InviteTeamMember />
+                </Suspense>
+            </div>
+        </TabsContent>
+
+        <TabsContent value="roles">
+            {teamData?.id ? (
+                <RoleManagerTab teamId={teamData.id} />
+            ) : (
+                <Card>
+                    <CardContent className="py-10 flex justify-center">
+                        <Loader2 className="animate-spin" />
+                    </CardContent>
+                </Card>
+            )}
+        </TabsContent>
+      </Tabs>
     </PageLayout>
   );
 }

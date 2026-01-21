@@ -320,6 +320,37 @@ export class ChatsCrudService {
   }
 
   /**
+   * Assign a chat to a user
+   */
+  async assignChat(
+    chatId: string,
+    assignerId: number,
+    assigneeId: number | null,
+  ) {
+    // If assigneeId is null, we unassign.
+    try {
+      const [updated] = await db
+        .update(chats)
+        .set({
+          assignedTo: assigneeId, // null or userId
+          assignedBy: assigneeId ? assignerId : null,
+          assignedAt: assigneeId ? new Date() : null,
+          updatedAt: new Date(),
+        })
+        .where(eq(chats.chatId, chatId))
+        .returning();
+
+      if (!updated) {
+        throw new NotFoundException(`Chat ${chatId} not found`);
+      }
+      return updated;
+    } catch (error) {
+      this.logger.error(`Error assigning chat: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
    * Close a chat
    */
   async close(chatId: string) {

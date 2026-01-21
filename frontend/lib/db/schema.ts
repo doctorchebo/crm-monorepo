@@ -6,6 +6,7 @@ import {
   timestamp,
   integer,
   boolean,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
@@ -32,6 +33,42 @@ export const teams = pgTable("teams", {
   subscriptionStatus: varchar("subscription_status", { length: 20 }),
 });
 
+export const permissions = pgTable("permissions", {
+  id: serial("id").primaryKey(),
+  key: varchar("key", { length: 100 }).notNull().unique(), // e.g. 'chat.delete'
+  description: text("description"),
+  category: varchar("category", { length: 50 }).notNull(), // e.g. 'chat', 'team', 'workflow'
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const roles = pgTable("roles", {
+  id: serial("id").primaryKey(),
+  teamId: integer("team_id")
+    .notNull()
+    .references(() => teams.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 50 }).notNull(), // e.g. 'Supervisor'
+  description: text("description"),
+  isSystem: boolean("is_system").default(false), // If true, cannot be deleted
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const rolePermissions = pgTable(
+  "role_permissions",
+  {
+    roleId: integer("role_id")
+      .notNull()
+      .references(() => roles.id, { onDelete: "cascade" }),
+    permissionId: integer("permission_id")
+      .notNull()
+      .references(() => permissions.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.roleId, table.permissionId] }),
+  }),
+);
+
 export const teamMembers = pgTable("team_members", {
   id: serial("id").primaryKey(),
   userId: integer("user_id")
@@ -41,6 +78,7 @@ export const teamMembers = pgTable("team_members", {
     .notNull()
     .references(() => teams.id),
   role: varchar("role", { length: 50 }).notNull(),
+  roleId: integer("role_id").references(() => roles.id),
   joinedAt: timestamp("joined_at").notNull().defaultNow(),
 });
 
@@ -102,6 +140,7 @@ export const teamsRelations = relations(teams, ({ many }) => ({
   teamMembers: many(teamMembers),
   activityLogs: many(activityLogs),
   invitations: many(invitations),
+  roles: many(roles),
 }));
 
 export const usersRelations = relations(users, ({ many }) => ({
@@ -140,6 +179,10 @@ export const teamMembersRelations = relations(teamMembers, ({ one }) => ({
     fields: [teamMembers.teamId],
     references: [teams.id],
   }),
+  role: one(roles, {
+    fields: [teamMembers.roleId],
+    references: [roles.id],
+  }),
 }));
 
 export const activityLogsRelations = relations(activityLogs, ({ one }) => ({
@@ -153,6 +196,29 @@ export const activityLogsRelations = relations(activityLogs, ({ one }) => ({
   }),
 }));
 
+export const rolesRelations = relations(roles, ({ one, many }) => ({
+  team: one(teams, {
+    fields: [roles.teamId],
+    references: [teams.id],
+  }),
+  permissions: many(rolePermissions),
+  members: many(teamMembers),
+}));
+
+export const rolePermissionsRelations = relations(
+  rolePermissions,
+  ({ one }) => ({
+    role: one(roles, {
+      fields: [rolePermissions.roleId],
+      references: [roles.id],
+    }),
+    permission: one(permissions, {
+      fields: [rolePermissions.permissionId],
+      references: [permissions.id],
+    }),
+  }),
+);
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Team = typeof teams.$inferSelect;
@@ -165,6 +231,11 @@ export type Invitation = typeof invitations.$inferSelect;
 export type NewInvitation = typeof invitations.$inferInsert;
 export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 export type NewPasswordResetToken = typeof passwordResetTokens.$inferInsert;
+export type Role = typeof roles.$inferSelect;
+export type NewRole = typeof roles.$inferInsert;
+export type Permission = typeof permissions.$inferSelect;
+export type RolePermission = typeof rolePermissions.$inferSelect;
+
 export type TeamDataWithMembers = Team & {
   teamMembers: (TeamMember & {
     user: Pick<User, "id" | "name" | "email">;

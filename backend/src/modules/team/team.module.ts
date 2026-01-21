@@ -5,10 +5,17 @@ import { TeamService } from './team.service';
 import { InvitationService } from './invitation.service';
 import { AuditService } from '../../shared/services/audit.service';
 import { PermissionService } from '../../shared/services/permission.service';
+import { RolesService } from './services/roles.service';
 
 @Module({
   controllers: [TeamController, InvitationController],
-  providers: [TeamService, InvitationService, AuditService, PermissionService],
-  exports: [TeamService, InvitationService, PermissionService],
+  providers: [
+    TeamService,
+    InvitationService,
+    AuditService,
+    PermissionService,
+    RolesService,
+  ],
+  exports: [TeamService, InvitationService, PermissionService, RolesService],
 })
 export class TeamModule {}

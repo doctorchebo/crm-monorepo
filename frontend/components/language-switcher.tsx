@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Globe } from "lucide-react";
 import { useLocale } from "next-intl";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTransition } from "react";
 
 const languages = [
@@ -21,6 +21,7 @@ export function LanguageSwitcher() {
   const locale = useLocale();
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [isPending, startTransition] = useTransition();
 
   const handleLanguageChange = (newLocale: string) => {
@@ -38,9 +39,13 @@ export function LanguageSwitcher() {
         newLocale === "en"
           ? pathWithoutLocale
           : `/${newLocale}${pathWithoutLocale}`;
+      
+      // Preserve query parameters
+      const params = searchParams.toString();
+      const finalPath = params ? `${newPath}?${params}` : newPath;
 
       // Use replace to push the new locale path and trigger a full re-render
-      router.replace(newPath);
+      router.replace(finalPath);
     });
   };
 

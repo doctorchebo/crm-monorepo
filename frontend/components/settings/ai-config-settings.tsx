@@ -18,6 +18,7 @@ import type { UpdateAiConfigurationDto } from "@/lib/api/endpoints";
 import { cn } from "@/lib/utils";
 import { Bot, Languages, MessageSquare, Settings2, Zap } from "lucide-react";
 import { useCallback, useState } from "react";
+import { useTabState } from "@/hooks/use-tab-state";
 
 // Simple toast replacement until sonner is installed
 const toast = {
@@ -32,6 +33,13 @@ interface AiConfigSettingsProps {
    * - "embedded": No card wrapper, for use inside SettingsCategory
    */
   variant?: "card" | "embedded";
+  
+  /**
+   * Query parameter name to store the selected tab.
+   * Useful when multiple tabbed components exist on the same page.
+   * @default "tab"
+   */
+  tabParamName?: string;
 }
 
 /**
@@ -44,7 +52,7 @@ interface AiConfigSettingsProps {
  *
  * Priority order: Chat Override > Stage Settings > User Defaults > System Defaults
  */
-export function AiConfigSettings({ variant = "card" }: AiConfigSettingsProps) {
+export function AiConfigSettings({ variant = "card", tabParamName = "tab" }: AiConfigSettingsProps) {
   const {
     options,
     loadingOptions,
@@ -54,6 +62,7 @@ export function AiConfigSettings({ variant = "card" }: AiConfigSettingsProps) {
   } = useAiConfig();
 
   const [saving, setSaving] = useState(false);
+  const [currentTab, setCurrentTab] = useTabState({ defaultValue: "style", paramName: tabParamName });
 
   const handleUpdate = useCallback(
     async (field: keyof UpdateAiConfigurationDto, value: unknown) => {
@@ -122,7 +131,7 @@ export function AiConfigSettings({ variant = "card" }: AiConfigSettingsProps) {
 
   // Main content - the tabs with all the settings
   const settingsContent = (
-    <Tabs defaultValue="style" className="w-full">
+    <Tabs value={currentTab} onValueChange={setCurrentTab} className="w-full">
       <TabsList className="grid w-full grid-cols-4">
         <TabsTrigger value="style" className="flex items-center gap-2">
           <MessageSquare className="h-4 w-4" />

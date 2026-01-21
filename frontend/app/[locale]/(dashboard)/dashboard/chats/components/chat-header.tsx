@@ -9,6 +9,7 @@ import { Search } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState, useEffect } from "react";
 import type { Chat } from "../types";
+import { AssigneeSelector } from "@/components/chat/assignee-selector";
 
 interface ChatHeaderProps {
   chat: Chat;
@@ -106,6 +107,12 @@ export function ChatHeader({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Assignee Selector */}
+          <AssigneeSelector
+            chatId={chat.chatId}
+            assigneeId={chat.assignedTo}
+          />
+          
           {/* AI Controls */}
           <ChatAIControls
             chatId={chat.chatId}

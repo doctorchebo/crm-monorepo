@@ -11,6 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/auth.guard';
+import { RequirePermission } from '../auth/guards/permissions.guard';
 import { ChatsService } from './chats.service';
 import { CreateChatDto } from './dto/create-chat.dto';
 import { SearchChatsDto } from './dto/search-chats.dto';
@@ -138,6 +139,22 @@ export class ChatsController {
     const userId = req.user.userId;
     await this.chatsService.deleteChat(id, userId);
     return { success: true, message: 'Chat deleted successfully' };
+  }
+
+  /**
+   * Assign a chat to a user
+   * PATCH /chats/:id/assign
+   * Body: { userId: number | null }
+   */
+  @Patch(':id/assign')
+  @RequirePermission('chat.assign')
+  async assignChat(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() body: { userId: number | null },
+  ) {
+    const assignerId = req.user.userId;
+    return this.chatsService.assignChat(id, assignerId, body.userId);
   }
 
   /**
