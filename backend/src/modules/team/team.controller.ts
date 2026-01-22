@@ -59,6 +59,11 @@ export class TeamController {
     return this.teamService.getMembers(id);
   }
 
+  @Get(':id/metrics')
+  async getMetrics(@Param('id', ParseIntPipe) id: number) {
+    return this.teamService.getTeamMetrics(id);
+  }
+
   @Post(':id/invite')
   async inviteMember(
     @Req() req: AuthenticatedRequest,

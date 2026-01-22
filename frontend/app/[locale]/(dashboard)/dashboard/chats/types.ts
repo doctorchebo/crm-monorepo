@@ -42,6 +42,7 @@ export interface Chat {
   assignedTo?: number | null;
   assignedBy?: number | null;
   assignedAt?: string | null;
+  teamId?: number | null;
 }
 
 export interface ReplyPreview {

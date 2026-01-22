@@ -11,7 +11,8 @@
     "loading": "Loading...",
     "error": "Error",
     "success": "Success",
-    "confirm": "Confirm"
+    "confirm": "Confirm",
+    "participant": "Participant"
   },
   "chat": {
     "aiReplyPreview": "AI Reply Preview",
@@ -559,7 +560,33 @@
         "updated": "Role updated successfully",
         "deleted": "Role deleted successfully"
       }
-    }
+    },
+    "metrics": "Metrics",
+    "workload": "Workload",
+    "unassignedChats": "Unassigned Chats",
+    "activeChats": "Active Chats",
+    "closedChats": "Closed Chats",
+    "activities": "Activities",
+    "analytics": "Analytics",
+    "assign": "Assign",
+    "assignedTo": "Assigned To",
+    "assignToMe": "Assign to Me",
+    "noUnassignedChats": "No unassigned chats",
+    "messagesSent": "Messages Sent",
+    "chatAssignment": "Chat Assignment",
+    "memberWorkload": "Member Workload",
+    "assignSuccess": "Chat assigned successfully",
+    "noActivity": "No activity data available",
+    "allChats": "All Chats",
+    "assigned": "Assigned",
+    "unassigned": "Unassigned",
+    "reassign": "Reassign",
+    "unassign": "Unassign",
+    "unassignSuccess": "Chat unassigned successfully",
+    "unassignFailed": "Failed to unassign chat",
+    "assignFailed": "Failed to assign chat",
+    "noChats": "No chats found",
+    "actions": "Actions"
   },
   "general": {
     "title": "General Settings",

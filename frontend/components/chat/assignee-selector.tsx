@@ -6,6 +6,7 @@ import useSWR from "swr";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { backendApi } from "@/lib/api/endpoints";
 import {
   Command,
   CommandEmpty,
@@ -36,16 +37,25 @@ interface AssigneeSelectorProps {
 export function AssigneeSelector({
   chatId,
   assigneeId,
+  teamId,
   onAssign,
-}: AssigneeSelectorProps) {
+}: AssigneeSelectorProps & { teamId?: number | null }) {
   const [open, setOpen] = React.useState(false);
   const [loading, setLoading] = useState(false);
   const { addNotification } = useNotification();
-  const { data: teamData } = useSWR<TeamDataWithMembers>("/api/team", fetcher);
+  
+  // Fetch members using backendApi if teamId is available
+  const { data: members, isLoading } = useSWR<any[]>(
+    teamId ? ['team-members', teamId] : null,
+    () => backendApi.team.getMembers(teamId!.toString()) as Promise<any[]>
+  );
 
-  const selectedMember = teamData?.teamMembers?.find(
+  const selectedMember = members?.find(
     (member) => member.userId === assigneeId
   );
+  
+  const getUserDisplayName = (user: any) => user.name || user.email || "Unknown";
+  const getUserInitials = (user: any) => (user.name || user.email || "?").charAt(0).toUpperCase();
 
   const handleSelect = async (memberId: number | null) => {
     setLoading(true);
@@ -68,7 +78,12 @@ export function AssigneeSelector({
     }
   };
 
-  if (!teamData) {
+  if (!teamId) {
+      // Fallback or empty state if no teamId (legacy chats before fix)
+      return null;
+  }
+
+  if (isLoading) {
       return <Button variant="ghost" size="sm" disabled>Loading...</Button>;
   }
 
@@ -87,10 +102,10 @@ export function AssigneeSelector({
                     <>
                         <Avatar className="h-5 w-5">
                             <AvatarFallback className="text-[10px]">
-                                {selectedMember.user.name?.charAt(0) || selectedMember.user.email.charAt(0)}
+                                {getUserInitials(selectedMember.user || selectedMember)}
                             </AvatarFallback>
                         </Avatar>
-                        <span className="truncate text-sm">{selectedMember.user.name || selectedMember.user.email}</span>
+                        <span className="truncate text-sm">{getUserDisplayName(selectedMember.user || selectedMember)}</span>
                     </>
                 ) : (
                     <>
@@ -120,28 +135,31 @@ export function AssigneeSelector({
                   />
                   Unassigned
                 </CommandItem>
-              {teamData.teamMembers.map((member) => (
-                <CommandItem
-                  key={member.userId}
-                  value={member.user.name || member.user.email}
-                  onSelect={() => handleSelect(member.userId)}
-                >
-                  <Check
-                    className={cn(
-                      "mr-2 h-4 w-4",
-                      assigneeId === member.userId ? "opacity-100" : "opacity-0"
-                    )}
-                  />
-                  <div className="flex items-center gap-2">
-                     <Avatar className="h-5 w-5">
-                        <AvatarFallback className="text-[10px]">
-                            {member.user.name?.charAt(0) || member.user.email.charAt(0)}
-                        </AvatarFallback>
-                     </Avatar>
-                     <span className="truncate">{member.user.name || member.user.email}</span>
-                  </div>
-                </CommandItem>
-              ))}
+              {members?.map((member) => {
+                 const user = member.user || member; // Handle different structure if any
+                 return (
+                    <CommandItem
+                    key={member.userId}
+                    value={getUserDisplayName(user)}
+                    onSelect={() => handleSelect(member.userId)}
+                    >
+                    <Check
+                        className={cn(
+                        "mr-2 h-4 w-4",
+                        assigneeId === member.userId ? "opacity-100" : "opacity-0"
+                        )}
+                    />
+                    <div className="flex items-center gap-2">
+                        <Avatar className="h-5 w-5">
+                            <AvatarFallback className="text-[10px]">
+                                {getUserInitials(user)}
+                            </AvatarFallback>
+                        </Avatar>
+                        <span className="truncate">{getUserDisplayName(user)}</span>
+                    </div>
+                    </CommandItem>
+                );
+              })}
             </CommandGroup>
           </CommandList>
         </Command>

@@ -12,6 +12,8 @@ export interface ChatAssignment {
   assignedBy: number | null;
   assignedByName?: string;
   teamId: number | null;
+  participantName?: string | null;
+  participantPhone?: string | null;
 }
 
 /**
@@ -223,10 +225,51 @@ export class ChatAssignmentService {
         assignedAt: chats.assignedAt,
         assignedBy: chats.assignedBy,
         teamId: chats.teamId,
+        participantName: chats.participantName,
+        participantPhone: chats.participantPhone,
       })
       .from(chats)
       .where(eq(chats.teamId, teamId));
 
     return chatsList.filter((c) => c.assignedTo === null);
+  }
+
+  /**
+   * Get all chats for a team (both assigned and unassigned)
+   * Includes assignee name for display purposes
+   */
+  async getAllTeamChats(teamId: number): Promise<ChatAssignment[]> {
+    const chatsList = await db
+      .select({
+        chatId: chats.chatId,
+        assignedTo: chats.assignedTo,
+        assignedAt: chats.assignedAt,
+        assignedBy: chats.assignedBy,
+        teamId: chats.teamId,
+        participantName: chats.participantName,
+        participantPhone: chats.participantPhone,
+      })
+      .from(chats)
+      .where(eq(chats.teamId, teamId));
+
+    // Enrich with assignee names
+    const enriched: ChatAssignment[] = [];
+    for (const chat of chatsList) {
+      let assignedToName: string | undefined;
+      if (chat.assignedTo) {
+        const [assignee] = await db
+          .select({ name: users.name })
+          .from(users)
+          .where(eq(users.id, chat.assignedTo))
+          .limit(1);
+        assignedToName = assignee?.name ?? undefined;
+      }
+      enriched.push({
+        ...chat,
+        assignedToName,
+      });
+    }
+
+    return enriched;
   }
 }

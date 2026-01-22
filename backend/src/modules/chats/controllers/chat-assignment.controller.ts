@@ -13,6 +13,10 @@ import {
 import { JwtAuthGuard } from '../../auth/auth.guard';
 import { ChatAssignmentService } from '../services/chat-assignment.service';
 import { PermissionService } from '../../../shared/services/permission.service';
+import {
+  PermissionsGuard,
+  RequirePermission,
+} from '../../auth/guards/permissions.guard';
 
 interface AuthenticatedRequest {
   user: { userId: number };
@@ -123,5 +127,33 @@ export class ChatAssignmentController {
   @Get('assigned')
   async getMyAssignedChats(@Req() req: AuthenticatedRequest) {
     return this.chatAssignmentService.getAssignedChats(req.user.userId);
+  }
+
+  /**
+   * Get unassigned chats for a team
+   * GET /chats/team/:teamId/unassigned
+   */
+  @Get('team/:teamId/unassigned')
+  @UseGuards(PermissionsGuard)
+  @RequirePermission('view_chats')
+  async getUnassignedChats(
+    @Req() req: AuthenticatedRequest,
+    @Param('teamId', ParseIntPipe) teamId: number,
+  ) {
+    return this.chatAssignmentService.getUnassignedChats(teamId);
+  }
+
+  /**
+   * Get all chats for a team (assigned and unassigned)
+   * GET /chats/team/:teamId/all
+   */
+  @Get('team/:teamId/all')
+  @UseGuards(PermissionsGuard)
+  @RequirePermission('view_chats')
+  async getAllTeamChats(
+    @Req() req: AuthenticatedRequest,
+    @Param('teamId', ParseIntPipe) teamId: number,
+  ) {
+    return this.chatAssignmentService.getAllTeamChats(teamId);
   }
 }

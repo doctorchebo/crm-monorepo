@@ -1,9 +1,11 @@
+"use client";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getActivityLogs } from "@/lib/db/queries";
 import { ActivityType } from "@/lib/db/schema";
 import {
   AlertCircle,
   CheckCircle,
+  Loader2,
   Lock,
   LogOut,
   Mail,
@@ -13,11 +15,21 @@ import {
   UserPlus,
   type LucideIcon,
 } from "lucide-react";
-import { getTranslations } from "next-intl/server";
+import { useTranslations } from "next-intl";
+import { backendApi } from "@/lib/api/endpoints";
+import useSWR from "swr";
+import { useAuthProtection } from "@/hooks/use-auth";
+import { PageLayout } from "@/components/ui/page-layout";
 
-type ActivityLog = Awaited<ReturnType<typeof getActivityLogs>>[number];
+type ActivityLog = {
+  id: number;
+  action: string;
+  timestamp: string;
+  ipAddress?: string;
+  userName?: string;
+};
 
-const iconMap: Record<ActivityType, LucideIcon> = {
+const iconMap: Record<string, LucideIcon> = {
   [ActivityType.SIGN_UP]: UserPlus,
   [ActivityType.SIGN_IN]: UserCog,
   [ActivityType.SIGN_OUT]: LogOut,
@@ -45,8 +57,8 @@ function getRelativeTime(date: Date) {
 }
 
 function formatAction(
-  action: ActivityType,
-  t: Awaited<ReturnType<typeof getTranslations>>
+  action: string,
+  t: (key: string) => string
 ): string {
   switch (action) {
     case ActivityType.SIGN_UP:
@@ -76,7 +88,7 @@ function formatAction(
 
 interface ActivityListProps {
   logs: ActivityLog[];
-  t: Awaited<ReturnType<typeof getTranslations>>;
+  t: (key: string) => string;
 }
 
 function ActivityList({ logs, t }: ActivityListProps) {
@@ -85,8 +97,8 @@ function ActivityList({ logs, t }: ActivityListProps) {
       {logs.length > 0 ? (
         <ul className="space-y-4">
           {logs.map((log) => {
-            const Icon = iconMap[log.action as ActivityType] || Settings;
-            const formattedAction = formatAction(log.action as ActivityType, t);
+            const Icon = iconMap[log.action] || Settings;
+            const formattedAction = formatAction(log.action, t);
 
             return (
               <li key={log.id} className="flex items-center space-x-4">
@@ -121,26 +133,37 @@ function ActivityList({ logs, t }: ActivityListProps) {
   );
 }
 
-export default async function ActivityPage() {
-  const t = await getTranslations("activity");
-  let logs: ActivityLog[] = [];
-  try {
-    logs = await getActivityLogs();
-  } catch (error) {
-    console.error("Failed to load activity logs:", error);
-  }
+export default function ActivityPage() {
+  const t = useTranslations("activity");
+  
+  // Protect route
+  useAuthProtection();
+
+  const { data: logs, error, isLoading } = useSWR<ActivityLog[]>(
+    ['activity-logs'],
+    () => backendApi.user.getActivity() as Promise<ActivityLog[]>
+  );
 
   return (
-    <section className="flex-1 p-4 lg:p-8">
-      <h1 className="text-lg lg:text-2xl font-medium mb-6">{t("title")}</h1>
+    <PageLayout title={t("title")}>
       <Card>
         <CardHeader>
           <CardTitle>{t("recentActivity")}</CardTitle>
         </CardHeader>
         <CardContent>
-          <ActivityList logs={logs} t={t} />
+          {isLoading ? (
+             <div className="flex justify-center p-8">
+               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+             </div>
+          ) : error ? (
+            <div className="text-center py-8 text-red-500">
+                Failed to load activity logs
+            </div>
+          ) : (
+            <ActivityList logs={logs || []} t={t} />
+          )}
         </CardContent>
       </Card>
-    </section>
+    </PageLayout>
   );
 }

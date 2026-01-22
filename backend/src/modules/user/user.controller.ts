@@ -12,15 +12,28 @@ import { JwtAuthGuard } from '../auth/auth.guard';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserService } from './user.service';
 
+interface AuthenticatedRequest {
+  user: { userId: number };
+}
+
 @Controller('users')
 @UseGuards(JwtAuthGuard)
 export class UserController {
   constructor(private userService: UserService) {}
 
   @Get('profile')
-  async getProfile(@Req() req: any) {
+  async getProfile(@Req() req: AuthenticatedRequest) {
     const userId = req.user.userId;
     return this.userService.findOne(userId.toString());
+  }
+
+  @Get('activity')
+  async getActivityLogs(@Req() req: AuthenticatedRequest) {
+    const userId =
+      typeof req.user.userId === 'string'
+        ? parseInt(req.user.userId, 10)
+        : req.user.userId;
+    return this.userService.getActivityLogs(userId);
   }
 
   @Get(':id')

@@ -90,7 +90,7 @@ export interface CreateContactDto {
   phoneNumber: string;
 }
 
-export interface UpdateContactDto extends Partial<CreateContactDto> { }
+export interface UpdateContactDto extends Partial<CreateContactDto> {}
 
 /**
  * Contact entity returned from the API
@@ -431,6 +431,7 @@ export const backendApi = {
   user: {
     getProfile: (): Promise<UserProfileDto> => apiClient.get("/users/profile"),
     updateProfile: (data: any) => apiClient.patch("/users/profile", data),
+    getActivity: () => apiClient.get("/users/activity"),
   },
 
   // Team endpoints
@@ -443,6 +444,7 @@ export const backendApi = {
     removeMember: (teamId: string, memberId: string) =>
       apiClient.delete(`/teams/${teamId}/members/${memberId}`),
     getMembers: (teamId: string) => apiClient.get(`/teams/${teamId}/members`),
+    getMetrics: (teamId: string) => apiClient.get(`/teams/${teamId}/metrics`),
   },
 
   // Billing endpoints
@@ -478,7 +480,7 @@ export const backendApi = {
       options?: {
         skip?: number;
         take?: number;
-      }
+      },
     ): Promise<{
       results: Array<{
         chatId: string;
@@ -523,9 +525,16 @@ export const backendApi = {
      */
     delete: (id: string) => apiClient.delete(`/chats/${id}`),
     markAsRead: (id: string) => apiClient.post(`/chats/${id}/mark-read`, {}),
+    assign: (chatId: string, assigneeId: number) =>
+      apiClient.post(`/chats/${chatId}/assign`, { assigneeId }),
+    unassign: (chatId: string) => apiClient.delete(`/chats/${chatId}/assign`),
+    getUnassigned: (teamId: string) =>
+      apiClient.get(`/chats/team/${teamId}/unassigned`),
+    getAllForTeam: (teamId: string) =>
+      apiClient.get(`/chats/team/${teamId}/all`),
     getMessages: (id: string, skip?: number, take?: number) =>
       apiClient.get(
-        `/chats/${id}/messages?skip=${skip || 0}&take=${take || 50}`
+        `/chats/${id}/messages?skip=${skip || 0}&take=${take || 50}`,
       ),
     startWithContact: (data: {
       businessPhone: string;
@@ -547,7 +556,7 @@ export const backendApi = {
         endDate?: string;
         skip?: number;
         take?: number;
-      }
+      },
     ): Promise<{
       results: Array<{
         messageId: string;
@@ -584,7 +593,7 @@ export const backendApi = {
      */
     getMessagePosition: (
       chatId: string,
-      messageId: string
+      messageId: string,
     ): Promise<{
       found: boolean;
       position: number;
@@ -598,7 +607,7 @@ export const backendApi = {
      */
     findMessageByDate: (
       chatId: string,
-      date: Date
+      date: Date,
     ): Promise<{
       found: boolean;
       messageId: string | null;
@@ -607,7 +616,7 @@ export const backendApi = {
       totalCount: number;
     }> =>
       apiClient.get(
-        `/chats/${chatId}/messages/by-date?date=${date.toISOString()}`
+        `/chats/${chatId}/messages/by-date?date=${date.toISOString()}`,
       ),
   },
 
@@ -649,7 +658,7 @@ export const backendApi = {
     getNotifications: (): Promise<NotificationSettings> =>
       apiClient.get("/settings/notifications"),
     updateNotifications: (
-      data: UpdateNotificationSettingsDto
+      data: UpdateNotificationSettingsDto,
     ): Promise<NotificationSettings> =>
       apiClient.patch("/settings/notifications", data),
   },
@@ -692,7 +701,7 @@ export const backendApi = {
       apiClient.get(`/whatsapp/status/${messageId}`),
     getDownloadUrl: (messageId: string, attachmentId: string) =>
       apiClient.get(
-        `/whatsapp/media/${messageId}/${attachmentId}/download-url`
+        `/whatsapp/media/${messageId}/${attachmentId}/download-url`,
       ),
     getMessages: () => apiClient.get("/whatsapp/messages"),
     getChats: (skip?: number, take?: number) =>
@@ -700,7 +709,7 @@ export const backendApi = {
     getChatMessages: (
       chatId: string,
       skip?: number,
-      take?: number
+      take?: number,
     ): Promise<{
       messages: any[];
       hasMore: boolean;
@@ -708,8 +717,9 @@ export const backendApi = {
       nextCursor: number;
     }> =>
       apiClient.get(
-        `/whatsapp/chats/${chatId}/messages?skip=${skip || 0}&take=${take || 50
-        }`
+        `/whatsapp/chats/${chatId}/messages?skip=${skip || 0}&take=${
+          take || 50
+        }`,
       ),
     /**
      * Get newer messages for bidirectional infinite scroll.
@@ -718,15 +728,15 @@ export const backendApi = {
     getNewerMessages: (
       chatId: string,
       afterTimestamp: string,
-      take?: number
+      take?: number,
     ): Promise<{
       messages: any[];
       hasMore: boolean;
     }> =>
       apiClient.get(
         `/whatsapp/chats/${chatId}/messages/newer?afterTimestamp=${encodeURIComponent(
-          afterTimestamp
-        )}&take=${take || 50}`
+          afterTimestamp,
+        )}&take=${take || 50}`,
       ),
     saveNote: (data: { messageId: string; note: string }) =>
       apiClient.post("/whatsapp/notes", data),
@@ -739,7 +749,7 @@ export const backendApi = {
       apiClient.delete(`/whatsapp/messages/${messageId}`),
     // Conversation window endpoints - for 24-hour rule enforcement
     getConversationWindowStatus: (
-      chatId: string
+      chatId: string,
     ): Promise<{
       canSendFreeFormMessage: boolean;
       canSendApprovedTemplate: boolean;
@@ -748,16 +758,16 @@ export const backendApi = {
       timeRemainingMs: number;
       hasInboundMessage: boolean;
       blockReason?:
-      | "no_inbound_messages"
-      | "window_expired"
-      | "window_expiring_soon";
+        | "no_inbound_messages"
+        | "window_expired"
+        | "window_expiring_soon";
     }> => apiClient.get(`/whatsapp/chats/${chatId}/window-status`),
     validateSend: (
       chatId: string,
       data: {
         messageType: "free-form" | "template";
         isTemplateApproved?: boolean;
-      }
+      },
     ): Promise<{
       isValid: boolean;
       windowStatus: {
@@ -768,16 +778,16 @@ export const backendApi = {
         timeRemainingMs: number;
         hasInboundMessage: boolean;
         blockReason?:
-        | "no_inbound_messages"
-        | "window_expired"
-        | "window_expiring_soon";
+          | "no_inbound_messages"
+          | "window_expired"
+          | "window_expiring_soon";
       };
       errorMessage?: string;
       errorCode?:
-      | "OUTSIDE_CONVERSATION_WINDOW"
-      | "NO_CUSTOMER_MESSAGES"
-      | "TEMPLATE_NOT_APPROVED"
-      | "INVALID_MESSAGE_TYPE";
+        | "OUTSIDE_CONVERSATION_WINDOW"
+        | "NO_CUSTOMER_MESSAGES"
+        | "TEMPLATE_NOT_APPROVED"
+        | "INVALID_MESSAGE_TYPE";
     }> => apiClient.post(`/whatsapp/chats/${chatId}/validate-send`, data),
   },
 
@@ -817,7 +827,7 @@ export const backendApi = {
      * @param contactIds - Array of contact IDs to delete
      */
     bulkDelete: (
-      contactIds: string[]
+      contactIds: string[],
     ): Promise<{ success: boolean; deletedCount: number }> =>
       apiClient.post("/contacts/bulk-delete", { contactIds }),
     getByPhone: (phoneNumber: string) =>
@@ -825,52 +835,61 @@ export const backendApi = {
     // Profile endpoints (chatId is optional for chat-specific attributes)
     getProfile: (
       contactId: string,
-      chatId?: string
+      chatId?: string,
     ): Promise<CustomerProfile> =>
       apiClient.get(
-        `/contacts/${contactId}/profile${chatId ? `?chatId=${encodeURIComponent(chatId)}` : ""
-        }`
+        `/contacts/${contactId}/profile${
+          chatId ? `?chatId=${encodeURIComponent(chatId)}` : ""
+        }`,
       ),
     // Attributes endpoints (chatId is optional for chat-specific attributes)
     getAttributes: (
       contactId: string,
-      chatId?: string
+      chatId?: string,
     ): Promise<ContactAttribute[]> =>
       apiClient.get(
-        `/contacts/${contactId}/attributes${chatId ? `?chatId=${encodeURIComponent(chatId)}` : ""
-        }`
+        `/contacts/${contactId}/attributes${
+          chatId ? `?chatId=${encodeURIComponent(chatId)}` : ""
+        }`,
       ),
     getAttribute: (
       contactId: string,
       key: string,
-      chatId?: string
+      chatId?: string,
     ): Promise<ContactAttribute> =>
       apiClient.get(
-        `/contacts/${contactId}/attributes/${key}${chatId ? `?chatId=${encodeURIComponent(chatId)}` : ""
-        }`
+        `/contacts/${contactId}/attributes/${key}${
+          chatId ? `?chatId=${encodeURIComponent(chatId)}` : ""
+        }`,
       ),
     upsertAttribute: (
       contactId: string,
-      data: { key: string; value?: string; valueType?: string; chatId?: string }
+      data: {
+        key: string;
+        value?: string;
+        valueType?: string;
+        chatId?: string;
+      },
     ): Promise<ContactAttribute> =>
       apiClient.post(`/contacts/${contactId}/attributes`, data),
     updateAttribute: (
       contactId: string,
       key: string,
-      data: { value?: string; valueType?: string; chatId?: string }
+      data: { value?: string; valueType?: string; chatId?: string },
     ): Promise<ContactAttribute> =>
       apiClient.patch(`/contacts/${contactId}/attributes/${key}`, data),
     deleteAttribute: (contactId: string, key: string, chatId?: string) =>
       apiClient.delete(
-        `/contacts/${contactId}/attributes/${key}${chatId ? `?chatId=${encodeURIComponent(chatId)}` : ""
-        }`
+        `/contacts/${contactId}/attributes/${key}${
+          chatId ? `?chatId=${encodeURIComponent(chatId)}` : ""
+        }`,
       ),
     bulkUpsertAttributes: (
       contactId: string,
       data: {
         attributes: Array<{ key: string; value?: string; valueType?: string }>;
         chatId?: string;
-      }
+      },
     ) => apiClient.post(`/contacts/${contactId}/attributes/bulk`, data),
   },
 
@@ -879,7 +898,9 @@ export const backendApi = {
     /**
      * Create a new import job and get presigned URL for upload
      */
-    create: (originalFilename: string): Promise<{
+    create: (
+      originalFilename: string,
+    ): Promise<{
       jobId: string;
       uploadUrl: string;
       s3Key: string;
@@ -910,7 +931,7 @@ export const backendApi = {
         mapping: Record<string, string | null>;
         fullNameColumn?: string;
         defaultCountryCode?: string;
-      }
+      },
     ) => apiClient.post(`/import-jobs/${jobId}/mapping`, data),
 
     /**
@@ -924,7 +945,7 @@ export const backendApi = {
      */
     getPreview: (
       jobId: string,
-      options?: { skip?: number; take?: number; status?: string }
+      options?: { skip?: number; take?: number; status?: string },
     ): Promise<{
       rows: Array<{
         id: string;
@@ -940,11 +961,15 @@ export const backendApi = {
       duplicateCount: number;
     }> => {
       const params = new URLSearchParams();
-      if (options?.skip !== undefined) params.append("skip", String(options.skip));
-      if (options?.take !== undefined) params.append("take", String(options.take));
+      if (options?.skip !== undefined)
+        params.append("skip", String(options.skip));
+      if (options?.take !== undefined)
+        params.append("take", String(options.take));
       if (options?.status) params.append("status", options.status);
       const query = params.toString();
-      return apiClient.get(`/import-jobs/${jobId}/preview${query ? `?${query}` : ""}`);
+      return apiClient.get(
+        `/import-jobs/${jobId}/preview${query ? `?${query}` : ""}`,
+      );
     },
 
     /**
@@ -967,9 +992,12 @@ export const backendApi = {
     // Mapping profiles
     profiles: {
       list: () => apiClient.get("/import-jobs/profiles"),
-      create: (data: { providerName: string; mapping: Record<string, string | null> }) =>
-        apiClient.post("/import-jobs/profiles", data),
-      delete: (profileId: string) => apiClient.delete(`/import-jobs/profiles/${profileId}`),
+      create: (data: {
+        providerName: string;
+        mapping: Record<string, string | null>;
+      }) => apiClient.post("/import-jobs/profiles", data),
+      delete: (profileId: string) =>
+        apiClient.delete(`/import-jobs/profiles/${profileId}`),
     },
   },
 
@@ -1020,7 +1048,7 @@ export const backendApi = {
         phoneNumber?: string;
         displayName?: string;
         phoneNumberId?: string;
-      }
+      },
     ): Promise<Sender> => apiClient.patch(`/senders/${senderId}`, data),
 
     /**
@@ -1060,9 +1088,10 @@ export const backendApi = {
       apiClient.post(`/templates/${templateId}/validate`, data),
     submit: (templateId: string, data: any, provider?: string) =>
       apiClient.post(
-        `/templates/${templateId}/submit${provider ? `?provider=${provider}` : ""
+        `/templates/${templateId}/submit${
+          provider ? `?provider=${provider}` : ""
         }`,
-        data
+        data,
       ),
     test: (templateId: string, data: any) =>
       apiClient.post(`/templates/${templateId}/test`, data),
@@ -1080,7 +1109,7 @@ export const backendApi = {
         senderId?: number;
         chatId?: string;
         overrides?: Record<string, string>;
-      }
+      },
     ): Promise<VariableResolutionResult> =>
       apiClient.post(`/templates/${templateId}/resolve`, data),
     getAutoFill: (
@@ -1090,29 +1119,29 @@ export const backendApi = {
         contactId: string;
         senderId?: number;
         chatId?: string;
-      }
+      },
     ) => apiClient.post(`/templates/${templateId}/autofill`, data),
     validateVariables: (variables: string[]) =>
       apiClient.post("/templates/validate-variables", { variables }),
     // Template approval endpoints
     validateForApproval: (
       templateId: string,
-      data: { locale: string }
+      data: { locale: string },
     ): Promise<TemplateValidationResult> =>
       apiClient.post(`/templates/${templateId}/validate-for-approval`, data),
     requestApproval: (
       templateId: string,
-      data: { locale: string; provider?: string }
+      data: { locale: string; provider?: string },
     ): Promise<TemplateApprovalResult> =>
       apiClient.post(`/templates/${templateId}/request-approval`, data),
     getApprovalStatus: (
       templateId: string,
-      locale: string
+      locale: string,
     ): Promise<TemplateApprovalStatus> =>
       apiClient.get(
         `/templates/${templateId}/approval-status?locale=${encodeURIComponent(
-          locale
-        )}`
+          locale,
+        )}`,
       ),
     /**
      * Sync status for a single template with Meta API
@@ -1120,7 +1149,7 @@ export const backendApi = {
      */
     syncStatus: (
       templateId: string,
-      data: { locale: string }
+      data: { locale: string },
     ): Promise<TemplateSyncResult> =>
       apiClient.post(`/templates/${templateId}/sync-status`, data),
     /**
@@ -1143,10 +1172,10 @@ export const backendApi = {
      */
     getVersionInfo: (
       templateId: string,
-      locale: string
+      locale: string,
     ): Promise<TemplateVersionInfo> =>
       apiClient.get(
-        `/templates/${templateId}/versions?locale=${encodeURIComponent(locale)}`
+        `/templates/${templateId}/versions?locale=${encodeURIComponent(locale)}`,
       ),
 
     /**
@@ -1154,12 +1183,12 @@ export const backendApi = {
      */
     getActiveVersion: (
       templateId: string,
-      locale: string
+      locale: string,
     ): Promise<TemplateVersionDetail | null> =>
       apiClient.get(
         `/templates/${templateId}/versions/active?locale=${encodeURIComponent(
-          locale
-        )}`
+          locale,
+        )}`,
       ),
 
     /**
@@ -1167,12 +1196,12 @@ export const backendApi = {
      */
     getDraftVersion: (
       templateId: string,
-      locale: string
+      locale: string,
     ): Promise<TemplateVersionDetail | null> =>
       apiClient.get(
         `/templates/${templateId}/versions/draft?locale=${encodeURIComponent(
-          locale
-        )}`
+          locale,
+        )}`,
       ),
 
     /**
@@ -1181,7 +1210,7 @@ export const backendApi = {
      */
     createVersion: (
       templateId: string,
-      data: { locale: string }
+      data: { locale: string },
     ): Promise<TemplateVersionDetail> =>
       apiClient.post(`/templates/${templateId}/versions`, data),
 
@@ -1190,7 +1219,7 @@ export const backendApi = {
      */
     getVersion: (
       templateId: string,
-      versionId: string
+      versionId: string,
     ): Promise<TemplateVersionDetail> =>
       apiClient.get(`/templates/${templateId}/versions/${versionId}`),
 
@@ -1200,7 +1229,7 @@ export const backendApi = {
     updateVersionContent: (
       templateId: string,
       versionId: string,
-      data: Partial<VersionContent>
+      data: Partial<VersionContent>,
     ): Promise<TemplateVersionDetail> =>
       apiClient.patch(`/templates/${templateId}/versions/${versionId}`, data),
 
@@ -1209,7 +1238,7 @@ export const backendApi = {
      */
     deleteVersion: (
       templateId: string,
-      versionId: string
+      versionId: string,
     ): Promise<{ success: boolean }> =>
       apiClient.delete(`/templates/${templateId}/versions/${versionId}`),
 
@@ -1219,11 +1248,11 @@ export const backendApi = {
      */
     submitVersionForApproval: (
       templateId: string,
-      versionId: string
+      versionId: string,
     ): Promise<TemplateVersionDetail> =>
       apiClient.post(
         `/templates/${templateId}/versions/${versionId}/submit`,
-        {}
+        {},
       ),
 
     /**
@@ -1233,11 +1262,11 @@ export const backendApi = {
     duplicateVersion: (
       templateId: string,
       versionId: string,
-      data: { locale: string }
+      data: { locale: string },
     ): Promise<TemplateVersionDetail> =>
       apiClient.post(
         `/templates/${templateId}/versions/${versionId}/duplicate`,
-        data
+        data,
       ),
 
     /**
@@ -1247,11 +1276,11 @@ export const backendApi = {
      */
     setActiveVersion: (
       templateId: string,
-      versionId: string
+      versionId: string,
     ): Promise<TemplateVersionDetail> =>
       apiClient.post(
         `/templates/${templateId}/versions/${versionId}/set-active`,
-        {}
+        {},
       ),
   },
 
@@ -1292,10 +1321,10 @@ export const backendApi = {
      * Get reactions for multiple messages in batch
      */
     getForMessages: (
-      messageIds: string[]
+      messageIds: string[],
     ): Promise<{ messageId: string; reactions: ReactionResponse[] }[]> =>
       apiClient.get(
-        `/reactions/batch/messages?messageIds=${messageIds.join(",")}`
+        `/reactions/batch/messages?messageIds=${messageIds.join(",")}`,
       ),
 
     /**
@@ -1308,7 +1337,7 @@ export const backendApi = {
      * Get customer reactions for a chat
      */
     getCustomerReactionsForChat: (
-      chatId: string
+      chatId: string,
     ): Promise<CustomerReactionResponse[]> =>
       apiClient.get(`/reactions/customer/${chatId}`),
 
@@ -1316,10 +1345,10 @@ export const backendApi = {
      * Get customer reactions for multiple messages in batch
      */
     getCustomerReactionsForMessages: (
-      messageIds: string[]
+      messageIds: string[],
     ): Promise<CustomerReactionResponse[]> =>
       apiClient.get(
-        `/reactions/customer/batch/messages?messageIds=${messageIds.join(",")}`
+        `/reactions/customer/batch/messages?messageIds=${messageIds.join(",")}`,
       ),
   },
 
@@ -1361,7 +1390,7 @@ export const backendApi = {
      */
     isPinned: (
       chatId: string,
-      messageId: string
+      messageId: string,
     ): Promise<{ isPinned: boolean }> =>
       apiClient.get(`/pins/${chatId}/check/${messageId}`),
 
@@ -1370,7 +1399,7 @@ export const backendApi = {
      */
     getPinnedIds: (
       chatId: string,
-      messageIds: string[]
+      messageIds: string[],
     ): Promise<{ pinnedMessageIds: string[] }> =>
       apiClient.get(`/pins/${chatId}/batch?messageIds=${messageIds.join(",")}`),
 
@@ -1381,7 +1410,7 @@ export const backendApi = {
     getMessageContext: (
       chatId: string,
       messageId: string,
-      windowSize?: number
+      windowSize?: number,
     ): Promise<{
       found: boolean;
       message?: any;
@@ -1392,8 +1421,9 @@ export const backendApi = {
       total: number;
     }> =>
       apiClient.get(
-        `/pins/${chatId}/context/${messageId}${windowSize ? `?windowSize=${windowSize}` : ""
-        }`
+        `/pins/${chatId}/context/${messageId}${
+          windowSize ? `?windowSize=${windowSize}` : ""
+        }`,
       ),
   },
 
@@ -1411,7 +1441,7 @@ export const backendApi = {
   workflow: {
     // Handoff status
     getHandoffStatus: (
-      chatId: string
+      chatId: string,
     ): Promise<{
       chatId: string;
       awaitingHandoff: boolean;
@@ -1426,7 +1456,7 @@ export const backendApi = {
 
     // AI status for a chat
     getAIStatus: (
-      chatId: string
+      chatId: string,
     ): Promise<{
       chatId: string;
       aiEnabled: boolean;
@@ -1439,7 +1469,7 @@ export const backendApi = {
 
     // Resume AI for a chat
     resumeAI: (
-      chatId: string
+      chatId: string,
     ): Promise<{ success: boolean; message: string }> =>
       apiClient.post(`/workflow/ai/resume/${chatId}`),
 
@@ -1486,19 +1516,19 @@ export const backendApi = {
     > => apiClient.get("/workflow/handoff/notifications"),
 
     acknowledgeNotification: (
-      notificationId: string
+      notificationId: string,
     ): Promise<{ success: boolean }> =>
       apiClient.patch(
-        `/workflow/handoff/notifications/${notificationId}/acknowledge`
+        `/workflow/handoff/notifications/${notificationId}/acknowledge`,
       ),
 
     resolveNotification: (
       notificationId: string,
-      resolution: string
+      resolution: string,
     ): Promise<{ success: boolean }> =>
       apiClient.patch(
         `/workflow/handoff/notifications/${notificationId}/resolve`,
-        { resolution }
+        { resolution },
       ),
   },
 
@@ -1551,7 +1581,7 @@ export const backendApi = {
     // Get chat-specific usage
     getChatUsage: (
       chatId: string,
-      limit?: number
+      limit?: number,
     ): Promise<
       Array<{
         id: string;
@@ -1563,7 +1593,7 @@ export const backendApi = {
       }>
     > =>
       apiClient.get(
-        `/workflow/usage/chat/${chatId}${limit ? `?limit=${limit}` : ""}`
+        `/workflow/usage/chat/${chatId}${limit ? `?limit=${limit}` : ""}`,
       ),
 
     // Set usage limit
@@ -1616,19 +1646,19 @@ export const backendApi = {
     // Pause AI for a chat
     pauseChat: (
       chatId: string,
-      reason?: string
+      reason?: string,
     ): Promise<{ success: boolean; message: string }> =>
       apiClient.post("/workflow/throttle/pause-chat", { chatId, reason }),
 
     // Resume AI for a chat
     resumeChat: (
-      chatId: string
+      chatId: string,
     ): Promise<{ success: boolean; message: string }> =>
       apiClient.post("/workflow/throttle/resume-chat", { chatId }),
 
     // Pause all AI
     pauseAll: (
-      reason?: string
+      reason?: string,
     ): Promise<{ success: boolean; pausedCount: number }> =>
       apiClient.post("/workflow/throttle/pause-all", { reason }),
   },
@@ -1650,7 +1680,7 @@ export const backendApi = {
     // Update stage
     updateStage: (
       stageId: string,
-      data: UpdateStageDto
+      data: UpdateStageDto,
     ): Promise<WorkflowStage> =>
       apiClient.patch(`/workflow/stages/${stageId}`, data),
 
@@ -1670,13 +1700,13 @@ export const backendApi = {
     getChatsByStage: (
       stageId: string,
       limit?: number,
-      offset?: number
+      offset?: number,
     ): Promise<ChatStageAssignment[]> => {
       const params = new URLSearchParams();
       if (limit) params.append("limit", limit.toString());
       if (offset) params.append("offset", offset.toString());
       return apiClient.get(
-        `/workflow/stages/${stageId}/chats?${params.toString()}`
+        `/workflow/stages/${stageId}/chats?${params.toString()}`,
       );
     },
 
@@ -1716,7 +1746,7 @@ export const backendApi = {
 
     // Update user's AI configuration
     updateUserConfig: (
-      data: UpdateAiConfigurationDto
+      data: UpdateAiConfigurationDto,
     ): Promise<AiConfiguration> => apiClient.patch("/workflow/ai-config", data),
 
     // Get resolved configuration for a chat (merged user + stage + chat)
@@ -1741,12 +1771,12 @@ export const backendApi = {
       apiClient.get("/workflow/ai-config/stage-settings"),
 
     getStageSetting: (
-      stageId: string
+      stageId: string,
     ): Promise<WorkflowStageAiSetting | null> =>
       apiClient.get(`/workflow/ai-config/stage-settings/${stageId}`),
 
     setStageSetting: (
-      data: SetStageAiSettingsDto
+      data: SetStageAiSettingsDto,
     ): Promise<WorkflowStageAiSetting> =>
       apiClient.post("/workflow/ai-config/stage-settings", data),
 
@@ -1767,20 +1797,22 @@ export const backendApi = {
       apiClient.post("/workflow/ai/discard-pending", { chatId }),
 
     regenerate: async (chatId: string) => {
-        return apiClient.post("/workflow/ai/regenerate", { chatId });
-    }
+      return apiClient.post("/workflow/ai/regenerate", { chatId });
+    },
   },
 
   aiWorkflow: {
-    getAIStatus: (chatId: string): Promise<{
-        chatId: string;
-        aiEnabled: boolean;
-        aiConfigEnabled: boolean;
-        reason?: string;
-        isRateLimited: boolean;
-        rateLimitReset?: Date;
-        rateLimitCurrentCount?: number;
-        rateLimitMaxCount?: number;
+    getAIStatus: (
+      chatId: string,
+    ): Promise<{
+      chatId: string;
+      aiEnabled: boolean;
+      aiConfigEnabled: boolean;
+      reason?: string;
+      isRateLimited: boolean;
+      rateLimitReset?: Date;
+      rateLimitCurrentCount?: number;
+      rateLimitMaxCount?: number;
     }> => apiClient.get(`/workflow/ai/status/${chatId}`),
   },
 

@@ -111,6 +111,7 @@ export function ChatHeader({
           <AssigneeSelector
             chatId={chat.chatId}
             assigneeId={chat.assignedTo}
+            teamId={chat.teamId}
           />
           
           {/* AI Controls */}

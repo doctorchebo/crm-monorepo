@@ -1,340 +1,84 @@
 "use client";
 
-import React, { Suspense, useActionState, useEffect, useState } from "react";
-import {
-  inviteTeamMember,
-  removeTeamMember,
-} from "@/app/[locale]/(login)/actions";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
-import { PageLayout } from "@/components/ui/page-layout";
-import {
-  Card,
-  CardContent,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { useNotification } from "@/hooks/use-notification";
-import { TeamDataWithMembers, User } from "@/lib/db/schema";
-import { customerPortalAction } from "@/lib/payments/actions";
-import { Loader2, PlusCircle } from "lucide-react";
 import { useTranslations } from "next-intl";
-import useSWR from "swr";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { RoleManager } from "@/components/team/role-manager";
-import { useTabState } from "@/hooks/use-tab-state";
-
-type ActionState = {
-  error?: string;
-  success?: string;
-};
-
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
-
-function SubscriptionSkeleton() {
-  const t = useTranslations("team");
-  return (
-    <Card className="mb-8 h-[140px]">
-      <CardHeader>
-        <CardTitle>{t("subscription")}</CardTitle>
-      </CardHeader>
-    </Card>
-  );
-}
-
-function ManageSubscription() {
-  const t = useTranslations("team");
-  const { data: teamData } = useSWR<TeamDataWithMembers>("/api/team", fetcher);
-
-  return (
-    <Card className="mb-8">
-      <CardHeader>
-        <CardTitle>{t("subscription")}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center">
-            <div className="mb-4 sm:mb-0">
-              <p className="font-medium">
-                {t("current")}: {teamData?.planName || "Free"}
-              </p>
-              <p className="text-sm text-muted-foreground">
-                {teamData?.subscriptionStatus === "active"
-                  ? t("billedMonthly")
-                  : teamData?.subscriptionStatus === "trialing"
-                  ? t("trial")
-                  : t("noSubscription")}
-              </p>
-            </div>
-            <form action={customerPortalAction}>
-              <Button type="submit" variant="outline">
-                {t("manageSubscription")}
-              </Button>
-            </form>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function TeamMembersSkeleton() {
-  const t = useTranslations("team");
-  return (
-    <Card className="mb-8 h-[140px]">
-      <CardHeader>
-        <CardTitle>{t("members")}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="animate-pulse space-y-4 mt-1">
-          <div className="flex items-center space-x-4">
-            <div className="size-8 rounded-full bg-gray-200"></div>
-            <div className="space-y-2">
-              <div className="h-4 w-32 bg-gray-200 rounded"></div>
-              <div className="h-3 w-14 bg-gray-200 rounded"></div>
-            </div>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function TeamMembers() {
-  const t = useTranslations("team");
-  const { data: teamData } = useSWR<TeamDataWithMembers>("/api/team", fetcher);
-  const [removeState, removeAction, isRemovePending] = useActionState<
-    ActionState,
-    FormData
-  >(removeTeamMember, {});
-
-  const getUserDisplayName = (user: Pick<User, "id" | "name" | "email">) => {
-    return user.name || user.email || "Unknown User";
-  };
-
-  if (!teamData?.teamMembers?.length) {
-    return (
-      <Card className="mb-8">
-        <CardHeader>
-          <CardTitle>{t("members")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-muted-foreground">{t("noMembers")}</p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return (
-    <Card className="mb-8">
-      <CardHeader>
-        <CardTitle>{t("members")}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <ul className="space-y-4">
-          {teamData.teamMembers.map((member, index) => (
-            <li key={member.id} className="flex items-center justify-between">
-              <div className="flex items-center space-x-4">
-                <Avatar>
-                  <AvatarFallback>
-                    {getUserDisplayName(member.user)
-                      .split(" ")
-                      .map((n) => n[0])
-                      .join("")}
-                  </AvatarFallback>
-                </Avatar>
-                <div>
-                  <p className="font-medium">
-                    {getUserDisplayName(member.user)}
-                  </p>
-                  <p className="text-sm text-muted-foreground capitalize">
-                    {member.roleId ? (
-                         member.role
-                    ) : member.role}
-                  </p>
-                </div>
-              </div>
-              {index > 0 ? (
-                <form action={removeAction}>
-                  <input type="hidden" name="memberId" value={member.id} />
-                  <Button
-                    type="submit"
-                    variant="outline"
-                    size="sm"
-                    disabled={isRemovePending}
-                  >
-                    {isRemovePending ? t("removing") : t("remove")}
-                  </Button>
-                </form>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-        {removeState?.error && (
-          <p className="text-red-500 mt-4">{removeState.error}</p>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function InviteTeamMemberSkeleton() {
-  const t = useTranslations("team");
-  return (
-    <Card className="h-[260px]">
-      <CardHeader>
-        <CardTitle>{t("invite")}</CardTitle>
-      </CardHeader>
-    </Card>
-  );
-}
-
-function InviteTeamMember() {
-  const t = useTranslations("team");
-  const { data: user } = useSWR<User>("/api/user", fetcher);
-  
-  const isOwner = user?.role === "owner" || user?.role === "admin";
-  
-  const [inviteState, inviteAction, isInvitePending] = useActionState<
-    ActionState,
-    FormData
-  >(inviteTeamMember, {});
-  const [lastProcessedState, setLastProcessedState] = React.useState<ActionState | null>(null);
-  const { addNotification } = useNotification();
-
-  React.useEffect(() => {
-    if (!inviteState || inviteState === lastProcessedState) return;
-    
-    if (inviteState.success) {
-      addNotification(t("invitationSent"), "success");
-      setLastProcessedState(inviteState);
-    } else if (inviteState.error) {
-      addNotification(inviteState.error, "error");
-      setLastProcessedState(inviteState);
-    }
-  }, [inviteState, lastProcessedState, addNotification, t]);
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("invite")}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <form action={inviteAction} className="space-y-4">
-          <div>
-            <Label htmlFor="email" className="mb-2">
-              {t("email")}
-            </Label>
-            <Input
-              id="email"
-              name="email"
-              type="email"
-              placeholder={t("enterEmail")}
-              required
-              disabled={!isOwner}
-            />
-          </div>
-          <div>
-            <Label>{t("role")}</Label>
-            <RadioGroup
-              defaultValue="member"
-              name="role"
-              className="flex space-x-4"
-              disabled={!isOwner}
-            >
-              <div className="flex items-center space-x-2 mt-2">
-                <RadioGroupItem value="member" id="member" />
-                <Label htmlFor="member">{t("member")}</Label>
-              </div>
-              <div className="flex items-center space-x-2 mt-2">
-                 <RadioGroupItem value="admin" id="admin" />
-                 <Label htmlFor="admin">Admin</Label>
-              </div>
-              <div className="flex items-center space-x-2 mt-2">
-                 <RadioGroupItem value="agent" id="agent" />
-                 <Label htmlFor="agent">Agent</Label>
-              </div>
-              <div className="flex items-center space-x-2 mt-2">
-                 <RadioGroupItem value="viewer" id="viewer" />
-                 <Label htmlFor="viewer">Viewer</Label>
-              </div>
-            </RadioGroup>
-          </div>
-          <Button type="submit" disabled={isInvitePending || !isOwner}>
-            {isInvitePending ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                {t("inviting")}
-              </>
-            ) : (
-              <>
-                <PlusCircle className="mr-2 h-4 w-4" />
-                {t("inviteMember")}
-              </>
-            )}
-          </Button>
-        </form>
-      </CardContent>
-      {!isOwner && (
-        <CardFooter>
-          <p className="text-sm text-muted-foreground">
-            {t("ownerOnlyInvite")}
-          </p>
-        </CardFooter>
-      )}
-    </Card>
-  );
-}
-
-function RoleManagerTab({ teamId }: { teamId: number }) {
-    return <RoleManager teamId={teamId} />;
-}
+import { useAuthProtection } from "@/hooks/use-auth";
+import { PageLayout } from "@/components/ui/page-layout";
+import { TeamMetrics } from "@/components/team/team-metrics";
+import { TeamWorkload } from "@/components/team/team-workload";
+import { TeamMembers } from "@/components/team/team-members";
+import { ManageSubscription } from "@/components/team/manage-subscription";
+import { backendApi } from "@/lib/api/endpoints";
+import useSWR from "swr";
+import { Loader2 } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
 
 export default function TeamCenterPage() {
   const t = useTranslations("team");
-  const { data: teamData } = useSWR<TeamDataWithMembers>("/api/team", fetcher);
-  const [currentTab, setCurrentTab] = useTabState({ defaultValue: "overview" });
+  
+  // Protect route
+  useAuthProtection();
+
+  // Fetch user's teams to get the current team ID
+  // We use the centralized backendApi which handles auth cookies
+  const { data: teams, error, isLoading } = useSWR<any[]>(
+    ['user-teams'],
+    () => backendApi.team.get() as Promise<any[]>
+  );
+
+  // For now, simpler implementation assuming single team per user or selecting first
+  // In future, a global team context/selector would drive this
+  const teamId = teams?.[0]?.id;
+
+  if (isLoading) {
+      return (
+          <PageLayout title={t("title") || "Team Center"}>
+              <div className="flex justify-center p-8">
+                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              </div>
+          </PageLayout>
+      );
+  }
+
+  // Handle error or no teams
+  if (error || !teams || teams.length === 0) {
+      return (
+          <PageLayout title={t("title") || "Team Center"}>
+              <Card>
+                  <CardContent className="pt-6">
+                      <div className="text-center text-muted-foreground">
+                          {error ? "Failed to load team data." : "No team found. Please create or join a team."}
+                      </div>
+                  </CardContent>
+              </Card>
+          </PageLayout>
+      );
+  }
 
   return (
-    <PageLayout title={t("title")}>
-      <Tabs value={currentTab} onValueChange={setCurrentTab} className="space-y-4">
+    <PageLayout title={t("title") || "Team Center"}>
+      <Tabs defaultValue="workload" className="space-y-4">
         <TabsList>
-          <TabsTrigger value="overview">{t("overview")}</TabsTrigger>
-          <TabsTrigger value="members">{t("members")}</TabsTrigger>
-          <TabsTrigger value="roles">{t("roles")}</TabsTrigger>
+            <TabsTrigger value="workload">{t("workload")}</TabsTrigger>
+            <TabsTrigger value="members">{t("members")}</TabsTrigger>
+            <TabsTrigger value="metrics">{t("metrics")}</TabsTrigger>
+            <TabsTrigger value="subscription">{t("subscription")}</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="overview">
-          <Suspense fallback={<SubscriptionSkeleton />}>
-            <ManageSubscription />
-          </Suspense>
+        <TabsContent value="workload" className="space-y-4">
+          <TeamWorkload teamId={teamId} />
         </TabsContent>
 
-        <TabsContent value="members">
-            <div className="space-y-6">
-                <Suspense fallback={<TeamMembersSkeleton />}>
-                    <TeamMembers />
-                </Suspense>
-                <Suspense fallback={<InviteTeamMemberSkeleton />}>
-                    <InviteTeamMember />
-                </Suspense>
-            </div>
+        <TabsContent value="members" className="space-y-4">
+          <TeamMembers teamId={teamId} />
         </TabsContent>
 
-        <TabsContent value="roles">
-            {teamData?.id ? (
-                <RoleManagerTab teamId={teamData.id} />
-            ) : (
-                <Card>
-                    <CardContent className="py-10 flex justify-center">
-                        <Loader2 className="animate-spin" />
-                    </CardContent>
-                </Card>
-            )}
+        <TabsContent value="metrics" className="space-y-4">
+          <TeamMetrics teamId={teamId} />
+        </TabsContent>
+        
+        <TabsContent value="subscription" className="space-y-4">
+          <ManageSubscription teamId={teamId} />
         </TabsContent>
       </Tabs>
     </PageLayout>

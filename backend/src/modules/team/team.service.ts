@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { eq, and } from 'drizzle-orm';
 import { db } from '../../database/db.connection';
-import { teams, teamMembers, users } from '../../database/schema';
+import { teams, teamMembers, users, chats, roles } from '../../database/schema';
 import { CreateTeamDto } from './dto/create-team.dto';
 import { RolesService } from './services/roles.service';
 
@@ -450,5 +450,45 @@ export class TeamService {
       joinedAt: m.joinedAt,
       isActive: m.isActive ?? true,
     }));
+  }
+
+  /**
+   * Get team metrics (chat counts per member)
+   */
+  async getTeamMetrics(teamId: number): Promise<
+    {
+      userId: number;
+      userName: string;
+      activeChats: number;
+      closedChats: number;
+    }[]
+  > {
+    const members = await this.getMembers(teamId);
+
+    // TODO: Optimize this with a single aggregation query when Drizzle knowledge improves
+    // Current approach: Fetch all stats and map (N+1 but safe for small teams)
+
+    // Get all chats for this team
+    const teamChats = await db
+      .select({
+        assignedTo: chats.assignedTo,
+        isActive: chats.isActive,
+      })
+      .from(chats)
+      .where(eq(chats.teamId, teamId));
+
+    const metrics = members.map((member) => {
+      const memberChats = teamChats.filter(
+        (c) => c.assignedTo === member.userId,
+      );
+      return {
+        userId: member.userId,
+        userName: member.userName,
+        activeChats: memberChats.filter((c) => c.isActive).length,
+        closedChats: memberChats.filter((c) => !c.isActive).length,
+      };
+    });
+
+    return metrics;
   }
 }

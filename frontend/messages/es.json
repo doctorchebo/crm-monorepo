@@ -11,7 +11,8 @@
     "loading": "Cargando...",
     "error": "Error",
     "success": "Éxito",
-    "confirm": "Confirmar"
+    "confirm": "Confirmar",
+    "participant": "Participante"
   },
   "header": {
     "pricing": "Precios",
@@ -548,7 +549,33 @@
         "updated": "Rol actualizado exitosamente",
         "deleted": "Rol eliminado exitosamente"
       }
-    }
+    },
+    "metrics": "Métricas",
+    "workload": "Carga de Trabajo",
+    "unassignedChats": "Chats Sin Asignar",
+    "activeChats": "Chats Activos",
+    "closedChats": "Chats Cerrados",
+    "activities": "Actividades",
+    "analytics": "Analíticas",
+    "assign": "Asignar",
+    "assignedTo": "Asignado a",
+    "assignToMe": "Asignarme",
+    "noUnassignedChats": "No hay chats sin asignar",
+    "messagesSent": "Mensajes Enviados",
+    "chatAssignment": "Asignación de Chats",
+    "memberWorkload": "Carga del Miembro",
+    "assignSuccess": "Chat asignado exitosamente",
+    "noActivity": "No hay datos de actividad disponibles",
+    "allChats": "Todos los Chats",
+    "assigned": "Asignados",
+    "unassigned": "Sin Asignar",
+    "reassign": "Reasignar",
+    "unassign": "Quitar Asignación",
+    "unassignSuccess": "Asignación removida exitosamente",
+    "unassignFailed": "Error al quitar asignación",
+    "assignFailed": "Error al asignar chat",
+    "noChats": "No se encontraron chats",
+    "actions": "Acciones"
   },
   "general": {
     "title": "Configuración General",
