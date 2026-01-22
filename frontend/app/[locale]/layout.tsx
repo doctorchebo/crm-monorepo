@@ -65,8 +65,8 @@ export default async function RootLayout({ children, params }: Props) {
                     fallback: {
                       // We do NOT await here
                       // Only components that read this data will suspend
-                      "/api/user": getUser(),
-                      "/api/team": getTeamForUser(),
+                      "user-profile": getUser(),
+                      "team-details": getTeamForUser(),
                     },
                   }}
                 >

@@ -425,6 +425,20 @@ export const backendApi = {
       apiClient.post("/auth/register", data),
     login: (data: { email: string; password: string }) =>
       apiClient.post("/auth/login", data),
+    forgotPassword: (email: string) =>
+      apiClient.post("/auth/forgot-password", { email }),
+    resetPassword: (data: {
+      token: string;
+      password: string;
+      confirmPassword: string;
+    }) => apiClient.post("/auth/reset-password", data),
+    changePassword: (data: {
+      currentPassword: string;
+      newPassword: string;
+      confirmPassword: string;
+    }) => apiClient.post("/auth/change-password", data),
+    deleteAccount: (password: string) =>
+      apiClient.post("/auth/delete-account", { password }),
   },
 
   // User endpoints

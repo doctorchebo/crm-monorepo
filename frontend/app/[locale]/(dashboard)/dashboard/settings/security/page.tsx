@@ -26,6 +26,7 @@ import {
   getStrengthTextColor,
   validatePassword,
 } from "@/lib/auth/password-validation";
+import { backendApi } from "@/lib/api/endpoints";
 import { AlertTriangle, Check, Loader2, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
@@ -68,29 +69,20 @@ export default function SecuritySettingsPage() {
     setIsUpdatingPassword(true);
 
     try {
-      const response = await fetch("/api/auth/change-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          currentPassword,
-          newPassword,
-          confirmPassword,
-        }),
+      await backendApi.auth.changePassword({
+        currentPassword,
+        newPassword,
+        confirmPassword,
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        addNotification(data.error || t("security.updateFailed"), "error");
-        return;
-      }
 
       addNotification(t("security.passwordUpdated"), "success");
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-    } catch {
-      addNotification(t("security.updateFailed"), "error");
+    } catch (err: unknown) {
+      const errorMessage =
+        err instanceof Error ? err.message : t("security.updateFailed");
+      addNotification(errorMessage, "error");
     } finally {
       setIsUpdatingPassword(false);
     }
@@ -105,23 +97,14 @@ export default function SecuritySettingsPage() {
     setIsDeleting(true);
 
     try {
-      const response = await fetch("/api/auth/delete-account", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: deletePassword }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        addNotification(data.error || t("security.deleteFailed"), "error");
-        return;
-      }
+      await backendApi.auth.deleteAccount(deletePassword);
 
       // Redirect to sign-in page after successful deletion
       router.push("/sign-in");
-    } catch {
-      addNotification(t("security.deleteFailed"), "error");
+    } catch (err: unknown) {
+      const errorMessage =
+        err instanceof Error ? err.message : t("security.deleteFailed");
+      addNotification(errorMessage, "error");
     } finally {
       setIsDeleting(false);
       setShowDeleteDialog(false);

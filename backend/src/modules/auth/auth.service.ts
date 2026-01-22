@@ -1,12 +1,27 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { compare } from 'bcryptjs';
-import { eq } from 'drizzle-orm';
+import { compare, hash } from 'bcryptjs';
+import { createHash, randomBytes } from 'crypto';
+import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 import { db } from '../../database/db.connection';
-import { users } from '../../database/schema';
+import {
+  passwordResetTokens,
+  teamMembers,
+  users,
+  chats,
+} from '../../database/schema';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { DeleteAccountDto } from './dto/delete-account.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 @Injectable()
 export class AuthService {
@@ -174,6 +189,245 @@ export class AuthService {
     return {
       access_token: accessToken,
       expiresAt: expiresAt.toISOString(),
+    };
+  }
+
+  /**
+   * Request password reset - generates token and logs reset link (email via SQS in production)
+   */
+  async forgotPassword(dto: ForgotPasswordDto) {
+    const { email } = dto;
+
+    // Find user by email
+    const user = await db.query.users.findFirst({
+      where: eq(users.email, email.toLowerCase()),
+      columns: { id: true, email: true, name: true },
+    });
+
+    // Always return success to prevent email enumeration attacks
+    // But only actually create a token if the user exists
+    if (user) {
+      // Generate a secure random token
+      const token = randomBytes(32).toString('hex');
+      const tokenHash = createHash('sha256').update(token).digest('hex');
+
+      // Token expires in 1 hour
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+
+      // Delete any existing tokens for this user
+      await db
+        .delete(passwordResetTokens)
+        .where(eq(passwordResetTokens.userId, user.id));
+
+      // Create new reset token
+      await db.insert(passwordResetTokens).values({
+        userId: user.id,
+        tokenHash,
+        expiresAt,
+      });
+
+      // Log the reset link (in production, this would send via SQS)
+      const baseUrl =
+        this.configService.get<string>('FRONTEND_URL') ||
+        'http://localhost:3000';
+      const resetUrl = `${baseUrl}/reset-password?token=${token}`;
+
+      this.logger.log(
+        `[Password Reset] Development mode - Reset link for ${user.email}: ${resetUrl}`,
+      );
+    }
+
+    return {
+      success: true,
+      message:
+        'If an account exists with this email, a reset link has been sent.',
+    };
+  }
+
+  /**
+   * Reset password using token
+   */
+  async resetPassword(dto: ResetPasswordDto) {
+    const { token, password, confirmPassword } = dto;
+
+    if (password !== confirmPassword) {
+      throw new BadRequestException("Passwords don't match");
+    }
+
+    // Hash the token to look it up
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+
+    // Find the reset token
+    const resetToken = await db.query.passwordResetTokens.findFirst({
+      where: and(
+        eq(passwordResetTokens.tokenHash, tokenHash),
+        gt(passwordResetTokens.expiresAt, new Date()),
+        isNull(passwordResetTokens.usedAt),
+      ),
+    });
+
+    if (!resetToken) {
+      throw new BadRequestException(
+        'This reset link is invalid or has expired',
+      );
+    }
+
+    // Hash the new password
+    const passwordHash = await hash(password, 10);
+
+    // Update the user's password
+    await db
+      .update(users)
+      .set({ passwordHash })
+      .where(eq(users.id, resetToken.userId));
+
+    // Mark the token as used
+    await db
+      .update(passwordResetTokens)
+      .set({ usedAt: new Date() })
+      .where(eq(passwordResetTokens.id, resetToken.id));
+
+    this.logger.log(
+      `[Password Reset] Password reset successfully for user ID: ${resetToken.userId}`,
+    );
+
+    return {
+      success: true,
+      message: 'Password has been reset successfully',
+    };
+  }
+
+  /**
+   * Change password for authenticated user
+   */
+  async changePassword(userId: number, dto: ChangePasswordDto) {
+    const { currentPassword, newPassword, confirmPassword } = dto;
+
+    // Get user with password hash
+    const user = await db.query.users.findFirst({
+      where: eq(users.id, userId),
+      columns: { id: true, passwordHash: true },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    // Verify current password
+    const isPasswordValid = await compare(currentPassword, user.passwordHash);
+    if (!isPasswordValid) {
+      throw new BadRequestException('Current password is incorrect');
+    }
+
+    // Check new password is different
+    if (currentPassword === newPassword) {
+      throw new BadRequestException(
+        'New password must be different from the current password',
+      );
+    }
+
+    // Check passwords match
+    if (newPassword !== confirmPassword) {
+      throw new BadRequestException(
+        'New password and confirmation password do not match',
+      );
+    }
+
+    // Hash and update password
+    const passwordHash = await hash(newPassword, 10);
+    await db.update(users).set({ passwordHash }).where(eq(users.id, userId));
+
+    this.logger.log(`[Auth Service] Password changed for user ID: ${userId}`);
+
+    return {
+      success: true,
+      message: 'Password updated successfully',
+    };
+  }
+
+  /**
+   * Delete user account (soft delete)
+   */
+  async deleteAccount(userId: number, dto: DeleteAccountDto) {
+    const { password } = dto;
+
+    // Get user with password hash
+    const user = await db.query.users.findFirst({
+      where: eq(users.id, userId),
+      columns: { id: true, email: true, passwordHash: true },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    // Verify password
+    const isPasswordValid = await compare(password, user.passwordHash);
+    if (!isPasswordValid) {
+      throw new BadRequestException(
+        'Incorrect password. Account deletion failed.',
+      );
+    }
+
+    // Get user's team membership
+    const teamMember = await db.query.teamMembers.findFirst({
+      where: eq(teamMembers.userId, userId),
+      columns: { teamId: true },
+    });
+
+    // Soft delete user
+    await db
+      .update(users)
+      .set({
+        deletedAt: sql`CURRENT_TIMESTAMP`,
+        email: sql`CONCAT(${user.email}, '-', ${userId}::text, '-deleted')`,
+      })
+      .where(eq(users.id, userId));
+
+    // Handle team chats reassignment if user was part of a team
+    if (teamMember) {
+      // Find team owner to reassign chats
+      const teamOwner = await db.query.teamMembers.findFirst({
+        where: and(
+          eq(teamMembers.teamId, teamMember.teamId),
+          eq(teamMembers.role, 'owner'),
+        ),
+        columns: { userId: true },
+      });
+
+      // Reassign chats to owner if exists and not the same user
+      if (teamOwner && teamOwner.userId !== userId) {
+        await db
+          .update(chats)
+          .set({
+            assignedTo: teamOwner.userId,
+            assignedBy: null,
+            assignedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(chats.teamId, teamMember.teamId),
+              eq(chats.assignedTo, userId),
+            ),
+          );
+      }
+
+      // Remove from team
+      await db
+        .delete(teamMembers)
+        .where(
+          and(
+            eq(teamMembers.userId, userId),
+            eq(teamMembers.teamId, teamMember.teamId),
+          ),
+        );
+    }
+
+    this.logger.log(`[Auth Service] Account deleted for user ID: ${userId}`);
+
+    return {
+      success: true,
+      message: 'Account deleted successfully',
     };
   }
 

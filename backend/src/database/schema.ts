@@ -286,6 +286,33 @@ export const activityLogs = pgTable(
 export type ActivityLog = typeof activityLogs.$inferSelect;
 export type NewActivityLog = typeof activityLogs.$inferInsert;
 
+/**
+ * Password Reset Tokens table - secure token storage for password reset flow
+ * Tokens are stored as SHA-256 hashes for security
+ */
+export const passwordResetTokens = pgTable(
+  'password_reset_tokens',
+  {
+    id: serial('id').primaryKey(),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tokenHash: varchar('token_hash', { length: 255 }).notNull().unique(),
+    expiresAt: timestamp('expires_at').notNull(),
+    usedAt: timestamp('used_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => ({
+    userIdIndex: index('idx_password_reset_tokens_user_id').on(table.userId),
+    expiresAtIndex: index('idx_password_reset_tokens_expires_at').on(
+      table.expiresAt,
+    ),
+  }),
+);
+
+export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
+export type NewPasswordResetToken = typeof passwordResetTokens.$inferInsert;
+
 // ==================== Custom Roles & Permissions Tables ====================
 
 /**

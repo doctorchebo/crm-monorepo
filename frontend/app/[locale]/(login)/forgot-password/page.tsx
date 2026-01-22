@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { backendApi } from "@/lib/api/endpoints";
 import { CircleIcon, Loader2, ArrowLeft, Mail } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
@@ -22,22 +23,12 @@ export default function ForgotPasswordPage() {
     setIsSubmitting(true);
 
     try {
-      const response = await fetch("/api/auth/forgot-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        setError(data.error || t("resetLinkFailed"));
-        return;
-      }
-
+      await backendApi.auth.forgotPassword(email);
       setIsSubmitted(true);
-    } catch {
-      setError(t("resetLinkFailed"));
+    } catch (err: unknown) {
+      const errorMessage =
+        err instanceof Error ? err.message : t("resetLinkFailed");
+      setError(errorMessage);
     } finally {
       setIsSubmitting(false);
     }

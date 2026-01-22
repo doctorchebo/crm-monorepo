@@ -28,7 +28,7 @@ export const mediaApi = {
     contactId: string,
     messageId?: string,
     onProgress?: (progress: number) => void,
-    attachmentId?: string
+    attachmentId?: string,
   ): Promise<{
     success: boolean;
     uploadId: string;
@@ -73,8 +73,8 @@ export const mediaApi = {
           console.error("[BackendUpload] Unauthorized (token may be expired)");
           reject(
             new Error(
-              "Upload failed: unauthorized (session may have expired, please refresh)"
-            )
+              "Upload failed: unauthorized (session may have expired, please refresh)",
+            ),
           );
         } else {
           const errorMsg = `Upload failed with status ${xhr.status}`;
@@ -106,7 +106,7 @@ export const mediaApi = {
 
       xhr.open(
         "POST",
-        `${API_BASE_URL}/whatsapp/media/upload?${params.toString()}`
+        `${API_BASE_URL}/whatsapp/media/upload?${params.toString()}`,
       );
       // CRITICAL: Enable credentials for XHR to include cookies
       xhr.withCredentials = true;
@@ -123,7 +123,7 @@ export const mediaApi = {
     mimeType: string,
     fileSize: number,
     senderId?: number,
-    contactId?: string
+    contactId?: string,
   ): Promise<PresignedUrlResponse> {
     const params = new URLSearchParams();
     if (senderId) params.append("senderId", senderId.toString());
@@ -142,7 +142,7 @@ export const mediaApi = {
           mimeType,
           fileSize,
         }),
-      }
+      },
     );
 
     if (!response.ok) {
@@ -161,7 +161,7 @@ export const mediaApi = {
     presignedUrl: string,
     file: File,
     mimeType: string,
-    onProgress?: (progress: number) => void
+    onProgress?: (progress: number) => void,
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       console.log(`[S3Upload] Starting upload to presigned URL`);
@@ -230,7 +230,7 @@ export const mediaApi = {
     fileSize: number,
     s3Key: string,
     messageId: string,
-    duration?: number
+    duration?: number,
   ): Promise<{ success: boolean; attachment: any }> {
     console.log(`[NotifyUpload] Notifying backend of upload completion`, {
       uploadId,
@@ -256,7 +256,7 @@ export const mediaApi = {
           s3Key,
           duration,
         }),
-      }
+      },
     );
 
     if (!response.ok) {
@@ -286,7 +286,7 @@ export const mediaApi = {
   async getDownloadUrl(
     messageId: string,
     attachmentId: string,
-    expiresIn?: number
+    expiresIn?: number,
   ): Promise<DownloadUrlResponse> {
     // Use cache to avoid redundant API calls
     const cachedUrl = await mediaCache.getDownloadUrl(
@@ -301,7 +301,7 @@ export const mediaApi = {
           {
             method: "GET",
             credentials: "include", // CRITICAL: Send cookies automatically for authentication
-          }
+          },
         );
 
         if (!response.ok) {
@@ -311,20 +311,8 @@ export const mediaApi = {
 
         const data = await response.json();
 
-        // CRITICAL: Convert backend URLs to use frontend proxy
-        // The backend returns URLs like http://localhost:3001/whatsapp/media/...
-        // These are direct URLs that don't include credentials
-        // We need to convert them to /api/whatsapp/media/... to use the proxy
-        if (data.url && data.url.includes("/whatsapp/media/")) {
-          // Extract the media path from the backend URL
-          // URL format: http://localhost:3001/whatsapp/media/{path}
-          // We want: /api/whatsapp/media/{path}
-          const mediaPathMatch = data.url.match(/\/whatsapp\/media\/(.+)/);
-          if (mediaPathMatch) {
-            const mediaPath = mediaPathMatch[1];
-            data.url = `/api/whatsapp/media/${mediaPath}`;
-          }
-        }
+        // We no longer need to convert to proxy URLs as we call backend directly
+        // and using credentials: 'include' handles the cookie authentication
 
         // Return full response object as JSON string (cache only handles strings)
         return JSON.stringify({
@@ -334,7 +322,7 @@ export const mediaApi = {
           fileSize: data.fileSize,
           mimeType: data.mimeType,
         });
-      }
+      },
     );
 
     // Parse cached JSON string back to object
@@ -347,14 +335,14 @@ export const mediaApi = {
    */
   async downloadMediaViaStream(
     messageId: string,
-    attachmentId: string
+    attachmentId: string,
   ): Promise<Blob> {
     const response = await fetch(
       `${API_BASE_URL}/whatsapp/media/${messageId}/${attachmentId}/stream`,
       {
         method: "GET",
         credentials: "include", // CRITICAL: Send cookies for authentication
-      }
+      },
     );
 
     if (!response.ok) {
@@ -380,7 +368,7 @@ export const mediaApi = {
   async getThumbnailUrl(
     messageId: string,
     attachmentId: string,
-    expiresIn?: number
+    expiresIn?: number,
   ): Promise<string | null> {
     // Use cache to avoid redundant API calls
     return mediaCache.getThumbnailUrl(messageId, attachmentId, async () => {
@@ -396,12 +384,12 @@ export const mediaApi = {
       });
 
       console.log(
-        `[mediaApi] Thumbnail URL response for ${attachmentId}: status=${response.status}`
+        `[mediaApi] Thumbnail URL response for ${attachmentId}: status=${response.status}`,
       );
 
       if (!response.ok) {
         console.warn(
-          `[mediaApi] Thumbnail URL fetch failed: ${response.status}`
+          `[mediaApi] Thumbnail URL fetch failed: ${response.status}`,
         );
         return null;
       }
@@ -409,7 +397,7 @@ export const mediaApi = {
       const data = await response.json();
       console.log(
         `[mediaApi] Thumbnail URL data for ${attachmentId}:`,
-        data.url ? "HAS_URL" : "NO_URL"
+        data.url ? "HAS_URL" : "NO_URL",
       );
       return data.url || null;
     });
@@ -419,14 +407,14 @@ export const mediaApi = {
    * Get all attachments for message
    */
   async getMessageAttachments(
-    messageId: string
+    messageId: string,
   ): Promise<{ attachments: any[] }> {
     const response = await fetch(
       `${API_BASE_URL}/whatsapp/media/${messageId}/attachments`,
       {
         method: "GET",
         credentials: "include", // CRITICAL: Send cookies for authentication
-      }
+      },
     );
 
     if (!response.ok) {
@@ -443,14 +431,14 @@ export const mediaApi = {
    */
   async removeAttachmentFromMessage(
     messageId: string,
-    attachmentId: string
+    attachmentId: string,
   ): Promise<void> {
     const response = await fetch(
       `${API_BASE_URL}/whatsapp/media/${messageId}/${attachmentId}`,
       {
         method: "DELETE",
         credentials: "include", // CRITICAL: Send cookies for authentication
-      }
+      },
     );
 
     if (!response.ok) {
@@ -468,7 +456,7 @@ export const mediaApi = {
       {
         method: "DELETE",
         credentials: "include", // CRITICAL: Send cookies for authentication
-      }
+      },
     );
 
     if (!response.ok) {
@@ -489,7 +477,7 @@ export const mediaApi = {
    */
   async fetchCloudAPIMedia(
     mediaId: string,
-    component?: object
+    component?: object,
   ): Promise<string> {
     return blobUrlManager.getBlobUrl(
       mediaId,
@@ -499,7 +487,7 @@ export const mediaApi = {
           {
             method: "GET",
             credentials: "include", // CRITICAL: Send cookies for authentication
-          }
+          },
         );
 
         if (!response.ok) {
@@ -509,7 +497,7 @@ export const mediaApi = {
 
         return response.blob();
       },
-      component
+      component,
     );
   },
 
@@ -553,7 +541,7 @@ export const mediaApi = {
     file: File,
     senderId: number,
     contactId: string,
-    onProgress?: (progress: number) => void
+    onProgress?: (progress: number) => void,
   ): Promise<{
     stagingId: string;
     s3Key: string;
@@ -615,7 +603,7 @@ export const mediaApi = {
 
       xhr.open(
         "POST",
-        `${API_BASE_URL}/whatsapp/media/staging?${params.toString()}`
+        `${API_BASE_URL}/whatsapp/media/staging?${params.toString()}`,
       );
       xhr.withCredentials = true;
       xhr.send(formData);
@@ -641,7 +629,7 @@ export const mediaApi = {
       {
         method: "GET",
         credentials: "include",
-      }
+      },
     );
 
     if (!response.ok) {
@@ -665,7 +653,7 @@ export const mediaApi = {
       {
         method: "DELETE",
         credentials: "include",
-      }
+      },
     );
 
     if (!response.ok && response.status !== 404) {
@@ -690,7 +678,7 @@ export const mediaApi = {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ stagingIds }),
-      }
+      },
     );
 
     if (!response.ok) {
@@ -716,7 +704,7 @@ export const mediaApi = {
     senderId: number,
     contactId: string,
     attachmentId?: string,
-    retries = 2
+    retries = 2,
   ): Promise<{
     stagingId: string;
     s3Key: string;
@@ -741,7 +729,7 @@ export const mediaApi = {
               contactId,
               attachmentId,
             }),
-          }
+          },
         );
 
         if (!response.ok) {
@@ -772,7 +760,7 @@ export const mediaApi = {
           const delay = 100 * Math.pow(2, attempt);
           console.warn(
             `[Staging] Promotion attempt ${attempt + 1} failed, retrying in ${delay}ms:`,
-            lastError.message
+            lastError.message,
           );
           await new Promise((resolve) => setTimeout(resolve, delay));
         }

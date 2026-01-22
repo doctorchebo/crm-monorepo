@@ -9,9 +9,18 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { AuthService } from './auth.service';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { DeleteAccountDto } from './dto/delete-account.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { RefreshJwtGuard } from './refresh.guard';
+import { JwtAuthGuard } from './auth.guard';
+
+interface AuthenticatedRequest {
+  user: { userId: number; email: string };
+}
 
 @Controller('auth')
 export class AuthController {
@@ -118,21 +127,12 @@ export class AuthController {
    * Logout endpoint
    * POST /auth/logout
    * Clears JWT cookies by setting them with blank value and immediate expiry
-   *
-   * Note: HTTP-only cookies cannot be deleted directly from the server.
-   * Instead, we send a Set-Cookie header with:
-   * - Empty string as the value
-   * - maxAge: 0 to expire immediately
-   * - Same cookie options as when it was set
-   *
-   * Reference: https://tomdev10.medium.com/exploring-http-only-cookies-54faba1d5d08
    */
   @Post('logout')
   async logout(@Res() res: Response) {
     this.logger.log('[Auth Controller] Logout request');
 
     // Clear JWT tokens by setting them with empty values and maxAge: 0
-    // Must match the exact cookie options from login endpoint
     res.cookie('jwt_token', '', {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -154,5 +154,73 @@ export class AuthController {
     );
 
     return res.status(200).json({ message: 'Logged out successfully' });
+  }
+
+  /**
+   * Forgot password endpoint (public)
+   * POST /auth/forgot-password
+   */
+  @Post('forgot-password')
+  async forgotPassword(@Body() dto: ForgotPasswordDto) {
+    this.logger.log('[Auth Controller] Forgot password request');
+    return this.authService.forgotPassword(dto);
+  }
+
+  /**
+   * Reset password endpoint (public, with token)
+   * POST /auth/reset-password
+   */
+  @Post('reset-password')
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    this.logger.log('[Auth Controller] Reset password request');
+    return this.authService.resetPassword(dto);
+  }
+
+  /**
+   * Change password endpoint (authenticated)
+   * POST /auth/change-password
+   */
+  @Post('change-password')
+  @UseGuards(JwtAuthGuard)
+  async changePassword(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    this.logger.log('[Auth Controller] Change password request');
+    return this.authService.changePassword(req.user.userId, dto);
+  }
+
+  /**
+   * Delete account endpoint (authenticated)
+   * POST /auth/delete-account
+   */
+  @Post('delete-account')
+  @UseGuards(JwtAuthGuard)
+  async deleteAccount(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: DeleteAccountDto,
+    @Res() res: Response,
+  ) {
+    this.logger.log('[Auth Controller] Delete account request');
+    const result = await this.authService.deleteAccount(req.user.userId, dto);
+
+    // Clear JWT cookies after account deletion
+    res.cookie('jwt_token', '', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 0,
+    });
+
+    res.cookie('jwt_refresh_token', '', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 0,
+    });
+
+    return res.status(200).json(result);
   }
 }

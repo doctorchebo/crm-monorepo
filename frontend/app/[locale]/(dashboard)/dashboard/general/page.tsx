@@ -11,6 +11,7 @@ import { Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useActionState, useEffect, useState } from "react";
 import useSWR from "swr";
+import { backendApi } from "@/lib/api/endpoints";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
@@ -71,7 +72,10 @@ function AccountFormWithData({
   state: ActionState;
   t: ReturnType<typeof useTranslations>;
 }) {
-  const { data: user } = useSWR<User>("/api/user", fetcher);
+  const { data: user } = useSWR<User>(
+    "user-profile",
+    () => backendApi.user.getProfile() as Promise<any>
+  );
   const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {

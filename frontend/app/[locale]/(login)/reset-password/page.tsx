@@ -9,6 +9,7 @@ import {
   getStrengthTextColor,
   validatePassword,
 } from "@/lib/auth/password-validation";
+import { backendApi } from "@/lib/api/endpoints";
 import { CircleIcon, Loader2, Check, X, CheckCircle } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
@@ -54,30 +55,24 @@ function ResetPasswordForm() {
     setIsSubmitting(true);
 
     try {
-      const response = await fetch("/api/auth/reset-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, password, confirmPassword }),
+      await backendApi.auth.resetPassword({
+        token: token!,
+        password,
+        confirmPassword,
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        if (response.status === 400 && data.error?.includes("invalid")) {
-          setTokenError(true);
-        } else {
-          setError(data.error || t("auth.resetFailed"));
-        }
-        return;
-      }
 
       setIsSuccess(true);
       // Redirect to sign-in after 3 seconds
       setTimeout(() => {
         router.push("/sign-in");
       }, 3000);
-    } catch {
-      setError(t("auth.resetFailed"));
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : "";
+      if (errorMessage.includes("invalid") || errorMessage.includes("expired")) {
+        setTokenError(true);
+      } else {
+        setError(errorMessage || t("auth.resetFailed"));
+      }
     } finally {
       setIsSubmitting(false);
     }

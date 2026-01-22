@@ -23,6 +23,7 @@ import useSWR from "swr";
 import { inviteTeamMember, removeTeamMember } from "../../(login)/actions";
 import { useAuthProtection } from "@/hooks/use-auth";
 import { PageLayout } from "@/components/ui/page-layout";
+import { backendApi } from "@/lib/api/endpoints";
 
 type ActionState = {
   error?: string;
@@ -44,7 +45,10 @@ function SubscriptionSkeleton() {
 
 function ManageSubscription() {
   const t = useTranslations("team");
-  const { data: teamData } = useSWR<TeamDataWithMembers>("/api/team", fetcher);
+  const { data: teamData } = useSWR<TeamDataWithMembers>(
+    "team-details",
+    () => backendApi.team.get() as Promise<any>
+  );
 
   return (
     <Card className="mb-8">
@@ -102,7 +106,10 @@ function TeamMembersSkeleton() {
 
 function TeamMembers() {
   const t = useTranslations("team");
-  const { data: teamData } = useSWR<TeamDataWithMembers>("/api/team", fetcher);
+  const { data: teamData } = useSWR<TeamDataWithMembers>(
+    "team-details",
+    () => backendApi.team.get() as Promise<any>
+  );
   const [removeState, removeAction, isRemovePending] = useActionState<
     ActionState,
     FormData
@@ -198,7 +205,10 @@ function InviteTeamMemberSkeleton() {
 
 function InviteTeamMember() {
   const t = useTranslations("team");
-  const { data: user } = useSWR<User>("/api/user", fetcher);
+  const { data: user } = useSWR<User>(
+    "user-profile",
+    () => backendApi.user.getProfile() as Promise<any>
+  );
   const isOwner = user?.role === "owner";
   const [inviteState, inviteAction, isInvitePending] = useActionState<
     ActionState,
