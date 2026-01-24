@@ -58,6 +58,7 @@ export const users = pgTable('users', {
   passwordHash: varchar('password_hash').notNull(),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
+  deletedAt: timestamp('deleted_at'), // Soft delete timestamp
 });
 
 export type User = typeof users.$inferSelect;
@@ -2526,6 +2527,59 @@ export const importMappingProfilesRelations = relations(
     }),
   }),
 );
+
+// Kanban tables
+export const kanbanStages = pgTable('kanban_stages', {
+  id: serial('id').primaryKey(),
+  teamId: integer('team_id')
+    .notNull()
+    .references(() => teams.id, { onDelete: 'cascade' }),
+  name: varchar('name').notNull(),
+  color: varchar('color').default('#e2e8f0'), // Default slate-200
+  order: integer('order').default(0),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const kanbanCards = pgTable('kanban_cards', {
+  id: serial('id').primaryKey(),
+  stageId: integer('stage_id')
+    .notNull()
+    .references(() => kanbanStages.id, { onDelete: 'cascade' }),
+  chatId: varchar('chat_id')
+    .notNull()
+    .references(() => chats.chatId, { onDelete: 'cascade' }),
+  order: integer('order').default(0),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export type KanbanStage = typeof kanbanStages.$inferSelect;
+export type NewKanbanStage = typeof kanbanStages.$inferInsert;
+export type KanbanCard = typeof kanbanCards.$inferSelect;
+export type NewKanbanCard = typeof kanbanCards.$inferInsert;
+
+export const kanbanStagesRelations = relations(
+  kanbanStages,
+  ({ many, one }) => ({
+    cards: many(kanbanCards),
+    team: one(teams, {
+      fields: [kanbanStages.teamId],
+      references: [teams.id],
+    }),
+  }),
+);
+
+export const kanbanCardsRelations = relations(kanbanCards, ({ one }) => ({
+  stage: one(kanbanStages, {
+    fields: [kanbanCards.stageId],
+    references: [kanbanStages.id],
+  }),
+  chat: one(chats, {
+    fields: [kanbanCards.chatId],
+    references: [chats.chatId],
+  }),
+}));
 
 // Export knowledge base schema
 export * from './knowledge-base.schema';

@@ -60,7 +60,6 @@ import {
 } from './services';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 
-
 @Controller('workflow')
 @UseGuards(JwtAuthGuard)
 export class WorkflowController {
@@ -79,7 +78,7 @@ export class WorkflowController {
     private readonly usageThrottle: UsageThrottleService,
     private readonly aiConfigService: AiConfigurationService,
     private readonly whatsAppService: WhatsAppService,
-  ) { }
+  ) {}
 
   // ==========================================================================
   // Workflow Summary & Status
@@ -174,11 +173,14 @@ export class WorkflowController {
 
   @Get('stages/:stageId/chats')
   async getChatsByStage(
+    @Req() req: any,
     @Param('stageId') stageId: string,
     @Query() query: GetChatsByStageDto,
   ) {
+    const userId = req.user.userId;
     return this.stageService.getChatsByStage(
       stageId,
+      userId,
       query.limit,
       query.offset,
     );
@@ -422,9 +424,14 @@ export class WorkflowController {
 
     // Trigger AI response for any pending customer message
     // Run in background to avoid blocking the response
-    this.whatsAppService.triggerAiResponseForResume(chatId, userId).catch(err => {
-      console.error(`Error triggering AI response on resume for chat ${chatId}:`, err);
-    });
+    this.whatsAppService
+      .triggerAiResponseForResume(chatId, userId)
+      .catch((err) => {
+        console.error(
+          `Error triggering AI response on resume for chat ${chatId}:`,
+          err,
+        );
+      });
 
     return { success: true, message: 'AI resumed' };
   }

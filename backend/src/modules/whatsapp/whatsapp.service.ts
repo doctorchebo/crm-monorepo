@@ -7,13 +7,16 @@ import {
   Message,
   messages,
   senders,
+  teamMembers,
 } from '@database/schema';
 import { MessageMemoryIntegration } from '@modules/ai-memory/services/message-memory-integration.service';
 import { RateLimiterService } from '@modules/workflow/services/rate-limiter.service';
 import { WorkflowEngineService } from '@modules/workflow/services';
 import {
   BadRequestException,
+  ForbiddenException,
   Inject,
+  forwardRef,
   Injectable,
   Logger,
   Optional,
@@ -27,6 +30,7 @@ import { withRetry } from '@shared/utils/retry.util';
 import { and, asc, desc, eq, gt, inArray, or, sql } from 'drizzle-orm';
 import { reactionsGatewayInstance } from '../reactions/reactions.gateway';
 import { ThumbnailQueueService } from '../thumbnail/thumbnail-queue.service';
+import { ChatVisibilityService } from '../chats/services/chat-visibility.service';
 import {
   supportsThumbnail,
   ThumbnailJobData,
@@ -96,6 +100,8 @@ export class WhatsAppService implements OnModuleInit {
     private rateLimiter: RateLimiterService,
     private moduleRef: ModuleRef,
     @Optional() private memoryIntegration: MessageMemoryIntegration,
+    @Inject(forwardRef(() => ChatVisibilityService))
+    private chatVisibilityService: ChatVisibilityService,
   ) {
     this.metaAccessToken =
       this.configService.getOrThrow<string>('META_ACCESS_TOKEN');
@@ -111,6 +117,10 @@ export class WhatsAppService implements OnModuleInit {
 
     this.logger.log('Cloud API Service initialized');
   }
+
+  // ... (previous methods)
+
+  // getChats removed via architectural unification. Use ChatsService.findByTeam() instead.
 
   async onModuleInit() {
     try {
@@ -474,12 +484,17 @@ export class WhatsAppService implements OnModuleInit {
       const chatId = generateChatId(senderPhoneNumber, recipientPhone);
 
       // Ensure chat exists with the correct sender (outbound message - no notification needed)
-      await this.getOrCreateChat(
+      const { chat } = await this.getOrCreateChat(
         chatId,
         senderPhoneNumber,
         recipientPhone,
         senderId,
-      ).then(({ chat }) => chat);
+      );
+
+      // Check assignment restriction
+      if (userId && chat.assignedTo && chat.assignedTo !== userId) {
+        throw new ForbiddenException('Chat is assigned to another team member');
+      }
 
       // ========================================================================
       // CRITICAL: Enforce 24-hour conversation window rule
@@ -750,6 +765,7 @@ export class WhatsAppService implements OnModuleInit {
     fileName?: string,
     originalMessageId?: string,
     attachmentId?: string,
+    userId?: number,
   ): Promise<any> {
     try {
       const cleanedPhone = cleanPhoneNumber(recipientPhone);
@@ -763,6 +779,19 @@ export class WhatsAppService implements OnModuleInit {
         });
         if (sender) {
           const chatId = generateChatId(sender.phoneNumber, cleanedPhone);
+
+          // Check assignment restriction
+          if (userId) {
+            const chat = await db.query.chats.findFirst({
+              where: eq(chats.chatId, chatId),
+            });
+            if (chat && chat.assignedTo && chat.assignedTo !== userId) {
+              throw new ForbiddenException(
+                'Chat is assigned to another team member',
+              );
+            }
+          }
+
           const windowValidation =
             await this.conversationWindowService.validateFreeFormMessage(
               chatId,

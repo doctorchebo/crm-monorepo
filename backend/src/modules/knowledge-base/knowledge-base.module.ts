@@ -15,6 +15,7 @@ import { MediaCompressionModule } from '../media-compression/media-compression.m
 import { ThumbnailModule } from '../thumbnail/thumbnail.module';
 import { VideoCompressionModule } from '../video-compression/video-compression.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
+import { TeamModule } from '../team/team.module';
 import { KnowledgeBaseController } from './knowledge-base.controller';
 import { KbMediaController } from './media.controller';
 import { KnowledgeBaseRepository } from './repositories/knowledge-base.repository';
@@ -42,6 +43,7 @@ import {
     VideoCompressionModule, // For video compression queue
     MediaCompressionModule, // For Lambda compression (primary)
     forwardRef(() => WhatsAppModule), // For ConversationWindowService
+    TeamModule,
   ],
   controllers: [KnowledgeBaseController, KbMediaController],
   providers: [

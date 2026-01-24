@@ -1,5 +1,5 @@
 import { db } from '@database/db.connection';
-import { Chat, chats, contacts, senders } from '@database/schema';
+import { Chat, chats, contacts, senders, teamMembers } from '@database/schema';
 import {
   BadRequestException,
   Injectable,
@@ -10,6 +10,8 @@ import { and, desc, eq, or, sql } from 'drizzle-orm';
 import { CreateChatDto } from '../dto/create-chat.dto';
 import { UpdateChatDto } from '../dto/update-chat.dto';
 
+import { ChatVisibilityService } from './chat-visibility.service';
+
 /**
  * Chats CRUD Service
  * Handles basic CRUD operations for chats
@@ -17,6 +19,8 @@ import { UpdateChatDto } from '../dto/update-chat.dto';
 @Injectable()
 export class ChatsCrudService {
   private readonly logger = new Logger(ChatsCrudService.name);
+
+  constructor(private readonly chatVisibilityService: ChatVisibilityService) {}
 
   /**
    * Generate a unique chat ID from business phone and participant phone
@@ -164,6 +168,14 @@ export class ChatsCrudService {
           await this.getContactNameByPhone(participantPhone);
       }
 
+      // Get teamId from user's active team membership (not just owner)
+      const userTeamMembership = await db.query.teamMembers.findFirst({
+        where: and(
+          eq(teamMembers.userId, userId),
+          eq(teamMembers.isActive, true),
+        ),
+      });
+
       const [newChat] = await db
         .insert(chats)
         .values({
@@ -174,6 +186,7 @@ export class ChatsCrudService {
           participantPhone,
           participantName: finalParticipantName || null,
           isActive: true,
+          teamId: userTeamMembership?.teamId,
         })
         .returning();
 
@@ -224,7 +237,9 @@ export class ChatsCrudService {
           businessPhone: createChatDto.businessPhone,
           participantPhone: createChatDto.participantPhone,
           participantName: createChatDto.participantName || null,
+
           isActive: true,
+          teamId: parseInt(teamId),
         })
         .returning();
 
@@ -266,12 +281,33 @@ export class ChatsCrudService {
     take: number = 20,
   ) {
     try {
-      const result = await db.query.chats.findMany({
+      // Lookup user's role in the team
+      const membership = await db.query.teamMembers.findFirst({
         where: and(
-          eq(chats.userId, userId),
-          eq(chats.isActive, true),
-          eq(chats.isArchived, false),
+          eq(teamMembers.userId, userId),
+          eq(teamMembers.teamId, parseInt(teamId)),
+          eq(teamMembers.isActive, true),
         ),
+      });
+
+      const role = membership?.role?.toLowerCase();
+
+      // Use centralized visibility service for ALL conditions (base + role-based)
+      // This ensures consistency with Kanban page and other chat displays
+      const whereConditions = [
+        eq(chats.teamId, parseInt(teamId)),
+        ...this.chatVisibilityService.getAllConditions(role || 'agent', userId),
+      ];
+
+      this.logger.log(
+        `Fetching chats for user ${userId} (Role: ${role}) in team ${teamId}. Conditions: ${whereConditions.length}`,
+      );
+
+      const result = await db.query.chats.findMany({
+        where: and(...whereConditions),
+        with: {
+          assignee: true, // Include assignee user data for display
+        },
         orderBy: [
           desc(sql`${chats.lastMessageTime} IS NULL`),
           desc(chats.lastMessageTime),
@@ -280,8 +316,19 @@ export class ChatsCrudService {
         offset: skip,
       });
 
+      // Enrich with contact names and flatten assignee info
       const enrichedChats = await this.enrichChatsWithContactNames(result);
-      return enrichedChats;
+
+      // Add assigneeName field for frontend convenience
+      return enrichedChats.map((chat) => ({
+        ...chat,
+        assigneeName:
+          (chat as Chat & { assignee?: { name?: string } }).assignee?.name ||
+          null,
+        assigneeEmail:
+          (chat as Chat & { assignee?: { email?: string } }).assignee?.email ||
+          null,
+      }));
     } catch (error) {
       this.logger.error(`Error fetching team chats: ${error.message}`);
       throw error;
@@ -295,7 +342,7 @@ export class ChatsCrudService {
     try {
       await this.findOne(chatId);
 
-      const updateData: any = {
+      const updateData: Partial<Chat> & { updatedAt: Date } = {
         updatedAt: new Date(),
       };
 
@@ -399,5 +446,99 @@ export class ChatsCrudService {
         return chat;
       }),
     );
+  }
+
+  /**
+   * Repair chats with NULL teamId
+   * Assigns correct teamId based on sender's owner's team membership
+   * This is used to fix historical data from before the teamId fix
+   */
+  async repairChatTeamIds(): Promise<{
+    total: number;
+    repaired: number;
+    skipped: number;
+    errors: string[];
+  }> {
+    this.logger.log('Starting chat teamId repair...');
+
+    // Find all chats with NULL teamId
+    const chatsToRepair = await db
+      .select()
+      .from(chats)
+      .where(sql`${chats.teamId} IS NULL`);
+
+    this.logger.log(`Found ${chatsToRepair.length} chats with NULL teamId`);
+
+    const result = {
+      total: chatsToRepair.length,
+      repaired: 0,
+      skipped: 0,
+      errors: [] as string[],
+    };
+
+    for (const chat of chatsToRepair) {
+      try {
+        let teamId: number | null = null;
+
+        // First try to get teamId from sender's owner
+        if (chat.senderId) {
+          const sender = await db.query.senders.findFirst({
+            where: eq(senders.id, chat.senderId),
+          });
+
+          if (sender?.userId) {
+            const ownerMembership = await db.query.teamMembers.findFirst({
+              where: and(
+                eq(teamMembers.userId, sender.userId),
+                eq(teamMembers.isActive, true),
+              ),
+            });
+
+            if (ownerMembership) {
+              teamId = ownerMembership.teamId;
+            }
+          }
+        }
+
+        // If still no teamId, try from chat's userId
+        if (!teamId && chat.userId) {
+          const userMembership = await db.query.teamMembers.findFirst({
+            where: and(
+              eq(teamMembers.userId, chat.userId),
+              eq(teamMembers.isActive, true),
+            ),
+          });
+
+          if (userMembership) {
+            teamId = userMembership.teamId;
+          }
+        }
+
+        if (teamId) {
+          await db
+            .update(chats)
+            .set({ teamId, updatedAt: new Date() })
+            .where(eq(chats.chatId, chat.chatId));
+          result.repaired++;
+          this.logger.log(`Repaired chat ${chat.chatId} with teamId ${teamId}`);
+        } else {
+          result.skipped++;
+          this.logger.warn(
+            `Could not determine teamId for chat ${chat.chatId}`,
+          );
+        }
+      } catch (error) {
+        result.errors.push(`${chat.chatId}: ${error.message}`);
+        this.logger.error(
+          `Error repairing chat ${chat.chatId}: ${error.message}`,
+        );
+      }
+    }
+
+    this.logger.log(
+      `Chat repair complete: ${result.repaired} repaired, ${result.skipped} skipped, ${result.errors.length} errors`,
+    );
+
+    return result;
   }
 }

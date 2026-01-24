@@ -509,7 +509,10 @@ export function ChatNotificationsProvider({
     });
 
     return () => {
-      newSocket.disconnect();
+      // Firefox fix: Only disconnect if connection is open
+      if (newSocket.connected) {
+        newSocket.disconnect();
+      }
       socketRef.current = null;
       setSocket(null);
     };

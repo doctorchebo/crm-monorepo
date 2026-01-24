@@ -54,8 +54,11 @@ export function AssigneeSelector({
     (member) => member.userId === assigneeId
   );
   
-  const getUserDisplayName = (user: any) => user.name || user.email || "Unknown";
-  const getUserInitials = (user: any) => (user.name || user.email || "?").charAt(0).toUpperCase();
+  // Handle both field naming conventions (backend returns userName/userEmail, some code expects name/email)
+  const getUserDisplayName = (user: any) => 
+    user.name || user.userName || user.email || user.userEmail || "Unknown";
+  const getUserInitials = (user: any) => 
+    (user.name || user.userName || user.email || user.userEmail || "?").charAt(0).toUpperCase();
 
   const handleSelect = async (memberId: number | null) => {
     setLoading(true);

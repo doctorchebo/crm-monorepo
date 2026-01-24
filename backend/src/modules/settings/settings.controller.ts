@@ -1,18 +1,8 @@
 import { Body, Controller, Get, Patch, Req, UseGuards } from '@nestjs/common';
+import { JwtPayload } from '@shared/types';
 import { JwtAuthGuard } from '../auth/auth.guard';
 import { UpdateNotificationSettingsDto } from './dto/settings.dto';
 import { SettingsService } from './settings.service';
-
-/**
- * Request interface with authenticated user
- * Matches the payload returned by JwtStrategy.validate()
- */
-interface AuthenticatedRequest {
-  user: {
-    userId: number;
-    email: string;
-  };
-}
 
 @Controller('settings')
 @UseGuards(JwtAuthGuard)
@@ -28,8 +18,9 @@ export class SettingsController {
    * Get the current user's notification settings
    */
   @Get('notifications')
-  async getNotificationSettings(@Req() req: AuthenticatedRequest) {
-    return this.settingsService.getNotificationSettings(req.user.userId);
+  async getNotificationSettings(@Req() req: any) {
+    const user = req.user as JwtPayload;
+    return this.settingsService.getNotificationSettings(user.userId);
   }
 
   /**
@@ -38,13 +29,11 @@ export class SettingsController {
    */
   @Patch('notifications')
   async updateNotificationSettings(
-    @Req() req: AuthenticatedRequest,
+    @Req() req: any,
     @Body() dto: UpdateNotificationSettingsDto,
   ) {
-    return this.settingsService.updateNotificationSettings(
-      req.user.userId,
-      dto,
-    );
+    const user = req.user as JwtPayload;
+    return this.settingsService.updateNotificationSettings(user.userId, dto);
   }
 
   // =====================================================

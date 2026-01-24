@@ -32,7 +32,11 @@ interface AuthenticatedSocket extends Socket {
 
 @WebSocketGateway({
   cors: {
-    origin: '*',
+    origin: [
+      process.env.FRONTEND_URL || 'http://localhost:3000',
+      'http://127.0.0.1:3000',
+    ],
+    credentials: true,
   },
   namespace: 'guardrail-alerts',
 })

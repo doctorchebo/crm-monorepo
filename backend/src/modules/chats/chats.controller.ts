@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Logger,
   Param,
   Patch,
   Post,
@@ -10,24 +11,47 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
+import { JwtPayload } from '@shared/types';
 import { JwtAuthGuard } from '../auth/auth.guard';
 import { RequirePermission } from '../auth/guards/permissions.guard';
+import { TeamService } from '../team/team.service';
 import { ChatsService } from './chats.service';
 import { CreateChatDto } from './dto/create-chat.dto';
 import { SearchChatsDto } from './dto/search-chats.dto';
 import { SearchMessagesDto } from './dto/search-messages.dto';
 import { UpdateChatDto } from './dto/update-chat.dto';
 
+interface StartChatDto {
+  businessPhone: string;
+  participantPhone: string;
+  participantName?: string;
+  senderId?: number;
+}
+
+interface AssignChatDto {
+  userId: number | null;
+}
+
 @Controller('chats')
 @UseGuards(JwtAuthGuard)
 export class ChatsController {
-  constructor(private chatsService: ChatsService) {}
+  private readonly logger = new Logger(ChatsController.name);
 
-  @Post()
+  constructor(
+    private chatsService: ChatsService,
+    private teamService: TeamService,
+  ) {}
+
   async create(@Req() req: any, @Body() createChatDto: CreateChatDto) {
-    const userId = req.user.userId;
-    // TODO: Get teamId from request context
-    return this.chatsService.create(userId, 'teamId', createChatDto);
+    const user = req.user as JwtPayload;
+    const teams = await this.teamService.getUserTeams(user.userId);
+    const teamId = teams[0]?.id.toString();
+
+    if (!teamId) {
+      throw new Error('User does not belong to any team');
+    }
+
+    return this.chatsService.create(user.userId, teamId, createChatDto);
   }
 
   /**
@@ -36,19 +60,10 @@ export class ChatsController {
    * Requires: businessPhone, participantPhone, participantName (optional)
    */
   @Post('contact/start')
-  async startChatWithContact(
-    @Req() req: any,
-    @Body()
-    body: {
-      businessPhone: string;
-      participantPhone: string;
-      participantName?: string;
-      senderId?: number;
-    },
-  ) {
-    const userId = req.user.userId;
+  async startChatWithContact(@Req() req: any, @Body() body: StartChatDto) {
+    const user = req.user as JwtPayload;
     return this.chatsService.createOrGetChatWithContact(
-      userId,
+      user.userId,
       body.businessPhone,
       body.participantPhone,
       body.participantName,
@@ -61,10 +76,31 @@ export class ChatsController {
     @Req() req: any,
     @Query('skip') skip: number = 0,
     @Query('take') take: number = 20,
+    @Query('teamId') teamIdParam?: string,
   ) {
-    const userId = req.user.userId;
-    // TODO: Get teamId from request context
-    return this.chatsService.findByTeam(userId, 'teamId', skip, take);
+    const user = req.user as JwtPayload;
+
+    this.logger.log(
+      `findByTeam called. User: ${user.userId}, TeamIdParam: ${teamIdParam}`,
+    );
+
+    let teamId = teamIdParam;
+    if (!teamId) {
+      const teams = await this.teamService.getUserTeams(user.userId);
+      this.logger.log(
+        `User teams found: ${teams.length}. First: ${teams[0]?.id}`,
+      );
+      teamId = teams[0]?.id.toString();
+    }
+
+    if (!teamId) {
+      this.logger.warn(
+        `No team ID found for user ${user.userId}. Returning empty.`,
+      );
+      return []; // Return empty if no team
+    }
+
+    return this.chatsService.findByTeam(user.userId, teamId, skip, take);
   }
 
   /**
@@ -77,8 +113,8 @@ export class ChatsController {
     @Query('skip') skip: number = 0,
     @Query('take') take: number = 20,
   ) {
-    const userId = req.user.userId;
-    return this.chatsService.getArchivedChats(userId, skip, take);
+    const user = req.user as JwtPayload;
+    return this.chatsService.getArchivedChats(user.userId, skip, take);
   }
 
   /**
@@ -92,8 +128,8 @@ export class ChatsController {
    */
   @Get('search')
   async searchChats(@Req() req: any, @Query() searchDto: SearchChatsDto) {
-    const userId = req.user.userId;
-    return this.chatsService.searchChats(userId, searchDto);
+    const user = req.user as JwtPayload;
+    return this.chatsService.searchChats(user.userId, searchDto);
   }
 
   @Get(':id')
@@ -136,8 +172,8 @@ export class ChatsController {
    */
   @Delete(':id')
   async deleteChat(@Req() req: any, @Param('id') id: string) {
-    const userId = req.user.userId;
-    await this.chatsService.deleteChat(id, userId);
+    const user = req.user as JwtPayload;
+    await this.chatsService.deleteChat(id, user.userId);
     return { success: true, message: 'Chat deleted successfully' };
   }
 
@@ -151,10 +187,10 @@ export class ChatsController {
   async assignChat(
     @Req() req: any,
     @Param('id') id: string,
-    @Body() body: { userId: number | null },
+    @Body() body: AssignChatDto,
   ) {
-    const assignerId = req.user.userId;
-    return this.chatsService.assignChat(id, assignerId, body.userId);
+    const user = req.user as JwtPayload;
+    return this.chatsService.assignChat(id, user.userId, body.userId);
   }
 
   /**
@@ -220,5 +256,15 @@ export class ChatsController {
     @Param('messageId') messageId: string,
   ) {
     return this.chatsService.getMessagePosition(chatId, messageId);
+  }
+
+  /**
+   * Repair chats with NULL teamId (admin operation)
+   * POST /chats/repair-team-ids
+   * This is a one-time fix for historical data from before the teamId fix
+   */
+  @Post('repair-team-ids')
+  async repairChatTeamIds() {
+    return this.chatsService.repairChatTeamIds();
   }
 }

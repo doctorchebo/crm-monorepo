@@ -76,7 +76,7 @@ export interface UseTemplateStatusSocketReturn {
  * ```
  */
 export function useTemplateStatusSocket(
-  options: UseTemplateStatusSocketOptions = {}
+  options: UseTemplateStatusSocketOptions = {},
 ): UseTemplateStatusSocketReturn {
   const {
     onStatusUpdate,
@@ -174,7 +174,10 @@ export function useTemplateStatusSocket(
 
   const disconnect = useCallback(() => {
     if (socketRef.current) {
-      socketRef.current.disconnect();
+      // Firefox fix: Only disconnect if connection is open
+      if (socketRef.current.connected) {
+        socketRef.current.disconnect();
+      }
       socketRef.current = null;
       isConnectedRef.current = false;
     }
@@ -219,7 +222,7 @@ export type TemplateApprovalStatusValue =
  * Map Meta webhook status to our internal status
  */
 export function mapWebhookStatusToInternal(
-  webhookStatus: string
+  webhookStatus: string,
 ): TemplateApprovalStatusValue {
   const statusMap: Record<string, TemplateApprovalStatusValue> = {
     APPROVED: "approved",

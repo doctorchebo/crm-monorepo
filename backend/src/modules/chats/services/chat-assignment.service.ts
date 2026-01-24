@@ -1,5 +1,5 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '../../../database/db.connection';
 import { chats, users } from '../../../database/schema';
 import { AuditService } from '../../../shared/services/audit.service';
@@ -216,6 +216,7 @@ export class ChatAssignmentService {
 
   /**
    * Get unassigned chats for a team
+   * Only returns active, non-archived chats that haven't been deleted
    */
   async getUnassignedChats(teamId: number): Promise<ChatAssignment[]> {
     const chatsList = await db
@@ -229,13 +230,21 @@ export class ChatAssignmentService {
         participantPhone: chats.participantPhone,
       })
       .from(chats)
-      .where(eq(chats.teamId, teamId));
+      .where(
+        and(
+          eq(chats.teamId, teamId),
+          eq(chats.isActive, true),
+          eq(chats.isArchived, false),
+          isNull(chats.assignedTo),
+        ),
+      );
 
-    return chatsList.filter((c) => c.assignedTo === null);
+    return chatsList;
   }
 
   /**
    * Get all chats for a team (both assigned and unassigned)
+   * Only returns active, non-archived chats (filters out deleted chats)
    * Includes assignee name for display purposes
    */
   async getAllTeamChats(teamId: number): Promise<ChatAssignment[]> {
@@ -250,7 +259,13 @@ export class ChatAssignmentService {
         participantPhone: chats.participantPhone,
       })
       .from(chats)
-      .where(eq(chats.teamId, teamId));
+      .where(
+        and(
+          eq(chats.teamId, teamId),
+          eq(chats.isActive, true),
+          eq(chats.isArchived, false),
+        ),
+      );
 
     // Enrich with assignee names
     const enriched: ChatAssignment[] = [];

@@ -1,10 +1,18 @@
 import { db } from '@database/db.connection';
-import { Chat, chats } from '@database/schema';
-import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
-import { and, desc, eq, sql } from 'drizzle-orm';
-import { CHAT_UPDATE_GATEWAY } from './chat.types';
+import { Chat, chats, teamMembers } from '@database/schema';
+import {
+  forwardRef,
+  Inject,
+  Injectable,
+  Logger,
+  Optional,
+} from '@nestjs/common';
+import { and, desc, eq, sql, SQL } from 'drizzle-orm';
 import type { IChatUpdateGateway } from './chat.types';
+import { CHAT_UPDATE_GATEWAY } from './chat.types';
 import { ChatsCrudService } from './chats-crud.service';
+
+import { ChatVisibilityService } from './chat-visibility.service';
 
 /**
  * Chats Archive Service
@@ -16,6 +24,8 @@ export class ChatsArchiveService {
 
   constructor(
     private readonly crudService: ChatsCrudService,
+    @Inject(forwardRef(() => ChatVisibilityService))
+    private readonly chatVisibilityService: ChatVisibilityService,
     @Optional()
     @Inject(CHAT_UPDATE_GATEWAY)
     private readonly chatUpdateGateway?: IChatUpdateGateway,
@@ -88,16 +98,57 @@ export class ChatsArchiveService {
     userId: number,
     skip: number = 0,
     take: number = 20,
+    teamId?: number,
   ): Promise<{ chats: Chat[]; total: number }> {
     try {
+      // Resolve teamId if not passed (though controller usually passes it)
+      // Since archived chats are specific to user context usually, but if we want STRICT enforcement:
+      let resolvedTeamId = teamId;
+      let role = 'agent';
+
+      // 1. Get User/Team Context
+      const teamMembership = await db.query.teamMembers.findFirst({
+        where: and(
+          eq(teamMembers.userId, userId),
+          eq(teamMembers.isActive, true),
+        ),
+      });
+
+      if (teamMembership) {
+        resolvedTeamId = teamMembership.teamId;
+        role = teamMembership.role?.toLowerCase() || 'agent';
+      }
+
+      if (!resolvedTeamId) {
+        return { chats: [], total: 0 };
+      }
+
+      // 2. Base Conditions
+      const baseConditions: (SQL | undefined)[] = [
+        eq(chats.teamId, resolvedTeamId),
+        eq(chats.isArchived, true),
+      ];
+
+      // 3. Strict Visibility
+      const visibilityConditions =
+        this.chatVisibilityService.getVisibilityConditions(role, userId);
+
+      if (visibilityConditions.length > 0) {
+        baseConditions.push(and(...visibilityConditions));
+      }
+
+      this.logger.log(
+        `Fetching archived chats for user ${userId} (Role: ${role}) in team ${resolvedTeamId}`,
+      );
+
       const countResult = await db
         .select({ count: sql<number>`count(*)::int` })
         .from(chats)
-        .where(and(eq(chats.userId, userId), eq(chats.isArchived, true)));
+        .where(and(...baseConditions));
       const total = countResult[0]?.count || 0;
 
       const result = await db.query.chats.findMany({
-        where: and(eq(chats.userId, userId), eq(chats.isArchived, true)),
+        where: and(...baseConditions),
         orderBy: [desc(chats.archivedAt)],
         limit: take,
         offset: skip,

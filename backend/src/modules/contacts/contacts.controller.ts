@@ -13,6 +13,8 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/auth.guard';
 import { ContactAttributesService } from './contact-attributes.service';
+
+import { TeamService } from '../team/team.service';
 import { ContactsService } from './contacts.service';
 import {
   BulkUpsertAttributesDto,
@@ -30,7 +32,8 @@ export class ContactsController {
   constructor(
     private contactsService: ContactsService,
     private contactAttributesService: ContactAttributesService,
-  ) { }
+    private teamService: TeamService,
+  ) {}
 
   /**
    * Create a new contact
@@ -57,10 +60,13 @@ export class ContactsController {
     @Query('search') search?: string,
   ) {
     const userId = req.user?.userId;
+    const teams = await this.teamService.getUserTeams(userId);
+    const targetUserId = teams[0]?.ownerId || userId;
+
     this.logger.log(
-      `Get contacts for user ${userId}, page=${page}, limit=${limit}, search=${search || 'none'}`,
+      `Get contacts for user ${userId} (target: ${targetUserId}), page=${page}, limit=${limit}, search=${search || 'none'}`,
     );
-    return this.contactsService.findAll(userId, page, limit, search);
+    return this.contactsService.findAll(targetUserId, page, limit, search);
   }
 
   /**

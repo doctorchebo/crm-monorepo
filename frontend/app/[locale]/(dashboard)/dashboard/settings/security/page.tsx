@@ -260,7 +260,12 @@ export default function SecuritySettingsPage() {
           <CardDescription>{t("security.deleteDesc")}</CardDescription>
         </CardHeader>
         <CardContent>
-          <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+          <Dialog open={showDeleteDialog} onOpenChange={(open) => {
+              setShowDeleteDialog(open);
+              if (!open) {
+                setDeletePassword("");
+              }
+            }}>
             <DialogTrigger asChild>
               <Button variant="destructive">
                 <AlertTriangle className="mr-2 h-4 w-4" />

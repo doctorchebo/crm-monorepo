@@ -8,6 +8,7 @@ import { TeamMetrics } from "@/components/team/team-metrics";
 import { TeamWorkload } from "@/components/team/team-workload";
 import { TeamMembers } from "@/components/team/team-members";
 import { ManageSubscription } from "@/components/team/manage-subscription";
+import { RoleManager } from "@/components/team/role-manager";
 import { backendApi } from "@/lib/api/endpoints";
 import useSWR from "swr";
 import { Loader2 } from "lucide-react";
@@ -61,6 +62,7 @@ export default function TeamCenterPage() {
         <TabsList>
             <TabsTrigger value="workload">{t("workload")}</TabsTrigger>
             <TabsTrigger value="members">{t("members")}</TabsTrigger>
+            <TabsTrigger value="roles">{t("roles")}</TabsTrigger>
             <TabsTrigger value="metrics">{t("metrics")}</TabsTrigger>
             <TabsTrigger value="subscription">{t("subscription")}</TabsTrigger>
         </TabsList>
@@ -71,6 +73,10 @@ export default function TeamCenterPage() {
 
         <TabsContent value="members" className="space-y-4">
           <TeamMembers teamId={teamId} />
+        </TabsContent>
+
+        <TabsContent value="roles" className="space-y-4">
+          <RoleManager teamId={teamId} />
         </TabsContent>
 
         <TabsContent value="metrics" className="space-y-4">

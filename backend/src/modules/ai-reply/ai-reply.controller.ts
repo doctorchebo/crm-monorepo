@@ -17,7 +17,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { Request } from 'express';
+import { JwtPayload } from '@shared/types';
 import {
   AnalyzeConversationDto,
   ConversationAnalysisResponseDto,
@@ -35,15 +35,6 @@ import {
   RateLimiterService,
   TemplateSelectorService,
 } from './services';
-
-// Extend Express Request type to include user
-interface AuthenticatedRequest extends Request {
-  user?: {
-    userId: number;
-    email: string;
-    name: string;
-  };
-}
 
 @Controller('ai-reply')
 @UseGuards(JwtAuthGuard)
@@ -67,11 +58,12 @@ export class AIReplyController {
    */
   @Post('generate')
   async generateReply(
-    @Req() req: AuthenticatedRequest,
+    @Req() req: any,
     @Body() dto: GenerateReplyDto,
     @Query('senderId') senderIdStr: string,
   ): Promise<GenerateReplyResponseDto> {
-    const userId = req.user!.userId;
+    const user = req.user as JwtPayload;
+    const userId = user.userId;
     const senderId = parseInt(senderIdStr, 10);
 
     if (!senderId || isNaN(senderId)) {
@@ -126,7 +118,7 @@ export class AIReplyController {
    */
   @Post('analyze')
   async analyzeConversation(
-    @Req() req: AuthenticatedRequest,
+    @Req() req: any,
     @Body() dto: AnalyzeConversationDto,
     @Query('senderId') senderIdStr: string,
   ): Promise<ConversationAnalysisResponseDto> {
@@ -163,11 +155,9 @@ export class AIReplyController {
    * GET /ai-reply/settings
    */
   @Get('settings')
-  async getSettings(
-    @Req() req: AuthenticatedRequest,
-  ): Promise<SettingsResponseDto> {
-    const userId = req.user!.userId;
-    return this.settingsService.getSettings(userId);
+  async getSettings(@Req() req: any): Promise<SettingsResponseDto> {
+    const user = req.user as JwtPayload;
+    return this.settingsService.getSettings(user.userId);
   }
 
   /**
@@ -176,11 +166,11 @@ export class AIReplyController {
    */
   @Put('settings')
   async updateSettings(
-    @Req() req: AuthenticatedRequest,
+    @Req() req: any,
     @Body() dto: UpdateSettingsDto,
   ): Promise<SettingsResponseDto> {
-    const userId = req.user!.userId;
-    return this.settingsService.updateSettings(userId, dto as any);
+    const user = req.user as JwtPayload;
+    return this.settingsService.updateSettings(user.userId, dto as any);
   }
 
   /**
@@ -188,11 +178,9 @@ export class AIReplyController {
    * DELETE /ai-reply/settings
    */
   @Delete('settings')
-  async resetSettings(
-    @Req() req: AuthenticatedRequest,
-  ): Promise<SettingsResponseDto> {
-    const userId = req.user!.userId;
-    return this.settingsService.resetToDefaults(userId);
+  async resetSettings(@Req() req: any): Promise<SettingsResponseDto> {
+    const user = req.user as JwtPayload;
+    return this.settingsService.resetToDefaults(user.userId);
   }
 
   // ============================================================================
@@ -205,11 +193,14 @@ export class AIReplyController {
    */
   @Get('rate-limit/:chatId')
   async getRateLimitStatus(
-    @Req() req: AuthenticatedRequest,
+    @Req() req: any,
     @Param('chatId') chatId: string,
   ): Promise<RateLimitStatusDto> {
-    const userId = req.user!.userId;
-    const status = await this.aiReplyService.getRateLimitStatus(chatId, userId);
+    const user = req.user as JwtPayload;
+    const status = await this.aiReplyService.getRateLimitStatus(
+      chatId,
+      user.userId,
+    );
 
     return {
       canSend: status.canSend,
@@ -246,16 +237,19 @@ export class AIReplyController {
    */
   @Post('select-template')
   async selectTemplate(
-    @Req() req: AuthenticatedRequest,
+    @Req() req: any,
     @Body() dto: SelectTemplateDto,
   ): Promise<TemplateSelectionResponseDto> {
-    const userId = req.user!.userId;
+    const user = req.user as JwtPayload;
 
-    const result = await this.templateSelectorService.selectTemplate(userId, {
-      contextKeywords: dto.contextKeywords,
-      language: dto.language,
-      category: dto.category,
-    });
+    const result = await this.templateSelectorService.selectTemplate(
+      user.userId,
+      {
+        contextKeywords: dto.contextKeywords,
+        language: dto.language,
+        category: dto.category,
+      },
+    );
 
     return result;
   }
@@ -265,8 +259,8 @@ export class AIReplyController {
    * GET /ai-reply/templates/approved
    */
   @Get('templates/approved')
-  async getApprovedTemplates(@Req() req: AuthenticatedRequest): Promise<any[]> {
-    const userId = req.user!.userId;
-    return this.templateSelectorService.getApprovedTemplates(userId);
+  async getApprovedTemplates(@Req() req: any): Promise<any[]> {
+    const user = req.user as JwtPayload;
+    return this.templateSelectorService.getApprovedTemplates(user.userId);
   }
 }

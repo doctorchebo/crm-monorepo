@@ -6,9 +6,11 @@ import {
   messages,
   rateLimitTracking,
   senders,
+  teamMembers,
 } from '@database/schema';
 import {
   BadRequestException,
+  forwardRef,
   Inject,
   Injectable,
   Logger,
@@ -16,17 +18,19 @@ import {
   Optional,
 } from '@nestjs/common';
 import { S3Service } from '@shared/services/s3.service';
-import { and, count, desc, eq, ilike, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, ilike, or, sql, SQL } from 'drizzle-orm';
 import { AiMemoryService } from '../../ai-memory/services/ai-memory.service';
 import {
   SearchChatsDto,
   SearchChatsResponse,
   SearchChatsResult,
 } from '../dto/search-chats.dto';
-import { CHAT_UPDATE_GATEWAY } from './chat.types';
 import type { IChatUpdateGateway } from './chat.types';
+import { CHAT_UPDATE_GATEWAY } from './chat.types';
 import { ChatsArchiveService } from './chats-archive.service';
 import { ChatsCrudService } from './chats-crud.service';
+
+import { ChatVisibilityService } from './chat-visibility.service';
 
 /**
  * Chats Cleanup Service
@@ -41,6 +45,8 @@ export class ChatsCleanupService {
     private readonly archiveService: ChatsArchiveService,
     private readonly s3Service: S3Service,
     private readonly aiMemoryService: AiMemoryService,
+    @Inject(forwardRef(() => ChatVisibilityService))
+    private readonly chatVisibilityService: ChatVisibilityService,
     @Optional()
     @Inject(CHAT_UPDATE_GATEWAY)
     private readonly chatUpdateGateway?: IChatUpdateGateway,
@@ -266,10 +272,33 @@ export class ChatsCleanupService {
     try {
       const { query, skip = 0, take = 50 } = searchDto;
 
-      const baseConditions = [
-        eq(chats.userId, userId),
-        eq(chats.isActive, true),
-        eq(chats.isArchived, false),
+      // Lookup user's role/team to apply visibility
+      // NOTE: searchChats doesn't take teamId in DTO currently, which is a flaw.
+      // We assume user's LAST team or PRIMARY team context.
+      // Ideally, the frontend should pass teamId or we derive it from user's active context.
+      // For now, let's look up the user's active team membership.
+
+      const teamMembership = await db.query.teamMembers.findFirst({
+        where: and(
+          eq(teamMembers.userId, userId),
+          eq(teamMembers.isActive, true),
+        ),
+      });
+
+      if (!teamMembership) {
+        // No team? Return empty.
+        return { results: [], total: 0, hasMore: false, query };
+      }
+
+      const teamId = teamMembership.teamId;
+      const role = teamMembership.role?.toLowerCase() || 'agent';
+
+      // Use centralized visibility service for ALL conditions (base + role-based)
+      // This ensures consistency with Chats page, Kanban page, and other chat displays
+      const baseConditions: (SQL | undefined)[] = [
+        // REMOVED: eq(chats.userId, userId) - Agents don't own the chats, strictly use teamId + visibility
+        eq(chats.teamId, teamId),
+        ...this.chatVisibilityService.getAllConditions(role, userId),
       ];
 
       if (!query || query.trim().length === 0) {

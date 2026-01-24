@@ -15,6 +15,7 @@ import { JwtAuthGuard } from '../auth/auth.guard';
 import { CreateSenderDto } from './dto/create-sender.dto';
 import { UpdateSenderDto } from './dto/update-sender.dto';
 import { SendersService } from './senders.service';
+import { TeamService } from '../team/team.service';
 
 /**
  * Senders Controller
@@ -38,7 +39,15 @@ import { SendersService } from './senders.service';
 export class SendersController {
   private readonly logger = new Logger(SendersController.name);
 
-  constructor(private readonly sendersService: SendersService) {}
+  constructor(
+    private readonly sendersService: SendersService,
+    private readonly teamService: TeamService,
+  ) {}
+
+  private async resolveTargetUserId(userId: number): Promise<number> {
+    const teams = await this.teamService.getUserTeams(userId);
+    return teams[0]?.ownerId || userId;
+  }
 
   // ==================== SYNC OPERATIONS ====================
 
@@ -93,8 +102,11 @@ export class SendersController {
   @Get()
   async findAll(@Req() req: any) {
     const userId = req.user?.userId;
-    this.logger.log(`Get all senders for user ${userId}`);
-    return this.sendersService.findAll(userId);
+    const targetUserId = await this.resolveTargetUserId(userId);
+    this.logger.log(
+      `Get all senders for user ${userId} (target: ${targetUserId})`,
+    );
+    return this.sendersService.findAll(targetUserId);
   }
 
   /**
@@ -105,8 +117,11 @@ export class SendersController {
   @Get('active')
   async findAllActive(@Req() req: any) {
     const userId = req.user?.userId;
-    this.logger.log(`Get active senders for user ${userId}`);
-    return this.sendersService.findAllActive(userId);
+    const targetUserId = await this.resolveTargetUserId(userId);
+    this.logger.log(
+      `Get active senders for user ${userId} (target: ${targetUserId})`,
+    );
+    return this.sendersService.findAllActive(targetUserId);
   }
 
   /**
@@ -117,8 +132,9 @@ export class SendersController {
   @Get(':id')
   async findOne(@Param('id', ParseIntPipe) senderId: number, @Req() req: any) {
     const userId = req.user?.userId;
-    this.logger.log(`Get sender: ${senderId}`);
-    return this.sendersService.findOne(userId, senderId);
+    const targetUserId = await this.resolveTargetUserId(userId);
+    this.logger.log(`Get sender: ${senderId} (target: ${targetUserId})`);
+    return this.sendersService.findOne(targetUserId, senderId);
   }
 
   /**

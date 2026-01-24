@@ -459,6 +459,7 @@ export const backendApi = {
       apiClient.delete(`/teams/${teamId}/members/${memberId}`),
     getMembers: (teamId: string) => apiClient.get(`/teams/${teamId}/members`),
     getMetrics: (teamId: string) => apiClient.get(`/teams/${teamId}/metrics`),
+    getRoles: (teamId: string) => apiClient.get(`/teams/${teamId}/roles`),
   },
 
   // Billing endpoints

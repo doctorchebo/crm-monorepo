@@ -34,6 +34,7 @@ import {
 } from './services/template-version.service';
 import { TemplatesService } from './services/templates.service';
 import { VariableResolutionService } from './services/variable-resolution.service';
+import { TeamService } from '../team/team.service';
 
 @Controller('templates')
 @UseGuards(JwtAuthGuard)
@@ -42,8 +43,10 @@ export class TemplatesController {
     private templatesService: TemplatesService,
     private variableResolutionService: VariableResolutionService,
     private approvalService: TemplateApprovalService,
+
     private versionService: TemplateVersionService,
     private providerFactory: MessagingProviderFactory,
+    private teamService: TeamService,
   ) {}
 
   // ==================== Variable Definitions (must be before :id routes) ====================
@@ -106,7 +109,11 @@ export class TemplatesController {
     if (!userId) {
       throw new BadRequestException('User ID is required');
     }
-    return await this.templatesService.createTemplate(userId, dto);
+
+    const teams = await this.teamService.getUserTeams(userId);
+    const targetId = teams[0]?.ownerId || userId;
+
+    return await this.templatesService.createTemplate(targetId, dto);
   }
 
   /**
@@ -115,8 +122,11 @@ export class TemplatesController {
   @Get()
   async listTemplates(@Request() req: any, @Query('visible') visible?: string) {
     const userId = req.user?.userId;
+    const teams = await this.teamService.getUserTeams(userId);
+    const targetId = teams[0]?.ownerId || userId;
+
     const onlyVisible = visible === 'true';
-    return await this.templatesService.listTemplates(userId, onlyVisible);
+    return await this.templatesService.listTemplates(targetId, onlyVisible);
   }
 
   // ==================== Bulk Sync Endpoints (must be before :id routes) ====================

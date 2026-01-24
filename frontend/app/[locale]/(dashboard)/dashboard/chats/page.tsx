@@ -917,6 +917,8 @@ export default function ChatsPage() {
                 );
               })
             )}
+            
+
           </div>
 
           {/* Archived Chats Drawer */}

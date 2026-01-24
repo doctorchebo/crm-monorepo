@@ -98,7 +98,7 @@ export function useRealtimeChat(chatId?: string) {
   const socketRef = useRef<Socket | null>(null);
   const chatIdRef = useRef<string | undefined>(chatId);
   const [statusMap, setStatusMap] = useState<Record<string, StatusMapEntry>>(
-    {}
+    {},
   );
   const [messages, setMessages] = useState<InboundMessage[]>([]);
   const [isConnected, setIsConnected] = useState(false);
@@ -125,7 +125,7 @@ export function useRealtimeChat(chatId?: string) {
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
         reconnectionAttempts: 5,
-      }
+      },
     );
 
     socketRef.current = socket;
@@ -201,7 +201,7 @@ export function useRealtimeChat(chatId?: string) {
         const existingIds = new Set(prev.map((m) => m.messageId));
         // Filter for messages that belong to the current chat and don't already exist
         const newMessages = messageList.filter(
-          (m) => !existingIds.has(m.messageId) && m.chatId === currentChatId
+          (m) => !existingIds.has(m.messageId) && m.chatId === currentChatId,
         );
         return [...prev, ...newMessages];
       });
@@ -247,7 +247,7 @@ export function useRealtimeChat(chatId?: string) {
                 if (updateIsStaging && attachmentIsPromoted) {
                   console.log(
                     `[attachment:updated] Ignoring stale staging s3Key for promoted attachment ${att.id}:`,
-                    `update s3Key=${update.s3Key}, current s3Key=${att.s3Key}`
+                    `update s3Key=${update.s3Key}, current s3Key=${att.s3Key}`,
                   );
                   return att; // Don't apply stale staging path
                 }
@@ -271,9 +271,9 @@ export function useRealtimeChat(chatId?: string) {
               ...msg,
               attachments: updatedAttachments,
             };
-          })
+          }),
         );
-      }
+      },
     );
 
     // Listen for attachment status updates (when individual attachments are sent in multi-media messages)
@@ -307,9 +307,9 @@ export function useRealtimeChat(chatId?: string) {
               ...msg,
               attachments: updatedAttachments,
             };
-          })
+          }),
         );
-      }
+      },
     );
 
     // NOTE: thumbnail:ready events are handled by useThumbnailUpdates hook
@@ -328,7 +328,10 @@ export function useRealtimeChat(chatId?: string) {
 
     // Cleanup on unmount
     return () => {
-      socket.disconnect();
+      // Firefox fix: Only disconnect if connection is open
+      if (socket.connected) {
+        socket.disconnect();
+      }
       socketRef.current = null;
     };
   }, []);

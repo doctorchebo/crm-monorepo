@@ -10,12 +10,14 @@
 
 import { db } from '@database/db.connection';
 import {
+  chatAiOverrides,
   chatStageAssignments,
   chatStageHistory,
   chats,
+  teamMembers,
   workflowStages,
-  chatAiOverrides,
 } from '@database/schema';
+import { ChatVisibilityService } from '@modules/chats/services/chat-visibility.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { and, asc, desc, eq } from 'drizzle-orm';
 import {
@@ -29,16 +31,58 @@ import {
 export class StageService {
   private readonly logger = new Logger(StageService.name);
 
+  constructor(private readonly chatVisibilityService: ChatVisibilityService) {}
+
   /**
-   * Get all stages for a user
+   * Helper to resolve the correct user ID for stage operations.
+   * If the user is an agent in a team, returns the Team Owner's user ID.
+   * If the user is an owner or has no team, returns the user's own ID.
+   */
+  private async resolveStageOwnerId(userId: number): Promise<number> {
+    const membership = await db.query.teamMembers.findFirst({
+      where: and(
+        eq(teamMembers.userId, userId),
+        eq(teamMembers.isActive, true),
+      ),
+      with: {
+        team: true,
+      },
+    });
+
+    // If user is not in a team, return their own ID
+    if (!membership) {
+      return userId;
+    }
+
+    // If user is already the owner, return their own ID
+    if (membership.role === 'owner') {
+      return userId;
+    }
+
+    // If user is an agent/admin, find the team owner
+    const ownerMembership = await db.query.teamMembers.findFirst({
+      where: and(
+        eq(teamMembers.teamId, membership.teamId),
+        eq(teamMembers.role, 'owner'),
+        eq(teamMembers.isActive, true),
+      ),
+    });
+
+    return ownerMembership ? ownerMembership.userId : userId;
+  }
+
+  /**
+   * Get all stages for a user (or their team owner)
    */
   async getStages(userId: number): Promise<WorkflowStageConfig[]> {
+    const ownerId = await this.resolveStageOwnerId(userId);
+
     const stages = await db
       .select()
       .from(workflowStages)
       .where(
         and(
-          eq(workflowStages.userId, userId),
+          eq(workflowStages.userId, ownerId),
           eq(workflowStages.isActive, true),
         ),
       )
@@ -65,11 +109,13 @@ export class StageService {
     stageId: string,
     userId: number,
   ): Promise<WorkflowStageConfig | null> {
+    const ownerId = await this.resolveStageOwnerId(userId);
+
     const [stage] = await db
       .select()
       .from(workflowStages)
       .where(
-        and(eq(workflowStages.id, stageId), eq(workflowStages.userId, userId)),
+        and(eq(workflowStages.id, stageId), eq(workflowStages.userId, ownerId)),
       )
       .limit(1);
 
@@ -90,15 +136,17 @@ export class StageService {
   }
 
   /**
-   * Get the default stage for a user
+   * Get the default stage for a user (or team owner)
    */
   async getDefaultStage(userId: number): Promise<WorkflowStageConfig | null> {
+    const ownerId = await this.resolveStageOwnerId(userId);
+
     const [stage] = await db
       .select()
       .from(workflowStages)
       .where(
         and(
-          eq(workflowStages.userId, userId),
+          eq(workflowStages.userId, ownerId),
           eq(workflowStages.isDefault, true),
           eq(workflowStages.isActive, true),
         ),
@@ -156,22 +204,24 @@ export class StageService {
     userId: number,
     request: CreateStageRequest,
   ): Promise<WorkflowStageConfig> {
+    const ownerId = await this.resolveStageOwnerId(userId);
+
     // If this is set as default, unset other defaults
     if (request.isDefault) {
       await db
         .update(workflowStages)
         .set({ isDefault: false })
-        .where(eq(workflowStages.userId, userId));
+        .where(eq(workflowStages.userId, ownerId));
     }
 
     // Get next sort order if not specified
     const sortOrder =
-      request.sortOrder ?? (await this.getNextSortOrder(userId));
+      request.sortOrder ?? (await this.getNextSortOrder(ownerId));
 
     const [stage] = await db
       .insert(workflowStages)
       .values({
-        userId,
+        userId: ownerId,
         name: request.name,
         description: request.description,
         color: request.color || '#3b82f6',
@@ -209,12 +259,14 @@ export class StageService {
     userId: number,
     request: UpdateStageRequest,
   ): Promise<WorkflowStageConfig | null> {
+    const ownerId = await this.resolveStageOwnerId(userId);
+
     // If setting as default, unset other defaults
     if (request.isDefault) {
       await db
         .update(workflowStages)
         .set({ isDefault: false })
-        .where(eq(workflowStages.userId, userId));
+        .where(eq(workflowStages.userId, ownerId));
     }
 
     const [stage] = await db
@@ -224,7 +276,7 @@ export class StageService {
         updatedAt: new Date(),
       })
       .where(
-        and(eq(workflowStages.id, stageId), eq(workflowStages.userId, userId)),
+        and(eq(workflowStages.id, stageId), eq(workflowStages.userId, ownerId)),
       )
       .returning();
 
@@ -254,6 +306,8 @@ export class StageService {
     userId: number,
     moveToStageId?: string,
   ): Promise<boolean> {
+    const ownerId = await this.resolveStageOwnerId(userId);
+
     // Get chats assigned to this stage
     const assignments = await db
       .select()
@@ -264,7 +318,7 @@ export class StageService {
       // Move chats to another stage
       const targetStageId =
         moveToStageId ||
-        (await this.getDefaultStage(userId).then((s) => s?.id));
+        (await this.getDefaultStage(ownerId).then((s) => s?.id));
 
       if (!targetStageId) {
         throw new Error(
@@ -289,7 +343,7 @@ export class StageService {
         updatedAt: new Date(),
       })
       .where(
-        and(eq(workflowStages.id, stageId), eq(workflowStages.userId, userId)),
+        and(eq(workflowStages.id, stageId), eq(workflowStages.userId, ownerId)),
       )
       .returning({ id: workflowStages.id });
 
@@ -303,6 +357,8 @@ export class StageService {
     userId: number,
     stageOrder: string[],
   ): Promise<WorkflowStageConfig[]> {
+    const ownerId = await this.resolveStageOwnerId(userId);
+
     // Update sort order for each stage
     for (let i = 0; i < stageOrder.length; i++) {
       await db
@@ -314,7 +370,7 @@ export class StageService {
         .where(
           and(
             eq(workflowStages.id, stageOrder[i]),
-            eq(workflowStages.userId, userId),
+            eq(workflowStages.userId, ownerId),
           ),
         );
     }
@@ -498,6 +554,7 @@ export class StageService {
 
   /**
    * Get chats in a specific stage with full chat details
+   * Filters by user's team membership for proper multi-tenant access control.
    * Returns enriched data for Kanban cards including:
    * - Participant name/phone
    * - Last message preview
@@ -505,9 +562,14 @@ export class StageService {
    * - Unread count
    * - AI status
    * - Time entered current stage (assignedAt)
+   *
+   * IMPORTANT: Uses ChatVisibilityService for role-based filtering consistency:
+   * - Owner/Admin: See all chats in the team
+   * - Agent/Member: See ONLY chats explicitly assigned to them (no unassigned chats)
    */
   async getChatsByStage(
     stageId: string,
+    userId: number,
     limit: number = 50,
     offset: number = 0,
   ): Promise<
@@ -535,6 +597,56 @@ export class StageService {
       isActive: boolean | null;
     }>
   > {
+    // Resolve user's teamId and role from their active team membership
+    const userMembership = await db.query.teamMembers.findFirst({
+      where: and(
+        eq(teamMembers.userId, userId),
+        eq(teamMembers.isActive, true),
+      ),
+    });
+
+    const teamId = userMembership?.teamId;
+    const role = userMembership?.role?.toLowerCase() || 'agent';
+
+    this.logger.debug(
+      `[StageService] getChatsByStage - StageId: ${stageId}, UserId: ${userId}, Role: ${role}, TeamId: ${teamId}`,
+    );
+
+    // FAIL-SAFE: If no team membership is found and user is not viewing their own personal stages,
+    // default to empty results to prevent "View All" leaks.
+    if (!teamId && !userMembership) {
+      // Check if user is the stage owner (personal workflow case)
+      const stage = await db.query.workflowStages.findFirst({
+        where: eq(workflowStages.id, stageId),
+      });
+      if (stage && stage.userId !== userId) {
+        this.logger.warn(
+          `User ${userId} attempted to access stage ${stageId} without membership`,
+        );
+        return [];
+      }
+    }
+
+    // Build where conditions - start with stage filter
+    const whereConditions = [eq(chatStageAssignments.stageId, stageId)];
+
+    // Filter by team if user has a team membership
+    if (teamId) {
+      whereConditions.push(eq(chats.teamId, teamId));
+    }
+
+    // Apply ALL chat visibility conditions using centralized ChatVisibilityService
+    // This ensures consistency across Chats page and Kanban page by applying:
+    // 1. Base conditions: isActive = true, isArchived = false (no deleted/archived chats)
+    // 2. Role-based conditions: Owner/Admin see all, Agent/Member see only assigned
+    const allVisibilityConditions = this.chatVisibilityService.getAllConditions(
+      role,
+      userId,
+    );
+    if (allVisibilityConditions.length > 0) {
+      whereConditions.push(...allVisibilityConditions);
+    }
+
     const results = await db
       .select({
         // Assignment fields
@@ -563,8 +675,11 @@ export class StageService {
       })
       .from(chatStageAssignments)
       .innerJoin(chats, eq(chatStageAssignments.chatId, chats.chatId))
-      .leftJoin(chatAiOverrides, eq(chatStageAssignments.chatId, chatAiOverrides.chatId))
-      .where(eq(chatStageAssignments.stageId, stageId))
+      .leftJoin(
+        chatAiOverrides,
+        eq(chatStageAssignments.chatId, chatAiOverrides.chatId),
+      )
+      .where(and(...whereConditions))
       .orderBy(desc(chats.lastMessageTime))
       .limit(limit)
       .offset(offset);

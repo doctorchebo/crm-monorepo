@@ -24,13 +24,24 @@ import { Server, Socket } from 'socket.io';
 @Injectable()
 @WebSocketGateway({
   cors: {
-    origin: '*',
+    origin: (
+      origin: string,
+      callback: (err: Error | null, allow?: boolean) => void,
+    ) => {
+      console.log(
+        `[WhatsAppGateway] Connection attempt from origin: ${origin}`,
+      );
+      callback(null, true);
+    },
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     methods: ['GET', 'POST'],
   },
   transports: ['websocket', 'polling'],
 })
 export class WhatsAppGateway
-  implements OnGatewayConnection, OnGatewayDisconnect {
+  implements OnGatewayConnection, OnGatewayDisconnect
+{
   @WebSocketServer() server!: Server;
   private readonly logger = new Logger(WhatsAppGateway.name);
   private connectedClients = new Set<string>();
@@ -532,7 +543,10 @@ export class WhatsAppGateway
     interactiveData?: {
       type: string;
       buttons?: Array<{ id: string; title: string }>;
-      sections?: Array<{ title: string; rows: Array<{ id: string; title: string; description?: string }> }>;
+      sections?: Array<{
+        title: string;
+        rows: Array<{ id: string; title: string; description?: string }>;
+      }>;
     };
   }): void {
     if (this.connectedClients.size === 0) {

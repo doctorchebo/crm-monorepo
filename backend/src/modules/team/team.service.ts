@@ -1,13 +1,13 @@
 import {
-  Injectable,
-  NotFoundException,
-  ForbiddenException,
   ConflictException,
+  ForbiddenException,
+  Injectable,
   Logger,
+  NotFoundException,
 } from '@nestjs/common';
-import { eq, and } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from '../../database/db.connection';
-import { teams, teamMembers, users, chats, roles } from '../../database/schema';
+import { chats, roles, teamMembers, teams, users } from '../../database/schema';
 import { CreateTeamDto } from './dto/create-team.dto';
 import { RolesService } from './services/roles.service';
 
@@ -250,11 +250,18 @@ export class TeamService {
       if (dbRole) {
         roleId = dbRole.id;
       } else {
-        // Failed to find role ID? Should we fail?
-        // If migration ran, defaults should exist.
+        // Role not found - default to "Agent" role for permissions compliance
+        // This handles legacy role strings like "member" that don't exist in roles table
         this.logger.warn(
-          `Could not find Role ID for '${roleName}' in team ${teamId}. Adding with legacy string only.`,
+          `Could not find Role ID for '${roleName}' in team ${teamId}. Defaulting to Agent role.`,
         );
+        const agentRole = await this.rolesService.getRoleByName(
+          teamId,
+          'Agent',
+        );
+        if (agentRole) {
+          roleId = agentRole.id;
+        }
       }
     }
 
@@ -445,6 +452,9 @@ export class TeamService {
       userId: m.userId,
       userName: m.userName,
       userEmail: m.userEmail,
+      // Aliases for frontend compatibility (expects .name and .email)
+      name: m.userName,
+      email: m.userEmail,
       role: m.customRoleName || m.role, // Return custom role name if available, else legacy
       roleId: m.roleId,
       joinedAt: m.joinedAt,
@@ -454,6 +464,7 @@ export class TeamService {
 
   /**
    * Get team metrics (chat counts per member)
+   * Only counts active, non-deleted chats
    */
   async getTeamMetrics(teamId: number): Promise<
     {
@@ -468,14 +479,15 @@ export class TeamService {
     // TODO: Optimize this with a single aggregation query when Drizzle knowledge improves
     // Current approach: Fetch all stats and map (N+1 but safe for small teams)
 
-    // Get all chats for this team
+    // Get all active (not deleted) chats for this team
     const teamChats = await db
       .select({
         assignedTo: chats.assignedTo,
         isActive: chats.isActive,
+        isArchived: chats.isArchived,
       })
       .from(chats)
-      .where(eq(chats.teamId, teamId));
+      .where(and(eq(chats.teamId, teamId), eq(chats.isActive, true)));
 
     const metrics = members.map((member) => {
       const memberChats = teamChats.filter(
@@ -484,8 +496,8 @@ export class TeamService {
       return {
         userId: member.userId,
         userName: member.userName,
-        activeChats: memberChats.filter((c) => c.isActive).length,
-        closedChats: memberChats.filter((c) => !c.isActive).length,
+        activeChats: memberChats.filter((c) => !c.isArchived).length,
+        closedChats: memberChats.filter((c) => c.isArchived).length,
       };
     });
 

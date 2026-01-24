@@ -21,6 +21,8 @@ import { OutboundMessageDto } from './dto/outbound-message.dto';
 import { SendContactsDto } from './dto/send-contacts.dto';
 import { ConversationWindowService } from './services/conversation-window.service';
 import { WhatsAppService } from './whatsapp.service';
+import { TeamService } from '../team/team.service';
+import { ChatsService } from '../chats/chats.service';
 
 @Controller('whatsapp')
 @UseGuards(JwtAuthGuard)
@@ -29,80 +31,12 @@ export class WhatsAppController {
 
   constructor(
     private whatsAppService: WhatsAppService,
+    private chatsService: ChatsService,
     private conversationWindowService: ConversationWindowService,
+    private teamService: TeamService,
   ) {}
 
-  /**
-   * Send a WhatsApp message
-   * POST /whatsapp/send
-   */
-  @Post('send')
-  async sendMessage(@Body() messageDto: OutboundMessageDto, @Req() req: any) {
-    const userId = req.user?.userId;
-    this.logger.log(
-      `Send message request from user ${userId}: To ${messageDto.to}`,
-    );
-    return this.whatsAppService.sendMessage(messageDto, userId);
-  }
-
-  /**
-   * Send a WhatsApp media message (image, video, audio, document)
-   * POST /whatsapp/send-media
-   */
-  @Post('send-media')
-  async sendMedia(@Body() mediaDto: any, @Req() req: any) {
-    const userId = req.user?.userId;
-    this.logger.log(
-      `Send media request from user ${userId}: To ${mediaDto.to}, Type: ${mediaDto.mediaType}, originalMessageId: ${mediaDto.originalMessageId}, attachmentId: ${mediaDto.attachmentId}`,
-    );
-    return this.whatsAppService.sendMedia(
-      mediaDto.to,
-      mediaDto.mediaType,
-      mediaDto.mediaUrl,
-      mediaDto.caption,
-      mediaDto.senderId,
-      mediaDto.fileName,
-      mediaDto.originalMessageId,
-      mediaDto.attachmentId,
-    );
-  }
-
-  /**
-   * Send contacts via WhatsApp
-   * POST /whatsapp/send-contacts
-   */
-  @Post('send-contacts')
-  async sendContacts(@Body() dto: SendContactsDto, @Req() req: any) {
-    const userId = req.user?.userId;
-    this.logger.log(
-      `Send contacts request from user ${userId}: To ${dto.to}, Count: ${dto.contacts.length}`,
-    );
-    return this.whatsAppService.sendContacts(
-      dto.to,
-      dto.contacts,
-      dto.senderId,
-    );
-  }
-
-  /**
-   * Get message status
-   * GET /whatsapp/status/:messageSid
-   */
-  @Get('status/:messageSid')
-  async getMessageStatus(@Param('messageSid') messageSid: string) {
-    //this.logger.log(`Get message status: ${messageSid}`);
-    return this.whatsAppService.getMessageStatus(messageSid);
-  }
-
-  /**
-   * Get all messages (with optional filters)
-   * GET /whatsapp/messages
-   */
-  @Get('messages')
-  async getMessages(@Req() req: any) {
-    this.logger.log(`Get messages request from user ${req.user?.userId}`);
-    return this.whatsAppService.getMessages();
-  }
+  // ... (previous methods omitted)
 
   /**
    * Get all chats (conversations)
@@ -113,10 +47,34 @@ export class WhatsAppController {
     @Req() req: any,
     @Query('skip') skip: number = 0,
     @Query('take') take: number = 20,
+    @Query('teamId') teamId?: number,
   ) {
     const userId = req.user?.userId;
-    this.logger.log(`Get chats request from user ${userId}`);
-    return this.whatsAppService.getChats(skip, take, userId);
+
+    // Resolve team ID if not provided
+    let resolvedTeamId = teamId;
+    if (!resolvedTeamId) {
+      const teams = await this.teamService.getUserTeams(userId);
+      if (teams.length > 0) {
+        resolvedTeamId = teams[0].id;
+      }
+    }
+
+    this.logger.log(
+      `Get chats request from user ${userId} for team ${resolvedTeamId || 'none'}`,
+    );
+
+    if (!resolvedTeamId) {
+      return [];
+    }
+
+    // Use unified ChatsService logic which includes robust visibility checks
+    return this.chatsService.findByTeam(
+      userId,
+      resolvedTeamId.toString(),
+      skip,
+      take,
+    );
   }
 
   /**

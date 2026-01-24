@@ -3,6 +3,27 @@
  * Used across modules and shared with frontend via monorepo
  */
 
+import { Request } from 'express';
+
+/**
+ * JWT payload structure after authentication
+ */
+export interface JwtPayload {
+  userId: number;
+  email: string;
+  teamId?: number;
+  iat?: number;
+  exp?: number;
+}
+
+/**
+ * Express Request with authenticated user context
+ * Used by all controllers that require authentication
+ */
+export interface AuthenticatedRequest extends Request {
+  user: JwtPayload;
+}
+
 export interface PaginationDto {
   page: number;
   pageSize: number;

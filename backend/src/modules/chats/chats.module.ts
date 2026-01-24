@@ -3,6 +3,7 @@ import { S3Service } from '@shared/services/s3.service';
 import { AiMemoryModule } from '../ai-memory/ai-memory.module';
 import { WhatsAppGateway } from '../whatsapp/whatsapp.gateway';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
+import { TeamModule } from '../team/team.module';
 import { ChatsController } from './chats.controller';
 import { ChatsService } from './chats.service';
 import {
@@ -13,6 +14,7 @@ import {
   ChatsMessagesService,
   ChatLockService,
   ChatAssignmentService,
+  ChatVisibilityService,
 } from './services';
 import { ChatLockController } from './controllers/chat-lock.controller';
 import { ChatAssignmentController } from './controllers/chat-assignment.controller';
@@ -20,8 +22,8 @@ import { PermissionService } from '../../shared/services/permission.service';
 import { AuditService } from '../../shared/services/audit.service';
 
 @Module({
-  imports: [forwardRef(() => WhatsAppModule), AiMemoryModule],
-  controllers: [ChatsController, ChatLockController, ChatAssignmentController],
+  imports: [forwardRef(() => WhatsAppModule), AiMemoryModule, TeamModule],
+  controllers: [ChatAssignmentController, ChatLockController, ChatsController],
   providers: [
     // Sub-services (order matters for dependency injection)
     ChatsCrudService,
@@ -41,6 +43,7 @@ import { AuditService } from '../../shared/services/audit.service';
       provide: CHAT_UPDATE_GATEWAY,
       useExisting: WhatsAppGateway,
     },
+    ChatVisibilityService,
   ],
   exports: [
     ChatsService,
@@ -50,6 +53,7 @@ import { AuditService } from '../../shared/services/audit.service';
     ChatsCleanupService,
     ChatLockService,
     ChatAssignmentService,
+    ChatVisibilityService,
   ],
 })
 export class ChatsModule {}

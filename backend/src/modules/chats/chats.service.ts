@@ -176,4 +176,19 @@ export class ChatsService {
   ): Promise<SearchChatsResponse> {
     return this.cleanupService.searchChats(userId, searchDto);
   }
+
+  // ========== Admin Operations ==========
+
+  /**
+   * Repair chats with NULL teamId (admin operation)
+   * Assigns correct teamId based on sender's owner's team membership
+   */
+  async repairChatTeamIds(): Promise<{
+    total: number;
+    repaired: number;
+    skipped: number;
+    errors: string[];
+  }> {
+    return this.crudService.repairChatTeamIds();
+  }
 }

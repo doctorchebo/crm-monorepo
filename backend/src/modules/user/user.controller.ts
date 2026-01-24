@@ -8,13 +8,10 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
+import { JwtPayload } from '@shared/types';
 import { JwtAuthGuard } from '../auth/auth.guard';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserService } from './user.service';
-
-interface AuthenticatedRequest {
-  user: { userId: number };
-}
 
 @Controller('users')
 @UseGuards(JwtAuthGuard)
@@ -22,17 +19,16 @@ export class UserController {
   constructor(private userService: UserService) {}
 
   @Get('profile')
-  async getProfile(@Req() req: AuthenticatedRequest) {
-    const userId = req.user.userId;
-    return this.userService.findOne(userId.toString());
+  async getProfile(@Req() req: any) {
+    const user = req.user as JwtPayload;
+    return this.userService.findOne(user.userId.toString());
   }
 
   @Get('activity')
-  async getActivityLogs(@Req() req: AuthenticatedRequest) {
+  async getActivityLogs(@Req() req: any) {
+    const user = req.user as JwtPayload;
     const userId =
-      typeof req.user.userId === 'string'
-        ? parseInt(req.user.userId, 10)
-        : req.user.userId;
+      typeof user.userId === 'string' ? parseInt(user.userId, 10) : user.userId;
     return this.userService.getActivityLogs(userId);
   }
 

@@ -7,7 +7,8 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
-import type { Response } from 'express';
+import { JwtPayload } from '@shared/types';
+import { JwtAuthGuard } from './auth.guard';
 import { AuthService } from './auth.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { DeleteAccountDto } from './dto/delete-account.dto';
@@ -16,11 +17,6 @@ import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { RefreshJwtGuard } from './refresh.guard';
-import { JwtAuthGuard } from './auth.guard';
-
-interface AuthenticatedRequest {
-  user: { userId: number; email: string };
-}
 
 @Controller('auth')
 export class AuthController {
@@ -34,7 +30,7 @@ export class AuthController {
   }
 
   @Post('login')
-  async login(@Body() loginDto: LoginDto, @Res() res: Response) {
+  async login(@Body() loginDto: LoginDto, @Res() res: any) {
     this.logger.log('[Auth Controller] Login request received');
     const result = await this.authService.login(loginDto);
 
@@ -100,7 +96,7 @@ export class AuthController {
    */
   @Post('refresh')
   @UseGuards(RefreshJwtGuard)
-  async refresh(@Req() req: any, @Res() res: Response) {
+  async refresh(@Req() req: any, @Res() res: any) {
     this.logger.log('[Auth Controller] Refresh token request');
     const result = await this.authService.refreshAccessToken(req.user);
 
@@ -129,7 +125,7 @@ export class AuthController {
    * Clears JWT cookies by setting them with blank value and immediate expiry
    */
   @Post('logout')
-  async logout(@Res() res: Response) {
+  async logout(@Res() res: any) {
     this.logger.log('[Auth Controller] Logout request');
 
     // Clear JWT tokens by setting them with empty values and maxAge: 0
@@ -182,12 +178,10 @@ export class AuthController {
    */
   @Post('change-password')
   @UseGuards(JwtAuthGuard)
-  async changePassword(
-    @Req() req: AuthenticatedRequest,
-    @Body() dto: ChangePasswordDto,
-  ) {
+  async changePassword(@Req() req: any, @Body() dto: ChangePasswordDto) {
+    const user = req.user as JwtPayload;
     this.logger.log('[Auth Controller] Change password request');
-    return this.authService.changePassword(req.user.userId, dto);
+    return this.authService.changePassword(user.userId, dto);
   }
 
   /**
@@ -197,12 +191,13 @@ export class AuthController {
   @Post('delete-account')
   @UseGuards(JwtAuthGuard)
   async deleteAccount(
-    @Req() req: AuthenticatedRequest,
+    @Req() req: any,
     @Body() dto: DeleteAccountDto,
-    @Res() res: Response,
+    @Res() res: any,
   ) {
+    const user = req.user as JwtPayload;
     this.logger.log('[Auth Controller] Delete account request');
-    const result = await this.authService.deleteAccount(req.user.userId, dto);
+    const result = await this.authService.deleteAccount(user.userId, dto);
 
     // Clear JWT cookies after account deletion
     res.cookie('jwt_token', '', {

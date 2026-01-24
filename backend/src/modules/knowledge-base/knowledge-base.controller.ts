@@ -35,6 +35,7 @@ import {
   UpdateTemplateDto,
 } from './dto';
 import { KnowledgeBaseRepository } from './repositories/knowledge-base.repository';
+import { TeamService } from '../team/team.service';
 import { ObjectService, RetrievalService, TemplateService } from './services';
 
 @Controller('knowledge-base')
@@ -45,7 +46,13 @@ export class KnowledgeBaseController {
     private readonly objectService: ObjectService,
     private readonly retrievalService: RetrievalService,
     private readonly repository: KnowledgeBaseRepository,
-  ) { }
+    private readonly teamService: TeamService,
+  ) {}
+
+  private async resolveUserId(userId: number): Promise<number> {
+    const teams = await this.teamService.getUserTeams(userId);
+    return teams[0]?.ownerId || userId;
+  }
 
   // ============================================================================
   // TEMPLATES
@@ -56,7 +63,8 @@ export class KnowledgeBaseController {
     @Request() req: any,
     @Query() query: ListTemplatesQueryDto,
   ) {
-    return this.templateService.getTemplates(req.user.userId, {
+    const targetUserId = await this.resolveUserId(req.user.userId);
+    return this.templateService.getTemplates(targetUserId, {
       category: query.category,
       includeSystem: query.includeSystem ?? true,
       activeOnly: query.activeOnly ?? true,
@@ -140,7 +148,11 @@ export class KnowledgeBaseController {
     @Param('id', ParseUUIDPipe) id: string,
     @Param('fieldId', ParseUUIDPipe) fieldId: string,
   ) {
-    await this.templateService.deleteTemplateField(req.user.userId, id, fieldId);
+    await this.templateService.deleteTemplateField(
+      req.user.userId,
+      id,
+      fieldId,
+    );
   }
 
   @Post('templates/:id/fields/reorder')
@@ -162,7 +174,8 @@ export class KnowledgeBaseController {
 
   @Get('objects')
   async getObjects(@Request() req: any, @Query() query: ListObjectsQueryDto) {
-    return this.objectService.getObjects(req.user.userId, query);
+    const targetUserId = await this.resolveUserId(req.user.userId);
+    return this.objectService.getObjects(targetUserId, query);
   }
 
   @Get('objects/:id')
@@ -316,7 +329,7 @@ export class KnowledgeBaseController {
 
   @Get('stats')
   async getDashboardStats(@Request() req: any) {
-    const userId = req.user.userId;
+    const userId = await this.resolveUserId(req.user.userId);
 
     // Get object counts by status
     const { objects: allObjects, total: totalObjects } =
@@ -408,4 +421,3 @@ export class KnowledgeBaseController {
     };
   }
 }
-

@@ -98,7 +98,7 @@ interface UseReactionsReturn {
  * Hook to manage message reactions with real-time updates
  */
 export function useReactions(
-  options: UseReactionsOptions = {}
+  options: UseReactionsOptions = {},
 ): UseReactionsReturn {
   const { currentUserId, currentUserName, enabled = true, chatId } = options;
 
@@ -107,7 +107,7 @@ export function useReactions(
   const [customerReactionsMap, setCustomerReactionsMap] =
     useState<CustomerReactionsMap>({});
   const [animatingReactionIds, setAnimatingReactionIds] = useState<Set<string>>(
-    new Set()
+    new Set(),
   );
   const [isConnected, setIsConnected] = useState(false);
 
@@ -142,7 +142,7 @@ export function useReactions(
         reconnectionAttempts: 10,
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
-      }
+      },
     );
 
     socketRef.current = socket;
@@ -172,7 +172,7 @@ export function useReactions(
 
         // Check if this user already has a reaction
         const existingIndex = messageReactions.findIndex(
-          (r) => r.userId === event.userId
+          (r) => r.userId === event.userId,
         );
 
         let updated: MessageReaction[];
@@ -224,7 +224,7 @@ export function useReactions(
         if (!messageReactions) return prev;
 
         const updated = messageReactions.filter(
-          (r) => r.userId !== event.userId
+          (r) => r.userId !== event.userId,
         );
 
         return { ...prev, [event.messageId]: updated };
@@ -269,7 +269,10 @@ export function useReactions(
     });
 
     return () => {
-      socket.disconnect();
+      // Firefox fix: Only disconnect if connection is open
+      if (socket.connected) {
+        socket.disconnect();
+      }
     };
   }, [enabled]); // Only depend on enabled - use refs for other values to avoid stale closures
 
@@ -299,7 +302,7 @@ export function useReactions(
   const loadReactionsForMessages = useCallback(async (messageIds: string[]) => {
     // Filter out already loaded messages
     const newMessageIds = messageIds.filter(
-      (id) => !loadedMessageIdsRef.current.has(id)
+      (id) => !loadedMessageIdsRef.current.has(id),
     );
 
     if (newMessageIds.length === 0) return;
@@ -343,7 +346,7 @@ export function useReactions(
 
       const existingReactions = reactionsMap[messageId] || [];
       const userReaction = existingReactions.find(
-        (r) => r.userId === currentUserId
+        (r) => r.userId === currentUserId,
       );
 
       // If clicking the same emoji, remove it
@@ -351,7 +354,7 @@ export function useReactions(
         // Optimistic removal
         setReactionsMap((prev) => {
           const updated = (prev[messageId] || []).filter(
-            (r) => r.userId !== currentUserId
+            (r) => r.userId !== currentUserId,
           );
           return { ...prev, [messageId]: updated };
         });
@@ -401,7 +404,7 @@ export function useReactions(
         setReactionsMap((prev) => {
           const existing = prev[messageId] || [];
           const withoutUser = existing.filter(
-            (r) => r.userId !== currentUserId
+            (r) => r.userId !== currentUserId,
           );
           return {
             ...prev,
@@ -425,7 +428,7 @@ export function useReactions(
         setReactionsMap((prev) => {
           const existing = prev[messageId] || [];
           const withoutOptimistic = existing.filter(
-            (r) => r.id !== optimisticReaction.id
+            (r) => r.id !== optimisticReaction.id,
           );
           if (userReaction) {
             return {
@@ -437,7 +440,7 @@ export function useReactions(
         });
       }
     },
-    [currentUserId, currentUserName, reactionsMap, triggerAnimation]
+    [currentUserId, currentUserName, reactionsMap, triggerAnimation],
   );
 
   /**
@@ -468,11 +471,11 @@ export function useReactions(
       } catch (error) {
         console.error(
           "[useReactions] Failed to load customer reactions:",
-          error
+          error,
         );
       }
     },
-    []
+    [],
   );
 
   // Load customer reactions when chat changes

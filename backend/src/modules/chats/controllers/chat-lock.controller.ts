@@ -1,21 +1,18 @@
 import {
+  Body,
   Controller,
-  Post,
   Delete,
   Get,
+  Logger,
   Param,
-  Body,
+  Post,
   Req,
   UseGuards,
-  Logger,
 } from '@nestjs/common';
+import { JwtPayload } from '@shared/types';
+import { PermissionService } from '../../../shared/services/permission.service';
 import { JwtAuthGuard } from '../../auth/auth.guard';
 import { ChatLockService } from '../services/chat-lock.service';
-import { PermissionService } from '../../../shared/services/permission.service';
-
-interface AuthenticatedRequest {
-  user: { userId: number };
-}
 
 interface AcquireLockDto {
   lockType: 'human' | 'ai' | 'system';
@@ -48,17 +45,18 @@ export class ChatLockController {
    */
   @Post()
   async acquireLock(
-    @Req() req: AuthenticatedRequest,
+    @Req() req: any,
     @Param('chatId') chatId: string,
     @Body() dto: AcquireLockDto,
   ) {
+    const user = req.user as JwtPayload;
     this.logger.log(
-      `User ${req.user.userId} acquiring ${dto.lockType} lock on chat ${chatId}`,
+      `User ${user.userId} acquiring ${dto.lockType} lock on chat ${chatId}`,
     );
 
     const result = await this.chatLockService.acquireLock(
       chatId,
-      req.user.userId,
+      user.userId,
       dto.lockType,
       dto.reason,
     );
@@ -71,16 +69,11 @@ export class ChatLockController {
    * DELETE /chats/:chatId/lock
    */
   @Delete()
-  async releaseLock(
-    @Req() req: AuthenticatedRequest,
-    @Param('chatId') chatId: string,
-  ) {
-    this.logger.log(`User ${req.user.userId} releasing lock on chat ${chatId}`);
+  async releaseLock(@Req() req: any, @Param('chatId') chatId: string) {
+    const user = req.user as JwtPayload;
+    this.logger.log(`User ${user.userId} releasing lock on chat ${chatId}`);
 
-    const result = await this.chatLockService.releaseLock(
-      chatId,
-      req.user.userId,
-    );
+    const result = await this.chatLockService.releaseLock(chatId, user.userId);
 
     return { success: result };
   }
@@ -91,25 +84,26 @@ export class ChatLockController {
    */
   @Delete('force')
   async forceUnlock(
-    @Req() req: AuthenticatedRequest,
+    @Req() req: any,
     @Param('chatId') chatId: string,
     @Body() body: { reason?: string },
   ) {
+    const user = req.user as JwtPayload;
     // Get team ID for permission check
     const teamId = await this.permissionService.getTeamIdForChat(chatId);
     if (teamId) {
       await this.permissionService.enforcePermission(
-        req.user.userId,
+        user.userId,
         teamId,
         'force_unlock',
       );
     }
 
-    this.logger.log(`User ${req.user.userId} force unlocking chat ${chatId}`);
+    this.logger.log(`User ${user.userId} force unlocking chat ${chatId}`);
 
     const result = await this.chatLockService.forceUnlock(
       chatId,
-      req.user.userId,
+      user.userId,
       body?.reason || 'Admin force unlock',
     );
 
@@ -136,18 +130,11 @@ export class ChatLockController {
    * POST /chats/:chatId/lock/refresh
    */
   @Post('refresh')
-  async refreshLock(
-    @Req() req: AuthenticatedRequest,
-    @Param('chatId') chatId: string,
-  ) {
-    this.logger.log(
-      `User ${req.user.userId} refreshing lock on chat ${chatId}`,
-    );
+  async refreshLock(@Req() req: any, @Param('chatId') chatId: string) {
+    const user = req.user as JwtPayload;
+    this.logger.log(`User ${user.userId} refreshing lock on chat ${chatId}`);
 
-    const result = await this.chatLockService.refreshLock(
-      chatId,
-      req.user.userId,
-    );
+    const result = await this.chatLockService.refreshLock(chatId, user.userId);
 
     return result;
   }
@@ -157,15 +144,11 @@ export class ChatLockController {
    * POST /chats/:chatId/lock/request
    */
   @Post('request')
-  async requestControl(
-    @Req() req: AuthenticatedRequest,
-    @Param('chatId') chatId: string,
-  ) {
-    this.logger.log(
-      `User ${req.user.userId} requesting control of chat ${chatId}`,
-    );
+  async requestControl(@Req() req: any, @Param('chatId') chatId: string) {
+    const user = req.user as JwtPayload;
+    this.logger.log(`User ${user.userId} requesting control of chat ${chatId}`);
 
-    await this.chatLockService.requestControl(chatId, req.user.userId);
+    await this.chatLockService.requestControl(chatId, user.userId);
 
     return { success: true };
   }

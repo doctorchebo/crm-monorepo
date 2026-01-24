@@ -6,3 +6,4 @@ export { ChatsCrudService } from './chats-crud.service';
 export { ChatsMessagesService } from './chats-messages.service';
 export { ChatLockService } from './chat-lock.service';
 export { ChatAssignmentService } from './chat-assignment.service';
+export { ChatVisibilityService } from './chat-visibility.service';

@@ -17,9 +17,10 @@ import { TemplateVersionService } from './services/template-version.service';
 import { TemplateWebhookController } from './template.webhook.controller';
 import { TemplateWebhookGateway } from './template.webhook.gateway';
 import { TemplatesController } from './templates.controller';
+import { TeamModule } from '../team/team.module';
 
 @Module({
-  imports: [ConfigModule],
+  imports: [ConfigModule, TeamModule],
   controllers: [TemplatesController, TemplateWebhookController],
   providers: [
     // Services

@@ -40,17 +40,21 @@
 
 import { AiMemoryModule } from '@modules/ai-memory/ai-memory.module';
 import { AIReplyModule } from '@modules/ai-reply/ai-reply.module';
+import { ChatsModule } from '@modules/chats/chats.module';
 import { KnowledgeBaseModule } from '@modules/knowledge-base/knowledge-base.module';
+import { WhatsAppModule } from '@modules/whatsapp/whatsapp.module';
 import { Module, forwardRef } from '@nestjs/common';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import {
   AiActionLoggerService,
   AiConfigurationService,
+  AiResponseGenerator,
   AntiBanSafeguardService,
   GuardrailAlertGateway,
   GuardrailAlertService,
   HandoffNotificationGateway,
   HandoffService,
+  InteractiveResponseHandler,
   LLMService,
   PolicySimulationService,
   RateLimiterService,
@@ -59,18 +63,15 @@ import {
   UsageThrottleService,
   UsageTrackingService,
   WorkflowEngineService,
-  InteractiveResponseHandler,
-  AiResponseGenerator,
   WorkflowStatusService,
 } from './services';
 import { WorkflowController } from './workflow.controller';
-
-import { WhatsAppModule } from '@modules/whatsapp/whatsapp.module'; // Import module
 
 @Module({
   imports: [
     AiMemoryModule,
     forwardRef(() => AIReplyModule),
+    forwardRef(() => ChatsModule),
     forwardRef(() => KnowledgeBaseModule),
     forwardRef(() => WhatsAppModule), // Fix circular dependency
     EventEmitterModule.forRoot(),

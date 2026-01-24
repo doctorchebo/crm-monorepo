@@ -1,26 +1,23 @@
 import {
+  Body,
   Controller,
-  Post,
   Delete,
   Get,
+  Logger,
   Param,
-  Body,
+  ParseIntPipe,
+  Post,
   Req,
   UseGuards,
-  Logger,
-  ParseIntPipe,
 } from '@nestjs/common';
-import { JwtAuthGuard } from '../../auth/auth.guard';
-import { ChatAssignmentService } from '../services/chat-assignment.service';
+import { JwtPayload } from '@shared/types';
 import { PermissionService } from '../../../shared/services/permission.service';
+import { JwtAuthGuard } from '../../auth/auth.guard';
 import {
   PermissionsGuard,
   RequirePermission,
 } from '../../auth/guards/permissions.guard';
-
-interface AuthenticatedRequest {
-  user: { userId: number };
-}
+import { ChatAssignmentService } from '../services/chat-assignment.service';
 
 interface AssignChatDto {
   assigneeId: number;
@@ -51,15 +48,16 @@ export class ChatAssignmentController {
    */
   @Post(':chatId/assign')
   async assignChat(
-    @Req() req: AuthenticatedRequest,
+    @Req() req: any,
     @Param('chatId') chatId: string,
     @Body() dto: AssignChatDto,
   ) {
+    const user = req.user as JwtPayload;
     // Get team ID for permission check
     const teamId = await this.permissionService.getTeamIdForChat(chatId);
     if (teamId) {
       await this.permissionService.enforcePermission(
-        req.user.userId,
+        user.userId,
         teamId,
         'assign_chats',
         chatId,
@@ -67,13 +65,13 @@ export class ChatAssignmentController {
     }
 
     this.logger.log(
-      `User ${req.user.userId} assigning chat ${chatId} to user ${dto.assigneeId}`,
+      `User ${user.userId} assigning chat ${chatId} to user ${dto.assigneeId}`,
     );
 
     return this.chatAssignmentService.assignChat(
       chatId,
       dto.assigneeId,
-      req.user.userId,
+      user.userId,
     );
   }
 
@@ -82,24 +80,22 @@ export class ChatAssignmentController {
    * DELETE /chats/:chatId/assign
    */
   @Delete(':chatId/assign')
-  async unassignChat(
-    @Req() req: AuthenticatedRequest,
-    @Param('chatId') chatId: string,
-  ) {
+  async unassignChat(@Req() req: any, @Param('chatId') chatId: string) {
+    const user = req.user as JwtPayload;
     // Get team ID for permission check
     const teamId = await this.permissionService.getTeamIdForChat(chatId);
     if (teamId) {
       await this.permissionService.enforcePermission(
-        req.user.userId,
+        user.userId,
         teamId,
         'assign_chats',
         chatId,
       );
     }
 
-    this.logger.log(`User ${req.user.userId} unassigning chat ${chatId}`);
+    this.logger.log(`User ${user.userId} unassigning chat ${chatId}`);
 
-    return this.chatAssignmentService.unassignChat(chatId, req.user.userId);
+    return this.chatAssignmentService.unassignChat(chatId, user.userId);
   }
 
   /**
@@ -125,8 +121,9 @@ export class ChatAssignmentController {
    * GET /chats/assigned
    */
   @Get('assigned')
-  async getMyAssignedChats(@Req() req: AuthenticatedRequest) {
-    return this.chatAssignmentService.getAssignedChats(req.user.userId);
+  async getMyAssignedChats(@Req() req: any) {
+    const user = req.user as JwtPayload;
+    return this.chatAssignmentService.getAssignedChats(user.userId);
   }
 
   /**
@@ -137,7 +134,7 @@ export class ChatAssignmentController {
   @UseGuards(PermissionsGuard)
   @RequirePermission('view_chats')
   async getUnassignedChats(
-    @Req() req: AuthenticatedRequest,
+    @Req() req: any,
     @Param('teamId', ParseIntPipe) teamId: number,
   ) {
     return this.chatAssignmentService.getUnassignedChats(teamId);
@@ -151,7 +148,7 @@ export class ChatAssignmentController {
   @UseGuards(PermissionsGuard)
   @RequirePermission('view_chats')
   async getAllTeamChats(
-    @Req() req: AuthenticatedRequest,
+    @Req() req: any,
     @Param('teamId', ParseIntPipe) teamId: number,
   ) {
     return this.chatAssignmentService.getAllTeamChats(teamId);

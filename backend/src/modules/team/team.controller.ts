@@ -7,19 +7,16 @@ import {
   ParseIntPipe,
   Patch,
   Post,
-  UseGuards,
   Req,
+  UseGuards,
 } from '@nestjs/common';
+import { JwtPayload } from '@shared/types';
+import { PermissionService } from '../../shared/services/permission.service';
 import { JwtAuthGuard } from '../auth/auth.guard';
 import { CreateTeamDto } from './dto/create-team.dto';
-import { TeamService } from './team.service';
 import { InvitationService } from './invitation.service';
 import { RolesService } from './services/roles.service';
-import { PermissionService } from '../../shared/services/permission.service';
-
-interface AuthenticatedRequest {
-  user: { userId: number };
-}
+import { TeamService } from './team.service';
 
 @Controller('teams')
 @UseGuards(JwtAuthGuard)
@@ -32,16 +29,15 @@ export class TeamController {
   ) {}
 
   @Post()
-  async create(
-    @Req() req: AuthenticatedRequest,
-    @Body() createTeamDto: CreateTeamDto,
-  ) {
-    return this.teamService.create(req.user.userId, createTeamDto);
+  async create(@Req() req: any, @Body() createTeamDto: CreateTeamDto) {
+    const user = req.user as JwtPayload;
+    return this.teamService.create(user.userId, createTeamDto);
   }
 
   @Get()
-  async getUserTeams(@Req() req: AuthenticatedRequest) {
-    return this.teamService.getUserTeams(req.user.userId);
+  async getUserTeams(@Req() req: any) {
+    const user = req.user as JwtPayload;
+    return this.teamService.getUserTeams(user.userId);
   }
 
   @Get('config/permissions')
@@ -66,13 +62,14 @@ export class TeamController {
 
   @Post(':id/invite')
   async inviteMember(
-    @Req() req: AuthenticatedRequest,
+    @Req() req: any,
     @Param('id', ParseIntPipe) teamId: number,
     @Body() inviteDto: { email: string; role: string },
   ) {
+    const user = req.user as JwtPayload;
     // Check permission
     await this.permissionService.enforcePermission(
-      req.user.userId,
+      user.userId,
       teamId,
       'invite_members',
     );
@@ -81,17 +78,18 @@ export class TeamController {
       teamId,
       inviteDto.email,
       inviteDto.role,
-      req.user.userId,
+      user.userId,
     );
   }
 
   @Get(':id/invitations')
   async getInvitations(
-    @Req() req: AuthenticatedRequest,
+    @Req() req: any,
     @Param('id', ParseIntPipe) teamId: number,
   ) {
+    const user = req.user as JwtPayload;
     await this.permissionService.enforcePermission(
-      req.user.userId,
+      user.userId,
       teamId,
       'invite_members',
     );
@@ -100,12 +98,13 @@ export class TeamController {
 
   @Delete(':teamId/members/:memberId')
   async removeMember(
-    @Req() req: AuthenticatedRequest,
+    @Req() req: any,
     @Param('teamId', ParseIntPipe) teamId: number,
     @Param('memberId', ParseIntPipe) memberId: number,
   ) {
+    const user = req.user as JwtPayload;
     await this.permissionService.enforcePermission(
-      req.user.userId,
+      user.userId,
       teamId,
       'remove_members',
     );
@@ -114,13 +113,14 @@ export class TeamController {
 
   @Post(':teamId/members/:memberId/role')
   async changeRole(
-    @Req() req: AuthenticatedRequest,
+    @Req() req: any,
     @Param('teamId', ParseIntPipe) teamId: number,
     @Param('memberId', ParseIntPipe) memberId: number,
     @Body() body: { role: string | number }, // Support roleId or legacy string
   ) {
+    const user = req.user as JwtPayload;
     await this.permissionService.enforcePermission(
-      req.user.userId,
+      user.userId,
       teamId,
       'change_roles',
     );
@@ -136,12 +136,13 @@ export class TeamController {
 
   @Post(':id/roles')
   async createRole(
-    @Req() req: AuthenticatedRequest,
+    @Req() req: any,
     @Param('id', ParseIntPipe) teamId: number,
     @Body() body: any,
   ) {
+    const user = req.user as JwtPayload;
     await this.permissionService.enforcePermission(
-      req.user.userId,
+      user.userId,
       teamId,
       'team.manage',
     );
@@ -150,13 +151,14 @@ export class TeamController {
 
   @Patch(':id/roles/:roleId')
   async updateRole(
-    @Req() req: AuthenticatedRequest,
+    @Req() req: any,
     @Param('id', ParseIntPipe) teamId: number,
     @Param('roleId', ParseIntPipe) roleId: number,
     @Body() body: any,
   ) {
+    const user = req.user as JwtPayload;
     await this.permissionService.enforcePermission(
-      req.user.userId,
+      user.userId,
       teamId,
       'team.manage',
     );
@@ -165,12 +167,13 @@ export class TeamController {
 
   @Delete(':id/roles/:roleId')
   async deleteRole(
-    @Req() req: AuthenticatedRequest,
+    @Req() req: any,
     @Param('id', ParseIntPipe) teamId: number,
     @Param('roleId', ParseIntPipe) roleId: number,
   ) {
+    const user = req.user as JwtPayload;
     await this.permissionService.enforcePermission(
-      req.user.userId,
+      user.userId,
       teamId,
       'team.manage',
     );

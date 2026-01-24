@@ -575,6 +575,7 @@
     "unassignFailed": "Error al quitar asignación",
     "assignFailed": "Error al asignar chat",
     "noChats": "No se encontraron chats",
+    "selectRole": "Seleccionar un rol",
     "actions": "Acciones"
   },
   "general": {

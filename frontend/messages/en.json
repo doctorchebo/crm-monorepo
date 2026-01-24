@@ -586,6 +586,7 @@
     "unassignFailed": "Failed to unassign chat",
     "assignFailed": "Failed to assign chat",
     "noChats": "No chats found",
+    "selectRole": "Select a role",
     "actions": "Actions"
   },
   "general": {

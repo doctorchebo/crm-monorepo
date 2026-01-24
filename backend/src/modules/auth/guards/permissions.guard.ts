@@ -1,33 +1,17 @@
 import {
-  Injectable,
   CanActivate,
   ExecutionContext,
   ForbiddenException,
+  Injectable,
   SetMetadata,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { Request } from 'express';
+import { AuthenticatedRequest } from '@shared/types';
 import { PermissionService } from '../../../shared/services/permission.service';
 
 export const PERMISSION_KEY = 'permission';
 export const RequirePermission = (permission: string) =>
   SetMetadata(PERMISSION_KEY, permission);
-
-interface AuthenticatedRequest extends Request {
-  user: {
-    userId: number;
-    [key: string]: any;
-  };
-  params: {
-    [key: string]: string;
-  };
-  query: {
-    [key: string]: string;
-  };
-  body: {
-    [key: string]: any;
-  };
-}
 
 @Injectable()
 export class PermissionsGuard implements CanActivate {

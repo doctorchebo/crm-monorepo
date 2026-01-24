@@ -380,7 +380,7 @@ export class AuthService {
       .update(users)
       .set({
         deletedAt: sql`CURRENT_TIMESTAMP`,
-        email: sql`CONCAT(${user.email}, '-', ${userId}::text, '-deleted')`,
+        email: sql`CONCAT(${user.email}::text, '-', ${userId}::text, '-deleted')`,
       })
       .where(eq(users.id, userId));
 

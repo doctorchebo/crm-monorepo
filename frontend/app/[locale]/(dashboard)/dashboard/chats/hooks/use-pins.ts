@@ -81,7 +81,7 @@ export function usePins(options: UsePinsOptions): UsePinsReturn {
 
   const socketRef = useRef<Socket | null>(null);
   const [pinnedMessages, setPinnedMessages] = useState<PinnedMessageResponse[]>(
-    []
+    [],
   );
   const [currentPinIndex, setCurrentPinIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
@@ -105,7 +105,7 @@ export function usePins(options: UsePinsOptions): UsePinsReturn {
       setPinnedMessages(pins);
       // Reset index if it's out of bounds
       setCurrentPinIndex((prev) =>
-        Math.min(prev, Math.max(0, pins.length - 1))
+        Math.min(prev, Math.max(0, pins.length - 1)),
       );
     } catch (error) {
       console.error("[usePins] Failed to load pinned messages:", error);
@@ -138,7 +138,7 @@ export function usePins(options: UsePinsOptions): UsePinsReturn {
         reconnectionAttempts: 10,
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
-      }
+      },
     );
 
     socketRef.current = socket;
@@ -164,7 +164,7 @@ export function usePins(options: UsePinsOptions): UsePinsReturn {
         // Add new pin, sort by pinnedAt
         const updated = [...prev, event].sort(
           (a, b) =>
-            new Date(a.pinnedAt).getTime() - new Date(b.pinnedAt).getTime()
+            new Date(a.pinnedAt).getTime() - new Date(b.pinnedAt).getTime(),
         );
 
         return updated;
@@ -183,12 +183,15 @@ export function usePins(options: UsePinsOptions): UsePinsReturn {
 
       // Adjust current index if needed
       setCurrentPinIndex((prev) =>
-        Math.min(prev, Math.max(0, pinnedMessages.length - 2))
+        Math.min(prev, Math.max(0, pinnedMessages.length - 2)),
       );
     });
 
     return () => {
-      socket.disconnect();
+      // Firefox fix: Only disconnect if connection is open
+      if (socket.connected) {
+        socket.disconnect();
+      }
     };
   }, [enabled, chatId]);
 
@@ -217,7 +220,7 @@ export function usePins(options: UsePinsOptions): UsePinsReturn {
 
           return [...updated, newPin].sort(
             (a, b) =>
-              new Date(a.pinnedAt).getTime() - new Date(b.pinnedAt).getTime()
+              new Date(a.pinnedAt).getTime() - new Date(b.pinnedAt).getTime(),
           );
         });
       } catch (error) {
@@ -225,7 +228,7 @@ export function usePins(options: UsePinsOptions): UsePinsReturn {
         throw error;
       }
     },
-    [chatId]
+    [chatId],
   );
 
   // Unpin a message
@@ -238,31 +241,31 @@ export function usePins(options: UsePinsOptions): UsePinsReturn {
 
         // Optimistic update
         setPinnedMessages((prev) =>
-          prev.filter((p) => p.messageId !== messageId)
+          prev.filter((p) => p.messageId !== messageId),
         );
 
         // Adjust current index
         setCurrentPinIndex((prev) =>
-          Math.min(prev, Math.max(0, pinnedMessages.length - 2))
+          Math.min(prev, Math.max(0, pinnedMessages.length - 2)),
         );
       } catch (error) {
         console.error("[usePins] Failed to unpin message:", error);
         throw error;
       }
     },
-    [chatId, pinnedMessages.length]
+    [chatId, pinnedMessages.length],
   );
 
   // Navigation helpers
   const goToNextPin = useCallback(() => {
     setCurrentPinIndex((prev) =>
-      prev < pinnedMessages.length - 1 ? prev + 1 : 0
+      prev < pinnedMessages.length - 1 ? prev + 1 : 0,
     );
   }, [pinnedMessages.length]);
 
   const goToPreviousPin = useCallback(() => {
     setCurrentPinIndex((prev) =>
-      prev > 0 ? prev - 1 : pinnedMessages.length - 1
+      prev > 0 ? prev - 1 : pinnedMessages.length - 1,
     );
   }, [pinnedMessages.length]);
 
@@ -274,7 +277,7 @@ export function usePins(options: UsePinsOptions): UsePinsReturn {
       try {
         const context = await backendApi.pins.getMessageContext(
           chatId,
-          messageId
+          messageId,
         );
 
         if (!context.found) {
@@ -291,7 +294,7 @@ export function usePins(options: UsePinsOptions): UsePinsReturn {
         throw error;
       }
     },
-    [chatId]
+    [chatId],
   );
 
   // Refresh pins

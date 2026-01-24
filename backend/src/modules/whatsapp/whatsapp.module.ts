@@ -4,6 +4,8 @@ import { ModuleRef } from '@nestjs/core';
 import { MetaCloudAPIConfigService } from '@shared/services/meta-cloud-api.config';
 import { S3Service } from '@shared/services/s3.service';
 import { AiMemoryModule } from '../ai-memory/ai-memory.module';
+import { ChatsModule } from '../chats/chats.module';
+import { TeamModule } from '../team/team.module';
 import { ThumbnailQueueService } from '../thumbnail/thumbnail-queue.service';
 import { ThumbnailModule } from '../thumbnail/thumbnail.module';
 import { WorkflowModule } from '../workflow/workflow.module';
@@ -48,6 +50,8 @@ import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
     forwardRef(() => ThumbnailModule),
     AiMemoryModule,
     forwardRef(() => WorkflowModule),
+    TeamModule,
+    forwardRef(() => ChatsModule),
   ],
   controllers: [WhatsAppController, WhatsAppWebhookController, MediaController],
   providers: [
