@@ -42,6 +42,17 @@ const MAX_WAIT_TIME_MS = 8000;
  */
 const SETTLE_DELAY_MS = 100;
 
+/**
+ * Maximum time to wait for container element to be available in the DOM.
+ * This handles race conditions where scroll is requested before the component mounts.
+ */
+const CONTAINER_WAIT_TIMEOUT_MS = 2000;
+
+/**
+ * How often to poll for container availability.
+ */
+const CONTAINER_POLL_INTERVAL_MS = 16; // One frame (~60fps)
+
 // ============================================================
 // MAIN HOOK
 // ============================================================
@@ -81,7 +92,7 @@ const SETTLE_DELAY_MS = 100;
  */
 export function useScrollToBottom(
   containerRef: React.RefObject<HTMLDivElement | null>,
-  deps: UseScrollToBottomDeps
+  deps: UseScrollToBottomDeps,
 ) {
   const { messages, selectedChatId, shouldAutoScroll } = deps;
 
@@ -112,7 +123,7 @@ export function useScrollToBottom(
       userScrolledAwayRef.current = false;
       return scrollContainerToBottom(containerRef.current, smooth);
     },
-    [containerRef]
+    [containerRef],
   );
 
   /**
@@ -123,7 +134,7 @@ export function useScrollToBottom(
     (threshold = 100): boolean => {
       return sharedIsNearBottom(containerRef.current, threshold);
     },
-    [containerRef]
+    [containerRef],
   );
 
   /**
@@ -147,6 +158,9 @@ export function useScrollToBottom(
    *
    * This is the heart of the solution - it creates a "scroll session"
    * that monitors media loading and scrolls as content loads.
+   *
+   * If the container is not yet available (e.g., component hasn't mounted),
+   * this function will wait and poll for the container to become available.
    */
   const requestScrollToBottom = useCallback(
     (smooth = false): (() => void) | undefined => {
@@ -158,10 +172,78 @@ export function useScrollToBottom(
       // Also reset lastScrollTop to prevent false "scrolled up" detection
       lastScrollTopRef.current = 0;
 
-      const container = containerRef.current;
+      // ============================================================
+      // CONTAINER AVAILABILITY CHECK AND WAIT
+      // ============================================================
+      // If container is not available yet, set up a polling mechanism
+      // This handles race conditions where scroll is requested before DOM is ready
+      let container = containerRef.current;
       if (!container) {
-        return undefined;
+        // Create a session that will wait for the container
+        const waitSessionId = `wait-${Date.now()}-${Math.random()
+          .toString(36)
+          .slice(2, 7)}`;
+
+        let pollIntervalId: ReturnType<typeof setInterval> | null = null;
+        let waitTimeoutId: ReturnType<typeof setTimeout> | null = null;
+        let waitSessionActive = true;
+
+        const waitCleanup = () => {
+          waitSessionActive = false;
+          if (pollIntervalId) {
+            clearInterval(pollIntervalId);
+            pollIntervalId = null;
+          }
+          if (waitTimeoutId) {
+            clearTimeout(waitTimeoutId);
+            waitTimeoutId = null;
+          }
+        };
+
+        // Create a temporary session for waiting
+        const waitSession: ScrollSession = {
+          id: waitSessionId,
+          active: true,
+          cleanup: waitCleanup,
+        };
+        activeSessionRef.current = waitSession;
+
+        // Poll for container availability
+        pollIntervalId = setInterval(() => {
+          if (!waitSessionActive) return;
+
+          const currentContainer = containerRef.current;
+          if (currentContainer) {
+            // Container is now available, clean up waiting and proceed with scroll
+            waitCleanup();
+            // Recursively call requestScrollToBottom to set up the actual scroll session
+            // The container is guaranteed to exist now
+            requestScrollToBottom(smooth);
+          }
+        }, CONTAINER_POLL_INTERVAL_MS);
+
+        // Safety timeout - don't wait forever for container
+        waitTimeoutId = setTimeout(() => {
+          if (!waitSessionActive) return;
+          // Give up waiting for container
+          waitCleanup();
+          if (activeSessionRef.current?.id === waitSessionId) {
+            activeSessionRef.current = null;
+          }
+        }, CONTAINER_WAIT_TIMEOUT_MS);
+
+        // Return cleanup function for the waiting session
+        return () => {
+          waitCleanup();
+          if (activeSessionRef.current?.id === waitSessionId) {
+            activeSessionRef.current = null;
+          }
+        };
       }
+
+      // ============================================================
+      // MAIN SCROLL SESSION (container is guaranteed to exist here)
+      // ============================================================
 
       // Generate unique session ID for debugging
       const sessionId = `scroll-${Date.now()}-${Math.random()
@@ -344,7 +426,7 @@ export function useScrollToBottom(
         // (e.g., images loaded via useMediaUrl hook)
         // -------------------------------------------------------
         const loadingContainers = container.querySelectorAll(
-          '[data-media-loading="true"]'
+          '[data-media-loading="true"]',
         );
         loadingContainers.forEach((el) => {
           const element = el as HTMLElement;
@@ -386,7 +468,7 @@ export function useScrollToBottom(
         // Also check for GIF containers that don't have a video element yet
         // The video element is conditionally rendered after mediaUrl is available
         const gifContainers = container.querySelectorAll(
-          '[data-media-container="gif"]'
+          '[data-media-container="gif"]',
         );
         gifContainers.forEach((gifContainer) => {
           const video = gifContainer.querySelector("video");
@@ -589,7 +671,7 @@ export function useScrollToBottom(
         }
       };
     },
-    [containerRef, cancelPendingScroll]
+    [containerRef, cancelPendingScroll],
   );
 
   // ============================================================
@@ -624,7 +706,7 @@ export function useScrollToBottom(
     const isNewChat = lastChatIdRef.current !== selectedChatId;
     if (isNewChat) {
       console.log(
-        "[ScrollToBottom Effect] Chat changed, resetting tracking refs"
+        "[ScrollToBottom Effect] Chat changed, resetting tracking refs",
       );
       lastMessageCountRef.current = 0;
       hasScrolledForChatRef.current = null;
@@ -658,7 +740,7 @@ export function useScrollToBottom(
       (wasAtBottom || hasActiveSession)
     ) {
       console.log(
-        "[ScrollToBottom Effect] New message arrived, user at bottom or scroll session active, scrolling"
+        "[ScrollToBottom Effect] New message arrived, user at bottom or scroll session active, scrolling",
       );
       scrollToBottom(false);
     }

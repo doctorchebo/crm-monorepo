@@ -14,6 +14,7 @@ import { ChatAssignmentController } from './controllers/chat-assignment.controll
 import { ChatLockController } from './controllers/chat-lock.controller';
 import {
   CHAT_UPDATE_GATEWAY,
+  ChatAccessService,
   ChatAssignmentService,
   ChatLockService,
   ChatVisibilityService,
@@ -40,6 +41,7 @@ import {
     // Team collaboration services
     ChatLockService,
     ChatAssignmentService,
+    ChatAccessService,
     PermissionService,
     AuditService,
     // Main facade service
@@ -61,6 +63,7 @@ import {
     ChatsCleanupService,
     ChatLockService,
     ChatAssignmentService,
+    ChatAccessService,
     ChatVisibilityService,
   ],
 })

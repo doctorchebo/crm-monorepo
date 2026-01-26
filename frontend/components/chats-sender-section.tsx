@@ -29,7 +29,7 @@ import {
   Video,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { UserAvatar } from "./user-avatar";
 
 interface Chat {
@@ -302,8 +302,27 @@ function ChatActionsMenu({
   isArchivedView,
   t,
 }: ChatActionsMenuProps) {
+  // Prevent hydration mismatch by only rendering dropdown after mount
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
   const hasAnyAction = onArchive || onUnarchive || onDelete;
   if (!hasAnyAction) return null;
+
+  // Return a placeholder button during SSR to maintain consistent DOM structure
+  if (!isMounted) {
+    return (
+      <button
+        className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <MoreVertical className="h-4 w-4" />
+      </button>
+    );
+  }
 
   return (
     <DropdownMenu open={isOpen} onOpenChange={onOpenChange}>
@@ -472,7 +491,18 @@ function ChatListItem({
       onMouseEnter={handlers.onMouseEnter}
       onMouseLeave={handlers.onMouseLeave}
     >
-      <button onClick={onSelect} className="w-full px-3 py-2 text-left">
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onSelect}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onSelect();
+          }
+        }}
+        className="w-full px-3 py-2 text-left cursor-pointer"
+      >
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
@@ -527,7 +557,7 @@ function ChatListItem({
             />
           </div>
         </div>
-      </button>
+      </div>
     </div>
   );
 }

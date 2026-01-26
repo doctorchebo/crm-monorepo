@@ -175,6 +175,67 @@ export interface VariableDefinitionsResponse {
   categories: string[];
 }
 
+// ==================== Notes Types ====================
+
+/**
+ * Note user information
+ */
+export interface NoteUser {
+  id: number;
+  name: string;
+  email: string;
+}
+
+/**
+ * Note response from API
+ */
+export interface NoteResponse {
+  id: number;
+  messageId?: string;
+  chatId?: string;
+  userId: number;
+  note: string;
+  createdAt: string | Date;
+  user?: NoteUser;
+}
+
+/**
+ * Note search result with match context
+ */
+export interface NoteSearchResult extends NoteResponse {
+  matchContext?: string;
+}
+
+/**
+ * Pagination metadata for notes
+ */
+export interface NotesPagination {
+  hasMore: boolean;
+  hasPrevious: boolean;
+  oldestId: number | null;
+  newestId: number | null;
+  total?: number;
+}
+
+/**
+ * Paginated notes response from API
+ */
+export interface PaginatedNotesResponse {
+  chatId: string;
+  notes: NoteResponse[];
+  pagination: NotesPagination;
+}
+
+/**
+ * Notes search response from API
+ */
+export interface NotesSearchResponse {
+  chatId: string;
+  query: string;
+  results: NoteSearchResult[];
+  total: number;
+}
+
 // ==================== Reaction Types ====================
 
 /**
@@ -1378,7 +1439,55 @@ export const backendApi = {
   notes: {
     create: (data: { messageId?: string; chatId?: string; note: string }) =>
       apiClient.post("/notes", data),
+
+    /** @deprecated Use getPaginated for better performance */
     getChatNotes: (chatId: string) => apiClient.get(`/notes/chat/${chatId}`),
+
+    /**
+     * Get paginated notes for a chat (general notes only)
+     * @param chatId - The chat ID
+     * @param options - Pagination options
+     */
+    getPaginated: (
+      chatId: string,
+      options?: {
+        limit?: number;
+        cursor?: number;
+        direction?: "before" | "after";
+        aroundId?: number;
+      },
+    ): Promise<PaginatedNotesResponse> => {
+      const params = new URLSearchParams();
+      if (options?.limit) params.append("limit", options.limit.toString());
+      if (options?.cursor) params.append("cursor", options.cursor.toString());
+      if (options?.direction) params.append("direction", options.direction);
+      if (options?.aroundId)
+        params.append("aroundId", options.aroundId.toString());
+
+      const queryString = params.toString();
+      return apiClient.get(
+        `/notes/chat/${chatId}/paginated${queryString ? `?${queryString}` : ""}`,
+      );
+    },
+
+    /**
+     * Search notes in a chat
+     * @param chatId - The chat ID
+     * @param query - Search query
+     * @param options - Search options
+     */
+    search: (
+      chatId: string,
+      query: string,
+      options?: { limit?: number },
+    ): Promise<NotesSearchResponse> => {
+      const params = new URLSearchParams();
+      params.append("q", query);
+      if (options?.limit) params.append("limit", options.limit.toString());
+
+      return apiClient.get(`/notes/chat/${chatId}/search?${params.toString()}`);
+    },
+
     getMessageNotes: (messageId: string) =>
       apiClient.get(`/notes/message/${messageId}`),
     delete: (noteId: number) => apiClient.delete(`/notes/${noteId}`),

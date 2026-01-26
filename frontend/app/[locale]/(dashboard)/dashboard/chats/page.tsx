@@ -27,19 +27,27 @@ import { ChatsSenderSection } from "@/components/chats-sender-section";
 import { DeleteChatDialog } from "@/components/dialogs/delete-chat-dialog";
 import { RateLimitBanner } from "@/components/rate-limit-banner";
 import { Button } from "@/components/ui/button";
-import { ChatSidebar } from "@/components/ui/chat-sidebar";
+import {
+  ChatSidebar,
+  ChatSidebarHandle,
+  SidebarTab,
+} from "@/components/ui/chat-sidebar";
 import { Input } from "@/components/ui/input";
+import { useAIEvents } from "@/hooks/use-ai-events";
 import { useAuthProtection } from "@/hooks/use-auth";
+import { useChatNotifications } from "@/hooks/use-chat-notifications";
 import { useMediaUpload } from "@/hooks/use-media-upload";
 import { useNotification } from "@/hooks/use-notification";
-import { useChatNotifications } from "@/hooks/use-chat-notifications";
-import { useAIEvents } from "@/hooks/use-ai-events";
 import { backendApi } from "@/lib/api/endpoints";
 import { PendingUpload } from "@/lib/media/types";
 
 // Local imports
-import type { SupportedLanguage } from "@/lib/api/endpoints";
+import { AiRegenerateBanner } from "@/components/chat/AiRegenerateBanner";
+import { AiReplyPreviewPanel } from "@/components/chat/AiReplyPreviewPanel";
 import type { RateLimitInfo } from "@/hooks/use-ai-events";
+import { useChatPersistence } from "@/hooks/use-chat-persistence";
+import { useHandoff } from "@/hooks/use-handoff";
+import type { SupportedLanguage } from "@/lib/api/endpoints";
 import {
   ChatHeader,
   ChatSearchResults,
@@ -53,9 +61,6 @@ import {
   SelectionBanner,
   TemplatesPanel,
 } from "./components";
-import { AiReplyPreviewPanel } from "@/components/chat/AiReplyPreviewPanel";
-import { AiRegenerateBanner } from "@/components/chat/AiRegenerateBanner";
-import { useHandoff } from "@/hooks/use-handoff";
 import {
   useChatSearch,
   useChatState,
@@ -77,6 +82,7 @@ export default function ChatsPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const separatorRef = useRef<HTMLDivElement>(null);
+  const chatSidebarRef = useRef<ChatSidebarHandle>(null);
   const notesPanelRef = useRef<HTMLDivElement>(null);
   const { addNotification } = useNotification();
   // Protect this route
@@ -91,7 +97,8 @@ export default function ChatsPage() {
   const { isUploading } = hookResult;
 
   // Rate limit state
-  const [fetchedRateLimitInfo, setFetchedRateLimitInfo] = useState<RateLimitInfo | null>(null);
+  const [fetchedRateLimitInfo, setFetchedRateLimitInfo] =
+    useState<RateLimitInfo | null>(null);
 
   // Archive/Delete state
   const [isArchivedDrawerOpen, setIsArchivedDrawerOpen] = useState(false);
@@ -99,25 +106,24 @@ export default function ChatsPage() {
     useState<ArchivedChat | null>(null);
   const [deleteChatId, setDeleteChatId] = useState<string | null>(null);
   const [deleteChatName, setDeleteChatName] = useState<string | undefined>(
-    undefined
+    undefined,
   );
   const [lastDeletedChatId, setLastDeletedChatId] = useState<string | null>(
-    null
+    null,
   );
 
   // Sync automation enabled state with backend - MOVED DOWN
 
-
-  // Notes state
-  const [notes, setNotes] = useState<any>(null);
-  const [notesLoading, setNotesLoading] = useState(false);
+  // User state
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [currentUserName, setCurrentUserName] = useState<string | undefined>(
-    undefined
+    undefined,
   );
+
+  // Sidebar state
   const [notesPanelWidth, setNotesPanelWidth] = useState(320);
   const [selectedContactId, setSelectedContactId] = useState<string | null>(
-    null
+    null,
   );
   const [customerLanguage, setCustomerLanguage] = useState<
     SupportedLanguage | undefined
@@ -126,8 +132,37 @@ export default function ChatsPage() {
   // Chat state hook - manages chats, messages, pagination, scroll
   const chatState = useChatState();
 
+  // Chat/sidebar tab persistence hook
+  // - Restores selected chat on page reload
+  // - Restores sidebar tab (profile/notes) on page reload
+  // - Does NOT change tab when switching chats
+  const chatPersistence = useChatPersistence({
+    onRestoreChatId: useCallback(
+      (chatId: string) => {
+        // Only restore if chatState is ready and has chats
+        // The actual selection happens after chats are loaded
+        chatState.setSelectedChatId(chatId);
+      },
+      [chatState.setSelectedChatId],
+    ),
+  });
+
+  // Persist chat selection whenever it changes
+  useEffect(() => {
+    chatPersistence.persistChatId(chatState.selectedChatId);
+  }, [chatState.selectedChatId, chatPersistence.persistChatId]);
+
+  // Handler for sidebar tab changes (to persist on page reload)
+  const handleSidebarTabChange = useCallback(
+    (tab: SidebarTab) => {
+      chatPersistence.persistSidebarTab(tab);
+    },
+    [chatPersistence.persistSidebarTab],
+  );
+
   // Get socket for AI events
   const { socket } = useChatNotifications();
+
   // AI Events hook - handles typing indicator, rate limits, and pending reviews
   const {
     isAITyping,
@@ -158,57 +193,60 @@ export default function ChatsPage() {
   // Sync rate limit state with backend on chat change
   useEffect(() => {
     if (!chatState.selectedChatId) return;
-    
+
     const fetchRateLimitStatus = async () => {
-        try {
-            const status = await backendApi.aiWorkflow.getAIStatus(chatState.selectedChatId!);
-            
-            // If rate limited, set the rate limit info
-            if (status.isRateLimited) {
-                setFetchedRateLimitInfo({
-                    chatId: status.chatId,
-                    currentCount: status.rateLimitCurrentCount || 0,
-                    maxCount: status.rateLimitMaxCount || 0,
-                    resetTime: status.rateLimitReset?.toString(),
-                    timestamp: new Date().toISOString()
-                });
-            } else {
-                setFetchedRateLimitInfo(null);
-            }
-        } catch (error) {
-            console.error("Failed to fetch AI status:", error);
+      try {
+        const status = await backendApi.aiWorkflow.getAIStatus(
+          chatState.selectedChatId!,
+        );
+
+        // If rate limited, set the rate limit info
+        if (status.isRateLimited) {
+          setFetchedRateLimitInfo({
+            chatId: status.chatId,
+            currentCount: status.rateLimitCurrentCount || 0,
+            maxCount: status.rateLimitMaxCount || 0,
+            resetTime: status.rateLimitReset?.toString(),
+            timestamp: new Date().toISOString(),
+          });
+        } else {
+          setFetchedRateLimitInfo(null);
         }
+      } catch (error) {
+        console.error("Failed to fetch AI status:", error);
+      }
     };
-    
+
     fetchRateLimitStatus();
   }, [chatState.selectedChatId]);
 
   // If socket rate limit event comes in, trigger refetch
   useEffect(() => {
-      if (rateLimitInfo) {
-          refetchHandoff();
-      }
+    if (rateLimitInfo) {
+      refetchHandoff();
+    }
   }, [rateLimitInfo, refetchHandoff]);
 
   // Handler for when AI is toggled ON - auto-trigger response if last message is inbound
-  const handleAIToggle = useCallback(async (shouldEnable: boolean) => {
-    if (shouldEnable) {
-      await resumeAI();
-      // Check if last message is inbound and trigger AI response
-      const lastMessage = chatState.messages[chatState.messages.length - 1];
-      if (lastMessage?.direction === 'inbound' && chatState.selectedChatId) {
-        try {
-          await backendApi.aiReview.regenerate(chatState.selectedChatId);
-        } catch (error) {
-          console.error("Failed to trigger AI response:", error);
+  const handleAIToggle = useCallback(
+    async (shouldEnable: boolean) => {
+      if (shouldEnable) {
+        await resumeAI();
+        // Check if last message is inbound and trigger AI response
+        const lastMessage = chatState.messages[chatState.messages.length - 1];
+        if (lastMessage?.direction === "inbound" && chatState.selectedChatId) {
+          try {
+            await backendApi.aiReview.regenerate(chatState.selectedChatId);
+          } catch (error) {
+            console.error("Failed to trigger AI response:", error);
+          }
         }
+      } else {
+        await pauseAI();
       }
-    } else {
-      await pauseAI();
-    }
-  }, [resumeAI, pauseAI, chatState.messages, chatState.selectedChatId]);
-    
-
+    },
+    [resumeAI, pauseAI, chatState.messages, chatState.selectedChatId],
+  );
 
   // AI Review Handlers
   const handleAiSend = useCallback(
@@ -222,15 +260,18 @@ export default function ChatsPage() {
           interactiveData,
         });
         clearPendingReview();
-        // Optimistically add message or rely on socket? 
+        // Optimistically add message or rely on socket?
         // Socket should handle incoming message or we can refresh messages.
         // For now, let's assume we rely on standard refresh or socket.
       } catch (error) {
         console.error("Failed to send reviewed AI response:", error);
-        addNotification(t("failedToSendAiResponse") || "Failed to send AI response", "error");
+        addNotification(
+          t("failedToSendAiResponse") || "Failed to send AI response",
+          "error",
+        );
       }
     },
-    [chatState.selectedChatId, clearPendingReview, addNotification, t]
+    [chatState.selectedChatId, clearPendingReview, addNotification, t],
   );
 
   const handleAiDiscard = useCallback(async () => {
@@ -320,13 +361,13 @@ export default function ChatsPage() {
         console.error("Failed to fetch templates:", error);
         return [];
       }
-    }
+    },
   );
 
   // Filter templates to only show those with at least one approved locale
   const approvedTemplates = useMemo(() => {
     return (templates as Template[]).filter((template) =>
-      template.locales?.some((locale) => locale.approvalStatus === "approved")
+      template.locales?.some((locale) => locale.approvalStatus === "approved"),
     );
   }, [templates]);
 
@@ -334,7 +375,7 @@ export default function ChatsPage() {
   // This determines if we're within the 24-hour window for free-form messaging
   const conversationWindow = useMemo(
     () => calculateConversationWindow(chatState.messages),
-    [chatState.messages]
+    [chatState.messages],
   );
 
   // All visible templates (for the new template panel with availability logic)
@@ -374,7 +415,7 @@ export default function ChatsPage() {
   const [pinDurationModalOpen, setPinDurationModalOpen] = useState(false);
   const [pinReplaceModalOpen, setPinReplaceModalOpen] = useState(false);
   const [pendingPinMessageId, setPendingPinMessageId] = useState<string | null>(
-    null
+    null,
   );
 
   // Load reactions when messages change
@@ -390,30 +431,8 @@ export default function ChatsPage() {
     reactions.clearReactions();
   }, [chatState.selectedChatId, reactions.clearReactions]);
 
-  // Fetch notes when chat changes
-  useEffect(() => {
-    if (!chatState.selectedChatId) {
-      setNotes(null);
-      return;
-    }
-
-    const fetchNotes = async () => {
-      try {
-        setNotesLoading(true);
-        const notesData = await backendApi.notes.getChatNotes(
-          chatState.selectedChatId!
-        );
-        setNotes(notesData);
-      } catch (error) {
-        console.error("Error fetching notes:", error);
-        setNotes(null);
-      } finally {
-        setNotesLoading(false);
-      }
-    };
-
-    fetchNotes();
-  }, [chatState.selectedChatId]);
+  // NOTE: Notes fetching and WebSocket subscription is now handled internally
+  // by the NotesPanel component via useNotesInfiniteScroll hook
 
   // Handler for when a contact is resolved (created or found) from the sidebar
   // This updates the selectedContactId and fetches language for template availability
@@ -425,7 +444,7 @@ export default function ChatsPage() {
       if (contact && typeof contact === "object" && "language" in contact) {
         setCustomerLanguage(
           (contact as { language?: SupportedLanguage | null }).language ||
-          undefined
+            undefined,
         );
       }
     } catch {
@@ -441,41 +460,6 @@ export default function ChatsPage() {
     }
   }, [chatState.selectedChatId]);
 
-  // Note handlers
-  const handleAddNote = async (noteText: string, messageId?: string) => {
-    if (!chatState.selectedChatId) return;
-
-    try {
-      await backendApi.notes.create({
-        chatId: chatState.selectedChatId,
-        messageId,
-        note: noteText,
-      });
-
-      const notesData = await backendApi.notes.getChatNotes(
-        chatState.selectedChatId
-      );
-      setNotes(notesData);
-    } catch (error) {
-      console.error("Failed to add note:", error);
-    }
-  };
-
-  const handleDeleteNote = async (noteId: number) => {
-    if (!chatState.selectedChatId) return;
-
-    try {
-      await backendApi.notes.delete(noteId);
-      const notesData = await backendApi.notes.getChatNotes(
-        chatState.selectedChatId
-      );
-      setNotes(notesData);
-    } catch (error) {
-      console.error("Failed to delete note:", error);
-      alert("Failed to delete note. Please try again.");
-    }
-  };
-
   // Pin handlers
   const handlePinMessage = useCallback(
     (messageId: string) => {
@@ -490,7 +474,7 @@ export default function ChatsPage() {
         setPinDurationModalOpen(true);
       }
     },
-    [pins.pinCount.count]
+    [pins.pinCount.count],
   );
 
   const handleUnpinMessage = useCallback(
@@ -502,7 +486,7 @@ export default function ChatsPage() {
         addNotification(t("unpinFailed"), "error");
       }
     },
-    [pins, addNotification, t]
+    [pins, addNotification, t],
   );
 
   const handlePinDurationSelect = useCallback(
@@ -526,7 +510,7 @@ export default function ChatsPage() {
         addNotification(t("pinFailed"), "error");
       }
     },
-    [pendingPinMessageId, pins, addNotification, t]
+    [pendingPinMessageId, pins, addNotification, t],
   );
 
   const handlePinReplace = useCallback(() => {
@@ -540,14 +524,14 @@ export default function ChatsPage() {
     async (messageId: string) => {
       // First try to scroll to message if it exists in current messages
       const existingMessage = chatState.messages.find(
-        (m) => m.messageId === messageId
+        (m) => m.messageId === messageId,
       );
       if (existingMessage) {
         // Pass container ref and current messages for "is last" check
         messageHandlers.handleScrollToMessage(
           messageId,
           chatState.messagesContainerRef,
-          chatState.messages
+          chatState.messages,
         );
         return;
       }
@@ -562,7 +546,7 @@ export default function ChatsPage() {
             messageId,
             context.messages,
             context.hasMoreBefore,
-            context.hasMoreAfter
+            context.hasMoreAfter,
           );
 
           // Wait for DOM to update with new messages before scrolling
@@ -574,7 +558,7 @@ export default function ChatsPage() {
                 messageHandlers.handleScrollToMessage(
                   messageId,
                   chatState.messagesContainerRef,
-                  context.messages // Pass the fresh context messages
+                  context.messages, // Pass the fresh context messages
                 );
               });
             });
@@ -585,7 +569,7 @@ export default function ChatsPage() {
         addNotification(t("navigationFailed"), "error");
       }
     },
-    [chatState, messageHandlers, pins, addNotification, t]
+    [chatState, messageHandlers, pins, addNotification, t],
   );
 
   // Archive chat handler
@@ -605,7 +589,7 @@ export default function ChatsPage() {
         addNotification(t("chatList.archiveFailed"), "error");
       }
     },
-    [chatState, t, addNotification]
+    [chatState, t, addNotification],
   );
 
   // Unarchive chat handler
@@ -625,7 +609,7 @@ export default function ChatsPage() {
         throw error; // Re-throw so the drawer can handle it
       }
     },
-    [chatState, t, addNotification]
+    [chatState, t, addNotification],
   );
 
   // Select an archived chat for viewing (without adding to main list)
@@ -636,7 +620,7 @@ export default function ChatsPage() {
       // Set the selected chat ID so messages load
       chatState.setSelectedChatId(archivedChat.chatId);
     },
-    [chatState]
+    [chatState],
   );
 
   // Computed selected chat: use archived chat if viewing one, otherwise use regular selected chat
@@ -677,11 +661,11 @@ export default function ChatsPage() {
       // Use passed participantName, or fall back to chat data, or phone number
       setDeleteChatName(
         participantName ||
-        effectiveChat?.participantName ||
-        effectiveChat?.participantPhone
+          effectiveChat?.participantName ||
+          effectiveChat?.participantPhone,
       );
     },
-    [chatState.chats, viewedArchivedChat]
+    [chatState.chats, viewedArchivedChat],
   );
 
   // Confirm delete chat
@@ -696,7 +680,7 @@ export default function ChatsPage() {
       setTimeout(() => setLastDeletedChatId(null), 100);
       // Remove from local chats list
       chatState.setChats((prev) =>
-        prev.filter((c) => c.chatId !== deleteChatId)
+        prev.filter((c) => c.chatId !== deleteChatId),
       );
       // Clear messages cache for deleted chat to free memory
       if (chatState.messagesCacheRef.current.has(deleteChatId)) {
@@ -734,7 +718,7 @@ export default function ChatsPage() {
         chatState.currentMessagesChatIdRef,
         chatState.selectedChatId,
         messageHandlers.messageRefs,
-        chatState.messagesContainerRef
+        chatState.messagesContainerRef,
       );
     },
     [
@@ -746,7 +730,7 @@ export default function ChatsPage() {
       chatState.messagesContainerRef,
       messageHandlers.messageRefs,
       messageSearch,
-    ]
+    ],
   );
 
   // Handle separator drag to resize notes panel
@@ -851,11 +835,11 @@ export default function ChatsPage() {
               <p className="text-xs text-muted-foreground mt-2">
                 {chatSearch.totalResults === 0
                   ? t("chatList.noResultsFor", {
-                    query: chatSearch.searchQuery,
-                  })
+                      query: chatSearch.searchQuery,
+                    })
                   : t("chatList.resultsCount", {
-                    count: chatSearch.totalResults,
-                  })}
+                      count: chatSearch.totalResults,
+                    })}
               </p>
             )}
           </div>
@@ -867,7 +851,7 @@ export default function ChatsPage() {
             ) : chatSearch.isSearchMode ? (
               /* Search Results Mode */
               chatSearch.searchResults.length === 0 &&
-                !chatSearch.isSearching ? (
+              !chatSearch.isSearching ? (
                 <div className="flex flex-col items-center justify-center h-full p-4 text-center">
                   <Search className="h-12 w-12 text-muted-foreground mb-3 opacity-40" />
                   <p className="text-muted-foreground">
@@ -901,7 +885,7 @@ export default function ChatsPage() {
               /* Normal Chat List Mode */
               chatState.senders.map((sender) => {
                 const senderChats = chatState.chats.filter(
-                  (c) => c.senderId === sender.id
+                  (c) => c.senderId === sender.id,
                 );
                 return (
                   <ChatsSenderSection
@@ -917,8 +901,6 @@ export default function ChatsPage() {
                 );
               })
             )}
-            
-
           </div>
 
           {/* Archived Chats Drawer */}
@@ -955,8 +937,6 @@ export default function ChatsPage() {
               <div className="flex flex-1 overflow-hidden" ref={containerRef}>
                 {/* Messages Area */}
                 <div className="flex-1 flex flex-col overflow-hidden min-h-0 relative">
-
-
                   {/* Pinned Messages Section */}
                   {pins.pinnedMessages.length > 0 && (
                     <PinnedMessagesSection
@@ -1053,25 +1033,29 @@ export default function ChatsPage() {
 
                   {/* Rate Limit Banner */}
                   {activeRateLimit && (
-                     <RateLimitBanner
-                        resetTime={activeRateLimit.resetTime}
-                        currentCount={activeRateLimit.currentCount}
-                        maxCount={activeRateLimit.maxCount}
-                     />
+                    <RateLimitBanner
+                      resetTime={activeRateLimit.resetTime}
+                      currentCount={activeRateLimit.currentCount}
+                      maxCount={activeRateLimit.maxCount}
+                    />
                   )}
 
                   {/* AI Regeneration Banner */}
-                  {!pendingReview && !activeRateLimit && !isAITyping && !isAIProcessing &&
-                   automationEnabled && 
-                   chatState.messages[chatState.messages.length - 1]?.direction === 'inbound' && (
-                    <AiRegenerateBanner
-                      chatId={effectiveSelectedChat.chatId}
-                      onRegenerateTriggered={() => {
-                         // Optional: add loading state or notification
-                         console.log("Regeneration triggered");
-                      }}
-                    />
-                  )}
+                  {!pendingReview &&
+                    !activeRateLimit &&
+                    !isAITyping &&
+                    !isAIProcessing &&
+                    automationEnabled &&
+                    chatState.messages[chatState.messages.length - 1]
+                      ?.direction === "inbound" && (
+                      <AiRegenerateBanner
+                        chatId={effectiveSelectedChat.chatId}
+                        onRegenerateTriggered={() => {
+                          // Optional: add loading state or notification
+                          console.log("Regeneration triggered");
+                        }}
+                      />
+                    )}
 
                   {/* Templates Panel - Only show if automation is DISABLED */}
                   {!automationEnabled && (
@@ -1096,13 +1080,16 @@ export default function ChatsPage() {
                       isSending={false} // Todo: Add sending state if needed
                     />
                   ) : (
-                    !messageHandlers.isSelectionMode && !automationEnabled && (
+                    !messageHandlers.isSelectionMode &&
+                    !automationEnabled && (
                       <MessageInputArea
                         messageInputRef={messageInputRef}
                         addMoreInputRef={mediaHandlers.addMoreInputRef}
                         replyingToMessage={messageHandlers.replyingToMessage}
                         selectedChat={effectiveSelectedChat}
-                        currentAttachmentType={mediaHandlers.currentAttachmentType}
+                        currentAttachmentType={
+                          mediaHandlers.currentAttachmentType
+                        }
                         templateInput={messageHandlers.templateInput}
                         isUploading={isUploading}
                         t={t}
@@ -1272,19 +1259,18 @@ export default function ChatsPage() {
                     chatState.selectedChatId &&
                     currentUserId && (
                       <ChatSidebar
+                        ref={chatSidebarRef}
                         chatId={chatState.selectedChatId}
                         contactId={selectedContactId}
                         currentUserId={currentUserId}
-                        notes={notes}
-                        notesLoading={notesLoading}
-                        onAddNote={handleAddNote}
-                        onDeleteNote={handleDeleteNote}
-                        onProfileUpdate={() => { }}
+                        onProfileUpdate={() => {}}
                         participantPhone={
                           effectiveSelectedChat?.participantPhone
                         }
                         participantName={effectiveSelectedChat?.participantName}
                         onContactCreated={handleContactResolved}
+                        initialTab={chatPersistence.persistedTab || "profile"}
+                        onTabChange={handleSidebarTabChange}
                       />
                     )
                   )}
