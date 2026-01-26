@@ -260,6 +260,192 @@ function getChatPreview(
   return { text, icon };
 }
 
+/**
+ * Hook to manage hover state with menu open override
+ * When menu is open, maintains hover appearance even if mouse leaves
+ */
+function useHoverWithMenu() {
+  const [isHovered, setIsHovered] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+  const showHoverState = isHovered || isMenuOpen;
+
+  const handlers = {
+    onMouseEnter: () => setIsHovered(true),
+    onMouseLeave: () => setIsHovered(false),
+    onMenuOpenChange: setIsMenuOpen,
+  };
+
+  return { showHoverState, isMenuOpen, handlers };
+}
+
+/**
+ * Chat item actions menu component
+ * Handles archive/unarchive/delete operations
+ */
+interface ChatActionsMenuProps {
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  onArchive?: () => void;
+  onUnarchive?: () => void;
+  onDelete?: () => void;
+  isArchivedView?: boolean;
+  t: ReturnType<typeof useTranslations>;
+}
+
+function ChatActionsMenu({
+  isOpen,
+  onOpenChange,
+  onArchive,
+  onUnarchive,
+  onDelete,
+  isArchivedView,
+  t,
+}: ChatActionsMenuProps) {
+  const hasAnyAction = onArchive || onUnarchive || onDelete;
+  if (!hasAnyAction) return null;
+
+  return (
+    <DropdownMenu open={isOpen} onOpenChange={onOpenChange}>
+      <DropdownMenuTrigger asChild>
+        <button
+          className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <MoreVertical className="h-4 w-4" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-40">
+        {isArchivedView
+          ? onUnarchive && (
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onUnarchive();
+                }}
+                className="gap-2"
+              >
+                <ArchiveRestore className="h-4 w-4" />
+                {t("unarchiveChat")}
+              </DropdownMenuItem>
+            )
+          : onArchive && (
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onArchive();
+                }}
+                className="gap-2"
+              >
+                <Archive className="h-4 w-4" />
+                {t("archiveChat")}
+              </DropdownMenuItem>
+            )}
+        {onDelete && (
+          <DropdownMenuItem
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            className="gap-2 text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400 focus:bg-red-500/10"
+          >
+            <Trash2 className="h-4 w-4" />
+            {t("deleteChat")}
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * Right-side indicators container (avatar, badge, menu)
+ * Handles the hover animation for avatar displacement
+ */
+interface ChatIndicatorsProps {
+  chat: Chat;
+  showHoverState: boolean;
+  isMenuOpen: boolean;
+  onMenuOpenChange: (open: boolean) => void;
+  onArchive?: () => void;
+  onUnarchive?: () => void;
+  onDelete?: () => void;
+  isArchivedView?: boolean;
+  t: ReturnType<typeof useTranslations>;
+}
+
+function ChatIndicators({
+  chat,
+  showHoverState,
+  isMenuOpen,
+  onMenuOpenChange,
+  onArchive,
+  onUnarchive,
+  onDelete,
+  isArchivedView,
+  t,
+}: ChatIndicatorsProps) {
+  const hasUnread = (chat.unreadCount || 0) > 0;
+  const hasMenu = !!(onArchive || onUnarchive || onDelete);
+  const hasAssignee = !!chat.assignedTo;
+
+  return (
+    <div className="flex items-center gap-1">
+      {/* Assignee Avatar - slides left on hover when menu exists */}
+      {hasAssignee && (
+        <div
+          className={cn(
+            "transition-transform duration-200 ease-out",
+            showHoverState && hasMenu && "-translate-x-1",
+          )}
+        >
+          <UserAvatar
+            name={chat.assigneeName}
+            profilePictureUrl={chat.assigneeProfilePictureUrl}
+            size="xs"
+          />
+        </div>
+      )}
+
+      {/* Unread Badge - slides left on hover when menu exists */}
+      {hasUnread && (
+        <div
+          className={cn(
+            "transition-transform duration-200 ease-out",
+            showHoverState && hasMenu && "-translate-x-1",
+          )}
+        >
+          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[#25D366] px-1.5 text-xs font-bold text-white">
+            {chat.unreadCount! > 99 ? "99+" : chat.unreadCount}
+          </span>
+        </div>
+      )}
+
+      {/* Actions Menu - fades in on hover */}
+      {hasMenu && (
+        <div
+          className={cn(
+            "transition-all duration-200 ease-out",
+            showHoverState
+              ? "opacity-100 w-6"
+              : "opacity-0 w-0 pointer-events-none overflow-hidden",
+          )}
+        >
+          <ChatActionsMenu
+            isOpen={isMenuOpen}
+            onOpenChange={onMenuOpenChange}
+            onArchive={onArchive}
+            onUnarchive={onUnarchive}
+            onDelete={onDelete}
+            isArchivedView={isArchivedView}
+            t={t}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ChatListItem({
   chat,
   isSelected,
@@ -270,24 +456,21 @@ function ChatListItem({
   isArchivedView,
   t,
 }: ChatListItemProps) {
-  const [isHovered, setIsHovered] = useState(false);
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const { showHoverState, isMenuOpen, handlers } = useHoverWithMenu();
   const hasUnread = (chat.unreadCount || 0) > 0;
 
   // Get the appropriate preview based on last activity type
   const { text: previewText, icon } = getChatPreview(chat, t);
 
-  const showMenu = isHovered || isMenuOpen;
-
   return (
     <div
       className={cn(
-        "relative group w-full rounded-lg text-sm transition-colors hover:bg-muted",
+        "group w-full rounded-lg text-sm transition-colors hover:bg-muted",
         isSelected && "bg-primary/10 font-medium",
         hasUnread && !isSelected && "bg-muted/50",
       )}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+      onMouseEnter={handlers.onMouseEnter}
+      onMouseLeave={handlers.onMouseLeave}
     >
       <button onClick={onSelect} className="w-full px-3 py-2 text-left">
         <div className="flex items-start justify-between gap-2">
@@ -331,92 +514,20 @@ function ChatListItem({
               </span>
             )}
 
-            <div className="flex items-center gap-1">
-              {/* Assignee Avatar */}
-              {chat.assignedTo && (
-                <UserAvatar
-                  name={chat.assigneeName}
-                  profilePictureUrl={chat.assigneeProfilePictureUrl}
-                  size="xs"
-                />
-              )}
-              {/* Unread Badge - WhatsApp Style */}
-              {hasUnread && (
-                <span
-                  className={cn(
-                    "inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[#25D366] px-1.5 text-xs font-bold text-white transition-all duration-200",
-                    showMenu && "mr-1",
-                  )}
-                >
-                  {chat.unreadCount! > 99 ? "99+" : chat.unreadCount}
-                </span>
-              )}
-            </div>
+            <ChatIndicators
+              chat={chat}
+              showHoverState={showHoverState}
+              isMenuOpen={isMenuOpen}
+              onMenuOpenChange={handlers.onMenuOpenChange}
+              onArchive={onArchive}
+              onUnarchive={onUnarchive}
+              onDelete={onDelete}
+              isArchivedView={isArchivedView}
+              t={t}
+            />
           </div>
         </div>
       </button>
-
-      {/* Actions Menu - positioned at bottom right of chat item */}
-      {(onArchive || onUnarchive || onDelete) && (
-        <div
-          className={cn(
-            "absolute bottom-2 right-2 transition-opacity duration-200",
-            showMenu ? "opacity-100" : "opacity-0 pointer-events-none",
-          )}
-        >
-          <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
-            <DropdownMenuTrigger asChild>
-              <button
-                className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <MoreVertical className="h-4 w-4" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-40">
-              {isArchivedView
-                ? // Archived view: show unarchive option
-                  onUnarchive && (
-                    <DropdownMenuItem
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onUnarchive();
-                      }}
-                      className="gap-2"
-                    >
-                      <ArchiveRestore className="h-4 w-4" />
-                      {t("unarchiveChat")}
-                    </DropdownMenuItem>
-                  )
-                : // Normal view: show archive option
-                  onArchive && (
-                    <DropdownMenuItem
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onArchive();
-                      }}
-                      className="gap-2"
-                    >
-                      <Archive className="h-4 w-4" />
-                      {t("archiveChat")}
-                    </DropdownMenuItem>
-                  )}
-              {onDelete && (
-                <DropdownMenuItem
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDelete();
-                  }}
-                  className="gap-2 text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400 focus:bg-red-500/10"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  {t("deleteChat")}
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      )}
     </div>
   );
 }
