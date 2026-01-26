@@ -35,12 +35,13 @@ export interface ThumbnailJobMessage {
   outputBucket: string;
   outputKey?: string; // Optional - auto-generated if not provided
   mimeType: string;
-  context: 'kb-media' | 'message-attachment';
+  context: 'kb-media' | 'message-attachment' | 'profile-picture';
   entityIds?: {
     mediaId?: string;
     attachmentId?: string;
     messageId?: string;
     chatId?: string;
+    userId?: string;
   };
   callback: {
     type: 'webhook';
@@ -68,12 +69,13 @@ export interface ThumbnailCallbackResult {
     bucket: string;
     key: string;
   };
-  context?: 'kb-media' | 'message-attachment';
+  context?: 'kb-media' | 'message-attachment' | 'profile-picture';
   entityIds?: {
     mediaId?: string;
     attachmentId?: string;
     messageId?: string;
     chatId?: string;
+    userId?: string;
   };
 }
 
@@ -106,6 +108,19 @@ export interface QueueMessageThumbnailParams {
   thumbnailS3Key?: string;
   /** Chat ID (optional - used as FIFO group ID) */
   chatId?: string;
+  /** S3 bucket (optional - uses default if not provided) */
+  s3Bucket?: string;
+}
+
+/**
+ * Parameters for queueing a profile picture thumbnail job
+ */
+export interface QueueProfilePictureThumbnailParams {
+  userId: number;
+  s3Key: string;
+  mimeType: string;
+  /** Target S3 key for thumbnail (optional - auto-generated if not provided) */
+  thumbnailS3Key?: string;
   /** S3 bucket (optional - uses default if not provided) */
   s3Bucket?: string;
 }
@@ -374,6 +389,54 @@ export class LambdaThumbnailService implements OnModuleInit {
       params.chatId || params.messageId,
       jobId,
       'message',
+    );
+  }
+
+  /**
+   * Queue a profile picture for thumbnail generation via Lambda
+   *
+   * @returns Job ID if successfully queued, null if not supported or failed
+   */
+  async queueProfilePictureThumbnail(
+    params: QueueProfilePictureThumbnailParams,
+  ): Promise<string | null> {
+    if (!this.shouldUseLambda(params.mimeType)) {
+      this.logger.warn(
+        `[Lambda Thumbnail] Type ${params.mimeType} not supported for profile picture - thumbnail will NOT be generated`,
+      );
+      return null;
+    }
+
+    const jobId = uuidv4();
+    const bucket = params.s3Bucket || this.bucketName;
+    const outputKey =
+      params.thumbnailS3Key || this.generateThumbnailKey(params.s3Key);
+
+    const message: ThumbnailJobMessage = {
+      jobType: 'thumbnail',
+      jobId,
+      inputBucket: bucket,
+      inputKey: params.s3Key,
+      outputBucket: bucket,
+      outputKey,
+      mimeType: params.mimeType,
+      context: 'profile-picture',
+      entityIds: {
+        userId: params.userId.toString(),
+      },
+      callback: {
+        type: 'webhook',
+        url: `${this.webhookBaseUrl}/api/v1/profile-picture/thumbnail/callback`,
+      },
+      // CRITICAL: Safety config prevents infinite loops and runaway costs
+      safety: this.createSafetyConfig(),
+    };
+
+    return this.sendToQueue(
+      message,
+      `user-${params.userId}`,
+      jobId,
+      'profile-picture',
     );
   }
 

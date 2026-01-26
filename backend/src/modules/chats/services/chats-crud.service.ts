@@ -319,16 +319,25 @@ export class ChatsCrudService {
       // Enrich with contact names and flatten assignee info
       const enrichedChats = await this.enrichChatsWithContactNames(result);
 
-      // Add assigneeName field for frontend convenience
-      return enrichedChats.map((chat) => ({
-        ...chat,
-        assigneeName:
-          (chat as Chat & { assignee?: { name?: string } }).assignee?.name ||
-          null,
-        assigneeEmail:
-          (chat as Chat & { assignee?: { email?: string } }).assignee?.email ||
-          null,
-      }));
+      // Add assignee fields for frontend convenience
+      return enrichedChats.map((chat) => {
+        const assignee = (
+          chat as Chat & {
+            assignee?: {
+              name?: string;
+              email?: string;
+              profilePictureThumbnailKey?: string | null;
+            };
+          }
+        ).assignee;
+        return {
+          ...chat,
+          assigneeName: assignee?.name || null,
+          assigneeEmail: assignee?.email || null,
+          assigneeProfilePictureKey:
+            assignee?.profilePictureThumbnailKey || null,
+        };
+      });
     } catch (error) {
       this.logger.error(`Error fetching team chats: ${error.message}`);
       throw error;

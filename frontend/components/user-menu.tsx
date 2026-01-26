@@ -2,7 +2,7 @@
 
 import { signOut } from "@/app/[locale]/(login)/actions";
 import { logoutClient } from "@/app/[locale]/(login)/logout";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { SmartAvatar } from "@/components/smart-avatar";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -12,53 +12,27 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { backendApi, UserProfileDto } from "@/lib/api/endpoints";
-import { TokenManager } from "@/lib/auth/token-manager";
-import { Home, LogOut } from "lucide-react";
+import { clearUserProfile, useUser } from "@/hooks/use-user";
+import { Home, LogOut, Settings } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
 
 /**
  * UserMenu component that displays either:
  * - Sign up/pricing links when user is not authenticated
  * - User avatar dropdown with dashboard/sign out options when authenticated
  *
- * Uses JWT-based authentication via TokenManager and backend API.
+ * Uses the centralized useUser hook with SWR for caching and automatic updates.
+ * Profile picture changes from settings will automatically reflect here.
  * This component is used in both the landing page header and dashboard layout.
  */
 export function UserMenu() {
   const t = useTranslations("header");
   const router = useRouter();
-  const [user, setUser] = useState<UserProfileDto | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
 
-  // Fetch user from backend API using JWT authentication
-  useEffect(() => {
-    const fetchUser = async () => {
-      setIsLoading(true);
-      try {
-        // First check if we have valid tokens
-        if (!TokenManager.isAccessTokenValid()) {
-          setUser(null);
-          setIsLoading(false);
-          return;
-        }
-
-        // Fetch user profile from backend
-        const userData = await backendApi.user.getProfile();
-        setUser(userData);
-      } catch (error) {
-        console.error("Failed to fetch user:", error);
-        setUser(null);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchUser();
-  }, []);
+  // Use centralized user hook with SWR for automatic updates
+  const { user, isLoading } = useUser();
 
   async function handleSignOut() {
     try {
@@ -66,8 +40,8 @@ export function UserMenu() {
       await signOut();
       // Clean up JWT tokens from client-side cookies
       logoutClient();
-      // Clear the user data immediately
-      setUser(null);
+      // Clear the user profile from SWR cache
+      clearUserProfile();
     } catch (error) {
       console.error("Sign out error:", error);
     } finally {
@@ -107,14 +81,16 @@ export function UserMenu() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Avatar className="cursor-pointer size-9">
-          <AvatarImage alt={user.name || ""} />
-          <AvatarFallback>
-            {user.email
-              ? user.email.split("@")[0].substring(0, 2).toUpperCase()
-              : "U"}
-          </AvatarFallback>
-        </Avatar>
+        <button className="cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-ring rounded-full">
+          <SmartAvatar
+            isLoading={isLoading}
+            hasProfilePicture={!!user.profilePictureUrl}
+            profilePictureUrl={user.profilePictureUrl}
+            name={user.name}
+            email={user.email}
+            size="sm"
+          />
+        </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56 flex flex-col gap-1">
         <DropdownMenuLabel className="font-normal">
@@ -130,6 +106,12 @@ export function UserMenu() {
           <Link href="/dashboard" className="flex w-full items-center">
             <Home className="mr-2 h-4 w-4" />
             <span>{t("dashboard")}</span>
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem className="cursor-pointer" asChild>
+          <Link href="/dashboard/general" className="flex w-full items-center">
+            <Settings className="mr-2 h-4 w-4" />
+            <span>{t("settings") || "Settings"}</span>
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem

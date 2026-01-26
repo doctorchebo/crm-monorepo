@@ -1,17 +1,24 @@
 "use client";
 
 import { updateAccount } from "@/app/[locale]/(login)/actions";
+import { ProfilePictureUpload } from "@/components/profile-picture-upload";
 import { Button } from "@/components/ui/button";
-import { PageLayout } from "@/components/ui/page-layout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageLayout } from "@/components/ui/page-layout";
+import { backendApi } from "@/lib/api/endpoints";
 import { User } from "@/lib/db/schema";
 import { Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useActionState, useEffect, useState } from "react";
 import useSWR from "swr";
-import { backendApi } from "@/lib/api/endpoints";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
@@ -72,9 +79,9 @@ function AccountFormWithData({
   state: ActionState;
   t: ReturnType<typeof useTranslations>;
 }) {
-  const { data: user } = useSWR<User>(
+  const { data: user, mutate } = useSWR<User>(
     "user-profile",
-    () => backendApi.user.getProfile() as Promise<any>
+    () => backendApi.user.getProfile() as Promise<any>,
   );
   const [isMounted, setIsMounted] = useState(false);
 
@@ -96,41 +103,67 @@ function AccountFormWithData({
   );
 }
 
+function ProfilePictureSection() {
+  const t = useTranslations("settings.profilePicture");
+  const { data: user } = useSWR<User>(
+    "user-profile",
+    () => backendApi.user.getProfile() as Promise<any>,
+  );
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("title")}</CardTitle>
+        <CardDescription>{t("description")}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <ProfilePictureUpload userName={user?.name} userEmail={user?.email} />
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function GeneralPage() {
   const t = useTranslations("general");
   const [state, formAction, isPending] = useActionState<ActionState, FormData>(
     updateAccount,
-    {}
+    {},
   );
 
   return (
     <PageLayout title={t("title")}>
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("accountInfo")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form className="space-y-4" action={formAction}>
-            <AccountFormWithData state={state} t={t} />
-            {state.error && (
-              <p className="text-red-500 text-sm">{state.error}</p>
-            )}
-            {state.success && (
-              <p className="text-green-500 text-sm">{state.success}</p>
-            )}
-            <Button type="submit" disabled={isPending}>
-              {isPending ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  {t("saving")}
-                </>
-              ) : (
-                t("saveChanges")
+      <div className="space-y-6">
+        {/* Profile Picture Section */}
+        <ProfilePictureSection />
+
+        {/* Account Information Section */}
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("accountInfo")}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form className="space-y-4" action={formAction}>
+              <AccountFormWithData state={state} t={t} />
+              {state.error && (
+                <p className="text-red-500 text-sm">{state.error}</p>
               )}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+              {state.success && (
+                <p className="text-green-500 text-sm">{state.success}</p>
+              )}
+              <Button type="submit" disabled={isPending}>
+                {isPending ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    {t("saving")}
+                  </>
+                ) : (
+                  t("saveChanges")
+                )}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
     </PageLayout>
   );
 }

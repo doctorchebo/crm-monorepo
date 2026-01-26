@@ -35,7 +35,7 @@ import {
   getOutputContentType,
   getOutputExtension,
 } from "./ffmpeg-compression";
-import { logger } from "./logger";
+import { extractErrorDetails, extractErrorMessage, logger } from "./logger";
 import {
   deleteFromS3,
   downloadFromS3,
@@ -106,7 +106,7 @@ function validateMessage(message: unknown): MediaJobMessage {
 
   if (msg.callback.type !== "webhook" || !msg.callback.url) {
     throw new Error(
-      'Invalid message: callback must have type "webhook" and a url'
+      'Invalid message: callback must have type "webhook" and a url',
     );
   }
 
@@ -118,7 +118,9 @@ function validateMessage(message: unknown): MediaJobMessage {
     }
     if (
       !thumbMsg.context ||
-      !["kb-media", "message-attachment"].includes(thumbMsg.context)
+      !["kb-media", "message-attachment", "profile-picture"].includes(
+        thumbMsg.context,
+      )
     ) {
       throw new Error("Invalid thumbnail message: missing or invalid context");
     }
@@ -181,7 +183,7 @@ function cleanup(...paths: (string | undefined)[]): void {
  * 3. Permanent error detection (errors that should not be retried)
  */
 async function processThumbnailJob(
-  message: ThumbnailJobMessage
+  message: ThumbnailJobMessage,
 ): Promise<ThumbnailJobResult> {
   const {
     jobId,
@@ -262,12 +264,12 @@ async function processThumbnailJob(
         inputBucket,
         outputBucket,
         EXPECTED_INPUT_BUCKET,
-        EXPECTED_OUTPUT_BUCKET
+        EXPECTED_OUTPUT_BUCKET,
       );
     }
 
     // SAFETY CHECK 2: Check input file size
-    const inputSize = await getObjectSize(inputBucket, inputKey);
+    const inputSize = await getObjectSize(inputBucket, inputKey, jobId);
     logger.info("Input file size for thumbnail", jobId, {
       sizeBytes: inputSize,
     });
@@ -304,7 +306,7 @@ async function processThumbnailJob(
       inputBuffer,
       mimeType,
       TMP_DIR,
-      context
+      context,
     );
 
     if (!thumbResult.success || !thumbResult.thumbnailBuffer) {
@@ -358,7 +360,7 @@ async function processThumbnailJob(
       thumbnailKey,
       thumbResult.thumbnailBuffer,
       "image/jpeg",
-      jobId
+      jobId,
     );
 
     logger.info("Thumbnail uploaded successfully", jobId, {
@@ -399,13 +401,16 @@ async function processThumbnailJob(
 
     return result;
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    // Use robust error extraction to get meaningful error messages
+    const errorMessage = extractErrorMessage(error);
+    const errorDetails = extractErrorDetails(error);
     const permanent = isPermanentError(
-      error instanceof Error ? error : errorMessage
+      error instanceof Error ? error : errorMessage,
     );
 
     logger.error("Thumbnail job failed", jobId, {
       error: errorMessage,
+      errorDetails,
       permanentFailure: permanent,
       attempt: safetyResult.attempt,
     });
@@ -438,10 +443,7 @@ async function processThumbnailJob(
       await sendWebhookNotification(callback, result);
     } catch (webhookError) {
       logger.error("Failed to send thumbnail failure webhook", jobId, {
-        error:
-          webhookError instanceof Error
-            ? webhookError.message
-            : String(webhookError),
+        error: extractErrorMessage(webhookError),
       });
     }
 
@@ -463,7 +465,7 @@ async function processThumbnailJob(
  * Process a single compression job
  */
 async function processCompressionJob(
-  message: CompressionJobMessage
+  message: CompressionJobMessage,
 ): Promise<CompressionResult> {
   const {
     jobId,
@@ -497,18 +499,18 @@ async function processCompressionJob(
         inputBucket,
         outputBucket,
         EXPECTED_INPUT_BUCKET,
-        EXPECTED_OUTPUT_BUCKET
+        EXPECTED_OUTPUT_BUCKET,
       );
     }
 
     // Check input file size before downloading (fail fast)
-    const inputSize = await getObjectSize(inputBucket, inputKey);
+    const inputSize = await getObjectSize(inputBucket, inputKey, jobId);
     logger.info("Input file size", jobId, { sizeBytes: inputSize });
 
     if (inputSize > MAX_SAFE_INPUT_SIZE_BYTES) {
       throw new Error(
         `Input file too large for ephemeral storage: ${inputSize} bytes ` +
-          `(max: ${MAX_SAFE_INPUT_SIZE_BYTES} bytes)`
+          `(max: ${MAX_SAFE_INPUT_SIZE_BYTES} bytes)`,
       );
     }
 
@@ -521,7 +523,7 @@ async function processCompressionJob(
         {
           inputSize,
           targetSizeBytes,
-        }
+        },
       );
 
       // Still need to copy to output location
@@ -569,7 +571,7 @@ async function processCompressionJob(
       outputPath,
       mediaType,
       targetMaxSizeMb,
-      jobId
+      jobId,
     );
 
     // Get compressed file size
@@ -634,8 +636,9 @@ async function processCompressionJob(
 
     return result;
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    logger.error("Job failed", jobId, { error: errorMessage });
+    const errorMessage = extractErrorMessage(error);
+    const errorDetails = extractErrorDetails(error);
+    logger.error("Job failed", jobId, { error: errorMessage, errorDetails });
 
     // Send failure notification
     const result: CompressionResult = {
@@ -650,10 +653,7 @@ async function processCompressionJob(
     } catch (webhookError) {
       // Log but don't mask original error
       logger.error("Failed to send failure webhook", jobId, {
-        error:
-          webhookError instanceof Error
-            ? webhookError.message
-            : String(webhookError),
+        error: extractErrorMessage(webhookError),
       });
     }
 
@@ -707,11 +707,12 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
         jobType: isThumbnailJob(message) ? "thumbnail" : "compression",
       });
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
+      const errorMessage = extractErrorMessage(error);
+      const errorDetails = extractErrorDetails(error);
       logger.error("Record processing failed", undefined, {
         messageId,
         error: errorMessage,
+        errorDetails,
       });
 
       // Add to batch failures - SQS will retry this message

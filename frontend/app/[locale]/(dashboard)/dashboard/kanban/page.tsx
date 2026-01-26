@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { UserAvatar } from "@/components/user-avatar";
 import { useNotification } from "@/hooks/use-notification";
 import type { ChatStageAssignment, WorkflowStage } from "@/lib/api/endpoints";
 import { backendApi } from "@/lib/api/endpoints";
@@ -77,7 +78,7 @@ function KanbanCardComponent({
   onDragStart: (
     e: React.DragEvent<HTMLDivElement>,
     chatId: string,
-    fromStageId: string
+    fromStageId: string,
   ) => void;
   onClick: (chatId: string) => void;
 }) {
@@ -104,11 +105,20 @@ function KanbanCardComponent({
             </p>
           )}
         </div>
-        {card.unreadCount && card.unreadCount > 0 && (
-          <Badge variant="destructive" className="h-5 px-1.5 text-xs shrink-0">
-            {card.unreadCount}
-          </Badge>
-        )}
+        <div className="flex items-center gap-2 shrink-0">
+          {card.unreadCount && card.unreadCount > 0 && (
+            <Badge variant="destructive" className="h-5 px-1.5 text-xs">
+              {card.unreadCount}
+            </Badge>
+          )}
+          {card.assignedToId && (
+            <UserAvatar
+              name={card.assignedToName}
+              profilePictureUrl={card.assignedToProfilePictureUrl}
+              size="xs"
+            />
+          )}
+        </div>
       </div>
       <div className="mt-2 flex items-center gap-2 flex-wrap">
         {card.awaitingHandoff && (
@@ -129,15 +139,17 @@ function KanbanCardComponent({
             {card.aiOverrideEnabled === false ? "AI Disabled" : "AI Paused"}
           </Badge>
         )}
-        {!card.aiPaused && card.aiOverrideEnabled !== false && !card.awaitingHandoff && (
-          <Badge
-            variant="outline"
-            className="text-xs bg-green-50 text-green-700 border-green-200"
-          >
-            <Bot className="h-3 w-3 mr-1" />
-            AI Active
-          </Badge>
-        )}
+        {!card.aiPaused &&
+          card.aiOverrideEnabled !== false &&
+          !card.awaitingHandoff && (
+            <Badge
+              variant="outline"
+              className="text-xs bg-green-50 text-green-700 border-green-200"
+            >
+              <Bot className="h-3 w-3 mr-1" />
+              AI Active
+            </Badge>
+          )}
         {card.lastMessageTime && (
           <span className="text-xs text-muted-foreground flex items-center gap-1">
             <Clock className="h-3 w-3" />
@@ -181,7 +193,7 @@ function KanbanColumnComponent({
   onDragStart: (
     e: React.DragEvent<HTMLDivElement>,
     chatId: string,
-    fromStageId: string
+    fromStageId: string,
   ) => void;
   onDragOver: (e: React.DragEvent<HTMLDivElement>) => void;
   onDrop: (e: React.DragEvent<HTMLDivElement>, stageId: string) => void;
@@ -196,7 +208,7 @@ function KanbanColumnComponent({
   canDelete: boolean;
   onStageDragStart: (
     e: React.DragEvent<HTMLDivElement>,
-    stageId: string
+    stageId: string,
   ) => void;
   onStageDragOver: (e: React.DragEvent<HTMLDivElement>) => void;
   onStageDrop: (e: React.DragEvent<HTMLDivElement>, stageId: string) => void;
@@ -212,8 +224,9 @@ function KanbanColumnComponent({
 
   return (
     <div
-      className={`flex-shrink-0 w-80 flex flex-col transition-opacity ${isStageDragging ? "opacity-50" : ""
-        }`}
+      className={`flex-shrink-0 w-80 flex flex-col transition-opacity ${
+        isStageDragging ? "opacity-50" : ""
+      }`}
       draggable={editMode}
       onDragStart={(e) => {
         if (editMode) {
@@ -309,10 +322,11 @@ function KanbanColumnComponent({
                     }
                   >
                     <Trash2
-                      className={`h-3.5 w-3.5 ${canDelete
-                        ? "text-red-600"
-                        : "text-muted-foreground opacity-50"
-                        }`}
+                      className={`h-3.5 w-3.5 ${
+                        canDelete
+                          ? "text-red-600"
+                          : "text-muted-foreground opacity-50"
+                      }`}
                     />
                   </Button>
                 </>
@@ -359,10 +373,11 @@ function KanbanColumnComponent({
       <div
         onDragOver={editMode ? undefined : onDragOver}
         onDrop={editMode ? undefined : (e) => onDrop(e, stage.id)}
-        className={`flex-1 rounded-lg p-3 space-y-3 min-h-[400px] transition-colors ${isDragOver
-          ? "bg-primary/10 border-2 border-dashed border-primary"
-          : "bg-muted/20"
-          }`}
+        className={`flex-1 rounded-lg p-3 space-y-3 min-h-[400px] transition-colors ${
+          isDragOver
+            ? "bg-primary/10 border-2 border-dashed border-primary"
+            : "bg-muted/20"
+        }`}
       >
         {cards.length > 0 ? (
           cards.map((card) => (
@@ -397,7 +412,7 @@ export default function KanbanPage() {
   const [error, setError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [stageToDelete, setStageToDelete] = useState<EditableStage | null>(
-    null
+    null,
   );
   const [draggedStageId, setDraggedStageId] = useState<string | null>(null);
   const [draggedChat, setDraggedChat] = useState<{
@@ -425,7 +440,7 @@ export default function KanbanPage() {
           } catch {
             chatsMap.set(stage.id, []);
           }
-        })
+        }),
       );
       setChatsByStage(chatsMap);
     } catch (err: unknown) {
@@ -434,7 +449,7 @@ export default function KanbanPage() {
       setError(message);
       addNotification(
         "Failed to load workflow stages. Please try again.",
-        "error"
+        "error",
       );
     } finally {
       setLoading(false);
@@ -444,7 +459,7 @@ export default function KanbanPage() {
   const handleDragStart = (
     e: React.DragEvent<HTMLDivElement>,
     chatId: string,
-    fromStageId: string
+    fromStageId: string,
   ) => {
     if (editMode) return;
     setDraggedChat({ chatId, fromStageId });
@@ -458,7 +473,7 @@ export default function KanbanPage() {
 
   const handleDrop = async (
     e: React.DragEvent<HTMLDivElement>,
-    toStageId: string
+    toStageId: string,
   ) => {
     e.preventDefault();
     setDragOverStageId(null);
@@ -503,20 +518,20 @@ export default function KanbanPage() {
   const handleStartEdit = (stageId: string) => {
     setStages((prev) =>
       prev.map((s) =>
-        s.id === stageId ? { ...s, isEditing: true, editName: s.name } : s
-      )
+        s.id === stageId ? { ...s, isEditing: true, editName: s.name } : s,
+      ),
     );
   };
   const handleCancelEdit = (stageId: string) => {
     setStages((prev) =>
       prev.map((s) =>
-        s.id === stageId ? { ...s, isEditing: false, editName: undefined } : s
-      )
+        s.id === stageId ? { ...s, isEditing: false, editName: undefined } : s,
+      ),
     );
   };
   const handleEditNameChange = (stageId: string, name: string) => {
     setStages((prev) =>
-      prev.map((s) => (s.id === stageId ? { ...s, editName: name } : s))
+      prev.map((s) => (s.id === stageId ? { ...s, editName: name } : s)),
     );
   };
   const handleSaveEdit = async (stageId: string) => {
@@ -536,8 +551,8 @@ export default function KanbanPage() {
         prev.map((s) =>
           s.id === stageId
             ? { ...s, name: newName, isEditing: false, editName: undefined }
-            : s
-        )
+            : s,
+        ),
       );
       addNotification(`Stage renamed to "${newName}"`, "success");
     } catch {
@@ -569,7 +584,7 @@ export default function KanbanPage() {
 
   const handleStageDragStart = (
     e: React.DragEvent<HTMLDivElement>,
-    stageId: string
+    stageId: string,
   ) => {
     setDraggedStageId(stageId);
     e.dataTransfer.effectAllowed = "move";
@@ -579,7 +594,7 @@ export default function KanbanPage() {
   };
   const handleStageDrop = async (
     e: React.DragEvent<HTMLDivElement>,
-    targetStageId: string
+    targetStageId: string,
   ) => {
     e.preventDefault();
     if (!draggedStageId || draggedStageId === targetStageId) {
@@ -601,8 +616,8 @@ export default function KanbanPage() {
     try {
       await Promise.all(
         updatedStages.map((s) =>
-          backendApi.stages.updateStage(s.id, { sortOrder: s.sortOrder })
-        )
+          backendApi.stages.updateStage(s.id, { sortOrder: s.sortOrder }),
+        ),
       );
       addNotification("Stage order updated", "success");
     } catch {
@@ -724,7 +739,7 @@ export default function KanbanPage() {
             <p className="text-2xl font-bold">
               {Array.from(chatsByStage.values()).reduce(
                 (sum, chats) => sum + chats.length,
-                0
+                0,
               )}
             </p>
           </CardContent>
@@ -740,7 +755,7 @@ export default function KanbanPage() {
               {Array.from(chatsByStage.values()).reduce(
                 (sum, chats) =>
                   sum + chats.filter((c) => c.awaitingHandoff).length,
-                0
+                0,
               )}
             </p>
           </CardContent>
@@ -756,9 +771,10 @@ export default function KanbanPage() {
               {Array.from(chatsByStage.values()).reduce(
                 (sum, chats) =>
                   sum +
-                  chats.filter((c) => c.aiPaused || c.aiOverrideEnabled === false)
-                    .length,
-                0
+                  chats.filter(
+                    (c) => c.aiPaused || c.aiOverrideEnabled === false,
+                  ).length,
+                0,
               )}
             </p>
           </CardContent>
@@ -778,8 +794,8 @@ export default function KanbanPage() {
               editMode
                 ? undefined
                 : (e) => {
-                  if (e.currentTarget === e.target) setDragOverStageId(null);
-                }
+                    if (e.currentTarget === e.target) setDragOverStageId(null);
+                  }
             }
           >
             <KanbanColumnComponent

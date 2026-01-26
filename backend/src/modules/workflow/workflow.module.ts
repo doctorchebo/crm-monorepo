@@ -44,7 +44,9 @@ import { ChatsModule } from '@modules/chats/chats.module';
 import { KnowledgeBaseModule } from '@modules/knowledge-base/knowledge-base.module';
 import { WhatsAppModule } from '@modules/whatsapp/whatsapp.module';
 import { Module, forwardRef } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ProfilePictureUrlService } from '@shared/services/profile-picture-url.service';
 import {
   AiActionLoggerService,
   AiConfigurationService,
@@ -69,6 +71,7 @@ import { WorkflowController } from './workflow.controller';
 
 @Module({
   imports: [
+    ConfigModule,
     AiMemoryModule,
     forwardRef(() => AIReplyModule),
     forwardRef(() => ChatsModule),
@@ -107,6 +110,9 @@ import { WorkflowController } from './workflow.controller';
 
     // Main orchestrator
     WorkflowEngineService,
+
+    // Shared utilities
+    ProfilePictureUrlService,
   ],
   exports: [
     // Export services for use in other modules

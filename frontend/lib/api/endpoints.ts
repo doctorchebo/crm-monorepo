@@ -353,6 +353,33 @@ export interface UserProfileDto {
   name: string;
   createdAt: string;
   updatedAt: string;
+  profilePictureUrl?: string | null;
+  profilePictureStatus?:
+    | "none"
+    | "uploading"
+    | "processing"
+    | "ready"
+    | "error";
+}
+
+/**
+ * Profile picture upload URL response
+ */
+export interface ProfilePictureUploadUrlResponse {
+  uploadUrl: string;
+  s3Key: string;
+  expiresIn: number;
+}
+
+/**
+ * Profile picture info response
+ */
+export interface ProfilePictureInfoResponse {
+  hasProfilePicture: boolean;
+  status: "none" | "uploading" | "processing" | "ready" | "error";
+  thumbnailUrl?: string;
+  originalUrl?: string;
+  expiresIn?: number;
 }
 
 // ==================== Template Version Types ====================
@@ -446,6 +473,54 @@ export const backendApi = {
     getProfile: (): Promise<UserProfileDto> => apiClient.get("/users/profile"),
     updateProfile: (data: any) => apiClient.patch("/users/profile", data),
     getActivity: () => apiClient.get("/users/activity"),
+  },
+
+  // Profile Picture endpoints
+  profilePicture: {
+    /**
+     * Upload profile picture directly through backend (CORS-free)
+     * Uses multipart/form-data - Content-Type header is NOT set manually
+     * so the browser can automatically set it with the proper boundary.
+     */
+    upload: (
+      file: File,
+    ): Promise<{ jobId: string | null; status: string; s3Key: string }> => {
+      const formData = new FormData();
+      formData.append("file", file);
+      // Don't pass headers - let browser set Content-Type with proper boundary
+      return apiClient.post("/api/v1/profile-picture/upload", formData);
+    },
+
+    /**
+     * Get presigned URL for uploading profile picture
+     */
+    getUploadUrl: (data: {
+      fileName: string;
+      contentType: string;
+      fileSize?: number;
+    }): Promise<ProfilePictureUploadUrlResponse> =>
+      apiClient.post("/api/v1/profile-picture/upload-url", data),
+
+    /**
+     * Confirm upload completion and trigger thumbnail generation
+     */
+    confirmUpload: (data: {
+      s3Key: string;
+      contentType: string;
+    }): Promise<{ jobId: string | null; status: string }> =>
+      apiClient.post("/api/v1/profile-picture/confirm-upload", data),
+
+    /**
+     * Get current profile picture info
+     */
+    getInfo: (): Promise<ProfilePictureInfoResponse> =>
+      apiClient.get("/api/v1/profile-picture"),
+
+    /**
+     * Delete profile picture
+     */
+    delete: (): Promise<{ success: boolean; message: string }> =>
+      apiClient.delete("/api/v1/profile-picture"),
   },
 
   // Team endpoints
@@ -1958,6 +2033,10 @@ export interface ChatStageAssignment {
   unreadCount: number;
   isActive: boolean | null;
   aiOverrideEnabled?: boolean;
+  // Assignee info for avatar display
+  assignedToId: number | null;
+  assignedToName: string | null;
+  assignedToProfilePictureUrl: string | null;
 }
 
 export interface ChatWorkflowStatus {

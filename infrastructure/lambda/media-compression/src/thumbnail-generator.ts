@@ -92,7 +92,7 @@ export function supportsThumbnailGeneration(mimeType: string): boolean {
  * Determine media type from MIME type
  */
 export function getMediaTypeFromMime(
-  mimeType: string
+  mimeType: string,
 ): ThumbnailMediaType | null {
   if (mimeType.startsWith("image/")) return "image";
   if (mimeType.startsWith("video/")) return "video";
@@ -117,7 +117,7 @@ export async function generateThumbnail(
   inputBuffer: Buffer,
   mimeType: string,
   tempDir: string = "/tmp",
-  context?: ThumbnailContext
+  context?: ThumbnailContext,
 ): Promise<ThumbnailResult> {
   const mediaType = getMediaTypeFromMime(mimeType);
   const config = getThumbnailConfig(context);
@@ -154,7 +154,7 @@ export async function generateThumbnail(
           inputBuffer,
           mimeType,
           tempDir,
-          config
+          config,
         );
       case "document":
         return await generatePdfThumbnail(inputBuffer, tempDir, config);
@@ -224,7 +224,7 @@ function qualityToFfmpegQv(quality: number): number {
 async function generateImageThumbnail(
   inputBuffer: Buffer,
   tempDir: string,
-  config: ThumbnailConfig
+  config: ThumbnailConfig,
 ): Promise<ThumbnailResult> {
   const inputPath = path.join(tempDir, `input_${Date.now()}.jpg`);
   const outputPath = path.join(tempDir, `thumb_${Date.now()}.jpg`);
@@ -235,11 +235,12 @@ async function generateImageThumbnail(
 
     // Use ffmpeg for image resizing (available in Lambda layer)
     // This avoids needing to bundle sharp which has native dependencies
+    // scale=W:H:force_original_aspect_ratio=decrease maintains aspect ratio while fitting in WxH box
     const ffmpegArgs = [
       "-i",
       inputPath,
       "-vf",
-      `scale='min(${config.maxWidth},iw)':min'(${config.maxHeight},ih)':force_original_aspect_ratio=decrease`,
+      `scale=${config.maxWidth}:${config.maxHeight}:force_original_aspect_ratio=decrease`,
       "-q:v",
       String(qualityToFfmpegQv(config.quality)),
       "-y",
@@ -283,7 +284,7 @@ async function generateVideoThumbnail(
   inputBuffer: Buffer,
   mimeType: string,
   tempDir: string,
-  config: ThumbnailConfig
+  config: ThumbnailConfig,
 ): Promise<ThumbnailResult> {
   const extension = getVideoExtension(mimeType);
   const inputPath = path.join(tempDir, `input_${Date.now()}.${extension}`);
@@ -301,6 +302,7 @@ async function generateVideoThumbnail(
     const seekTime = formatSeekTime(framePosition);
 
     // Use ffmpeg to extract and resize frame
+    // scale=W:H:force_original_aspect_ratio=decrease maintains aspect ratio while fitting in WxH box
     const ffmpegArgs = [
       "-ss",
       seekTime,
@@ -309,7 +311,7 @@ async function generateVideoThumbnail(
       "-vframes",
       "1",
       "-vf",
-      `scale='min(${config.maxWidth},iw)':min'(${config.maxHeight},ih)':force_original_aspect_ratio=decrease`,
+      `scale=${config.maxWidth}:${config.maxHeight}:force_original_aspect_ratio=decrease`,
       "-q:v",
       String(qualityToFfmpegQv(config.quality)),
       "-y",
@@ -358,13 +360,13 @@ async function generateVideoThumbnail(
 async function generatePdfThumbnail(
   inputBuffer: Buffer,
   tempDir: string,
-  config: ThumbnailConfig
+  config: ThumbnailConfig,
 ): Promise<ThumbnailResult> {
   const inputPath = path.join(tempDir, `input_${Date.now()}.pdf`);
   const htmlPath = path.join(tempDir, `pdf_viewer_${Date.now()}.html`);
   const chromiumOutputPath = path.join(
     tempDir,
-    `chromium_out_${Date.now()}.png`
+    `chromium_out_${Date.now()}.png`,
   );
   const outputPath = path.join(tempDir, `thumb_${Date.now()}.jpg`);
 
@@ -488,7 +490,7 @@ async function generatePdfThumbnail(
       // Wait for PDF to render (poll for window.pdfRendered)
       await page.waitForFunction(
         () => (window as any).pdfRendered || (window as any).pdfError,
-        { timeout: config.processingTimeoutMs }
+        { timeout: config.processingTimeoutMs },
       );
 
       // Check for errors
@@ -526,11 +528,12 @@ async function generatePdfThumbnail(
     }
 
     // Now resize with ffmpeg for consistent dimensions and JPEG format
+    // scale=W:H:force_original_aspect_ratio=decrease maintains aspect ratio while fitting in WxH box
     const ffmpegArgs = [
       "-i",
       chromiumOutputPath,
       "-vf",
-      `scale='min(${config.maxWidth},iw)':min'(${config.maxHeight},ih)':force_original_aspect_ratio=decrease`,
+      `scale=${config.maxWidth}:${config.maxHeight}:force_original_aspect_ratio=decrease`,
       "-q:v",
       String(qualityToFfmpegQv(config.quality)),
       "-y",
@@ -601,7 +604,7 @@ async function generatePdfThumbnail(
  * @returns Browser instance or null if Chromium is not available
  */
 async function initChromiumBrowser(
-  config: ThumbnailConfig
+  config: ThumbnailConfig,
 ): Promise<Browser | null> {
   // Return existing instance if available and connected
   if (browserInstance?.connected) {
@@ -720,7 +723,7 @@ async function getVideoDuration(filePath: string): Promise<number> {
   try {
     const output = execSync(
       `"${FFPROBE_PATH}" -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`,
-      { encoding: "utf-8" }
+      { encoding: "utf-8" },
     );
     return parseFloat(output.trim()) || 0;
   } catch (error) {
@@ -736,12 +739,12 @@ async function getVideoDuration(filePath: string): Promise<number> {
  * Get media dimensions using ffprobe
  */
 async function getMediaDimensions(
-  filePath: string
+  filePath: string,
 ): Promise<{ width: number; height: number }> {
   try {
     const output = execSync(
       `"${FFPROBE_PATH}" -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "${filePath}"`,
-      { encoding: "utf-8" }
+      { encoding: "utf-8" },
     );
     const [width, height] = output.trim().split("x").map(Number);
     return { width: width || 0, height: height || 0 };
@@ -760,7 +763,7 @@ async function getMediaDimensions(
  */
 async function generateBlurhash(
   imageBuffer: Buffer,
-  tempDir: string
+  tempDir: string,
 ): Promise<string | undefined> {
   // Blurhash generation requires pixel data extraction
   // For Lambda simplicity, we'll skip blurhash generation

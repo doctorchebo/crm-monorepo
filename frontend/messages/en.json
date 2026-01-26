@@ -32,7 +32,8 @@
     "signUp": "Sign Up",
     "dashboard": "Dashboard",
     "signOut": "Sign out",
-    "language": "Language"
+    "language": "Language",
+    "settings": "Settings"
   },
   "dashboard": {
     "home": "Home",
@@ -1549,7 +1550,27 @@
     "autoResponse": "Auto Response",
     "autoResponseDesc": "Enable automatic responses for matched rules",
     "messageNotifications": "Message Notifications",
-    "notificationsDesc": "Receive notifications for new messages"
+    "notificationsDesc": "Receive notifications for new messages",
+    "profilePicture": {
+      "title": "Profile Picture",
+      "description": "Upload a photo to personalize your account",
+      "upload": "Upload",
+      "change": "Change",
+      "delete": "Remove",
+      "processing": "Processing...",
+      "cropTitle": "Adjust your photo",
+      "cropDescription": "Drag to reposition and use the slider to zoom in or out",
+      "zoomHint": "Drag to move, use slider to zoom",
+      "cancel": "Cancel",
+      "save": "Save",
+      "uploading": "Uploading...",
+      "uploadSuccess": "Profile picture updated successfully",
+      "uploadError": "Failed to upload profile picture",
+      "deleteSuccess": "Profile picture removed",
+      "deleteError": "Failed to remove profile picture",
+      "invalidFileType": "Please upload a valid image file (JPEG, PNG, WebP, or GIF)",
+      "fileTooLarge": "File is too large. Maximum size is 5MB."
+    }
   },
   "settingsAi": {
     "title": "AI Settings",

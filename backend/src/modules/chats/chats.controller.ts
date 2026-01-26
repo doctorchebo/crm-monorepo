@@ -11,6 +11,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
+import { ProfilePictureUrlService } from '@shared/services/profile-picture-url.service';
 import { JwtPayload } from '@shared/types';
 import { JwtAuthGuard } from '../auth/auth.guard';
 import { RequirePermission } from '../auth/guards/permissions.guard';
@@ -40,6 +41,7 @@ export class ChatsController {
   constructor(
     private chatsService: ChatsService,
     private teamService: TeamService,
+    private profilePictureUrlService: ProfilePictureUrlService,
   ) {}
 
   async create(@Req() req: any, @Body() createChatDto: CreateChatDto) {
@@ -100,7 +102,19 @@ export class ChatsController {
       return []; // Return empty if no team
     }
 
-    return this.chatsService.findByTeam(user.userId, teamId, skip, take);
+    const chats = await this.chatsService.findByTeam(
+      user.userId,
+      teamId,
+      skip,
+      take,
+    );
+
+    // Generate presigned URLs for assignee profile pictures using centralized service
+    return this.profilePictureUrlService.transformArrayWithUrls(
+      chats,
+      'assigneeProfilePictureKey',
+      'assigneeProfilePictureUrl',
+    );
   }
 
   /**

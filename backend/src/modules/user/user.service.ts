@@ -1,11 +1,45 @@
-import { db } from '../../database/db.connection';
-import { users, activityLogs } from '../../database/schema';
+import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { eq, desc } from 'drizzle-orm';
+import { ConfigService } from '@nestjs/config';
+import { desc, eq } from 'drizzle-orm';
+import { db } from '../../database/db.connection';
+import { activityLogs, users } from '../../database/schema';
 import { UpdateUserDto } from './dto/update-user.dto';
 
 @Injectable()
 export class UserService {
+  private readonly s3Client: S3Client;
+  private readonly bucketName: string;
+
+  constructor(private readonly configService: ConfigService) {
+    const region = this.configService.get<string>('AWS_REGION', 'us-east-1');
+    this.bucketName = this.configService.get<string>(
+      'AWS_S3_BUCKET_NAME',
+      'chatflowai-dev',
+    );
+    this.s3Client = new S3Client({ region });
+  }
+
+  /**
+   * Generate presigned download URL for profile picture thumbnail
+   */
+  private async getProfilePictureThumbnailUrl(
+    thumbnailKey: string | null,
+  ): Promise<string | null> {
+    if (!thumbnailKey) return null;
+
+    try {
+      const command = new GetObjectCommand({
+        Bucket: this.bucketName,
+        Key: thumbnailKey,
+      });
+      return getSignedUrl(this.s3Client, command, { expiresIn: 3600 });
+    } catch {
+      return null;
+    }
+  }
+
   async findOne(id: string) {
     const userId = parseInt(id, 10);
     if (isNaN(userId)) {
@@ -20,9 +54,24 @@ export class UserService {
       throw new NotFoundException(`User with ID ${id} not found`);
     }
 
+    // Generate profile picture URL if available
+    const profilePictureUrl = await this.getProfilePictureThumbnailUrl(
+      user.profilePictureThumbnailKey,
+    );
+
     // Don't return password hash
-    const { passwordHash, ...userWithoutPassword } = user;
-    return userWithoutPassword;
+    const {
+      passwordHash,
+      profilePictureKey,
+      profilePictureThumbnailKey,
+      ...userWithoutSensitiveData
+    } = user;
+
+    return {
+      ...userWithoutSensitiveData,
+      profilePictureUrl,
+      profilePictureStatus: user.profilePictureStatus || 'none',
+    };
   }
 
   async findByEmail(email: string) {

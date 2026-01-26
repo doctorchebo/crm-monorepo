@@ -28,7 +28,7 @@ export class ApiError extends Error {
     message: string,
     statusCode: number,
     errors?: Array<{ message: string; field?: string; severity?: string }>,
-    originalError?: unknown
+    originalError?: unknown,
   ) {
     super(message);
     this.name = "ApiError";
@@ -93,14 +93,16 @@ class ApiClient {
   private async request<T>(
     endpoint: string,
     options: ApiRequestOptions = {},
-    isRetry: boolean = false
+    isRetry: boolean = false,
   ): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
 
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      ...options.headers,
-    };
+    const headers: Record<string, string> = {};
+    // Don't set Content-Type for FormData - browser will set it automatically with boundary
+    if (!(options.body instanceof FormData)) {
+      headers["Content-Type"] = "application/json";
+    }
+    Object.assign(headers, options.headers);
 
     const response = await fetch(url, {
       ...options,
@@ -158,10 +160,19 @@ class ApiClient {
     return this.request<T>(endpoint, { method: "GET" });
   }
 
-  async post<T>(endpoint: string, data?: unknown): Promise<T> {
+  async post<T>(
+    endpoint: string,
+    data?: unknown,
+    options?: ApiRequestOptions,
+  ): Promise<T> {
+    // For FormData, don't stringify - send directly
+    const body =
+      data instanceof FormData ? data : data ? JSON.stringify(data) : undefined;
+
     return this.request<T>(endpoint, {
       method: "POST",
-      body: data ? JSON.stringify(data) : undefined,
+      body,
+      ...options,
     });
   }
 

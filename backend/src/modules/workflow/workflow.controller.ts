@@ -17,13 +17,16 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
+import { ProfilePictureUrlService } from '@shared/services/profile-picture-url.service';
 import { JwtAuthGuard } from '../auth/auth.guard';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import {
   BulkTransitionChatsDto,
   ChatCompletionDto,
   ClassifyMessageDto,
   CreateRuleDto,
   CreateStageDto,
+  DiscardPendingReviewDto,
   GetChatsByStageDto,
   GetUsageStatsDto,
   GetViolationLogsDto,
@@ -34,14 +37,13 @@ import {
   ResolveHandoffDto,
   RunAllSimulationsDto,
   RunSimulationDto,
+  SendReviewedAiResponseDto,
   SetChatAiOverrideDto,
   SetStageAiSettingsDto,
   TransitionChatDto,
   UpdateAiConfigurationDto,
   UpdateRuleDto,
   UpdateStageDto,
-  SendReviewedAiResponseDto,
-  DiscardPendingReviewDto,
 } from './dto';
 import {
   AiActionLoggerService,
@@ -58,12 +60,12 @@ import {
   UsageTrackingService,
   WorkflowEngineService,
 } from './services';
-import { WhatsAppService } from '../whatsapp/whatsapp.service';
 
 @Controller('workflow')
 @UseGuards(JwtAuthGuard)
 export class WorkflowController {
   constructor(
+    private readonly profilePictureUrlService: ProfilePictureUrlService,
     private readonly workflowEngine: WorkflowEngineService,
     private readonly stageService: StageService,
     private readonly ruleEngineService: RuleEngineService,
@@ -178,11 +180,18 @@ export class WorkflowController {
     @Query() query: GetChatsByStageDto,
   ) {
     const userId = req.user.userId;
-    return this.stageService.getChatsByStage(
+    const chats = await this.stageService.getChatsByStage(
       stageId,
       userId,
       query.limit,
       query.offset,
+    );
+
+    // Generate presigned URLs for assignee profile pictures using centralized service
+    return this.profilePictureUrlService.transformArrayWithUrls(
+      chats,
+      'assignedToProfilePictureKey',
+      'assignedToProfilePictureUrl',
     );
   }
 

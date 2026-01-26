@@ -2,6 +2,7 @@ import { KnowledgeBaseModule } from '@modules/knowledge-base/knowledge-base.modu
 import { MediaCompressionModule } from '@modules/media-compression/media-compression.module';
 import { NotesModule } from '@modules/notes/notes.module';
 import { PinsModule } from '@modules/pins/pins.module';
+import { ProfilePictureModule } from '@modules/profile-picture/profile-picture.module';
 import { ReactionsModule } from '@modules/reactions/reactions.module';
 import { ScheduledTasksModule } from '@modules/scheduled-tasks/scheduled-tasks.module';
 import { WorkflowModule } from '@modules/workflow/workflow.module';
@@ -18,6 +19,7 @@ import { AutomationModule } from './modules/automation/automation.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { ChatsModule } from './modules/chats/chats.module';
 import { ContactsModule } from './modules/contacts/contacts.module';
+import { ImportJobsModule } from './modules/import-jobs/import-jobs.module';
 import { KanbanModule } from './modules/kanban/kanban.module';
 import { LinkPreviewModule } from './modules/link-preview/link-preview.module';
 import { MessagingModule } from './modules/messaging/messaging.module';
@@ -28,7 +30,6 @@ import { TemplatesModule } from './modules/templates/templates.module';
 import { ThumbnailModule } from './modules/thumbnail/thumbnail.module';
 import { UserModule } from './modules/user/user.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
-import { ImportJobsModule } from './modules/import-jobs/import-jobs.module';
 
 @Module({
   imports: [
@@ -62,9 +63,10 @@ import { ImportJobsModule } from './modules/import-jobs/import-jobs.module';
     MediaCompressionModule,
     ScheduledTasksModule,
     ImportJobsModule,
+    ProfilePictureModule,
     DatabaseModule,
   ],
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule { }
+export class AppModule {}

@@ -20,7 +20,8 @@
     "signUp": "Registrarse",
     "dashboard": "Panel",
     "signOut": "Cerrar sesión",
-    "language": "Idioma"
+    "language": "Idioma",
+    "settings": "Configuración"
   },
   "dashboard": {
     "home": "Inicio",
@@ -1510,7 +1511,27 @@
     "autoResponse": "Respuesta Automática",
     "autoResponseDesc": "Habilita respuestas automáticas para reglas coincidentes",
     "messageNotifications": "Notificaciones de Mensajes",
-    "notificationsDesc": "Recibe notificaciones para nuevos mensajes"
+    "notificationsDesc": "Recibe notificaciones para nuevos mensajes",
+    "profilePicture": {
+      "title": "Foto de Perfil",
+      "description": "Sube una foto para personalizar tu cuenta",
+      "upload": "Subir",
+      "change": "Cambiar",
+      "delete": "Eliminar",
+      "processing": "Procesando...",
+      "cropTitle": "Ajusta tu foto",
+      "cropDescription": "Arrastra para reposicionar y usa el control deslizante para acercar o alejar",
+      "zoomHint": "Arrastra para mover, usa el control para zoom",
+      "cancel": "Cancelar",
+      "save": "Guardar",
+      "uploading": "Subiendo...",
+      "uploadSuccess": "Foto de perfil actualizada correctamente",
+      "uploadError": "Error al subir la foto de perfil",
+      "deleteSuccess": "Foto de perfil eliminada",
+      "deleteError": "Error al eliminar la foto de perfil",
+      "invalidFileType": "Por favor sube un archivo de imagen válido (JPEG, PNG, WebP o GIF)",
+      "fileTooLarge": "El archivo es demasiado grande. El tamaño máximo es 5MB."
+    }
   },
   "settingsAi": {
     "title": "Configuración de IA",

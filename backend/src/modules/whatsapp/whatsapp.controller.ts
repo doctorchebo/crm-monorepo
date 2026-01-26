@@ -11,18 +11,17 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
+import { ProfilePictureUrlService } from '@shared/services/profile-picture-url.service';
 import { JwtAuthGuard } from '../auth/auth.guard';
+import { ChatsService } from '../chats/chats.service';
+import { TeamService } from '../team/team.service';
 import {
   DeleteMessageDto,
   EditMessageDto,
 } from './dto/message-edit-delete.dto';
 import { SaveNoteDto } from './dto/notes.dto';
-import { OutboundMessageDto } from './dto/outbound-message.dto';
-import { SendContactsDto } from './dto/send-contacts.dto';
 import { ConversationWindowService } from './services/conversation-window.service';
 import { WhatsAppService } from './whatsapp.service';
-import { TeamService } from '../team/team.service';
-import { ChatsService } from '../chats/chats.service';
 
 @Controller('whatsapp')
 @UseGuards(JwtAuthGuard)
@@ -34,6 +33,7 @@ export class WhatsAppController {
     private chatsService: ChatsService,
     private conversationWindowService: ConversationWindowService,
     private teamService: TeamService,
+    private profilePictureUrlService: ProfilePictureUrlService,
   ) {}
 
   // ... (previous methods omitted)
@@ -69,11 +69,18 @@ export class WhatsAppController {
     }
 
     // Use unified ChatsService logic which includes robust visibility checks
-    return this.chatsService.findByTeam(
+    const chats = await this.chatsService.findByTeam(
       userId,
       resolvedTeamId.toString(),
       skip,
       take,
+    );
+
+    // Generate presigned URLs for assignee profile pictures
+    return this.profilePictureUrlService.transformArrayWithUrls(
+      chats,
+      'assigneeProfilePictureKey',
+      'assigneeProfilePictureUrl',
     );
   }
 

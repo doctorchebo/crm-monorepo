@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
+import { UserAvatar } from "./user-avatar";
 
 interface Chat {
   id?: number;
@@ -48,6 +49,10 @@ interface Chat {
   lastReactedMessagePreview?: string | null;
   unreadCount?: number;
   isArchived?: boolean;
+  // Assignee info for avatar display
+  assignedTo?: number | null;
+  assigneeName?: string | null;
+  assigneeProfilePictureUrl?: string | null;
 }
 
 interface ChatsSenderSectionProps {
@@ -92,7 +97,7 @@ export function ChatsSenderSection({
         onClick={() => setIsExpanded(!isExpanded)}
         className={cn(
           "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-muted",
-          isExpanded ? "bg-muted/50" : ""
+          isExpanded ? "bg-muted/50" : "",
         )}
       >
         {isExpanded ? (
@@ -139,7 +144,7 @@ export function ChatsSenderSection({
                   ? () =>
                       onDeleteChat(
                         chat.chatId,
-                        chat.participantName || chat.participantPhone
+                        chat.participantName || chat.participantPhone,
                       )
                   : undefined
               }
@@ -200,7 +205,7 @@ function getMessageTypeIcon(type: string | null | undefined) {
 function getMessageTypePreview(
   type: string | null | undefined,
   textContent: string | null | undefined,
-  t: ReturnType<typeof useTranslations>
+  t: ReturnType<typeof useTranslations>,
 ): string {
   // If there's text content, use it
   if (textContent && textContent.trim()) {
@@ -233,7 +238,7 @@ function getMessageTypePreview(
  */
 function getChatPreview(
   chat: Chat,
-  t: ReturnType<typeof useTranslations>
+  t: ReturnType<typeof useTranslations>,
 ): { text: string; icon: React.ReactNode } {
   // Check if last activity was a reaction
   if (
@@ -279,7 +284,7 @@ function ChatListItem({
       className={cn(
         "relative group w-full rounded-lg text-sm transition-colors hover:bg-muted",
         isSelected && "bg-primary/10 font-medium",
-        hasUnread && !isSelected && "bg-muted/50"
+        hasUnread && !isSelected && "bg-muted/50",
       )}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
@@ -291,7 +296,7 @@ function ChatListItem({
               <p
                 className={cn(
                   "truncate",
-                  hasUnread ? "font-semibold" : "font-medium"
+                  hasUnread ? "font-semibold" : "font-medium",
                 )}
               >
                 {chat.participantName || chat.participantPhone}
@@ -303,7 +308,7 @@ function ChatListItem({
                   "flex items-center truncate text-xs",
                   hasUnread
                     ? "text-foreground font-medium"
-                    : "text-muted-foreground"
+                    : "text-muted-foreground",
                 )}
               >
                 {icon}
@@ -319,7 +324,7 @@ function ChatListItem({
                   "whitespace-nowrap text-xs",
                   hasUnread
                     ? "text-[#25D366] font-medium"
-                    : "text-muted-foreground"
+                    : "text-muted-foreground",
                 )}
               >
                 {formatTime(new Date(chat.lastMessageTime), t)}
@@ -327,12 +332,20 @@ function ChatListItem({
             )}
 
             <div className="flex items-center gap-1">
+              {/* Assignee Avatar */}
+              {chat.assignedTo && (
+                <UserAvatar
+                  name={chat.assigneeName}
+                  profilePictureUrl={chat.assigneeProfilePictureUrl}
+                  size="xs"
+                />
+              )}
               {/* Unread Badge - WhatsApp Style */}
               {hasUnread && (
                 <span
                   className={cn(
                     "inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[#25D366] px-1.5 text-xs font-bold text-white transition-all duration-200",
-                    showMenu && "mr-1"
+                    showMenu && "mr-1",
                   )}
                 >
                   {chat.unreadCount! > 99 ? "99+" : chat.unreadCount}
@@ -348,7 +361,7 @@ function ChatListItem({
         <div
           className={cn(
             "absolute bottom-2 right-2 transition-opacity duration-200",
-            showMenu ? "opacity-100" : "opacity-0 pointer-events-none"
+            showMenu ? "opacity-100" : "opacity-0 pointer-events-none",
           )}
         >
           <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>

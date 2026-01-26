@@ -6,13 +6,13 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   serial,
   text,
   timestamp,
   unique,
   uuid,
   varchar,
-  primaryKey,
 } from 'drizzle-orm/pg-core';
 
 /**
@@ -56,6 +56,14 @@ export const users = pgTable('users', {
   email: varchar('email').notNull().unique(),
   name: varchar('name').notNull(),
   passwordHash: varchar('password_hash').notNull(),
+  // Profile picture fields - async thumbnail generation via Lambda
+  profilePictureKey: varchar('profile_picture_key', { length: 500 }),
+  profilePictureThumbnailKey: varchar('profile_picture_thumbnail_key', {
+    length: 500,
+  }),
+  profilePictureStatus: varchar('profile_picture_status', {
+    length: 20,
+  }).default('none'), // 'none', 'uploading', 'processing', 'ready', 'error'
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
   deletedAt: timestamp('deleted_at'), // Soft delete timestamp

@@ -43,6 +43,10 @@ export interface Chat {
   assignedBy?: number | null;
   assignedAt?: string | null;
   teamId?: number | null;
+  // Assignee info for avatar display
+  assigneeName?: string | null;
+  assigneeEmail?: string | null;
+  assigneeProfilePictureUrl?: string | null;
 }
 
 export interface ReplyPreview {

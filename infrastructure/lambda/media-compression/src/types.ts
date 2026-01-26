@@ -175,7 +175,7 @@ export interface ThumbnailJobMessage {
    * Context for the thumbnail job
    * Helps identify the source of the request
    */
-  context: "kb-media" | "message-attachment";
+  context: "kb-media" | "message-attachment" | "profile-picture";
 
   /**
    * Related entity IDs for database updates
@@ -189,6 +189,8 @@ export interface ThumbnailJobMessage {
     messageId?: string;
     /** Chat ID for WebSocket notifications */
     chatId?: string;
+    /** User ID for profile picture updates */
+    userId?: string;
   };
 
   /**
@@ -356,7 +358,7 @@ export interface ThumbnailResult {
   /**
    * Context info passed through from job
    */
-  context?: "kb-media" | "message-attachment";
+  context?: "kb-media" | "message-attachment" | "profile-picture";
 
   /**
    * Entity IDs passed through from job
@@ -366,6 +368,7 @@ export interface ThumbnailResult {
     attachmentId?: string;
     messageId?: string;
     chatId?: string;
+    userId?: string;
   };
 
   /**
@@ -457,7 +460,10 @@ export interface FfmpegPreset {
  * Context types for thumbnail generation
  * Determines which thumbnail preset to use
  */
-export type ThumbnailContext = "kb-media" | "message-attachment";
+export type ThumbnailContext =
+  | "kb-media"
+  | "message-attachment"
+  | "profile-picture";
 
 /**
  * Configuration for thumbnail generation
@@ -510,6 +516,7 @@ export interface ThumbnailConfig {
  * - KB media: Smaller thumbnails (300x300) are sufficient for file browser UI
  * - Message attachments: Larger thumbnails (1200x1200) needed for chat thread
  *   where users need to preview images with readable text
+ * - Profile pictures: Optimized for avatar display (200x200) with high quality
  *
  * These values balance quality vs storage/bandwidth costs
  */
@@ -544,6 +551,22 @@ export const THUMBNAIL_PRESETS: Record<ThumbnailContext, ThumbnailConfig> = {
     pdfViewportWidth: 1200,
     pdfViewportHeight: 1600,
   },
+
+  /**
+   * Profile picture thumbnails
+   * Used for user avatars throughout the application
+   * Square format optimized for circular avatar displays
+   * High quality for crisp appearance at small sizes
+   */
+  "profile-picture": {
+    maxWidth: 200,
+    maxHeight: 200,
+    quality: 90,
+    videoFramePosition: "00:00:00", // Not used for profile pictures
+    processingTimeoutMs: 15000, // Faster timeout for simpler images
+    pdfViewportWidth: 200, // Not used for profile pictures
+    pdfViewportHeight: 200, // Not used for profile pictures
+  },
 } as const;
 
 /**
@@ -554,7 +577,7 @@ export const THUMBNAIL_PRESETS: Record<ThumbnailContext, ThumbnailConfig> = {
  * @returns ThumbnailConfig for the context
  */
 export function getThumbnailConfig(
-  context?: ThumbnailContext
+  context?: ThumbnailContext,
 ): ThumbnailConfig {
   if (context && THUMBNAIL_PRESETS[context]) {
     return THUMBNAIL_PRESETS[context];

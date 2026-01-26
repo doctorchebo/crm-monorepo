@@ -15,6 +15,7 @@ import {
   chatStageHistory,
   chats,
   teamMembers,
+  users,
   workflowStages,
 } from '@database/schema';
 import { ChatVisibilityService } from '@modules/chats/services/chat-visibility.service';
@@ -562,6 +563,7 @@ export class StageService {
    * - Unread count
    * - AI status
    * - Time entered current stage (assignedAt)
+   * - Assignee profile info (name, profile picture)
    *
    * IMPORTANT: Uses ChatVisibilityService for role-based filtering consistency:
    * - Owner/Admin: See all chats in the team
@@ -595,6 +597,10 @@ export class StageService {
       lastMessageType: string | null;
       unreadCount: number;
       isActive: boolean | null;
+      // Assignee info for avatar display
+      assignedToId: number | null;
+      assignedToName: string | null;
+      assignedToProfilePictureKey: string | null;
     }>
   > {
     // Resolve user's teamId and role from their active team membership
@@ -672,9 +678,14 @@ export class StageService {
         isActive: chats.isActive,
         // AI Override fields
         aiOverrideEnabled: chatAiOverrides.aiEnabled,
+        // Assignee info for avatar display
+        assignedToId: chats.assignedTo,
+        assignedToName: users.name,
+        assignedToProfilePictureKey: users.profilePictureThumbnailKey,
       })
       .from(chatStageAssignments)
       .innerJoin(chats, eq(chatStageAssignments.chatId, chats.chatId))
+      .leftJoin(users, eq(chats.assignedTo, users.id))
       .leftJoin(
         chatAiOverrides,
         eq(chatStageAssignments.chatId, chatAiOverrides.chatId),

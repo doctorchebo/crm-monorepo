@@ -2,6 +2,7 @@ import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ModuleRef } from '@nestjs/core';
 import { MetaCloudAPIConfigService } from '@shared/services/meta-cloud-api.config';
+import { ProfilePictureUrlService } from '@shared/services/profile-picture-url.service';
 import { S3Service } from '@shared/services/s3.service';
 import { AiMemoryModule } from '../ai-memory/ai-memory.module';
 import { ChatsModule } from '../chats/chats.module';
@@ -63,6 +64,7 @@ import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
     AudioConverterService,
     S3Service,
     MetaCloudAPIConfigService,
+    ProfilePictureUrlService,
     WhatsAppGateway,
   ],
   exports: [

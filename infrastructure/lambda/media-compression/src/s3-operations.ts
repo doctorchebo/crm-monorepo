@@ -27,15 +27,34 @@ const s3Client = new S3Client({});
  */
 export async function getObjectSize(
   bucket: string,
-  key: string
+  key: string,
+  jobId?: string,
 ): Promise<number> {
+  logger.info("Getting object size from S3", jobId, { bucket, key });
+
   const command = new HeadObjectCommand({
     Bucket: bucket,
     Key: key,
   });
 
-  const response = await s3Client.send(command);
-  return response.ContentLength ?? 0;
+  try {
+    const response = await s3Client.send(command);
+    const size = response.ContentLength ?? 0;
+    logger.info("Got object size from S3", jobId, { bucket, key, size });
+    return size;
+  } catch (error) {
+    // Enhance error with S3 context
+    const s3Error = error as Error & { Code?: string; $metadata?: unknown };
+    logger.error("Failed to get object size from S3", jobId, {
+      bucket,
+      key,
+      errorName: s3Error.name,
+      errorMessage: s3Error.message,
+      errorCode: s3Error.Code,
+      metadata: s3Error.$metadata,
+    });
+    throw error;
+  }
 }
 
 /**
@@ -51,7 +70,7 @@ export async function downloadFromS3(
   bucket: string,
   key: string,
   localPath: string,
-  jobId: string
+  jobId: string,
 ): Promise<number> {
   logger.info("Downloading file from S3", jobId, { bucket, key, localPath });
 
@@ -108,7 +127,7 @@ export async function uploadToS3(
   key: string,
   source: string | Buffer,
   contentType: string,
-  jobId: string
+  jobId: string,
 ): Promise<number> {
   logger.info("Uploading to S3", jobId, {
     bucket,
@@ -147,17 +166,17 @@ export function validateBuckets(
   inputBucket: string,
   outputBucket: string,
   expectedInputBucket: string,
-  expectedOutputBucket: string
+  expectedOutputBucket: string,
 ): void {
   if (inputBucket !== expectedInputBucket) {
     throw new Error(
-      `Invalid input bucket: ${inputBucket}. Expected: ${expectedInputBucket}`
+      `Invalid input bucket: ${inputBucket}. Expected: ${expectedInputBucket}`,
     );
   }
 
   if (outputBucket !== expectedOutputBucket) {
     throw new Error(
-      `Invalid output bucket: ${outputBucket}. Expected: ${expectedOutputBucket}`
+      `Invalid output bucket: ${outputBucket}. Expected: ${expectedOutputBucket}`,
     );
   }
 }
@@ -172,7 +191,7 @@ export function validateBuckets(
 export async function deleteFromS3(
   bucket: string,
   key: string,
-  jobId: string
+  jobId: string,
 ): Promise<void> {
   logger.info("Deleting file from S3", jobId, { bucket, key });
 
