@@ -21,7 +21,6 @@ import { cn } from "@/lib/utils";
 import {
   AlertCircle,
   ArrowRight,
-  FileText,
   GitBranch,
   Layers,
   Loader2,
@@ -33,6 +32,7 @@ import {
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { WorkflowIcon } from "./workflow-icon";
 
 interface TemplateLibraryDialogProps {
   isOpen: boolean;
@@ -167,11 +167,11 @@ export function TemplateLibraryDialog({
                 <CategoryButton
                   key={category.id}
                   icon={
-                    category.icon ? (
-                      <span>{category.icon}</span>
-                    ) : (
-                      <FileText className="h-4 w-4" />
-                    )
+                    <WorkflowIcon
+                      icon={category.icon}
+                      size="sm"
+                      useLucideDefault={true}
+                    />
                   }
                   label={category.name}
                   isSelected={selectedCategoryId === category.id}
@@ -312,15 +312,11 @@ function TemplateCard({ template, isUsing, onUse }: TemplateCardProps) {
     <div className="rounded-lg border bg-card p-4 hover:border-primary/50 transition-colors">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
-          {template.icon ? (
-            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-lg">
-              {template.icon}
-            </div>
-          ) : (
-            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-              <Workflow className="h-5 w-5 text-primary" />
-            </div>
-          )}
+          <WorkflowIcon
+            icon={template.icon}
+            size="xl"
+            useLucideDefault={true}
+          />
           <div className="min-w-0">
             <h4 className="font-medium text-sm truncate">{template.name}</h4>
             {template.isFeatured && (

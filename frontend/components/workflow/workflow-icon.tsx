@@ -1,7 +1,21 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { Workflow } from "lucide-react";
+import {
+  Bell,
+  Calendar,
+  Clock,
+  HelpCircle,
+  MessageSquare,
+  Package,
+  RefreshCw,
+  ShoppingCart,
+  Target,
+  ThumbsUp,
+  UserPlus,
+  Workflow,
+  type LucideIcon,
+} from "lucide-react";
 
 /**
  * Size presets for the workflow icon component.
@@ -33,6 +47,27 @@ const SIZE_PRESETS = {
 type IconSize = keyof typeof SIZE_PRESETS;
 
 /**
+ * Mapping of icon names to Lucide icons for workflow templates.
+ * Use these names in the database instead of emojis to avoid encoding issues.
+ */
+const LUCIDE_ICON_MAP: Record<string, LucideIcon> = {
+  // Template category icons
+  target: Target,
+  "message-square": MessageSquare,
+  "shopping-cart": ShoppingCart,
+  calendar: Calendar,
+  bell: Bell,
+  "user-plus": UserPlus,
+  // Template icons
+  "help-circle": HelpCircle,
+  package: Package,
+  "thumbs-up": ThumbsUp,
+  clock: Clock,
+  "refresh-cw": RefreshCw,
+  workflow: Workflow,
+};
+
+/**
  * Default emoji to use when no valid icon is provided or when the icon
  * is a non-emoji string (like "workflow" from the database default).
  */
@@ -54,6 +89,11 @@ function isEmoji(str: string): boolean {
     return false;
   }
 
+  // If it's a known Lucide icon name, it's not an emoji
+  if (LUCIDE_ICON_MAP[str.toLowerCase()]) {
+    return false;
+  }
+
   // Emoji regex pattern - matches most common emojis including:
   // - Basic emojis
   // - Emojis with skin tone modifiers
@@ -68,12 +108,21 @@ function isEmoji(str: string): boolean {
     // Check if it looks like an emoji (contains emoji characters)
     const containsEmoji = /\p{Emoji}/u.test(str);
     // And doesn't look like regular text (no letters/numbers only)
-    const isNotPlainText = !/^[a-zA-Z0-9]+$/.test(str);
+    const isNotPlainText = !/^[a-zA-Z0-9-]+$/.test(str);
 
     return containsEmoji || (isNotPlainText && str.length <= 4);
   }
 
   return false;
+}
+
+/**
+ * Gets the Lucide icon component for a given icon name.
+ * Returns null if the icon name is not found in the map.
+ */
+function getLucideIcon(iconName: string | null | undefined): LucideIcon | null {
+  if (!iconName) return null;
+  return LUCIDE_ICON_MAP[iconName.toLowerCase()] || null;
 }
 
 interface WorkflowIconProps {
@@ -139,10 +188,16 @@ export function WorkflowIcon({
   const sizePreset = SIZE_PRESETS[size];
   const backgroundColor = color || "#6366f1";
 
+  // Check if the icon is a known Lucide icon name
+  const LucideIconComponent = getLucideIcon(icon);
+
   // Determine what to display
-  const displayIcon = icon && isEmoji(icon) ? icon : null;
-  const showDefaultEmoji = !displayIcon && !useLucideDefault;
-  const showLucideIcon = !displayIcon && useLucideDefault;
+  const displayEmoji = icon && isEmoji(icon) ? icon : null;
+  const showLucideNamedIcon = !!LucideIconComponent;
+  const showDefaultEmoji =
+    !displayEmoji && !showLucideNamedIcon && !useLucideDefault;
+  const showLucideFallback =
+    !displayEmoji && !showLucideNamedIcon && useLucideDefault;
 
   return (
     <div
@@ -154,17 +209,20 @@ export function WorkflowIcon({
       style={{ backgroundColor }}
       aria-hidden="true"
     >
-      {displayIcon && (
+      {displayEmoji && (
         <span className={cn(sizePreset.emoji, "leading-none select-none")}>
-          {displayIcon}
+          {displayEmoji}
         </span>
+      )}
+      {showLucideNamedIcon && LucideIconComponent && (
+        <LucideIconComponent className={cn(sizePreset.icon)} />
       )}
       {showDefaultEmoji && (
         <span className={cn(sizePreset.emoji, "leading-none select-none")}>
           {DEFAULT_EMOJI}
         </span>
       )}
-      {showLucideIcon && <Workflow className={cn(sizePreset.icon)} />}
+      {showLucideFallback && <Workflow className={cn(sizePreset.icon)} />}
     </div>
   );
 }
