@@ -11,7 +11,6 @@ import {
   Background,
   BackgroundVariant,
   Connection,
-  Controls,
   MiniMap,
   Node,
   ReactFlow,
@@ -122,72 +121,254 @@ function WorkflowCanvasInner({
   const { screenToFlowPosition, fitView, zoomIn, zoomOut, setViewport } =
     useReactFlow();
 
-  // Initialize nodes and edges from workflow
-  const initialNodes = useMemo(
+  /**
+   * Track whether we're currently syncing FROM workflow prop TO React Flow state.
+   * This prevents the circular update pattern:
+   * workflow.nodes change → setNodes → nodes change → onUpdate → workflow.nodes change → ...
+   */
+  const isSyncingFromWorkflow = useRef(false);
+
+  /**
+   * Track the workflow ID to detect when we're loading a different workflow.
+   */
+  const currentWorkflowIdRef = useRef<string>(workflow.id);
+
+  /**
+   * Track the last known workflow node data to detect external changes.
+   * We only need to track data properties (name, description, config) since
+   * positions are managed by React Flow.
+   */
+  const lastSyncedNodeData = useRef<Map<string, string>>(new Map());
+
+  // Convert workflow data to React Flow format
+  const convertedNodes = useMemo(
     () => workflowNodesToReactFlow(workflow.nodes),
-    [], // Only on initial mount
+    [workflow.nodes],
   );
-  const initialEdges = useMemo(
+
+  const convertedEdges = useMemo(
     () => workflowConnectionsToReactFlow(workflow.connections),
-    [], // Only on initial mount
+    [workflow.connections],
   );
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const [nodes, setNodes, onNodesChange] = useNodesState(convertedNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(convertedEdges);
 
-  // Sync nodes/edges changes back to parent
+  /**
+   * Effect to fully reset React Flow state when loading a different workflow.
+   * This handles the case when navigating between workflows or when initial
+   * workflow data is loaded asynchronously after component mount.
+   */
   useEffect(() => {
-    const updatedNodes: WorkflowWithDetails["nodes"] = nodes.map((node) => ({
-      id: node.id,
-      workflowId: workflow.id,
-      type: node.type as WorkflowNodeType,
-      name: (node.data.label as string) || "Unnamed",
-      description: (node.data.description as string) || null,
-      config: (node.data.config as Record<string, unknown>) || {},
-      positionX: node.position.x,
-      positionY: node.position.y,
-      width: node.measured?.width || null,
-      height: node.measured?.height || null,
-      isEntryPoint: Boolean(node.data.isEntryPoint),
-      isExitPoint: Boolean(node.data.isExitPoint),
-      metadata: (node.data.metadata as Record<string, unknown>) || {},
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }));
+    // Check if this is a workflow change (different ID or initial load)
+    const isWorkflowChange = currentWorkflowIdRef.current !== workflow.id;
+    const isInitialLoad =
+      nodes.length === 0 &&
+      edges.length === 0 &&
+      (workflow.nodes.length > 0 || workflow.connections.length > 0);
 
-    const updatedConnections: WorkflowWithDetails["connections"] = edges.map(
-      (edge) => ({
-        id: edge.id,
-        workflowId: workflow.id,
-        sourceNodeId: edge.source,
-        targetNodeId: edge.target,
-        sourceHandle: edge.sourceHandle || null,
-        targetHandle: edge.targetHandle || null,
-        type:
-          (edge.data?.connectionType as WorkflowConnectionType) || "default",
-        label: (edge.label as string) || null,
-        condition: (edge.data?.condition as ConnectionCondition) || null,
-        priority: (edge.data?.priority as number) || 0,
-        metadata: {},
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+    if (isWorkflowChange || isInitialLoad) {
+      currentWorkflowIdRef.current = workflow.id;
+      isSyncingFromWorkflow.current = true;
+
+      // Reset tracking map
+      lastSyncedNodeData.current.clear();
+      workflow.nodes.forEach((wn) => {
+        lastSyncedNodeData.current.set(
+          wn.id,
+          JSON.stringify({
+            name: wn.name,
+            description: wn.description,
+            config: wn.config,
+          }),
+        );
+      });
+
+      // Fully replace nodes and edges
+      setNodes(convertedNodes);
+      setEdges(convertedEdges);
+
+      // Reset the flag after React processes the state update
+      setTimeout(() => {
+        isSyncingFromWorkflow.current = false;
+        // Fit view after nodes are loaded
+        fitView({ duration: 200 });
+      }, 0);
+
+      return; // Exit early - full reset handled
+    }
+
+    // For same workflow, just update tracking map (incremental sync is below)
+  }, [
+    workflow.id,
+    workflow.nodes,
+    workflow.connections,
+    convertedNodes,
+    convertedEdges,
+    setNodes,
+    setEdges,
+    nodes.length,
+    edges.length,
+    fitView,
+  ]);
+
+  /**
+   * Sync node data (name, description, config) FROM workflow prop TO React Flow state.
+   * This enables external components (like NodeConfigPanel) to update node data
+   * and have those changes reflected in the canvas.
+   *
+   * Only syncs when changes are detected that weren't caused by this component
+   * (i.e., external changes from NodeConfigPanel).
+   */
+  useEffect(() => {
+    // Check if any node data changed externally
+    let hasExternalChanges = false;
+    const updatedDataMap = new Map<
+      string,
+      { name: string; description: string | null | undefined; config: unknown }
+    >();
+
+    for (const workflowNode of workflow.nodes) {
+      const currentDataString = JSON.stringify({
+        name: workflowNode.name,
+        description: workflowNode.description,
+        config: workflowNode.config,
+      });
+      const lastSyncedString = lastSyncedNodeData.current.get(workflowNode.id);
+
+      if (currentDataString !== lastSyncedString) {
+        hasExternalChanges = true;
+        updatedDataMap.set(workflowNode.id, {
+          name: workflowNode.name,
+          description: workflowNode.description ?? null,
+          config: workflowNode.config,
+        });
+        // Update tracking
+        lastSyncedNodeData.current.set(workflowNode.id, currentDataString);
+      }
+    }
+
+    if (!hasExternalChanges) return;
+
+    // Mark that we're syncing from workflow to prevent circular updates
+    isSyncingFromWorkflow.current = true;
+
+    setNodes((currentNodes) =>
+      currentNodes.map((node) => {
+        const updatedData = updatedDataMap.get(node.id);
+        if (!updatedData) return node;
+
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            label: updatedData.name,
+            description: updatedData.description,
+            config: updatedData.config,
+          },
+        };
       }),
     );
 
-    // Only update if something actually changed
-    const nodesChanged =
-      JSON.stringify(updatedNodes) !== JSON.stringify(workflow.nodes);
-    const connectionsChanged =
-      JSON.stringify(updatedConnections) !==
-      JSON.stringify(workflow.connections);
+    // Reset the flag after React processes the state update
+    // Using setTimeout to ensure it happens after the state update is processed
+    setTimeout(() => {
+      isSyncingFromWorkflow.current = false;
+    }, 0);
+  }, [workflow.nodes, setNodes]);
 
-    if (nodesChanged || connectionsChanged) {
+  // Sync nodes/edges changes back to parent (only for position/structure changes from React Flow)
+  useEffect(() => {
+    // Skip if this update was caused by syncing from workflow prop
+    if (isSyncingFromWorkflow.current) return;
+
+    const updatedNodes: WorkflowWithDetails["nodes"] = nodes.map((node) => {
+      // Find the original workflow node to preserve timestamps and other metadata
+      const originalNode = workflow.nodes.find((wn) => wn.id === node.id);
+
+      return {
+        id: node.id,
+        workflowId: workflow.id,
+        type: node.type as WorkflowNodeType,
+        name: (node.data.label as string) || "Unnamed",
+        description: (node.data.description as string) || null,
+        config: (node.data.config as Record<string, unknown>) || {},
+        positionX: node.position.x,
+        positionY: node.position.y,
+        width: node.measured?.width || null,
+        height: node.measured?.height || null,
+        isEntryPoint: Boolean(node.data.isEntryPoint),
+        isExitPoint: Boolean(node.data.isExitPoint),
+        metadata: (node.data.metadata as Record<string, unknown>) || {},
+        createdAt: originalNode?.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+    });
+
+    const updatedConnections: WorkflowWithDetails["connections"] = edges.map(
+      (edge) => {
+        const originalConnection = workflow.connections.find(
+          (c) => c.id === edge.id,
+        );
+
+        return {
+          id: edge.id,
+          workflowId: workflow.id,
+          sourceNodeId: edge.source,
+          targetNodeId: edge.target,
+          sourceHandle: edge.sourceHandle || null,
+          targetHandle: edge.targetHandle || null,
+          type:
+            (edge.data?.connectionType as WorkflowConnectionType) || "default",
+          label: (edge.label as string) || null,
+          condition: (edge.data?.condition as ConnectionCondition) || null,
+          priority: (edge.data?.priority as number) || 0,
+          metadata: {},
+          createdAt: originalConnection?.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+      },
+    );
+
+    // Compare only the meaningful properties, not timestamps
+    const nodesEqual =
+      nodes.length === workflow.nodes.length &&
+      nodes.every((node) => {
+        const wn = workflow.nodes.find((w) => w.id === node.id);
+        if (!wn) return false;
+        return (
+          node.position.x === wn.positionX &&
+          node.position.y === wn.positionY &&
+          node.data.label === wn.name &&
+          node.data.description === wn.description &&
+          JSON.stringify(node.data.config) === JSON.stringify(wn.config)
+        );
+      });
+
+    const edgesEqual =
+      edges.length === workflow.connections.length &&
+      edges.every((edge) => {
+        const wc = workflow.connections.find((c) => c.id === edge.id);
+        if (!wc) return false;
+        return (
+          edge.source === wc.sourceNodeId && edge.target === wc.targetNodeId
+        );
+      });
+
+    if (!nodesEqual || !edgesEqual) {
       onUpdate({
         nodes: updatedNodes,
         connections: updatedConnections,
       });
     }
-  }, [nodes, edges]);
+  }, [
+    nodes,
+    edges,
+    workflow.id,
+    workflow.nodes,
+    workflow.connections,
+    onUpdate,
+  ]);
 
   // Handle node selection
   const onSelectionChange = useCallback(
@@ -301,42 +482,49 @@ function WorkflowCanvasInner({
         }}
         deleteKeyCode={["Backspace", "Delete"]}
         multiSelectionKeyCode={["Shift"]}
-        className="bg-muted/30"
+        className="bg-muted/30 dark:bg-muted/10"
       >
         <Background
           variant={BackgroundVariant.Dots}
           gap={20}
           size={1}
-          color="hsl(var(--muted-foreground) / 0.2)"
+          className="!fill-muted-foreground/30 dark:!fill-muted-foreground/50"
         />
-        <Controls showInteractive={false} className="!bg-background !border">
+        {/* Custom controls panel with proper dark mode styling */}
+        <div className="react-flow__panel react-flow__controls absolute bottom-2 left-2 z-10 flex flex-col gap-1 rounded-lg border bg-background p-1 shadow-sm">
           <button
-            className="react-flow__controls-button"
+            type="button"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             onClick={() => zoomIn()}
             title="Zoom in"
           >
-            <Plus className="h-3 w-3" />
+            <Plus className="h-4 w-4" />
           </button>
           <button
-            className="react-flow__controls-button"
+            type="button"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             onClick={() => zoomOut()}
             title="Zoom out"
           >
-            <Minus className="h-3 w-3" />
+            <Minus className="h-4 w-4" />
           </button>
+          <div className="mx-1 h-px bg-border" />
           <button
-            className="react-flow__controls-button"
+            type="button"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             onClick={() => fitView()}
             title="Fit view"
           >
-            <Maximize2 className="h-3 w-3" />
+            <Maximize2 className="h-4 w-4" />
           </button>
-        </Controls>
+        </div>
         <MiniMap
           nodeStrokeWidth={3}
           pannable
           zoomable
-          className="!bg-background !border"
+          className="!bg-background !border !border-border"
+          maskColor="hsl(var(--muted) / 0.7)"
+          nodeColor="hsl(var(--primary) / 0.8)"
         />
       </ReactFlow>
     </div>

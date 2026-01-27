@@ -18,7 +18,7 @@ import type {
   WorkflowNodeType,
 } from "@/lib/types/workflow.types";
 import { X } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 interface NodeConfigPanelProps {
   node: WorkflowNode;
@@ -89,6 +89,23 @@ export function NodeConfigPanel({
   const [localDescription, setLocalDescription] = useState(
     node.description || "",
   );
+
+  /**
+   * Reset local state ONLY when the selected node changes (different node.id).
+   * This ensures:
+   * 1. User's local edits are preserved while they're editing the same node
+   * 2. State is properly initialized when switching to a different node
+   *
+   * IMPORTANT: Do NOT include node.name, node.description, or node.config in dependencies.
+   * Those props are updated via onUpdate() which already updates the workflow state.
+   * Including them would cause a circular update: user types → onUpdate → prop changes → effect resets state.
+   */
+  useEffect(() => {
+    setLocalConfig((node.config as Record<string, unknown>) || {});
+    setLocalName(node.name);
+    setLocalDescription(node.description || "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [node.id]);
 
   const updateConfig = useCallback(
     (key: string, value: unknown) => {

@@ -495,14 +495,48 @@ export interface CreateVariableDto {
 
 export interface UpdateVariableDto extends Partial<CreateVariableDto> {}
 
+// Canvas DTOs matching backend expectations
+export interface SaveCanvasNodeDto {
+  id?: string;
+  tempId?: string;
+  nodeType: WorkflowNodeType;
+  positionX: number;
+  positionY: number;
+  label?: string;
+  description?: string;
+  config?: NodeConfig;
+  aiInstructions?: string;
+  aiTone?: string;
+  aiGoal?: string;
+  allowedKbTemplates?: string[];
+}
+
+export type ConnectionBranch =
+  | "default"
+  | "true"
+  | "false"
+  | "timeout"
+  | "error";
+
+export interface SaveCanvasConnectionDto {
+  id?: string;
+  fromNodeId: string;
+  toNodeId: string;
+  branch?: ConnectionBranch;
+  conditionLabel?: string;
+  conditionConfig?: Record<string, unknown>;
+  label?: string;
+  animated?: boolean;
+}
+
 export interface SaveCanvasDto {
-  nodes: Array<CreateNodeDto & { id?: string }>;
-  connections: Array<CreateConnectionDto & { id?: string }>;
-  variables?: Array<CreateVariableDto & { id?: string }>;
-  canvasState?: CanvasState;
-  deleteNodeIds?: string[];
-  deleteConnectionIds?: string[];
-  deleteVariableIds?: string[];
+  nodes: SaveCanvasNodeDto[];
+  connections: SaveCanvasConnectionDto[];
+  deletedNodeIds?: string[];
+  deletedConnectionIds?: string[];
+  viewportX?: number;
+  viewportY?: number;
+  viewportZoom?: number;
 }
 
 export interface PublishWorkflowDto {

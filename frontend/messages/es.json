@@ -1655,6 +1655,8 @@
       "status": {
         "draft": "Borrador",
         "published": "Publicado",
+        "active": "Activo",
+        "paused": "Pausado",
         "archived": "Archivado",
         "disabled": "Deshabilitado"
       },
@@ -1676,6 +1678,14 @@
         "loadFailed": "Error al cargar flujo de trabajo",
         "saveFailed": "Error al guardar flujo de trabajo",
         "publishFailed": "Error al publicar flujo de trabajo"
+      },
+      "dialogs": {
+        "unsavedChanges": {
+          "title": "Cambios Sin Guardar",
+          "description": "Tienes cambios sin guardar que se perderán si sales de esta página. ¿Estás seguro de que deseas continuar?",
+          "leave": "Salir Sin Guardar",
+          "stay": "Permanecer en la Página"
+        }
       },
       "sidebar": {
         "searchNodes": "Buscar nodos...",

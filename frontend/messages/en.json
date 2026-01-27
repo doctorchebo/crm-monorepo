@@ -1694,6 +1694,8 @@
       "status": {
         "draft": "Draft",
         "published": "Published",
+        "active": "Active",
+        "paused": "Paused",
         "archived": "Archived",
         "disabled": "Disabled"
       },
@@ -1715,6 +1717,14 @@
         "loadFailed": "Failed to load workflow",
         "saveFailed": "Failed to save workflow",
         "publishFailed": "Failed to publish workflow"
+      },
+      "dialogs": {
+        "unsavedChanges": {
+          "title": "Unsaved Changes",
+          "description": "You have unsaved changes that will be lost if you leave this page. Are you sure you want to continue?",
+          "leave": "Leave Without Saving",
+          "stay": "Stay on Page"
+        }
       },
       "sidebar": {
         "searchNodes": "Search nodes...",

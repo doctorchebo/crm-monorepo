@@ -362,7 +362,7 @@ export function WorkflowSidebar({ workflow, onUpdate }: WorkflowSidebarProps) {
               <Plus className="h-3.5 w-3.5" />
             </Button>
           </div>
-          {workflow.variables.length === 0 ? (
+          {!workflow.variables || workflow.variables.length === 0 ? (
             <p className="text-xs text-muted-foreground">
               {t("sidebar.noVariables")}
             </p>

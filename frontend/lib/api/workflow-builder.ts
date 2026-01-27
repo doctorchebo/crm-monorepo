@@ -32,6 +32,14 @@ import type {
   WorkflowWithDetails,
 } from "@/lib/types/workflow.types";
 import { apiClient } from "./client";
+import {
+  type BackendWorkflowConnection,
+  type BackendWorkflowNode,
+  type BackendWorkflowWithDetails,
+  transformConnectionToFrontend,
+  transformNodeToFrontend,
+  transformWorkflowToFrontend,
+} from "./workflow-transformers";
 
 export const workflowBuilderApi = {
   // ============================================================================
@@ -60,9 +68,14 @@ export const workflowBuilderApi = {
 
   /**
    * Get a single workflow with full details (nodes, connections, variables)
+   * Transforms backend format to frontend format
    */
-  get: (workflowId: string): Promise<WorkflowWithDetails> =>
-    apiClient.get(`/workflow-builder/workflows/${workflowId}`),
+  get: async (workflowId: string): Promise<WorkflowWithDetails> => {
+    const response = await apiClient.get<BackendWorkflowWithDetails>(
+      `/workflow-builder/workflows/${workflowId}`,
+    );
+    return transformWorkflowToFrontend(response);
+  },
 
   /**
    * Create a new workflow
@@ -107,12 +120,18 @@ export const workflowBuilderApi = {
   /**
    * Save entire canvas state (nodes, connections, variables)
    * This is the main operation for the visual editor
+   * Transforms backend response to frontend format
    */
-  saveCanvas: (
+  saveCanvas: async (
     workflowId: string,
     data: SaveCanvasDto,
-  ): Promise<WorkflowWithDetails> =>
-    apiClient.post(`/workflow-builder/workflows/${workflowId}/canvas`, data),
+  ): Promise<WorkflowWithDetails> => {
+    const response = await apiClient.post<BackendWorkflowWithDetails>(
+      `/workflow-builder/workflows/${workflowId}/canvas`,
+      data,
+    );
+    return transformWorkflowToFrontend(response);
+  },
 
   /**
    * Publish a workflow (create new version and set status to published)
@@ -137,14 +156,27 @@ export const workflowBuilderApi = {
     /**
      * Create a new node
      */
-    create: (data: CreateNodeDto): Promise<WorkflowNode> =>
-      apiClient.post(`/workflow-builder/nodes`, data),
+    create: async (data: CreateNodeDto): Promise<WorkflowNode> => {
+      const response = await apiClient.post<BackendWorkflowNode>(
+        `/workflow-builder/nodes`,
+        data,
+      );
+      return transformNodeToFrontend(response);
+    },
 
     /**
      * Update a node
      */
-    update: (nodeId: string, data: UpdateNodeDto): Promise<WorkflowNode> =>
-      apiClient.patch(`/workflow-builder/nodes/${nodeId}`, data),
+    update: async (
+      nodeId: string,
+      data: UpdateNodeDto,
+    ): Promise<WorkflowNode> => {
+      const response = await apiClient.patch<BackendWorkflowNode>(
+        `/workflow-builder/nodes/${nodeId}`,
+        data,
+      );
+      return transformNodeToFrontend(response);
+    },
 
     /**
      * Delete a node
@@ -175,17 +207,27 @@ export const workflowBuilderApi = {
     /**
      * Create a new connection
      */
-    create: (data: CreateConnectionDto): Promise<WorkflowConnection> =>
-      apiClient.post(`/workflow-builder/connections`, data),
+    create: async (data: CreateConnectionDto): Promise<WorkflowConnection> => {
+      const response = await apiClient.post<BackendWorkflowConnection>(
+        `/workflow-builder/connections`,
+        data,
+      );
+      return transformConnectionToFrontend(response);
+    },
 
     /**
      * Update a connection
      */
-    update: (
+    update: async (
       connectionId: string,
       data: UpdateConnectionDto,
-    ): Promise<WorkflowConnection> =>
-      apiClient.patch(`/workflow-builder/connections/${connectionId}`, data),
+    ): Promise<WorkflowConnection> => {
+      const response = await apiClient.patch<BackendWorkflowConnection>(
+        `/workflow-builder/connections/${connectionId}`,
+        data,
+      );
+      return transformConnectionToFrontend(response);
+    },
 
     /**
      * Delete a connection

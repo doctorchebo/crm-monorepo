@@ -27,7 +27,6 @@ import {
   Upload,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 interface WorkflowHeaderProps {
@@ -37,14 +36,31 @@ interface WorkflowHeaderProps {
   onSave: () => void;
   onPublish: () => void;
   onUpdate: (updates: Partial<WorkflowWithDetails>) => void;
+  /**
+   * Called when user clicks the back button.
+   * Parent component should handle navigation guard logic.
+   */
+  onBack: () => void;
 }
 
+/**
+ * Status badge configuration for all workflow statuses.
+ * Maps to the workflow_status enum in the database schema.
+ */
 const STATUS_BADGES: Record<string, { color: string; label: string }> = {
   draft: { color: "bg-yellow-500", label: "Draft" },
   published: { color: "bg-green-500", label: "Published" },
+  active: { color: "bg-blue-500", label: "Active" },
+  paused: { color: "bg-orange-500", label: "Paused" },
   archived: { color: "bg-gray-500", label: "Archived" },
   disabled: { color: "bg-red-500", label: "Disabled" },
 };
+
+/**
+ * Default status for when workflow.status is undefined or unknown.
+ * This provides a fallback that works with both the badge styling and translations.
+ */
+const DEFAULT_STATUS = "draft";
 
 export function WorkflowHeader({
   workflow,
@@ -53,9 +69,9 @@ export function WorkflowHeader({
   onSave,
   onPublish,
   onUpdate,
+  onBack,
 }: WorkflowHeaderProps) {
   const t = useTranslations("workflows.editor");
-  const router = useRouter();
   const [editingName, setEditingName] = useState(false);
   const [name, setName] = useState(workflow.name);
 
@@ -66,16 +82,17 @@ export function WorkflowHeader({
     setEditingName(false);
   };
 
-  const statusBadge = STATUS_BADGES[workflow.status];
+  // Normalize status - use default if undefined or not in STATUS_BADGES
+  const normalizedStatus =
+    workflow.status && STATUS_BADGES[workflow.status]
+      ? workflow.status
+      : DEFAULT_STATUS;
+  const statusBadge = STATUS_BADGES[normalizedStatus];
 
   return (
     <header className="h-14 border-b bg-background flex items-center px-4 gap-2 flex-shrink-0">
       {/* Back button */}
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={() => router.push("/dashboard/workflows")}
-      >
+      <Button variant="ghost" size="icon" onClick={onBack}>
         <ArrowLeft className="h-4 w-4" />
       </Button>
 
@@ -118,7 +135,7 @@ export function WorkflowHeader({
         <div className="flex items-center gap-1.5">
           <div className={`w-2 h-2 rounded-full ${statusBadge.color}`} />
           <span className="text-xs text-muted-foreground">
-            {t(`status.${workflow.status}`)}
+            {t(`status.${normalizedStatus}`)}
           </span>
         </div>
 

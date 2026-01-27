@@ -819,32 +819,50 @@ export class WorkflowBuilderService {
     const savedNodes: WorkflowNode[] = [];
     const savedConnections: WorkflowConnection[] = [];
 
+    // Helper to check if a string is a valid UUID
+    const isValidUUID = (str: string): boolean => {
+      const uuidRegex =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      return uuidRegex.test(str);
+    };
+
     // Delete removed items first
     if (dto.deletedNodeIds?.length) {
-      await db
-        .delete(workflowNodes)
-        .where(
-          and(
-            eq(workflowNodes.workflowId, workflowId),
-            inArray(workflowNodes.id, dto.deletedNodeIds),
-          ),
-        );
+      // Filter out any non-UUID IDs (temp IDs from frontend)
+      const validDeleteIds = dto.deletedNodeIds.filter(isValidUUID);
+      if (validDeleteIds.length) {
+        await db
+          .delete(workflowNodes)
+          .where(
+            and(
+              eq(workflowNodes.workflowId, workflowId),
+              inArray(workflowNodes.id, validDeleteIds),
+            ),
+          );
+      }
     }
 
     if (dto.deletedConnectionIds?.length) {
-      await db
-        .delete(workflowConnections)
-        .where(
-          and(
-            eq(workflowConnections.workflowId, workflowId),
-            inArray(workflowConnections.id, dto.deletedConnectionIds),
-          ),
-        );
+      // Filter out any non-UUID IDs
+      const validDeleteIds = dto.deletedConnectionIds.filter(isValidUUID);
+      if (validDeleteIds.length) {
+        await db
+          .delete(workflowConnections)
+          .where(
+            and(
+              eq(workflowConnections.workflowId, workflowId),
+              inArray(workflowConnections.id, validDeleteIds),
+            ),
+          );
+      }
     }
 
     // Process nodes (create new, update existing)
     for (const nodeDto of dto.nodes) {
-      if (nodeDto.id) {
+      // Determine if this is an existing node (has valid UUID id) or new node
+      const isExistingNode = nodeDto.id && isValidUUID(nodeDto.id);
+
+      if (isExistingNode) {
         // Update existing node
         const [updated] = await db
           .update(workflowNodes)
@@ -863,7 +881,7 @@ export class WorkflowBuilderService {
           })
           .where(
             and(
-              eq(workflowNodes.id, nodeDto.id),
+              eq(workflowNodes.id, nodeDto.id!),
               eq(workflowNodes.workflowId, workflowId),
             ),
           )
@@ -873,8 +891,12 @@ export class WorkflowBuilderService {
           savedNodes.push(updated);
         }
       } else {
-        // Create new node (generate temp ID if needed)
-        const tempId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        // Create new node
+        // Store the temp ID from frontend (could be in tempId field or the non-UUID id field)
+        const frontendTempId =
+          nodeDto.tempId ||
+          (nodeDto.id && !isValidUUID(nodeDto.id) ? nodeDto.id : null);
+
         const [created] = await db
           .insert(workflowNodes)
           .values({
@@ -892,7 +914,10 @@ export class WorkflowBuilderService {
           })
           .returning();
 
-        tempIdMap.set(tempId, created.id);
+        // Map the frontend temp ID to the real database UUID
+        if (frontendTempId) {
+          tempIdMap.set(frontendTempId, created.id);
+        }
         savedNodes.push(created);
       }
     }
@@ -904,7 +929,18 @@ export class WorkflowBuilderService {
         tempIdMap.get(connDto.fromNodeId) ?? connDto.fromNodeId;
       const toNodeId = tempIdMap.get(connDto.toNodeId) ?? connDto.toNodeId;
 
-      if (connDto.id) {
+      // Verify the resolved IDs are valid UUIDs
+      if (!isValidUUID(fromNodeId) || !isValidUUID(toNodeId)) {
+        this.logger.warn(
+          `Skipped connection with invalid node IDs: ${connDto.fromNodeId} -> ${connDto.toNodeId}`,
+        );
+        continue;
+      }
+
+      // Check if this is an existing connection (has valid UUID id)
+      const isExistingConnection = connDto.id && isValidUUID(connDto.id);
+
+      if (isExistingConnection) {
         // Update existing connection
         const [updated] = await db
           .update(workflowConnections)
@@ -919,7 +955,7 @@ export class WorkflowBuilderService {
           })
           .where(
             and(
-              eq(workflowConnections.id, connDto.id),
+              eq(workflowConnections.id, connDto.id!),
               eq(workflowConnections.workflowId, workflowId),
             ),
           )

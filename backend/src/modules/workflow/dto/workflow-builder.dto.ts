@@ -517,6 +517,10 @@ class CanvasNodeDto {
   @IsUUID()
   id?: string;
 
+  @IsOptional()
+  @IsString()
+  tempId?: string; // Frontend-generated temporary ID for new nodes
+
   @IsEnum(WorkflowNodeType)
   nodeType: WorkflowNodeType;
 
