@@ -146,12 +146,17 @@ export function transformNodeToFrontend(
 export function transformConnectionToFrontend(
   conn: BackendWorkflowConnection,
 ): WorkflowConnection {
+  // The branch field contains the handle ID (e.g., "true", "false", "default")
+  // We need to restore this as the sourceHandle for React Flow to render correctly
+  const sourceHandle =
+    conn.branch && conn.branch !== "default" ? conn.branch : null;
+
   return {
     id: conn.id,
     workflowId: conn.workflowId,
     sourceNodeId: conn.fromNodeId, // Backend 'fromNodeId' → Frontend 'sourceNodeId'
     targetNodeId: conn.toNodeId, // Backend 'toNodeId' → Frontend 'targetNodeId'
-    sourceHandle: null,
+    sourceHandle,
     targetHandle: null,
     type: conn.branch as WorkflowConnection["type"],
     label: conn.label,
@@ -234,22 +239,36 @@ export function transformWorkflowToFrontend(
   };
 }
 
+// ============================================================================
+// Save Canvas Response Types and Transformers
+// ============================================================================
+
 /**
- * Transform save canvas response (partial) and merge with existing workflow
- * The saveCanvas endpoint only returns { nodes, connections }
+ * Response from saveCanvas endpoint - contains ALL nodes/connections for the workflow
+ * (not just the ones that were modified in this save operation)
+ */
+export interface SaveCanvasResponse {
+  nodes: BackendWorkflowNode[];
+  connections: BackendWorkflowConnection[];
+}
+
+/**
+ * Frontend representation of save canvas response
+ */
+export interface TransformedSaveCanvasResponse {
+  nodes: WorkflowNode[];
+  connections: WorkflowConnection[];
+}
+
+/**
+ * Transform save canvas response to frontend format.
+ * The backend returns the complete state of all nodes/connections for the workflow.
  */
 export function transformSaveCanvasResponse(
-  response: {
-    nodes: BackendWorkflowNode[];
-    connections: BackendWorkflowConnection[];
-  },
-  existingWorkflow: WorkflowWithDetails,
-): WorkflowWithDetails {
+  response: SaveCanvasResponse,
+): TransformedSaveCanvasResponse {
   return {
-    ...existingWorkflow,
     nodes: response.nodes.map(transformNodeToFrontend),
     connections: response.connections.map(transformConnectionToFrontend),
-    // Variables are not returned by saveCanvas, preserve existing
-    variables: existingWorkflow.variables || [],
   };
 }

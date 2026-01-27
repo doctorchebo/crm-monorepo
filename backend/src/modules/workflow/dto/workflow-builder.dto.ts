@@ -805,3 +805,165 @@ export class ExecutionLogResponseDto {
   durationMs?: number;
   executedAt: Date;
 }
+
+// ============================================================================
+// WORKFLOW TEMPLATE DTOs
+// ============================================================================
+
+export class CreateWorkflowTemplateCategoryDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(100)
+  name: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  icon?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  sortOrder?: number;
+}
+
+export class UpdateWorkflowTemplateCategoryDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(100)
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  icon?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  sortOrder?: number;
+}
+
+export class CreateWorkflowTemplateDto {
+  @IsOptional()
+  @IsUUID()
+  categoryId?: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(255)
+  name: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  icon?: string;
+
+  @IsOptional()
+  @IsString()
+  previewImageUrl?: string;
+
+  @IsObject()
+  definition: {
+    nodes: Array<{
+      id: string;
+      nodeType: string;
+      label: string;
+      description?: string;
+      config: Record<string, unknown>;
+      positionX: number;
+      positionY: number;
+    }>;
+    connections: Array<{
+      id: string;
+      fromNodeId: string;
+      toNodeId: string;
+      branch: string;
+      label?: string;
+    }>;
+    variables?: Array<{
+      name: string;
+      type: string;
+      defaultValue?: unknown;
+      scope: string;
+      description?: string;
+    }>;
+  };
+
+  @IsOptional()
+  @IsBoolean()
+  isFeatured?: boolean;
+}
+
+export class UpdateWorkflowTemplateDto {
+  @IsOptional()
+  @IsUUID()
+  categoryId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(255)
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  icon?: string;
+
+  @IsOptional()
+  @IsString()
+  previewImageUrl?: string;
+
+  @IsOptional()
+  @IsObject()
+  definition?: CreateWorkflowTemplateDto['definition'];
+
+  @IsOptional()
+  @IsBoolean()
+  isFeatured?: boolean;
+}
+
+export class UseWorkflowTemplateDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(255)
+  name?: string;
+}
+
+export class ListWorkflowTemplatesQueryDto {
+  @IsOptional()
+  @IsUUID()
+  categoryId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  featuredOnly?: boolean;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
+}

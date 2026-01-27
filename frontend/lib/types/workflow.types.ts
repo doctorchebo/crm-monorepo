@@ -37,9 +37,12 @@ export type ExecutionTriggerType =
 
 export type WorkflowConnectionType =
   | "default"
+  | "true"
+  | "false"
   | "success"
   | "failure"
   | "timeout"
+  | "error"
   | "condition_true"
   | "condition_false"
   | "branch";

@@ -24,6 +24,10 @@ import {
   WorkflowNode,
   workflowNodes,
   workflows,
+  WorkflowTemplate,
+  workflowTemplateCategories,
+  WorkflowTemplateCategory,
+  workflowTemplates,
   WorkflowVariable,
   workflowVariables,
   WorkflowVersion,
@@ -37,22 +41,38 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { and, desc, eq, ilike, inArray, isNull, sql, SQL } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNull,
+  sql,
+  SQL,
+} from 'drizzle-orm';
 import {
   BulkUpdateNodePositionsDto,
   CreateConnectionDto,
   CreateNodeDto,
   CreateVariableDto,
   CreateWorkflowDto,
+  CreateWorkflowTemplateCategoryDto,
+  CreateWorkflowTemplateDto,
   DuplicateWorkflowDto,
   ListExecutionsQueryDto,
   ListWorkflowsQueryDto,
+  ListWorkflowTemplatesQueryDto,
   PublishWorkflowDto,
   SaveWorkflowCanvasDto,
   UpdateConnectionDto,
   UpdateNodeDto,
   UpdateVariableDto,
   UpdateWorkflowDto,
+  UpdateWorkflowTemplateCategoryDto,
+  UpdateWorkflowTemplateDto,
+  UseWorkflowTemplateDto,
   WorkflowAnalyticsQueryDto,
 } from '../dto/workflow-builder.dto';
 import type { WorkflowDefinition } from '../types/workflow-builder.types';
@@ -1002,13 +1022,25 @@ export class WorkflowBuilderService {
       })
       .where(eq(workflows.id, workflowId));
 
+    // CRITICAL: Fetch ALL nodes and connections for this workflow
+    // The frontend expects the complete state, not just what was processed
+    const allNodes = await db
+      .select()
+      .from(workflowNodes)
+      .where(eq(workflowNodes.workflowId, workflowId));
+
+    const allConnections = await db
+      .select()
+      .from(workflowConnections)
+      .where(eq(workflowConnections.workflowId, workflowId));
+
     this.logger.log(
-      `Saved canvas for workflow ${workflowId}: ${savedNodes.length} nodes, ${savedConnections.length} connections`,
+      `Saved canvas for workflow ${workflowId}: ${savedNodes.length} nodes processed, ${savedConnections.length} connections processed. Total: ${allNodes.length} nodes, ${allConnections.length} connections`,
     );
 
     return {
-      nodes: savedNodes,
-      connections: savedConnections,
+      nodes: allNodes,
+      connections: allConnections,
     };
   }
 
@@ -1948,5 +1980,363 @@ export class WorkflowBuilderService {
     this.logger.log(`Reset workflow state for chat ${chatId}`);
 
     return { success: true };
+  }
+
+  // ============================================================================
+  // Template Management
+  // ============================================================================
+
+  /**
+   * List all template categories
+   */
+  async listTemplateCategories(): Promise<WorkflowTemplateCategory[]> {
+    return db.query.workflowTemplateCategories.findMany({
+      orderBy: (table) => [asc(table.sortOrder), asc(table.name)],
+    });
+  }
+
+  /**
+   * Create a new template category
+   */
+  async createTemplateCategory(
+    dto: CreateWorkflowTemplateCategoryDto,
+  ): Promise<WorkflowTemplateCategory> {
+    const [category] = await db
+      .insert(workflowTemplateCategories)
+      .values({
+        name: dto.name,
+        description: dto.description,
+        icon: dto.icon,
+        sortOrder: dto.sortOrder ?? 0,
+      })
+      .returning();
+
+    this.logger.log(`Created template category: ${category.id}`);
+    return category;
+  }
+
+  /**
+   * Update a template category
+   */
+  async updateTemplateCategory(
+    categoryId: string,
+    dto: UpdateWorkflowTemplateCategoryDto,
+  ): Promise<WorkflowTemplateCategory> {
+    const existing = await db.query.workflowTemplateCategories.findFirst({
+      where: eq(workflowTemplateCategories.id, categoryId),
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Template category not found');
+    }
+
+    const updateData: Partial<WorkflowTemplateCategory> = {};
+    if (dto.name !== undefined) updateData.name = dto.name;
+    if (dto.description !== undefined) updateData.description = dto.description;
+    if (dto.icon !== undefined) updateData.icon = dto.icon;
+    if (dto.sortOrder !== undefined) updateData.sortOrder = dto.sortOrder;
+
+    const [updated] = await db
+      .update(workflowTemplateCategories)
+      .set(updateData)
+      .where(eq(workflowTemplateCategories.id, categoryId))
+      .returning();
+
+    return updated;
+  }
+
+  /**
+   * Delete a template category
+   */
+  async deleteTemplateCategory(
+    categoryId: string,
+  ): Promise<{ success: boolean }> {
+    const existing = await db.query.workflowTemplateCategories.findFirst({
+      where: eq(workflowTemplateCategories.id, categoryId),
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Template category not found');
+    }
+
+    // Set categoryId to null for all templates in this category
+    await db
+      .update(workflowTemplates)
+      .set({ categoryId: null })
+      .where(eq(workflowTemplates.categoryId, categoryId));
+
+    await db
+      .delete(workflowTemplateCategories)
+      .where(eq(workflowTemplateCategories.id, categoryId));
+
+    this.logger.log(`Deleted template category: ${categoryId}`);
+    return { success: true };
+  }
+
+  /**
+   * List all workflow templates
+   */
+  async listTemplates(
+    query?: ListWorkflowTemplatesQueryDto,
+  ): Promise<WorkflowTemplate[]> {
+    const conditions: SQL[] = [];
+
+    if (query?.categoryId) {
+      conditions.push(eq(workflowTemplates.categoryId, query.categoryId));
+    }
+
+    if (query?.featuredOnly) {
+      conditions.push(eq(workflowTemplates.isFeatured, true));
+    }
+
+    if (query?.search) {
+      conditions.push(
+        sql`(
+          ${workflowTemplates.name} ILIKE ${`%${query.search}%`}
+          OR ${workflowTemplates.description} ILIKE ${`%${query.search}%`}
+        )`,
+      );
+    }
+
+    return db.query.workflowTemplates.findMany({
+      where: conditions.length > 0 ? and(...conditions) : undefined,
+      with: {
+        category: true,
+      },
+      orderBy: (table) => [desc(table.isFeatured), desc(table.useCount)],
+    });
+  }
+
+  /**
+   * Get a single template by ID
+   */
+  async getTemplate(templateId: string): Promise<WorkflowTemplate> {
+    const template = await db.query.workflowTemplates.findFirst({
+      where: eq(workflowTemplates.id, templateId),
+      with: {
+        category: true,
+      },
+    });
+
+    if (!template) {
+      throw new NotFoundException('Template not found');
+    }
+
+    return template;
+  }
+
+  /**
+   * Create a new workflow template
+   */
+  async createTemplate(
+    dto: CreateWorkflowTemplateDto,
+  ): Promise<WorkflowTemplate> {
+    // Validate category if provided
+    if (dto.categoryId) {
+      const category = await db.query.workflowTemplateCategories.findFirst({
+        where: eq(workflowTemplateCategories.id, dto.categoryId),
+      });
+      if (!category) {
+        throw new BadRequestException('Invalid category ID');
+      }
+    }
+
+    const [template] = await db
+      .insert(workflowTemplates)
+      .values({
+        categoryId: dto.categoryId,
+        name: dto.name,
+        description: dto.description,
+        icon: dto.icon,
+        previewImageUrl: dto.previewImageUrl,
+        definition: dto.definition,
+        isFeatured: dto.isFeatured ?? false,
+      })
+      .returning();
+
+    this.logger.log(`Created workflow template: ${template.id}`);
+    return template;
+  }
+
+  /**
+   * Update a workflow template
+   */
+  async updateTemplate(
+    templateId: string,
+    dto: UpdateWorkflowTemplateDto,
+  ): Promise<WorkflowTemplate> {
+    const existing = await db.query.workflowTemplates.findFirst({
+      where: eq(workflowTemplates.id, templateId),
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Template not found');
+    }
+
+    // Validate category if provided
+    if (dto.categoryId) {
+      const category = await db.query.workflowTemplateCategories.findFirst({
+        where: eq(workflowTemplateCategories.id, dto.categoryId),
+      });
+      if (!category) {
+        throw new BadRequestException('Invalid category ID');
+      }
+    }
+
+    const updateData: Partial<WorkflowTemplate> = {
+      updatedAt: new Date(),
+    };
+    if (dto.categoryId !== undefined) updateData.categoryId = dto.categoryId;
+    if (dto.name !== undefined) updateData.name = dto.name;
+    if (dto.description !== undefined) updateData.description = dto.description;
+    if (dto.icon !== undefined) updateData.icon = dto.icon;
+    if (dto.previewImageUrl !== undefined)
+      updateData.previewImageUrl = dto.previewImageUrl;
+    if (dto.definition !== undefined)
+      updateData.definition = dto.definition as any;
+    if (dto.isFeatured !== undefined) updateData.isFeatured = dto.isFeatured;
+
+    const [updated] = await db
+      .update(workflowTemplates)
+      .set(updateData)
+      .where(eq(workflowTemplates.id, templateId))
+      .returning();
+
+    return updated;
+  }
+
+  /**
+   * Delete a workflow template
+   */
+  async deleteTemplate(templateId: string): Promise<{ success: boolean }> {
+    const existing = await db.query.workflowTemplates.findFirst({
+      where: eq(workflowTemplates.id, templateId),
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Template not found');
+    }
+
+    await db
+      .delete(workflowTemplates)
+      .where(eq(workflowTemplates.id, templateId));
+
+    this.logger.log(`Deleted workflow template: ${templateId}`);
+    return { success: true };
+  }
+
+  /**
+   * Create a workflow from a template
+   */
+  async createWorkflowFromTemplate(
+    userId: number,
+    templateId: string,
+    dto?: UseWorkflowTemplateDto,
+  ): Promise<Workflow> {
+    const teamId = await this.getUserTeamId(userId);
+    await this.verifyTeamAccess(userId, teamId, ['owner', 'admin']);
+
+    const template = await this.getTemplate(templateId);
+    const definition =
+      template.definition as CreateWorkflowTemplateDto['definition'];
+
+    // Increment use count
+    await db
+      .update(workflowTemplates)
+      .set({
+        useCount: sql`${workflowTemplates.useCount} + 1`,
+      })
+      .where(eq(workflowTemplates.id, templateId));
+
+    // Create the workflow
+    const workflowName = dto?.name || `${template.name} (Copy)`;
+
+    // Check for duplicate name
+    const existingCount = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(workflows)
+      .where(
+        and(
+          eq(workflows.teamId, teamId),
+          ilike(workflows.name, `${workflowName}%`),
+        ),
+      );
+
+    const finalName =
+      existingCount[0]?.count > 0
+        ? `${workflowName} ${existingCount[0].count + 1}`
+        : workflowName;
+
+    const [workflow] = await db
+      .insert(workflows)
+      .values({
+        teamId,
+        createdBy: userId,
+        name: finalName,
+        description: template.description,
+        icon: template.icon,
+        status: 'draft',
+        version: 1,
+      })
+      .returning();
+
+    // Generate new IDs mapping for nodes
+    const nodeIdMapping = new Map<string, string>();
+
+    // Create nodes
+    if (definition.nodes && definition.nodes.length > 0) {
+      const nodeValues = definition.nodes.map((node) => {
+        const newNodeId = crypto.randomUUID();
+        nodeIdMapping.set(node.id, newNodeId);
+
+        return {
+          id: newNodeId,
+          workflowId: workflow.id,
+          nodeType: node.nodeType as WorkflowNode['nodeType'],
+          label: node.label,
+          description: node.description,
+          config: node.config,
+          positionX: node.positionX,
+          positionY: node.positionY,
+        };
+      });
+
+      await db.insert(workflowNodes).values(nodeValues);
+    }
+
+    // Create connections with remapped node IDs
+    if (definition.connections && definition.connections.length > 0) {
+      const connectionValues = definition.connections.map((conn) => ({
+        id: crypto.randomUUID(),
+        workflowId: workflow.id,
+        fromNodeId: nodeIdMapping.get(conn.fromNodeId) || conn.fromNodeId,
+        toNodeId: nodeIdMapping.get(conn.toNodeId) || conn.toNodeId,
+        branch: (conn.branch || 'default') as WorkflowConnection['branch'],
+        conditionLabel: conn.label,
+      }));
+
+      await db.insert(workflowConnections).values(connectionValues);
+    }
+
+    // Create variables
+    if (definition.variables && definition.variables.length > 0) {
+      const variableValues = definition.variables.map((variable) => ({
+        id: crypto.randomUUID(),
+        workflowId: workflow.id,
+        name: variable.name,
+        variableType: variable.type || 'string',
+        defaultValue: variable.defaultValue,
+        isInput: variable.scope === 'input',
+        isOutput: variable.scope === 'output',
+        description: variable.description,
+      }));
+
+      await db.insert(workflowVariables).values(variableValues);
+    }
+
+    this.logger.log(
+      `Created workflow ${workflow.id} from template ${templateId}`,
+    );
+    return workflow;
   }
 }

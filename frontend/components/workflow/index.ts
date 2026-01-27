@@ -1,6 +1,9 @@
 export { NodeConfigPanel } from "./node-config-panel";
+export { TemplateLibraryDialog } from "./template-library-dialog";
+export { VersionHistoryDrawer } from "./version-history-drawer";
 export { WorkflowCanvas } from "./workflow-canvas";
 export { WorkflowHeader } from "./workflow-header";
+export { WorkflowIcon, type WorkflowIconSize } from "./workflow-icon";
 export { WorkflowSidebar } from "./workflow-sidebar";
 
 // Node components

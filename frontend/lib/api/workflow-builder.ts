@@ -36,8 +36,11 @@ import {
   type BackendWorkflowConnection,
   type BackendWorkflowNode,
   type BackendWorkflowWithDetails,
+  type SaveCanvasResponse,
+  type TransformedSaveCanvasResponse,
   transformConnectionToFrontend,
   transformNodeToFrontend,
+  transformSaveCanvasResponse,
   transformWorkflowToFrontend,
 } from "./workflow-transformers";
 
@@ -119,18 +122,21 @@ export const workflowBuilderApi = {
 
   /**
    * Save entire canvas state (nodes, connections, variables)
-   * This is the main operation for the visual editor
-   * Transforms backend response to frontend format
+   * This is the main operation for the visual editor.
+   *
+   * IMPORTANT: Returns only the processed nodes/connections with their final IDs.
+   * The caller must merge this with the existing workflow state.
+   * Temp IDs from the frontend will be replaced with real UUIDs from the backend.
    */
   saveCanvas: async (
     workflowId: string,
     data: SaveCanvasDto,
-  ): Promise<WorkflowWithDetails> => {
-    const response = await apiClient.post<BackendWorkflowWithDetails>(
+  ): Promise<TransformedSaveCanvasResponse> => {
+    const response = await apiClient.post<SaveCanvasResponse>(
       `/workflow-builder/workflows/${workflowId}/canvas`,
       data,
     );
-    return transformWorkflowToFrontend(response);
+    return transformSaveCanvasResponse(response);
   },
 
   /**

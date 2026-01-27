@@ -12,6 +12,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TemplateLibraryDialog, WorkflowIcon } from "@/components/workflow";
 import { useNotification } from "@/hooks/use-notification";
 import { workflowBuilderApi } from "@/lib/api/workflow-builder";
 import type { Workflow, WorkflowStatus } from "@/lib/types/workflow.types";
@@ -20,6 +21,7 @@ import {
   Copy,
   Download,
   GitBranch,
+  Layers,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -59,12 +61,11 @@ function WorkflowCard({
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-2">
-            <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-lg"
-              style={{ backgroundColor: workflow.color || "#6366f1" }}
-            >
-              {workflow.icon || "⚡"}
-            </div>
+            <WorkflowIcon
+              icon={workflow.icon}
+              color={workflow.color}
+              size="lg"
+            />
             <div>
               <CardTitle className="text-base font-medium">
                 {workflow.name}
@@ -169,6 +170,7 @@ export default function WorkflowsPage() {
   const [statusFilter, setStatusFilter] = useState<WorkflowStatus | "all">(
     "all",
   );
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
 
   const fetchWorkflows = useCallback(async () => {
     try {
@@ -272,6 +274,10 @@ export default function WorkflowsPage() {
           <p className="text-muted-foreground">{t("description")}</p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setTemplateDialogOpen(true)}>
+            <Layers className="mr-2 h-4 w-4" />
+            Templates
+          </Button>
           <Button variant="outline">
             <Download className="mr-2 h-4 w-4" />
             {t("actions.import")}
@@ -346,6 +352,12 @@ export default function WorkflowsPage() {
           ))}
         </div>
       )}
+
+      {/* Template Library Dialog */}
+      <TemplateLibraryDialog
+        isOpen={templateDialogOpen}
+        onClose={() => setTemplateDialogOpen(false)}
+      />
     </div>
   );
 }

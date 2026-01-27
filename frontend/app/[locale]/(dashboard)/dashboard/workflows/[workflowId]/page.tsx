@@ -17,6 +17,15 @@ import { useTranslations } from "next-intl";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+/**
+ * Helper to check if a string is a valid UUID
+ */
+function isValidUUID(str: string): boolean {
+  const uuidRegex =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(str);
+}
+
 export default function WorkflowEditorPage() {
   const params = useParams();
   const router = useRouter();
@@ -30,16 +39,40 @@ export default function WorkflowEditorPage() {
   // Ref to store the navigation callback for when user confirms leaving
   const pendingNavigationRef = useRef<(() => void) | null>(null);
 
+  // Ref to track when we're applying save results to prevent re-marking as unsaved
+  const isApplyingSaveResultRef = useRef(false);
+
+  /**
+   * Save version counter - incremented after each save to help canvas
+   * identify when new data comes from a save operation vs user edit
+   */
+  const saveVersionRef = useRef(0);
+
   const [workflow, setWorkflow] = useState<WorkflowWithDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+
+  // Track original metadata to detect changes that need separate API call
+  const originalMetadataRef = useRef<{
+    name: string;
+    description?: string | null;
+    icon?: string | null;
+    color?: string | null;
+  } | null>(null);
 
   const fetchWorkflow = useCallback(async () => {
     try {
       setLoading(true);
       const data = await workflowBuilderApi.get(workflowId);
       setWorkflow(data);
+      // Store original metadata for change detection
+      originalMetadataRef.current = {
+        name: data.name,
+        description: data.description,
+        icon: data.icon,
+        color: data.color,
+      };
     } catch (error) {
       addNotification(
         `${t("errors.loadFailed")}: ${error instanceof Error ? error.message : "Unknown error"}`,
@@ -88,9 +121,47 @@ export default function WorkflowEditorPage() {
 
     try {
       setSaving(true);
-      const updatedWorkflow = await workflowBuilderApi.saveCanvas(workflowId, {
+
+      // Check if workflow metadata has changed (name, description, icon, color)
+      const original = originalMetadataRef.current;
+      const metadataChanged =
+        original &&
+        (workflow.name !== original.name ||
+          workflow.description !== original.description ||
+          workflow.icon !== original.icon ||
+          workflow.color !== original.color);
+
+      // If metadata changed, update it via the update endpoint
+      if (metadataChanged) {
+        await workflowBuilderApi.update(workflowId, {
+          name: workflow.name,
+          description: workflow.description ?? undefined,
+          icon: workflow.icon ?? undefined,
+          color: workflow.color ?? undefined,
+        });
+        // Update original metadata ref after successful save
+        originalMetadataRef.current = {
+          name: workflow.name,
+          description: workflow.description,
+          icon: workflow.icon,
+          color: workflow.color,
+        };
+      }
+
+      // Create a mapping of temp IDs to their position in the arrays
+      // This helps us match returned UUIDs back to the original items
+      const nodeIdToIndex = new Map(
+        workflow.nodes.map((node, index) => [node.id, index]),
+      );
+      const connIdToIndex = new Map(
+        workflow.connections.map((conn, index) => [conn.id, index]),
+      );
+
+      // Build the save payload with the frontend's current state
+      const savePayload = {
         nodes: workflow.nodes.map((node) => ({
-          id: node.id,
+          id: isValidUUID(node.id) ? node.id : undefined, // Only send valid UUIDs
+          tempId: !isValidUUID(node.id) ? node.id : undefined, // Send temp ID for new nodes
           nodeType: node.type, // Backend expects 'nodeType', not 'type'
           label: node.name,
           description: node.description || undefined,
@@ -98,35 +169,76 @@ export default function WorkflowEditorPage() {
           positionX: node.positionX,
           positionY: node.positionY,
         })),
-        connections: workflow.connections.map((conn) => ({
-          id: conn.id,
-          fromNodeId: conn.sourceNodeId, // Backend expects 'fromNodeId'
-          toNodeId: conn.targetNodeId, // Backend expects 'toNodeId'
-          branch:
-            (conn.type as "default" | "true" | "false" | "timeout" | "error") ||
-            "default",
-          label: conn.label || undefined,
-          conditionConfig: conn.condition
-            ? (conn.condition as unknown as Record<string, unknown>)
-            : undefined,
-        })),
+        connections: workflow.connections.map((conn) => {
+          // Determine branch from type or sourceHandle
+          let branch: string = conn.type || "default";
+          if (
+            conn.sourceHandle &&
+            conn.sourceHandle !== "output" &&
+            conn.sourceHandle !== "default"
+          ) {
+            branch = conn.sourceHandle;
+          }
+
+          // Get the source and target node IDs
+          // These might be temp IDs if the nodes were just created
+          const sourceNodeId = conn.sourceNodeId;
+          const targetNodeId = conn.targetNodeId;
+
+          return {
+            id: isValidUUID(conn.id) ? conn.id : undefined, // Only send valid UUIDs
+            fromNodeId: sourceNodeId,
+            toNodeId: targetNodeId,
+            branch: branch as
+              | "default"
+              | "true"
+              | "false"
+              | "timeout"
+              | "error",
+            label: conn.label || undefined,
+            conditionConfig: conn.condition
+              ? (conn.condition as unknown as Record<string, unknown>)
+              : undefined,
+          };
+        }),
         viewportX: workflow.canvasState?.panX,
         viewportY: workflow.canvasState?.panY,
         viewportZoom: workflow.canvasState?.zoom,
-      });
+      };
 
-      // Merge the save response with existing workflow state
-      // saveCanvas only returns { nodes, connections }, so we preserve other fields
+      // Save canvas and get the response with proper UUIDs
+      const saveResponse = await workflowBuilderApi.saveCanvas(
+        workflowId,
+        savePayload,
+      );
+
+      // Mark that we're applying save results to prevent sync effects from re-marking as unsaved
+      isApplyingSaveResultRef.current = true;
+      saveVersionRef.current += 1;
+
+      // CRITICAL: Completely replace the workflow nodes and connections with the saved versions
+      // The backend returns ALL nodes and connections with proper UUIDs
+      // We must use these to ensure IDs are consistent
       setWorkflow((prev) => {
-        if (!prev) return updatedWorkflow;
+        if (!prev) return prev;
         return {
           ...prev,
-          ...updatedWorkflow,
+          nodes: saveResponse.nodes,
+          connections: saveResponse.connections,
           // Ensure variables are preserved (saveCanvas doesn't return them)
           variables: prev.variables ?? [],
         };
       });
+
+      // Clear unsaved changes flag
       unsavedChangesGuard.setHasUnsavedChanges(false);
+
+      // Use a longer delay to ensure React has fully processed the state update
+      // and the canvas has re-rendered with the new data
+      setTimeout(() => {
+        isApplyingSaveResultRef.current = false;
+      }, 200);
+
       addNotification(t("notifications.saved"), "success");
     } catch (error) {
       addNotification(
@@ -180,7 +292,11 @@ export default function WorkflowEditorPage() {
   const handleWorkflowUpdate = useCallback(
     (updates: Partial<WorkflowWithDetails>) => {
       setWorkflow((prev) => (prev ? { ...prev, ...updates } : null));
-      unsavedChangesGuard.setHasUnsavedChanges(true);
+      // Only mark as unsaved if we're not applying save results
+      // This prevents the sync effects from re-marking as unsaved after a save
+      if (!isApplyingSaveResultRef.current) {
+        unsavedChangesGuard.setHasUnsavedChanges(true);
+      }
     },
     [unsavedChangesGuard],
   );
@@ -200,7 +316,10 @@ export default function WorkflowEditorPage() {
           ),
         };
       });
-      unsavedChangesGuard.setHasUnsavedChanges(true);
+      // Only mark as unsaved if we're not applying save results
+      if (!isApplyingSaveResultRef.current) {
+        unsavedChangesGuard.setHasUnsavedChanges(true);
+      }
     },
     [unsavedChangesGuard],
   );
@@ -248,6 +367,7 @@ export default function WorkflowEditorPage() {
           onPublish={handlePublish}
           onUpdate={handleWorkflowUpdate}
           onBack={handleNavigateBack}
+          onVersionRestore={fetchWorkflow}
         />
         <div className="flex-1 flex overflow-hidden">
           <WorkflowSidebar

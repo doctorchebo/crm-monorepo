@@ -1732,6 +1732,53 @@
         "noVariables": "No variables defined",
         "workflowSettings": "Workflow Settings"
       }
+    },
+    "versionHistory": {
+      "title": "Version History",
+      "description": "View and restore previous versions of this workflow",
+      "versionLabel": "Version {version}",
+      "current": "Current",
+      "publishedBy": "User #{userId}",
+      "nodesCount": "{count, plural, =0 {No nodes} =1 {1 node} other {# nodes}}",
+      "connectionsCount": "{count, plural, =0 {No connections} =1 {1 connection} other {# connections}}",
+      "restore": "Restore",
+      "restoring": "Restoring...",
+      "retry": "Try Again",
+      "empty": {
+        "title": "No version history",
+        "description": "Publish your workflow to start tracking versions"
+      },
+      "errors": {
+        "loadFailed": "Failed to load version history",
+        "restoreFailed": "Failed to restore version"
+      },
+      "notifications": {
+        "restored": "Workflow restored",
+        "restoredMessage": "Restored to version {version}"
+      }
+    },
+    "templates": {
+      "title": "Workflow Templates",
+      "description": "Start with a pre-built template to save time",
+      "searchPlaceholder": "Search templates...",
+      "useTemplate": "Use Template",
+      "preview": "Preview",
+      "featured": "Featured",
+      "allCategories": "All Categories",
+      "noResults": "No templates found",
+      "noResultsDescription": "Try adjusting your search or filter",
+      "empty": {
+        "title": "No templates available",
+        "description": "Check back later for new templates"
+      },
+      "errors": {
+        "loadFailed": "Failed to load templates",
+        "useFailed": "Failed to create workflow from template"
+      },
+      "notifications": {
+        "created": "Workflow created",
+        "createdMessage": "Created from template: {name}"
+      }
     }
   }
 }

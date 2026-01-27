@@ -27,7 +27,9 @@ import {
   Upload,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { VersionHistoryDrawer } from "./version-history-drawer";
+import { WorkflowIcon } from "./workflow-icon";
 
 interface WorkflowHeaderProps {
   workflow: WorkflowWithDetails;
@@ -41,6 +43,10 @@ interface WorkflowHeaderProps {
    * Parent component should handle navigation guard logic.
    */
   onBack: () => void;
+  /**
+   * Called when a version is restored. Parent should refetch the workflow.
+   */
+  onVersionRestore?: () => void;
 }
 
 /**
@@ -70,10 +76,17 @@ export function WorkflowHeader({
   onPublish,
   onUpdate,
   onBack,
+  onVersionRestore,
 }: WorkflowHeaderProps) {
   const t = useTranslations("workflows.editor");
   const [editingName, setEditingName] = useState(false);
   const [name, setName] = useState(workflow.name);
+  const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
+
+  // Sync local name state when workflow.name prop changes (e.g., after version restore)
+  useEffect(() => {
+    setName(workflow.name);
+  }, [workflow.name]);
 
   const handleNameSubmit = () => {
     if (name.trim() && name !== workflow.name) {
@@ -100,12 +113,7 @@ export function WorkflowHeader({
 
       {/* Workflow icon and name */}
       <div className="flex items-center gap-2">
-        <div
-          className="w-7 h-7 rounded-md flex items-center justify-center text-sm"
-          style={{ backgroundColor: workflow.color || "#6366f1" }}
-        >
-          {workflow.icon || "⚡"}
-        </div>
+        <WorkflowIcon icon={workflow.icon} color={workflow.color} size="md" />
 
         {editingName ? (
           <Input
@@ -209,7 +217,7 @@ export function WorkflowHeader({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setVersionHistoryOpen(true)}>
             <History className="mr-2 h-4 w-4" />
             {t("actions.versionHistory")}
           </DropdownMenuItem>
@@ -229,6 +237,18 @@ export function WorkflowHeader({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {/* Version History Drawer */}
+      <VersionHistoryDrawer
+        workflowId={workflow.id}
+        currentVersion={workflow.version}
+        isOpen={versionHistoryOpen}
+        onClose={() => setVersionHistoryOpen(false)}
+        onRestore={(version) => {
+          setVersionHistoryOpen(false);
+          onVersionRestore?.();
+        }}
+      />
     </header>
   );
 }

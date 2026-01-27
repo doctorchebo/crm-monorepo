@@ -25,10 +25,13 @@ import {
   CreateNodeDto,
   CreateVariableDto,
   CreateWorkflowDto,
+  CreateWorkflowTemplateCategoryDto,
+  CreateWorkflowTemplateDto,
   DuplicateWorkflowDto,
   ImportWorkflowDto,
   ListExecutionsQueryDto,
   ListWorkflowsQueryDto,
+  ListWorkflowTemplatesQueryDto,
   PublishWorkflowDto,
   SaveWorkflowCanvasDto,
   TriggerWorkflowDto,
@@ -36,6 +39,9 @@ import {
   UpdateNodeDto,
   UpdateVariableDto,
   UpdateWorkflowDto,
+  UpdateWorkflowTemplateCategoryDto,
+  UpdateWorkflowTemplateDto,
+  UseWorkflowTemplateDto,
   WorkflowAnalyticsQueryDto,
 } from '../dto/workflow-builder.dto';
 import { WorkflowBuilderService } from '../services/workflow-builder.service';
@@ -61,7 +67,11 @@ export class WorkflowBuilderController {
     const teamId = await this.workflowBuilderService['getUserTeamId'](
       req.user.userId,
     );
-    return this.workflowBuilderService.createWorkflow(req.user.userId, teamId, dto);
+    return this.workflowBuilderService.createWorkflow(
+      req.user.userId,
+      teamId,
+      dto,
+    );
   }
 
   @Get('workflows')
@@ -177,7 +187,11 @@ export class WorkflowBuilderController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateConnectionDto,
   ) {
-    return this.workflowBuilderService.updateConnection(req.user.userId, id, dto);
+    return this.workflowBuilderService.updateConnection(
+      req.user.userId,
+      id,
+      dto,
+    );
   }
 
   @Delete('connections/:id')
@@ -227,7 +241,11 @@ export class WorkflowBuilderController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: PublishWorkflowDto,
   ) {
-    return this.workflowBuilderService.publishWorkflow(req.user.userId, id, dto);
+    return this.workflowBuilderService.publishWorkflow(
+      req.user.userId,
+      id,
+      dto,
+    );
   }
 
   @Post('workflows/:id/duplicate')
@@ -236,7 +254,11 @@ export class WorkflowBuilderController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: DuplicateWorkflowDto,
   ) {
-    return this.workflowBuilderService.duplicateWorkflow(req.user.userId, id, dto);
+    return this.workflowBuilderService.duplicateWorkflow(
+      req.user.userId,
+      id,
+      dto,
+    );
   }
 
   @Get('workflows/:id/versions')
@@ -400,6 +422,78 @@ export class WorkflowBuilderController {
     return this.workflowBuilderService.resetChatWorkflowState(
       req.user.userId,
       chatId,
+    );
+  }
+
+  // ============================================================================
+  // Template Categories
+  // ============================================================================
+
+  @Get('templates/categories')
+  async listTemplateCategories() {
+    return this.workflowBuilderService.listTemplateCategories();
+  }
+
+  @Post('templates/categories')
+  async createTemplateCategory(@Body() dto: CreateWorkflowTemplateCategoryDto) {
+    return this.workflowBuilderService.createTemplateCategory(dto);
+  }
+
+  @Patch('templates/categories/:id')
+  async updateTemplateCategory(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateWorkflowTemplateCategoryDto,
+  ) {
+    return this.workflowBuilderService.updateTemplateCategory(id, dto);
+  }
+
+  @Delete('templates/categories/:id')
+  async deleteTemplateCategory(@Param('id', ParseUUIDPipe) id: string) {
+    return this.workflowBuilderService.deleteTemplateCategory(id);
+  }
+
+  // ============================================================================
+  // Workflow Templates
+  // ============================================================================
+
+  @Get('templates')
+  async listTemplates(@Query() query: ListWorkflowTemplatesQueryDto) {
+    return this.workflowBuilderService.listTemplates(query);
+  }
+
+  @Get('templates/:id')
+  async getTemplate(@Param('id', ParseUUIDPipe) id: string) {
+    return this.workflowBuilderService.getTemplate(id);
+  }
+
+  @Post('templates')
+  async createTemplate(@Body() dto: CreateWorkflowTemplateDto) {
+    return this.workflowBuilderService.createTemplate(dto);
+  }
+
+  @Patch('templates/:id')
+  async updateTemplate(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateWorkflowTemplateDto,
+  ) {
+    return this.workflowBuilderService.updateTemplate(id, dto);
+  }
+
+  @Delete('templates/:id')
+  async deleteTemplate(@Param('id', ParseUUIDPipe) id: string) {
+    return this.workflowBuilderService.deleteTemplate(id);
+  }
+
+  @Post('templates/:id/use')
+  async useTemplate(
+    @Req() req: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UseWorkflowTemplateDto,
+  ) {
+    return this.workflowBuilderService.createWorkflowFromTemplate(
+      req.user.userId,
+      id,
+      dto,
     );
   }
 }
