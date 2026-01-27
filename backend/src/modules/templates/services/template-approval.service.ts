@@ -1056,7 +1056,7 @@ export class TemplateApprovalService {
     const rejectedVersion = versions.find((v) => v.status === 'rejected');
 
     let newStatus = 'draft';
-    let newActiveVersion = null;
+    let newActiveVersion: number | null = null;
 
     if (approvedVersion) {
       newStatus = 'approved';

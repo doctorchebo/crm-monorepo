@@ -31,6 +31,7 @@
     "senders": "Remitentes",
     "connectWhatsapp": "Conectar WhatsApp",
     "kanban": "Kanban",
+    "workflows": "Flujos de Trabajo",
     "knowledgeBase": "Base de Conocimiento",
     "overview": "Resumen",
     "objects": "Objetos",
@@ -1601,5 +1602,87 @@
     "qualityHigh": "Alta Calidad",
     "qualityMedium": "Calidad Media",
     "qualityLow": "Baja Calidad"
+  },
+  "workflows": {
+    "title": "Flujos de Trabajo",
+    "description": "Construye flujos de trabajo automatizados con un lienzo visual",
+    "newWorkflowName": "Nuevo Flujo de Trabajo",
+    "noDescription": "Sin descripción",
+    "searchPlaceholder": "Buscar flujos de trabajo...",
+    "updatedAt": "Actualizado {date}",
+    "status": {
+      "draft": "Borrador",
+      "published": "Publicado",
+      "archived": "Archivado",
+      "disabled": "Deshabilitado"
+    },
+    "filters": {
+      "all": "Todos",
+      "draft": "Borradores",
+      "published": "Publicados",
+      "archived": "Archivados"
+    },
+    "actions": {
+      "create": "Crear Flujo",
+      "edit": "Editar",
+      "duplicate": "Duplicar",
+      "archive": "Archivar",
+      "unarchive": "Desarchivar",
+      "delete": "Eliminar",
+      "import": "Importar"
+    },
+    "emptyState": {
+      "title": "Aún no hay flujos de trabajo",
+      "description": "Crea tu primer flujo de trabajo para automatizar las interacciones con clientes"
+    },
+    "notifications": {
+      "duplicated": "Flujo duplicado",
+      "duplicatedMessage": "Copia creada: {name}",
+      "deleted": "Flujo eliminado",
+      "deletedMessage": "El flujo de trabajo ha sido eliminado permanentemente",
+      "archived": "Flujo archivado",
+      "unarchived": "Flujo desarchivado"
+    },
+    "errors": {
+      "loadFailed": "Error al cargar flujos de trabajo",
+      "createFailed": "Error al crear flujo de trabajo",
+      "duplicateFailed": "Error al duplicar flujo de trabajo",
+      "deleteFailed": "Error al eliminar flujo de trabajo",
+      "archiveFailed": "Error al archivar flujo de trabajo"
+    },
+    "editor": {
+      "unsavedChanges": "Cambios sin guardar",
+      "status": {
+        "draft": "Borrador",
+        "published": "Publicado",
+        "archived": "Archivado",
+        "disabled": "Deshabilitado"
+      },
+      "actions": {
+        "save": "Guardar",
+        "publish": "Publicar",
+        "published": "Publicado",
+        "versionHistory": "Historial de Versiones",
+        "export": "Exportar",
+        "import": "Importar",
+        "settings": "Configuración"
+      },
+      "notifications": {
+        "saved": "Flujo guardado",
+        "published": "Flujo publicado",
+        "publishedMessage": "La versión {version} está activa"
+      },
+      "errors": {
+        "loadFailed": "Error al cargar flujo de trabajo",
+        "saveFailed": "Error al guardar flujo de trabajo",
+        "publishFailed": "Error al publicar flujo de trabajo"
+      },
+      "sidebar": {
+        "searchNodes": "Buscar nodos...",
+        "variables": "Variables",
+        "noVariables": "Sin variables definidas",
+        "workflowSettings": "Configuración del Flujo"
+      }
+    }
   }
 }

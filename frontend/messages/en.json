@@ -43,6 +43,7 @@
     "senders": "Senders",
     "connectWhatsapp": "Connect WhatsApp",
     "kanban": "Kanban",
+    "workflows": "Workflows",
     "knowledgeBase": "Knowledge Base",
     "overview": "Overview",
     "objects": "Objects",
@@ -1640,5 +1641,87 @@
     "qualityHigh": "High Quality",
     "qualityMedium": "Medium Quality",
     "qualityLow": "Low Quality"
+  },
+  "workflows": {
+    "title": "Workflows",
+    "description": "Build automated workflows with visual canvas",
+    "newWorkflowName": "New Workflow",
+    "noDescription": "No description",
+    "searchPlaceholder": "Search workflows...",
+    "updatedAt": "Updated {date}",
+    "status": {
+      "draft": "Draft",
+      "published": "Published",
+      "archived": "Archived",
+      "disabled": "Disabled"
+    },
+    "filters": {
+      "all": "All",
+      "draft": "Drafts",
+      "published": "Published",
+      "archived": "Archived"
+    },
+    "actions": {
+      "create": "Create Workflow",
+      "edit": "Edit",
+      "duplicate": "Duplicate",
+      "archive": "Archive",
+      "unarchive": "Unarchive",
+      "delete": "Delete",
+      "import": "Import"
+    },
+    "emptyState": {
+      "title": "No workflows yet",
+      "description": "Create your first workflow to automate customer interactions"
+    },
+    "notifications": {
+      "duplicated": "Workflow duplicated",
+      "duplicatedMessage": "Created copy: {name}",
+      "deleted": "Workflow deleted",
+      "deletedMessage": "The workflow has been permanently deleted",
+      "archived": "Workflow archived",
+      "unarchived": "Workflow unarchived"
+    },
+    "errors": {
+      "loadFailed": "Failed to load workflows",
+      "createFailed": "Failed to create workflow",
+      "duplicateFailed": "Failed to duplicate workflow",
+      "deleteFailed": "Failed to delete workflow",
+      "archiveFailed": "Failed to archive workflow"
+    },
+    "editor": {
+      "unsavedChanges": "Unsaved changes",
+      "status": {
+        "draft": "Draft",
+        "published": "Published",
+        "archived": "Archived",
+        "disabled": "Disabled"
+      },
+      "actions": {
+        "save": "Save",
+        "publish": "Publish",
+        "published": "Published",
+        "versionHistory": "Version History",
+        "export": "Export",
+        "import": "Import",
+        "settings": "Settings"
+      },
+      "notifications": {
+        "saved": "Workflow saved",
+        "published": "Workflow published",
+        "publishedMessage": "Version {version} is now live"
+      },
+      "errors": {
+        "loadFailed": "Failed to load workflow",
+        "saveFailed": "Failed to save workflow",
+        "publishFailed": "Failed to publish workflow"
+      },
+      "sidebar": {
+        "searchNodes": "Search nodes...",
+        "variables": "Variables",
+        "noVariables": "No variables defined",
+        "workflowSettings": "Workflow Settings"
+      }
+    }
   }
 }

@@ -2,10 +2,10 @@
 
 import { deleteAccount, updatePassword } from "@/app/[locale]/(login)/actions";
 import { Button } from "@/components/ui/button";
-import { PageLayout } from "@/components/ui/page-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageLayout } from "@/components/ui/page-layout";
 import { Loader2, Lock, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useActionState } from "react";
@@ -36,6 +36,7 @@ export default function SecurityPage() {
     FormData
   >(deleteAccount, {});
 
+  return (
     <PageLayout title={t("title")}>
       <Card className="mb-8">
         <CardHeader>

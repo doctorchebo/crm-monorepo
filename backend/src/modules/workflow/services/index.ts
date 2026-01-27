@@ -10,6 +10,10 @@ export * from './rule-engine.service';
 export * from './stage.service';
 export * from './workflow-engine';
 
+// Visual Workflow Builder
+export * from './workflow-builder.service';
+export * from './workflow-execution.engine';
+
 // Anti-ban safeguards
 export * from './ai-action-logger.service';
 export * from './anti-ban-safeguard.service';

@@ -3,6 +3,7 @@ import {
   BookOpen,
   Bot,
   FileText,
+  GitBranch,
   Home,
   Layers,
   LayoutGrid,
@@ -73,6 +74,12 @@ export const navigationConfig: NavItem[] = [
     labelKey: "dashboard.kanban",
     icon: LayoutGrid,
     href: "/dashboard/kanban",
+  },
+  {
+    id: "workflows",
+    labelKey: "dashboard.workflows",
+    icon: GitBranch,
+    href: "/dashboard/workflows",
   },
   {
     id: "knowledge-base",

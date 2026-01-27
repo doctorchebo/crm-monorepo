@@ -46,7 +46,9 @@ import { WhatsAppModule } from '@modules/whatsapp/whatsapp.module';
 import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ProfilePictureUrlService } from '@shared/services/profile-picture-url.service';
+import { WorkflowBuilderController } from './controllers/workflow-builder.controller';
 import {
   AiActionLoggerService,
   AiConfigurationService,
@@ -64,7 +66,9 @@ import {
   StageService,
   UsageThrottleService,
   UsageTrackingService,
+  WorkflowBuilderService,
   WorkflowEngineService,
+  WorkflowExecutionEngine,
   WorkflowStatusService,
 } from './services';
 import { WorkflowController } from './workflow.controller';
@@ -73,13 +77,14 @@ import { WorkflowController } from './workflow.controller';
   imports: [
     ConfigModule,
     AiMemoryModule,
+    ScheduleModule.forRoot(),
     forwardRef(() => AIReplyModule),
     forwardRef(() => ChatsModule),
     forwardRef(() => KnowledgeBaseModule),
     forwardRef(() => WhatsAppModule), // Fix circular dependency
     EventEmitterModule.forRoot(),
   ],
-  controllers: [WorkflowController],
+  controllers: [WorkflowController, WorkflowBuilderController],
   providers: [
     // Core services
     LLMService,
@@ -87,6 +92,10 @@ import { WorkflowController } from './workflow.controller';
     RuleEngineService,
     HandoffService,
     PolicySimulationService,
+
+    // Visual Workflow Builder
+    WorkflowBuilderService,
+    WorkflowExecutionEngine,
 
     // AI configuration
     AiConfigurationService,
@@ -122,6 +131,10 @@ import { WorkflowController } from './workflow.controller';
     HandoffService,
     LLMService,
     PolicySimulationService,
+
+    // Visual Workflow Builder
+    WorkflowBuilderService,
+    WorkflowExecutionEngine,
 
     // AI configuration
     AiConfigurationService,

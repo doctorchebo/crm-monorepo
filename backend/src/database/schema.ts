@@ -2594,3 +2594,6 @@ export * from './knowledge-base.schema';
 
 // Export AI context schema (lightweight replacement for AI memory)
 export * from './ai-context.schema';
+
+// Export workflow builder schema (visual canvas-based automation)
+export * from './workflow-builder.schema';

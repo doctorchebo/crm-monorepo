@@ -1,21 +1,22 @@
+export * from './workflow-builder.types';
 export * from './workflow.types';
 // Export workflow-engine types (WorkflowStageConfig comes from workflow.types)
 export {
   AI_CONFIDENCE_THRESHOLD,
   AUTO_HANDOFF_CATEGORIES,
   HANDOFF_KEYWORDS,
-  type ProcessMessageInput,
-  type MediaAttachment,
   type AiResponseResult,
-  type ProcessStageTransition,
-  type PolicyCheckResult,
-  type ProcessMessageResult,
+  type AiStatusResult,
+  type ChatWorkflowStatus,
   type ClassificationResultType,
-  type WorkflowStageSummary,
-  type WorkflowSummary,
   type HandoffStatusInfo,
   type LastTransitionInfo,
-  type ChatWorkflowStatus,
-  type AiStatusResult,
+  type MediaAttachment,
   type MediaPreCheckResult,
+  type PolicyCheckResult,
+  type ProcessMessageInput,
+  type ProcessMessageResult,
+  type ProcessStageTransition,
+  type WorkflowStageSummary,
+  type WorkflowSummary,
 } from './workflow-engine.types';
