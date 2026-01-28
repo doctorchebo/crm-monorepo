@@ -36,23 +36,10 @@ import {
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { SearchInput } from "@/components/ui/search-input";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 
-/** Debounce hook for search */
-function useDebounce<T>(value: T, delay: number): T {
-  const [debouncedValue, setDebouncedValue] = useState<T>(value);
 
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedValue(value);
-    }, delay);
-
-    return () => {
-      clearTimeout(handler);
-    };
-  }, [value, delay]);
-
-  return debouncedValue;
-}
 
 const STATUS_COLORS: Record<WorkflowStatus, string> = {
   draft:
@@ -247,8 +234,12 @@ export default function WorkflowsPage() {
   const { addNotification } = useNotification();
 
   // Filter state (managed separately for controlled inputs)
-  const [search, setSearch] = useState("");
-  const debouncedSearch = useDebounce(search, 300);
+  const {
+    value: search,
+    debouncedValue: debouncedSearch,
+    setValue: setSearch,
+  } = useDebouncedValue("", { delay: 300 });
+
   const [statusFilter, setStatusFilter] = useState<WorkflowStatus | "all">(
     "all",
   );
@@ -421,12 +412,10 @@ export default function WorkflowsPage() {
       <div className="flex flex-col lg:flex-row items-start lg:items-center gap-4 justify-between">
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
           <div className="relative flex-1 min-w-[250px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
+            <SearchInput
               placeholder={t("searchPlaceholder")}
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
+              onChange={setSearch}
             />
           </div>
           <Tabs

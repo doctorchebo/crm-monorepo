@@ -44,6 +44,8 @@ import { useTranslations } from "next-intl";
 import { useParams, useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import useSWR from "swr";
+import { SearchInput } from "@/components/ui/search-input";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 
 export default function SendersPage() {
   const router = useRouter();
@@ -53,7 +55,12 @@ export default function SendersPage() {
   const tCommon = useTranslations("common");
   const { addNotification } = useNotification();
 
-  const [searchQuery, setSearchQuery] = useState("");
+  const {
+    value: searchQuery,
+    debouncedValue: debouncedSearch,
+    setValue: setSearchQuery,
+  } = useDebouncedValue("", { delay: 300 });
+
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [senderToDelete, setSenderToDelete] = useState<Sender | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -83,11 +90,11 @@ export default function SendersPage() {
   const filteredSenders = useMemo(() => {
     return (senders as Sender[]).filter(
       (sender: Sender) =>
-        sender.phoneNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        sender.displayName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        sender.verifiedName?.toLowerCase().includes(searchQuery.toLowerCase())
+        sender.phoneNumber.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+        sender.displayName?.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+        sender.verifiedName?.toLowerCase().includes(debouncedSearch.toLowerCase())
     );
-  }, [senders, searchQuery]);
+  }, [senders, debouncedSearch]);
 
   // Sync from WABA
   const handleSync = async () => {
@@ -341,10 +348,10 @@ export default function SendersPage() {
 
       {/* Search Bar */}
       <Card className="p-4">
-        <Input
+        <SearchInput
           placeholder={t("searchPlaceholder")}
           value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          onChange={setSearchQuery}
           className="w-full"
         />
       </Card>

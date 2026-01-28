@@ -25,7 +25,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
 import {
   Select,
   SelectContent,
@@ -70,6 +70,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useState } from "react";
 import useSWR from "swr";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 
 // ==================== Sub-components ====================
 
@@ -240,7 +241,12 @@ export function ObjectList({ templateId: initialTemplateId }: ObjectListProps) {
   const tCommon = useTranslations("knowledgeBase.common");
 
   // Filter state
-  const [search, setSearch] = useState(searchParams.get("search") || "");
+  const {
+    value: search,
+    debouncedValue: debouncedSearch,
+    setValue: setSearch,
+  } = useDebouncedValue(searchParams.get("search") || "", { delay: 300 });
+
   const [status, setStatus] = useState<ObjectStatus | "all">(
     (searchParams.get("status") as ObjectStatus) || "all"
   );
@@ -266,10 +272,10 @@ export function ObjectList({ templateId: initialTemplateId }: ObjectListProps) {
 
   // Fetch objects with filters
   const { data, isLoading, mutate } = useSWR(
-    ["knowledge-base-objects", search, status, templateId, page],
+    ["knowledge-base-objects", debouncedSearch, status, templateId, page],
     () =>
       knowledgeBaseApi.listObjects({
-        search: search || undefined,
+        search: debouncedSearch || undefined,
         status: status !== "all" ? status : undefined,
         templateId: templateId !== "all" ? templateId : undefined,
         page,
@@ -436,15 +442,13 @@ export function ObjectList({ templateId: initialTemplateId }: ObjectListProps) {
           <div className="flex flex-col sm:flex-row gap-4">
             {/* Search */}
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
+              <SearchInput
                 placeholder={t("searchPlaceholder")}
                 value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
+                onChange={(value) => {
+                  setSearch(value);
                   setPage(1);
                 }}
-                className="pl-10"
               />
             </div>
 

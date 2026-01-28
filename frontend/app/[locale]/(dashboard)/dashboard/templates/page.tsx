@@ -33,6 +33,8 @@ import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
 import useSWR from "swr";
+import { SearchInput } from "@/components/ui/search-input";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 
 /**
  * Template interface matching the API response
@@ -51,7 +53,12 @@ export default function TemplatesPage() {
   // Protect this route - redirect to login if token is missing or expired
   useAuthProtection();
 
-  const [searchQuery, setSearchQuery] = useState("");
+  const {
+    value: searchQuery,
+    debouncedValue: debouncedSearch,
+    setValue: setSearchQuery,
+  } = useDebouncedValue("", { delay: 300 });
+
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [templateToDelete, setTemplateToDelete] = useState<Template | null>(
     null
@@ -129,7 +136,7 @@ export default function TemplatesPage() {
   const filteredTemplates = useMemo(() => {
     return (templates as Template[])
       .filter((template) => {
-        const searchLower = searchQuery.toLowerCase();
+        const searchLower = debouncedSearch.toLowerCase();
         const nameToSearch = (
           template.displayName || template.name
         ).toLowerCase();
@@ -146,7 +153,7 @@ export default function TemplatesPage() {
         const dateB = new Date(b.updatedAt).getTime();
         return dateB - dateA;
       });
-  }, [templates, searchQuery]);
+  }, [templates, debouncedSearch]);
 
   // Delete template handler
   const handleDelete = async () => {
@@ -378,10 +385,10 @@ export default function TemplatesPage() {
       className="space-y-6"
     >
       {/* Search */}
-      <Input
+      <SearchInput
         placeholder={t("searchPlaceholder") || "Search templates..."}
         value={searchQuery}
-        onChange={(e) => setSearchQuery(e.target.value)}
+        onChange={setSearchQuery}
       />
 
       {/* Templates Grid */}

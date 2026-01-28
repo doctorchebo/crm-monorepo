@@ -31,6 +31,8 @@ import {
 import { useTranslations } from "next-intl";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { SearchInput } from "@/components/ui/search-input";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 
 interface Sender {
   id: number;
@@ -38,22 +40,7 @@ interface Sender {
   displayName?: string;
 }
 
-/** Debounce hook for search */
-function useDebounce<T>(value: T, delay: number): T {
-  const [debouncedValue, setDebouncedValue] = useState<T>(value);
 
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedValue(value);
-    }, delay);
-
-    return () => {
-      clearTimeout(handler);
-    };
-  }, [value, delay]);
-
-  return debouncedValue;
-}
 
 function formatDateTime(dateString: string | null): string {
   if (!dateString) return "";
@@ -102,8 +89,11 @@ export default function ContactsPage() {
   useAuthProtection();
 
   // Filter state (managed separately for controlled inputs)
-  const [searchQuery, setSearchQuery] = useState("");
-  const debouncedSearch = useDebounce(searchQuery, 300);
+  const {
+    value: searchQuery,
+    debouncedValue: debouncedSearch,
+    setValue: setSearchQuery,
+  } = useDebouncedValue("", { delay: 300 });
 
   // Modal and dialog state
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
@@ -290,12 +280,10 @@ export default function ContactsPage() {
       {/* Search and Pagination Controls */}
       <div className="flex flex-col sm:flex-row gap-4 justify-between items-end sm:items-center">
         <div className="relative w-full sm:w-auto sm:min-w-[300px]">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
+          <SearchInput
             placeholder={t("searchContactsPlaceholder")}
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9"
+            onChange={setSearchQuery}
           />
         </div>
 

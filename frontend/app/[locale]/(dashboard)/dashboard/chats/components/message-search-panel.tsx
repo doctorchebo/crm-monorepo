@@ -19,13 +19,14 @@ import {
   Image,
   Loader2,
   Mic,
-  Search,
   User,
   Video,
   X,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { SearchInput } from "@/components/ui/search-input";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 
 // Types
 interface MessageSearchResult {
@@ -61,22 +62,7 @@ interface MessageSearchPanelProps {
   onSelectMessage: (messageId: string) => void;
 }
 
-// Debounce hook
-function useDebounce<T>(value: T, delay: number): T {
-  const [debouncedValue, setDebouncedValue] = useState<T>(value);
 
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedValue(value);
-    }, delay);
-
-    return () => {
-      clearTimeout(handler);
-    };
-  }, [value, delay]);
-
-  return debouncedValue;
-}
 
 // Media type icon component
 function MediaTypeIcon({ type }: { type: string }) {
@@ -261,7 +247,13 @@ export function MessageSearchPanel({
   onSelectMessage,
 }: MessageSearchPanelProps) {
   const t = useTranslations("chats.search");
-  const [searchQuery, setSearchQuery] = useState("");
+  
+  const {
+    value: searchQuery,
+    debouncedValue: debouncedQuery,
+    setValue: setSearchQuery,
+  } = useDebouncedValue("", { delay: 300 });
+
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [isJumpingToDate, setIsJumpingToDate] = useState(false);
   const [results, setResults] = useState<MessageSearchResult[]>([]);
@@ -272,9 +264,6 @@ export function MessageSearchPanel({
 
   const resultsContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  // Debounce the search query
-  const debouncedQuery = useDebounce(searchQuery, 300);
 
   // Jump to a specific date - find the first message on or after that date
   const handleJumpToDate = useCallback(
@@ -429,27 +418,13 @@ export function MessageSearchPanel({
       <div className="p-3 border-b space-y-2">
         <div className="flex items-center gap-2">
           {/* Search Input */}
-          <div className="relative flex-1">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              ref={inputRef}
-              type="text"
-              placeholder={t("placeholder")}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-8 h-9"
-            />
-            {searchQuery && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6"
-                onClick={() => setSearchQuery("")}
-              >
-                <X className="h-3 w-3" />
-              </Button>
-            )}
-          </div>
+          <SearchInput
+            ref={inputRef}
+            placeholder={t("placeholder")}
+            value={searchQuery}
+            onChange={setSearchQuery}
+            className="flex-1"
+          />
 
           {/* Date Picker - Jump to Date */}
           <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
