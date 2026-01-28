@@ -702,6 +702,11 @@ interface CreateFormInputProps {
   disabled?: boolean;
   hasError?: boolean;
   type?: string;
+  /**
+   * When true, only allows numeric digits (0-9) to be entered.
+   * Used for phone number fields.
+   */
+  numericOnly?: boolean;
 }
 
 const CreateFormInput = memo(function CreateFormInput({
@@ -712,22 +717,76 @@ const CreateFormInput = memo(function CreateFormInput({
   disabled = false,
   hasError = false,
   type = "text",
+  numericOnly = false,
 }: CreateFormInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [localValue, setLocalValue] = useState(defaultValue);
 
   // Sync from prop only on mount or when defaultValue changes significantly
   useEffect(() => {
-    setLocalValue(defaultValue);
+    const valueToSet = numericOnly ? defaultValue.replace(/\D/g, "") : defaultValue;
+    setLocalValue(valueToSet);
     if (inputRef.current) {
-      inputRef.current.value = defaultValue;
+      inputRef.current.value = valueToSet;
     }
-  }, [defaultValue]);
+  }, [defaultValue, numericOnly]);
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const newValue = e.target.value;
+    let newValue = e.target.value;
+    // Filter to digits only if numericOnly is true
+    if (numericOnly) {
+      newValue = newValue.replace(/\D/g, "");
+      e.target.value = newValue;
+    }
     setLocalValue(newValue);
-  }, []);
+  }, [numericOnly]);
+
+  // Prevent non-digit keys when numericOnly is true
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!numericOnly) return;
+    
+    const allowedKeys = [
+      "Backspace",
+      "Delete",
+      "ArrowLeft",
+      "ArrowRight",
+      "Tab",
+      "Home",
+      "End",
+    ];
+
+    if (allowedKeys.includes(e.key)) return;
+    if (e.ctrlKey || e.metaKey) return;
+    if (!/^\d$/.test(e.key)) {
+      e.preventDefault();
+    }
+  }, [numericOnly]);
+
+  // Handle paste for numericOnly mode
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLInputElement>) => {
+    if (!numericOnly) return;
+    
+    e.preventDefault();
+    const pastedText = e.clipboardData.getData("text");
+    const filteredText = pastedText.replace(/\D/g, "");
+    
+    const input = e.currentTarget;
+    const start = input.selectionStart ?? 0;
+    const end = input.selectionEnd ?? 0;
+    const currentValue = input.value;
+    const newValue =
+      currentValue.substring(0, start) +
+      filteredText +
+      currentValue.substring(end);
+    
+    input.value = newValue;
+    setLocalValue(newValue);
+    
+    const newCursorPosition = start + filteredText.length;
+    requestAnimationFrame(() => {
+      input.setSelectionRange(newCursorPosition, newCursorPosition);
+    });
+  }, [numericOnly]);
 
   // Only notify parent on blur to minimize re-renders
   const handleBlur = useCallback(() => {
@@ -739,8 +798,12 @@ const CreateFormInput = memo(function CreateFormInput({
       ref={inputRef}
       id={id}
       type={type}
+      inputMode={numericOnly ? "numeric" : undefined}
+      pattern={numericOnly ? "[0-9]*" : undefined}
       value={localValue}
       onChange={handleChange}
+      onKeyDown={handleKeyDown}
+      onPaste={handlePaste}
       onBlur={handleBlur}
       placeholder={placeholder}
       className={`h-8 text-sm ${hasError ? "border-red-500" : ""}`}
@@ -1018,6 +1081,7 @@ const CreateContactForm = memo(function CreateContactForm({
                   placeholder={t("placeholders.phoneNumber")}
                   disabled={isSaving}
                   hasError={!!errors.phoneNumber || !!errors.countryCode}
+                  numericOnly
                 />
               </div>
             </div>

@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CountryCodeSelect } from "@/components/ui/country-code-select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PhoneNumberInput } from "@/components/ui/phone-number-input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useNotification } from "@/hooks/use-notification";
 import { backendApi, CreateContactDto } from "@/lib/api/endpoints";
@@ -305,7 +306,7 @@ function ContactFormContent() {
                   />
                 </div>
                 <div className="col-span-2">
-                  <Input
+                  <PhoneNumberInput
                     id="phoneNumber"
                     name="phoneNumber"
                     placeholder={t("enterPhoneNumber")}

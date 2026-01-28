@@ -106,12 +106,10 @@ export default function ContactsPage() {
   const debouncedSearch = useDebounce(searchQuery, 300);
 
   // Modal and dialog state
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   const [senderModalOpen, setSenderModalOpen] = useState(false);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [availableSenders, setAvailableSenders] = useState<Sender[]>([]);
-  const [contactToDelete, setContactToDelete] = useState<Contact | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
   // Memoize filters
@@ -136,6 +134,7 @@ export default function ContactsPage() {
     toggleSelect,
     toggleSelectAll,
     clearSelection,
+    selectOne,
     refreshAfterDelete,
     swrResponse: { mutate },
   } = usePaginatedData<Contact, { search: string }>({
@@ -234,34 +233,12 @@ export default function ContactsPage() {
     }
   };
 
-  // Delete handlers
+  // Delete handlers - enters selection mode with this contact selected
   const handleDeleteClick = (contact: Contact) => {
-    setContactToDelete(contact);
-    setDeleteDialogOpen(true);
+    selectOne(contact.contactId);
   };
 
-  const handleConfirmDelete = async () => {
-    if (!contactToDelete) return;
 
-    setIsDeleting(true);
-    try {
-      await backendApi.contacts.delete(contactToDelete.contactId);
-      addNotification(
-        `${contactToDelete.firstName} ${
-          contactToDelete.lastName || ""
-        } deleted successfully`,
-        "success",
-      );
-      mutate();
-      setDeleteDialogOpen(false);
-      setContactToDelete(null);
-    } catch (err) {
-      console.error("Failed to delete contact:", err);
-      addNotification("Failed to delete contact", "error");
-    } finally {
-      setIsDeleting(false);
-    }
-  };
 
   // Bulk delete
   const handleBulkDelete = async () => {
@@ -517,18 +494,7 @@ export default function ContactsPage() {
         )}
       </div>
 
-      {/* Single Delete Confirmation Dialog */}
-      <DeleteConfirmationDialog
-        isOpen={deleteDialogOpen}
-        title={t("deleteContact")}
-        description={t("deleteConfirmationDesc")}
-        onConfirm={handleConfirmDelete}
-        onCancel={() => {
-          setDeleteDialogOpen(false);
-          setContactToDelete(null);
-        }}
-        isLoading={isDeleting}
-      />
+
 
       {/* Bulk Delete Confirmation Dialog */}
       <DeleteConfirmationDialog

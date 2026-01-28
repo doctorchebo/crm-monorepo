@@ -465,6 +465,7 @@
         "title": "Review Import",
         "description": "Review the validation results before importing",
         "validating": "Validating contacts...",
+        "preparingValidation": "Preparing validation...",
         "table": {
           "row": "Row",
           "status": "Status",

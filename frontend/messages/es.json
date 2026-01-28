@@ -454,6 +454,7 @@
         "title": "Revisar Importación",
         "description": "Revisa los resultados de validación antes de importar",
         "validating": "Validando contactos...",
+        "preparingValidation": "Preparando validación...",
         "table": {
           "row": "Fila",
           "status": "Estado",

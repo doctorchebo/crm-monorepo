@@ -523,7 +523,7 @@ export const contacts = pgTable(
     email: varchar('email'), // Contact email address
     language: varchar('language', { length: 10 }), // Preferred language code (e.g., 'en', 'es', 'pt')
     countryCode: varchar('country_code').notNull(), // e.g., '+591' for Bolivia
-    phoneNumber: varchar('phone_number').notNull(), // Full phone number
+    phoneNumber: varchar('phone_number'), // Full phone number (nullable for email-only contacts)
     twilioContactId: varchar('twilio_contact_id'), // Contact ID from Twilio if synced
     lastMessageTime: timestamp('last_message_time'), // When last message was exchanged
     lastMessagePreview: text('last_message_preview'), // Preview of last message
@@ -540,7 +540,7 @@ export const contacts = pgTable(
     contactIdUnique: unique().on(table.contactId),
     importJobIdIndex: index('idx_contacts_import_job_id').on(table.importJobId),
     // Note: phoneNumber unique constraint is applied as a conditional index in migrations
-    // to allow soft-deleted contacts to be recreated
+    // to allow soft-deleted contacts and email-only contacts (null phone_number)
   }),
 );
 
@@ -2394,12 +2394,14 @@ export type ImportJobStatus = (typeof importJobStatuses)[number];
  * - VALID: Row passed validation, ready to import
  * - INVALID: Row has validation errors
  * - DUPLICATE: Row duplicates an existing contact
+ * - IMPORTED: Row was successfully imported to contacts
  */
 export const importStagingStatuses = [
   'PENDING',
   'VALID',
   'INVALID',
   'DUPLICATE',
+  'IMPORTED',
 ] as const;
 export type ImportStagingStatus = (typeof importStagingStatuses)[number];
 

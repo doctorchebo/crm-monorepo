@@ -6,83 +6,95 @@
 /**
  * Normalize a phone number to E.164-like format
  * Removes spaces, dashes, and other formatting
+ * Returns null if phone is empty/undefined to avoid unique constraint violations
  */
 export function normalizePhoneNumber(
-    phone: string,
-    defaultCountryCode: string = "+1"
-): string {
-    if (!phone) return "";
+  phone: string | null | undefined,
+  defaultCountryCode: string = "+1",
+): string | null {
+  // Return null for empty/undefined phone numbers
+  // This is critical: empty strings would violate unique constraints
+  if (!phone || phone.trim() === "") return null;
 
-    // Remove all non-digit characters except leading +
-    let normalized = phone.replace(/[^\d+]/g, "");
+  // Remove all non-digit characters except leading +
+  let normalized = phone.replace(/[^\d+]/g, "");
 
-    // If starts with +, keep it
-    if (normalized.startsWith("+")) {
-        return normalized;
-    }
+  // If empty after normalization, return null
+  if (!normalized || normalized === "+") return null;
 
-    // If starts with 00, replace with +
-    if (normalized.startsWith("00")) {
-        return "+" + normalized.slice(2);
-    }
+  // If starts with +, keep it
+  if (normalized.startsWith("+")) {
+    return normalized;
+  }
 
-    // If it's a full international number without +
-    if (normalized.length >= 11) {
-        return "+" + normalized;
-    }
+  // If starts with 00, replace with +
+  if (normalized.startsWith("00")) {
+    return "+" + normalized.slice(2);
+  }
 
-    // Otherwise, prepend default country code
-    return defaultCountryCode + normalized;
+  // If it's a full international number without +
+  if (normalized.length >= 11) {
+    return "+" + normalized;
+  }
+
+  // Otherwise, prepend default country code
+  return defaultCountryCode + normalized;
 }
 
 /**
  * Validate phone number format
  * Returns true if the phone appears to be valid
  */
-export function isValidPhoneNumber(phone: string): boolean {
-    if (!phone) return false;
+export function isValidPhoneNumber(phone: string | null | undefined): boolean {
+  if (!phone) return false;
 
-    const normalized = normalizePhoneNumber(phone);
+  const normalized = normalizePhoneNumber(phone);
 
-    // Must start with +
-    if (!normalized.startsWith("+")) return false;
+  // Must have a value after normalization
+  if (!normalized) return false;
 
-    // Must have at least 8 digits (minimum for international)
-    const digits = normalized.replace(/\D/g, "");
-    if (digits.length < 8) return false;
+  // Must start with +
+  if (!normalized.startsWith("+")) return false;
 
-    // Must not exceed 15 digits (E.164 max)
-    if (digits.length > 15) return false;
+  // Must have at least 8 digits (minimum for international)
+  const digits = normalized.replace(/\D/g, "");
+  if (digits.length < 8) return false;
 
-    return true;
+  // Must not exceed 15 digits (E.164 max)
+  if (digits.length > 15) return false;
+
+  return true;
 }
 
 /**
  * Extract country code from a phone number
  * Returns null if cannot determine
  */
-export function extractCountryCode(phone: string): string | null {
-    const normalized = normalizePhoneNumber(phone);
-    if (!normalized.startsWith("+")) return null;
+export function extractCountryCode(
+  phone: string | null | undefined,
+): string | null {
+  if (!phone) return null;
+  const normalized = normalizePhoneNumber(phone);
+  if (!normalized || !normalized.startsWith("+")) return null;
 
-    // Common country code patterns (1-3 digits)
-    // This is a simplified approach - production should use libphonenumber
-    const match = normalized.match(/^\+(\d{1,3})/);
-    if (match) {
-        return "+" + match[1];
-    }
-    return null;
+  // Common country code patterns (1-3 digits)
+  // This is a simplified approach - production should use libphonenumber
+  const match = normalized.match(/^\+(\d{1,3})/);
+  if (match) {
+    return "+" + match[1];
+  }
+  return null;
 }
 
 /**
  * Validate email format
  */
 export function isValidEmail(email: string): boolean {
-    if (!email) return false;
+  if (!email) return false;
 
-    // Basic email regex
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email.trim());
+  // Basic email regex
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email.trim());
 }
 
 /**
@@ -90,21 +102,21 @@ export function isValidEmail(email: string): boolean {
  * Used when only a "name" or "full_name" column is present
  */
 export function parseName(fullName: string): {
-    firstName: string;
-    lastName: string | null;
+  firstName: string;
+  lastName: string | null;
 } {
-    if (!fullName || !fullName.trim()) {
-        return { firstName: "", lastName: null };
-    }
+  if (!fullName || !fullName.trim()) {
+    return { firstName: "", lastName: null };
+  }
 
-    const parts = fullName.trim().split(/\s+/);
+  const parts = fullName.trim().split(/\s+/);
 
-    if (parts.length === 1) {
-        return { firstName: parts[0], lastName: null };
-    }
+  if (parts.length === 1) {
+    return { firstName: parts[0], lastName: null };
+  }
 
-    return {
-        firstName: parts[0],
-        lastName: parts.slice(1).join(" "),
-    };
+  return {
+    firstName: parts[0],
+    lastName: parts.slice(1).join(" "),
+  };
 }
