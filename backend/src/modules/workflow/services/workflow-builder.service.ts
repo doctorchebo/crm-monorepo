@@ -2311,7 +2311,7 @@ export class WorkflowBuilderService {
         workflowId: workflow.id,
         fromNodeId: nodeIdMapping.get(conn.fromNodeId) || conn.fromNodeId,
         toNodeId: nodeIdMapping.get(conn.toNodeId) || conn.toNodeId,
-        branch: (conn.branch || 'default') as WorkflowConnection['branch'],
+        branch: conn.branch || 'default',
         conditionLabel: conn.label,
       }));
 

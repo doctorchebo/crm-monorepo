@@ -56,8 +56,40 @@ function WorkflowCard({
 }) {
   const t = useTranslations("workflows");
 
+  /**
+   * Handle card click to edit workflow.
+   * Only triggers if the click wasn't on an interactive element.
+   */
+  const handleCardClick = (e: React.MouseEvent) => {
+    // Don't navigate if clicking on interactive elements
+    const target = e.target as HTMLElement;
+    if (
+      target.closest("button") ||
+      target.closest('[role="menuitem"]') ||
+      target.closest("[data-radix-collection-item]")
+    ) {
+      return;
+    }
+    onEdit(workflow.id);
+  };
+
+  /**
+   * Stop event propagation for menu actions.
+   * This prevents the card click handler from firing.
+   */
+  const handleMenuAction = (
+    e: React.MouseEvent,
+    action: (id: string) => void,
+  ) => {
+    e.stopPropagation();
+    action(workflow.id);
+  };
+
   return (
-    <Card className="hover:shadow-md transition-shadow cursor-pointer group">
+    <Card
+      className="hover:shadow-md transition-shadow cursor-pointer group"
+      onClick={handleCardClick}
+    >
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-2">
@@ -85,28 +117,31 @@ function WorkflowCard({
                 variant="ghost"
                 size="icon"
                 className="opacity-0 group-hover:opacity-100 transition-opacity"
+                onClick={(e) => e.stopPropagation()}
               >
                 <MoreHorizontal className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => onEdit(workflow.id)}>
+              <DropdownMenuItem onClick={(e) => handleMenuAction(e, onEdit)}>
                 <Pencil className="mr-2 h-4 w-4" />
                 {t("actions.edit")}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onDuplicate(workflow.id)}>
+              <DropdownMenuItem
+                onClick={(e) => handleMenuAction(e, onDuplicate)}
+              >
                 <Copy className="mr-2 h-4 w-4" />
                 {t("actions.duplicate")}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => onArchive(workflow.id)}>
+              <DropdownMenuItem onClick={(e) => handleMenuAction(e, onArchive)}>
                 <Archive className="mr-2 h-4 w-4" />
                 {workflow.status === "archived"
                   ? t("actions.unarchive")
                   : t("actions.archive")}
               </DropdownMenuItem>
               <DropdownMenuItem
-                onClick={() => onDelete(workflow.id)}
+                onClick={(e) => handleMenuAction(e, onDelete)}
                 className="text-destructive focus:text-destructive"
               >
                 <Trash2 className="mr-2 h-4 w-4" />
@@ -337,18 +372,14 @@ export default function WorkflowsPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {workflows.map((workflow) => (
-            <div
+            <WorkflowCard
               key={workflow.id}
-              onClick={() => handleEditWorkflow(workflow.id)}
-            >
-              <WorkflowCard
-                workflow={workflow}
-                onEdit={handleEditWorkflow}
-                onDuplicate={handleDuplicateWorkflow}
-                onDelete={handleDeleteWorkflow}
-                onArchive={handleArchiveWorkflow}
-              />
-            </div>
+              workflow={workflow}
+              onEdit={handleEditWorkflow}
+              onDuplicate={handleDuplicateWorkflow}
+              onDelete={handleDeleteWorkflow}
+              onArchive={handleArchiveWorkflow}
+            />
           ))}
         </div>
       )}

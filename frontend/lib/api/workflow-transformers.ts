@@ -12,9 +12,82 @@
 import type {
   WorkflowConnection,
   WorkflowNode,
+  WorkflowNodeType,
   WorkflowVariable,
   WorkflowWithDetails,
 } from "@/lib/types/workflow.types";
+
+// ============================================================================
+// Node Type Mapping
+// ============================================================================
+
+/**
+ * Maps specific backend node types to their base frontend node types.
+ * This ensures React Flow can find the correct component to render.
+ *
+ * Backend uses specific types like 'trigger_message', 'action_send_message'
+ * Frontend React Flow needs generic types like 'trigger', 'action'
+ */
+const NODE_TYPE_PREFIXES = [
+  "trigger",
+  "condition",
+  "action",
+  "delay",
+  "branch",
+  "sub_workflow",
+  "end",
+] as const;
+
+/**
+ * Extract the base node type from a specific node type.
+ * Examples:
+ *   - 'trigger_message' → 'trigger'
+ *   - 'action_send_message' → 'action'
+ *   - 'condition_ai_classification' → 'condition'
+ *   - 'trigger' → 'trigger' (already base type)
+ *   - 'end' → 'end'
+ */
+export function getBaseNodeType(nodeType: string): WorkflowNodeType {
+  // Direct match - already a base type
+  if (
+    NODE_TYPE_PREFIXES.includes(nodeType as (typeof NODE_TYPE_PREFIXES)[number])
+  ) {
+    return nodeType as WorkflowNodeType;
+  }
+
+  // Find the prefix that matches
+  for (const prefix of NODE_TYPE_PREFIXES) {
+    if (nodeType.startsWith(`${prefix}_`) || nodeType === prefix) {
+      return prefix as WorkflowNodeType;
+    }
+  }
+
+  // Default fallback - try to infer from common patterns
+  if (nodeType.includes("trigger")) return "trigger";
+  if (nodeType.includes("condition")) return "condition";
+  if (nodeType.includes("action")) return "action";
+  if (nodeType.includes("delay")) return "delay";
+  if (nodeType.includes("branch")) return "branch";
+  if (nodeType.includes("end")) return "end";
+
+  // Ultimate fallback
+  console.warn(`Unknown node type: ${nodeType}, defaulting to 'action'`);
+  return "action";
+}
+
+/**
+ * Check if a node type represents an entry point (trigger)
+ */
+export function isEntryPointNodeType(nodeType: string): boolean {
+  return getBaseNodeType(nodeType) === "trigger";
+}
+
+/**
+ * Check if a node type represents an exit point (end)
+ */
+export function isExitPointNodeType(nodeType: string): boolean {
+  return getBaseNodeType(nodeType) === "end";
+}
 
 // ============================================================================
 // Backend Response Types (what the API actually returns)
@@ -114,19 +187,25 @@ export interface BackendWorkflowWithDetails {
 export function transformNodeToFrontend(
   node: BackendWorkflowNode,
 ): WorkflowNode {
+  const baseType = getBaseNodeType(node.nodeType);
+
   return {
     id: node.id,
     workflowId: node.workflowId,
-    type: node.nodeType as WorkflowNode["type"], // Backend 'nodeType' → Frontend 'type'
+    type: baseType, // Use base type for React Flow component matching
     name: node.label || "Unnamed Node", // Backend 'label' → Frontend 'name'
     description: node.description,
-    config: node.config as WorkflowNode["config"],
+    config: {
+      ...node.config,
+      // Preserve the original specific nodeType in config for component-level logic
+      _originalNodeType: node.nodeType,
+    } as WorkflowNode["config"],
     positionX: node.positionX,
     positionY: node.positionY,
     width: null,
     height: null,
-    isEntryPoint: node.nodeType === "trigger",
-    isExitPoint: node.nodeType === "end",
+    isEntryPoint: isEntryPointNodeType(node.nodeType),
+    isExitPoint: isExitPointNodeType(node.nodeType),
     metadata: {
       aiInstructions: node.aiInstructions,
       aiTone: node.aiTone,

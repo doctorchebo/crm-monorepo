@@ -98,6 +98,10 @@ export const workflowNodeTypeEnum = pgEnum('workflow_node_type', [
 
 /**
  * Connection branch types for conditional logic
+ * @deprecated This enum is no longer used. The branch field is now text to support
+ * dynamic AI classification categories. Kept for documentation of common values.
+ * Common values: 'default', 'true', 'false', 'timeout', 'error'
+ * AI classification: category names like 'interested', 'support', 'billing', etc.
  */
 export const connectionBranchEnum = pgEnum('workflow_connection_branch', [
   'default', // Default path (no condition or condition not met)
@@ -274,8 +278,10 @@ export const workflowConnections = pgTable(
       .notNull()
       .references(() => workflowNodes.id, { onDelete: 'cascade' }),
 
-    // Connection type (for conditional branches)
-    branch: connectionBranchEnum('branch').notNull().default('default'),
+    // Connection branch type (text for flexibility with AI classification categories)
+    // Common values: 'default', 'true', 'false', 'timeout', 'error'
+    // AI classification: category names like 'interested', 'support', 'billing', etc.
+    branch: text('branch').notNull().default('default'),
 
     // Optional condition for this specific connection
     // (allows multiple conditions from same node)
