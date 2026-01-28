@@ -649,6 +649,12 @@ export class ListWorkflowsQueryDto {
   limit?: number;
 }
 
+export class BulkDeleteWorkflowsDto {
+  @IsArray()
+  @IsUUID('4', { each: true })
+  workflowIds: string[];
+}
+
 export class ListExecutionsQueryDto {
   @IsOptional()
   @IsUUID()

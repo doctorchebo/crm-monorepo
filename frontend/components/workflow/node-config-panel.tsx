@@ -17,7 +17,11 @@ import type {
   WorkflowNode,
   WorkflowNodeType,
 } from "@/lib/types/workflow.types";
-import { X } from "lucide-react";
+import {
+  createDefaultBranch,
+  getBranchColor,
+} from "@/lib/workflow/branch-utils";
+import { GripVertical, Plus, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 interface NodeConfigPanelProps {
@@ -52,10 +56,14 @@ const ACTION_TYPES = [
 
 // Condition type options
 const CONDITION_TYPES = [
+  { value: "ai_classification", label: "AI Classification" },
   { value: "message_contains", label: "Message Contains" },
+  { value: "keyword_match", label: "Keyword Match" },
   { value: "tag_exists", label: "Tag Exists" },
   { value: "stage_is", label: "Stage Is" },
   { value: "variable_equals", label: "Variable Equals" },
+  { value: "contact_field", label: "Contact Field" },
+  { value: "time_based", label: "Time Based" },
   { value: "ai_intent_detected", label: "AI Intent Detected" },
   { value: "time_condition", label: "Time Condition" },
   { value: "custom_expression", label: "Custom Expression" },
@@ -401,6 +409,89 @@ function ActionConfig({ config, updateConfig }: ConfigProps) {
 }
 
 function ConditionConfig({ config, updateConfig }: ConfigProps) {
+  // Get current AI classification config
+  const aiClassification = config.aiClassification as
+    | {
+        prompt?: string;
+        categories?: Array<{ name: string; description?: string }>;
+        fallbackCategory?: string;
+      }
+    | undefined;
+
+  // Helper to update AI classification config
+  const updateAiClassification = useCallback(
+    (updates: Partial<typeof aiClassification>) => {
+      updateConfig("aiClassification", {
+        ...(aiClassification || { prompt: "", categories: [] }),
+        ...updates,
+      });
+    },
+    [aiClassification, updateConfig],
+  );
+
+  // Add a new category
+  const addCategory = useCallback(() => {
+    const currentCategories = aiClassification?.categories || [];
+    const newBranch = createDefaultBranch(
+      currentCategories.length,
+      currentCategories.map((c) => ({
+        id: c.name,
+        label: c.name,
+        color: getBranchColor(c.name, 0),
+      })),
+    );
+
+    updateAiClassification({
+      categories: [
+        ...currentCategories,
+        { name: newBranch.label, description: "" },
+      ],
+    });
+  }, [aiClassification?.categories, updateAiClassification]);
+
+  // Update a category
+  const updateCategory = useCallback(
+    (index: number, field: "name" | "description", value: string) => {
+      const currentCategories = [...(aiClassification?.categories || [])];
+      if (currentCategories[index]) {
+        currentCategories[index] = {
+          ...currentCategories[index],
+          [field]: value,
+        };
+        updateAiClassification({ categories: currentCategories });
+      }
+    },
+    [aiClassification?.categories, updateAiClassification],
+  );
+
+  // Remove a category
+  const removeCategory = useCallback(
+    (index: number) => {
+      const currentCategories = aiClassification?.categories || [];
+      if (currentCategories.length > 1) {
+        updateAiClassification({
+          categories: currentCategories.filter((_, i) => i !== index),
+        });
+      }
+    },
+    [aiClassification?.categories, updateAiClassification],
+  );
+
+  // Move category up/down for reordering
+  const moveCategory = useCallback(
+    (index: number, direction: "up" | "down") => {
+      const currentCategories = [...(aiClassification?.categories || [])];
+      const newIndex = direction === "up" ? index - 1 : index + 1;
+
+      if (newIndex < 0 || newIndex >= currentCategories.length) return;
+
+      const [moved] = currentCategories.splice(index, 1);
+      currentCategories.splice(newIndex, 0, moved);
+      updateAiClassification({ categories: currentCategories });
+    },
+    [aiClassification?.categories, updateAiClassification],
+  );
+
   return (
     <>
       <div className="space-y-2">
@@ -421,6 +512,138 @@ function ConditionConfig({ config, updateConfig }: ConfigProps) {
           </SelectContent>
         </Select>
       </div>
+
+      {/* AI Classification Config */}
+      {config.conditionType === "ai_classification" && (
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label>AI Prompt</Label>
+            <Textarea
+              value={aiClassification?.prompt || ""}
+              onChange={(e) =>
+                updateAiClassification({ prompt: e.target.value })
+              }
+              placeholder="Analyze the customer message and classify their intent..."
+              rows={3}
+            />
+            <p className="text-xs text-muted-foreground">
+              Instructions for how the AI should classify messages
+            </p>
+          </div>
+
+          <Separator />
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label>Classification Categories</Label>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={addCategory}
+                className="h-7 text-xs"
+              >
+                <Plus className="h-3 w-3 mr-1" />
+                Add Category
+              </Button>
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              Each category creates a branch output from this node. Connect each
+              branch to handle different customer intents.
+            </p>
+
+            <div className="space-y-2">
+              {(aiClassification?.categories || []).map((category, idx) => {
+                const branchColor = getBranchColor(category.name, idx);
+                return (
+                  <div
+                    key={idx}
+                    className="relative rounded-lg border bg-muted/30 p-3 space-y-2"
+                  >
+                    {/* Category header with color indicator */}
+                    <div className="flex items-center gap-2">
+                      <GripVertical className="h-4 w-4 text-muted-foreground cursor-move" />
+                      <div
+                        className="w-3 h-3 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: branchColor }}
+                        title={`Branch color: ${branchColor}`}
+                      />
+                      <Input
+                        value={category.name}
+                        onChange={(e) =>
+                          updateCategory(idx, "name", e.target.value)
+                        }
+                        placeholder="Category name"
+                        className="h-8 text-sm font-medium"
+                      />
+                      {(aiClassification?.categories?.length || 0) > 1 && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                          onClick={() => removeCategory(idx)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
+
+                    {/* Category description */}
+                    <Textarea
+                      value={category.description || ""}
+                      onChange={(e) =>
+                        updateCategory(idx, "description", e.target.value)
+                      }
+                      placeholder="Description for the AI (when to use this category)..."
+                      rows={2}
+                      className="text-xs resize-none"
+                    />
+                  </div>
+                );
+              })}
+
+              {(!aiClassification?.categories ||
+                aiClassification.categories.length === 0) && (
+                <div className="text-center py-4 border border-dashed rounded-lg">
+                  <p className="text-sm text-muted-foreground">
+                    No categories defined
+                  </p>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    onClick={addCategory}
+                    className="mt-1"
+                  >
+                    Add your first category
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <Separator />
+
+          <div className="space-y-2">
+            <Label>Fallback Category</Label>
+            <Input
+              value={aiClassification?.fallbackCategory || "other"}
+              onChange={(e) =>
+                updateAiClassification({ fallbackCategory: e.target.value })
+              }
+              placeholder="other"
+            />
+            <p className="text-xs text-muted-foreground">
+              Used when no category matches. Creates an additional branch
+              output.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Keyword Match Config */}
+      {config.conditionType === "keyword_match" && (
+        <KeywordMatchConfig config={config} updateConfig={updateConfig} />
+      )}
 
       {config.conditionType === "message_contains" && (
         <div className="space-y-2">
@@ -468,6 +691,10 @@ function ConditionConfig({ config, updateConfig }: ConfigProps) {
         </div>
       )}
 
+      {config.conditionType === "contact_field" && (
+        <ContactFieldConfig config={config} updateConfig={updateConfig} />
+      )}
+
       {config.conditionType === "custom_expression" && (
         <div className="space-y-2">
           <Label>Expression</Label>
@@ -480,6 +707,141 @@ function ConditionConfig({ config, updateConfig }: ConfigProps) {
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * Keyword Match Configuration Component
+ */
+function KeywordMatchConfig({ config, updateConfig }: ConfigProps) {
+  const keywordMatch = config.keywordMatch as
+    | {
+        keywords?: string[];
+        matchType?: "any" | "all" | "exact";
+        caseSensitive?: boolean;
+      }
+    | undefined;
+
+  const updateKeywordMatch = useCallback(
+    (updates: Partial<typeof keywordMatch>) => {
+      updateConfig("keywordMatch", {
+        ...(keywordMatch || { keywords: [], matchType: "any" }),
+        ...updates,
+      });
+    },
+    [keywordMatch, updateConfig],
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-2">
+        <Label>Keywords</Label>
+        <Textarea
+          value={(keywordMatch?.keywords || []).join(", ")}
+          onChange={(e) =>
+            updateKeywordMatch({
+              keywords: e.target.value
+                .split(",")
+                .map((k) => k.trim())
+                .filter(Boolean),
+            })
+          }
+          placeholder="keyword1, keyword2, keyword3"
+          rows={2}
+        />
+        <p className="text-xs text-muted-foreground">
+          Comma-separated keywords to match
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label>Match Type</Label>
+        <Select
+          value={keywordMatch?.matchType || "any"}
+          onValueChange={(value) =>
+            updateKeywordMatch({ matchType: value as "any" | "all" | "exact" })
+          }
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="any">Any keyword matches</SelectItem>
+            <SelectItem value="all">All keywords must match</SelectItem>
+            <SelectItem value="exact">Exact phrase match</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Contact Field Configuration Component
+ */
+function ContactFieldConfig({ config, updateConfig }: ConfigProps) {
+  const contactField = config.contactField as
+    | {
+        fieldPath?: string;
+        operator?: string;
+        value?: unknown;
+      }
+    | undefined;
+
+  const updateContactField = useCallback(
+    (updates: Partial<typeof contactField>) => {
+      updateConfig("contactField", {
+        ...(contactField || { fieldPath: "", operator: "equals" }),
+        ...updates,
+      });
+    },
+    [contactField, updateConfig],
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-2">
+        <Label>Field Path</Label>
+        <Input
+          value={contactField?.fieldPath || ""}
+          onChange={(e) => updateContactField({ fieldPath: e.target.value })}
+          placeholder="e.g., name, email, tags, customFields.vip"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label>Operator</Label>
+        <Select
+          value={contactField?.operator || "equals"}
+          onValueChange={(value) => updateContactField({ operator: value })}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="equals">Equals</SelectItem>
+            <SelectItem value="notEquals">Not Equals</SelectItem>
+            <SelectItem value="contains">Contains</SelectItem>
+            <SelectItem value="isEmpty">Is Empty</SelectItem>
+            <SelectItem value="isNotEmpty">Is Not Empty</SelectItem>
+            <SelectItem value="gt">Greater Than</SelectItem>
+            <SelectItem value="lt">Less Than</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {contactField?.operator &&
+        !["isEmpty", "isNotEmpty"].includes(contactField.operator) && (
+          <div className="space-y-2">
+            <Label>Value</Label>
+            <Input
+              value={(contactField?.value as string) || ""}
+              onChange={(e) => updateContactField({ value: e.target.value })}
+              placeholder="Value to compare"
+            />
+          </div>
+        )}
+    </div>
   );
 }
 

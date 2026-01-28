@@ -1606,10 +1606,24 @@
   "workflows": {
     "title": "Flujos de Trabajo",
     "description": "Construye flujos de trabajo automatizados con un lienzo visual",
+    "totalWorkflows": "{count, plural, =0 {Sin flujos de trabajo} one {# flujo de trabajo} other {# flujos de trabajo}}",
     "newWorkflowName": "Nuevo Flujo de Trabajo",
     "noDescription": "Sin descripción",
     "searchPlaceholder": "Buscar flujos de trabajo...",
     "updatedAt": "Actualizado {date}",
+    "selectedCount": "{count} seleccionados",
+    "selectAll": "Seleccionar todos",
+    "bulkDeleteTitle": "Eliminar Flujos de Trabajo",
+    "bulkDeleteDescription": "¿Estás seguro de que deseas eliminar {count} flujos de trabajo? Esta acción no se puede deshacer.",
+    "bulkDeleteSuccess": "{count} flujos de trabajo eliminados exitosamente",
+    "pagination": {
+      "page": "Página {current} de {total}",
+      "previous": "Anterior",
+      "next": "Siguiente",
+      "first": "Primera",
+      "last": "Última",
+      "rowsPerPage": "Por página"
+    },
     "status": {
       "draft": "Borrador",
       "published": "Publicado",

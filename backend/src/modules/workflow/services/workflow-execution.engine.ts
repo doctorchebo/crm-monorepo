@@ -241,11 +241,12 @@ export class WorkflowExecutionEngine implements OnModuleInit {
         }
       }
 
-      // Find active workflows for this team
+      // Find active workflows for this team (exclude soft-deleted)
       const activeWorkflows = await db.query.workflows.findMany({
         where: and(
           eq(workflows.teamId, teamId),
           eq(workflows.status, 'active'),
+          sql`${workflows.deletedAt} IS NULL`,
         ),
         orderBy: [desc(workflows.priority)],
         with: {
@@ -383,7 +384,10 @@ export class WorkflowExecutionEngine implements OnModuleInit {
     variables?: Record<string, unknown>,
   ): Promise<string> {
     const workflow = await db.query.workflows.findFirst({
-      where: eq(workflows.id, workflowId),
+      where: and(
+        eq(workflows.id, workflowId),
+        sql`${workflows.deletedAt} IS NULL`,
+      ),
       with: { nodes: true, connections: true },
     });
 
@@ -743,9 +747,12 @@ export class WorkflowExecutionEngine implements OnModuleInit {
       return;
     }
 
-    // Get workflow
+    // Get workflow (exclude soft-deleted)
     const workflow = await db.query.workflows.findFirst({
-      where: eq(workflows.id, execution.workflowId),
+      where: and(
+        eq(workflows.id, execution.workflowId),
+        sql`${workflows.deletedAt} IS NULL`,
+      ),
       with: { nodes: true, connections: true },
     });
 

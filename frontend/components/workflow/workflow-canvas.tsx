@@ -6,6 +6,7 @@ import type {
   WorkflowNodeType,
   WorkflowWithDetails,
 } from "@/lib/types/workflow.types";
+import { getEdgeColor } from "@/lib/workflow/branch-utils";
 import {
   addEdge,
   applyEdgeChanges as applyReactFlowEdgeChanges,
@@ -72,35 +73,14 @@ function workflowNodeToReactFlow(node: WorkflowWithDetails["nodes"][0]): Node {
 }
 
 /**
- * Get edge color based on connection type
- */
-function getEdgeColor(type: string | null | undefined): string {
-  switch (type) {
-    case "true":
-    case "yes":
-    case "success":
-    case "condition_true":
-      return "#22c55e"; // green
-    case "false":
-    case "no":
-    case "failure":
-    case "condition_false":
-      return "#ef4444"; // red
-    case "timeout":
-      return "#f59e0b"; // amber
-    case "error":
-      return "#dc2626"; // darker red
-    default:
-      return "#64748b"; // slate
-  }
-}
-
-/**
  * Convert a single workflow connection to ReactFlow edge format
  */
 function workflowConnectionToReactFlow(
   conn: WorkflowWithDetails["connections"][0],
 ): Edge {
+  // Use sourceHandle for color when available (for branch-specific colors)
+  const edgeColor = getEdgeColor(conn.type, conn.sourceHandle);
+
   return {
     id: conn.id,
     source: conn.sourceNodeId,
@@ -111,7 +91,7 @@ function workflowConnectionToReactFlow(
     type: "smoothstep",
     animated: conn.type === "default",
     style: {
-      stroke: getEdgeColor(conn.type),
+      stroke: edgeColor,
       strokeWidth: 2,
     },
     data: {
@@ -472,6 +452,8 @@ function WorkflowCanvasInner({
       if (!params.source || !params.target) return;
 
       // Determine connection type from source handle
+      // For dynamic branches (like AI classification categories), we use "branch" as type
+      // The actual branch identification is stored in sourceHandle
       let connectionType: WorkflowConnectionType = "default";
       if (params.sourceHandle) {
         if (params.sourceHandle === "true" || params.sourceHandle === "yes") {
@@ -486,12 +468,14 @@ function WorkflowCanvasInner({
         } else if (params.sourceHandle === "error") {
           connectionType = "error";
         } else if (params.sourceHandle !== "output") {
-          connectionType = params.sourceHandle as WorkflowConnectionType;
+          // For dynamic branches (AI classification, etc.), use "branch" type
+          connectionType = "branch";
         }
       }
 
       const newEdgeId = generateEdgeId();
-      const edgeColor = getEdgeColor(connectionType);
+      // Get color based on source handle for consistent coloring with node handles
+      const edgeColor = getEdgeColor(connectionType, params.sourceHandle);
 
       const newEdge: Edge = {
         id: newEdgeId,

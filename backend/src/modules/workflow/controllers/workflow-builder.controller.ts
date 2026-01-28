@@ -19,6 +19,7 @@ import {
 } from '@nestjs/common';
 import type { AuthenticatedRequest } from '@shared/types';
 import {
+  BulkDeleteWorkflowsDto,
   BulkUpdateNodePositionsDto,
   CancelExecutionDto,
   CreateConnectionDto,
@@ -71,6 +72,17 @@ export class WorkflowBuilderController {
       req.user.userId,
       teamId,
       dto,
+    );
+  }
+
+  @Post('workflows/bulk-delete')
+  async bulkDeleteWorkflows(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: BulkDeleteWorkflowsDto,
+  ) {
+    return this.workflowBuilderService.bulkDeleteWorkflows(
+      req.user.userId,
+      dto.workflowIds,
     );
   }
 

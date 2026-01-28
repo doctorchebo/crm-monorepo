@@ -41,17 +41,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  ilike,
-  inArray,
-  isNull,
-  sql,
-  SQL,
-} from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, inArray, sql, SQL } from 'drizzle-orm';
 import {
   BulkUpdateNodePositionsDto,
   CreateConnectionDto,
@@ -135,12 +125,74 @@ export class WorkflowBuilderService {
     return membership.teamId;
   }
 
+  /**
+   * Generate a unique workflow name within a team
+   * If the base name exists, appends (2), (3), etc. until a unique name is found
+   * @param teamId - The team ID to check uniqueness within
+   * @param baseName - The desired base name for the workflow
+   * @returns A unique workflow name
+   */
+  private async generateUniqueWorkflowName(
+    teamId: number,
+    baseName: string,
+  ): Promise<string> {
+    // First check if the base name is available
+    const existingWithBaseName = await db.query.workflows.findFirst({
+      where: and(
+        eq(workflows.teamId, teamId),
+        eq(workflows.name, baseName),
+        sql`${workflows.deletedAt} IS NULL`,
+      ),
+    });
+
+    if (!existingWithBaseName) {
+      return baseName;
+    }
+
+    // Find all workflows that match the pattern "baseName" or "baseName (N)"
+    // This regex pattern matches the base name with optional " (N)" suffix
+    const existingWorkflows = await db.query.workflows.findMany({
+      where: and(
+        eq(workflows.teamId, teamId),
+        sql`${workflows.deletedAt} IS NULL`,
+        sql`${workflows.name} ~ ${`^${baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}( \\(\\d+\\))?$`}`,
+      ),
+      columns: { name: true },
+    });
+
+    if (existingWorkflows.length === 0) {
+      return baseName;
+    }
+
+    // Extract numbers from existing names like "baseName (2)", "baseName (3)"
+    const usedNumbers = new Set<number>([1]); // 1 represents the base name without suffix
+    const suffixPattern = new RegExp(
+      `^${baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\((\\d+)\\)$`,
+    );
+
+    for (const wf of existingWorkflows) {
+      const match = wf.name.match(suffixPattern);
+      if (match) {
+        usedNumbers.add(parseInt(match[1], 10));
+      }
+    }
+
+    // Find the smallest available number starting from 2
+    let nextNumber = 2;
+    while (usedNumbers.has(nextNumber)) {
+      nextNumber++;
+    }
+
+    return `${baseName} (${nextNumber})`;
+  }
+
   // ============================================================================
   // Workflow CRUD
   // ============================================================================
 
   /**
    * Create a new workflow
+   * Automatically generates a unique name if the requested name already exists
    */
   async createWorkflow(
     userId: number,
@@ -149,27 +201,15 @@ export class WorkflowBuilderService {
   ): Promise<Workflow> {
     await this.verifyTeamAccess(userId, teamId, ['owner', 'admin']);
 
-    // Check for duplicate name in team
-    const existing = await db.query.workflows.findFirst({
-      where: and(
-        eq(workflows.teamId, teamId),
-        eq(workflows.name, dto.name),
-        isNull(workflows.status) || sql`${workflows.status} != 'archived'`,
-      ),
-    });
-
-    if (existing) {
-      throw new ConflictException(
-        `A workflow named "${dto.name}" already exists`,
-      );
-    }
+    // Generate a unique name if the requested name already exists
+    const uniqueName = await this.generateUniqueWorkflowName(teamId, dto.name);
 
     const [workflow] = await db
       .insert(workflows)
       .values({
         teamId,
         createdBy: userId,
-        name: dto.name,
+        name: uniqueName,
         description: dto.description,
         icon: dto.icon ?? 'workflow',
         color: dto.color ?? '#3b82f6',
@@ -182,7 +222,7 @@ export class WorkflowBuilderService {
       .returning();
 
     this.logger.log(
-      `Created workflow "${dto.name}" (${workflow.id}) for team ${teamId}`,
+      `Created workflow "${uniqueName}" (${workflow.id}) for team ${teamId}`,
     );
 
     return workflow;
@@ -190,11 +230,13 @@ export class WorkflowBuilderService {
 
   /**
    * Get workflow by ID with full details
+   * Excludes soft-deleted workflows by default
    */
   async getWorkflow(
     userId: number,
     workflowId: string,
     includeDetails = true,
+    includeDeleted = false,
   ): Promise<
     Workflow & {
       nodes?: WorkflowNode[];
@@ -202,8 +244,15 @@ export class WorkflowBuilderService {
       variables?: WorkflowVariable[];
     }
   > {
+    const conditions = [eq(workflows.id, workflowId)];
+
+    // Exclude soft-deleted workflows unless explicitly requested
+    if (!includeDeleted) {
+      conditions.push(sql`${workflows.deletedAt} IS NULL`);
+    }
+
     const workflow = await db.query.workflows.findFirst({
-      where: eq(workflows.id, workflowId),
+      where: and(...conditions),
       with: includeDetails
         ? {
             nodes: true,
@@ -232,13 +281,14 @@ export class WorkflowBuilderService {
   ): Promise<{ workflows: Workflow[]; total: number }> {
     await this.verifyTeamAccess(userId, teamId);
 
-    const conditions = [eq(workflows.teamId, teamId)];
+    // Always exclude soft-deleted workflows
+    const conditions = [
+      eq(workflows.teamId, teamId),
+      sql`${workflows.deletedAt} IS NULL`,
+    ];
 
     if (query.status) {
       conditions.push(eq(workflows.status, query.status));
-    } else {
-      // Default: exclude archived
-      conditions.push(sql`${workflows.status} != 'archived'`);
     }
 
     if (query.search) {
@@ -279,13 +329,14 @@ export class WorkflowBuilderService {
     const workflow = await this.getWorkflow(userId, workflowId, false);
     await this.verifyTeamAccess(userId, workflow.teamId, ['owner', 'admin']);
 
-    // Check name uniqueness if changing name
+    // Check name uniqueness if changing name (exclude soft-deleted)
     if (dto.name && dto.name !== workflow.name) {
       const existing = await db.query.workflows.findFirst({
         where: and(
           eq(workflows.teamId, workflow.teamId),
           eq(workflows.name, dto.name),
           sql`${workflows.id} != ${workflowId}`,
+          sql`${workflows.deletedAt} IS NULL`,
         ),
       });
 
@@ -333,16 +384,19 @@ export class WorkflowBuilderService {
   }
 
   /**
-   * Delete (archive) a workflow
+   * Soft delete a workflow by setting deletedAt timestamp
+   * This removes the workflow from all views while preserving data for potential recovery
    */
   async deleteWorkflow(userId: number, workflowId: string): Promise<void> {
     const workflow = await this.getWorkflow(userId, workflowId, false);
     await this.verifyTeamAccess(userId, workflow.teamId, ['owner', 'admin']);
 
-    // Soft delete by setting status to archived
+    const now = new Date();
+
+    // Soft delete by setting deletedAt timestamp
     await db
       .update(workflows)
-      .set({ status: 'archived', updatedAt: new Date() })
+      .set({ deletedAt: now, updatedAt: now })
       .where(eq(workflows.id, workflowId));
 
     // Clear any chat states pointing to this workflow
@@ -356,11 +410,62 @@ export class WorkflowBuilderService {
         currentAiTone: null,
         currentAiGoal: null,
         allowedKbTemplates: null,
-        updatedAt: new Date(),
+        updatedAt: now,
       })
       .where(eq(workflowChatState.activeWorkflowId, workflowId));
 
-    this.logger.log(`Archived workflow ${workflowId}`);
+    this.logger.log(`Soft deleted workflow ${workflowId}`);
+  }
+
+  /**
+   * Bulk soft delete multiple workflows by setting deletedAt timestamp
+   * This removes workflows from all views while preserving data for potential recovery
+   */
+  async bulkDeleteWorkflows(
+    userId: number,
+    workflowIds: string[],
+  ): Promise<{ deletedCount: number }> {
+    if (workflowIds.length === 0) {
+      return { deletedCount: 0 };
+    }
+
+    // Verify access to all workflows first
+    const workflowList = await Promise.all(
+      workflowIds.map((id) => this.getWorkflow(userId, id, false)),
+    );
+
+    // Verify team access for all workflows
+    const teamIds = [...new Set(workflowList.map((w) => w.teamId))];
+    for (const teamId of teamIds) {
+      await this.verifyTeamAccess(userId, teamId, ['owner', 'admin']);
+    }
+
+    const now = new Date();
+
+    // Soft delete by setting deletedAt timestamp
+    await db
+      .update(workflows)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(inArray(workflows.id, workflowIds));
+
+    // Clear any chat states pointing to these workflows
+    await db
+      .update(workflowChatState)
+      .set({
+        activeWorkflowId: null,
+        activeExecutionId: null,
+        currentNodeId: null,
+        currentAiInstructions: null,
+        currentAiTone: null,
+        currentAiGoal: null,
+        allowedKbTemplates: null,
+        updatedAt: now,
+      })
+      .where(inArray(workflowChatState.activeWorkflowId, workflowIds));
+
+    this.logger.log(`Bulk soft deleted ${workflowIds.length} workflows`);
+
+    return { deletedCount: workflowIds.length };
   }
 
   // ============================================================================
@@ -1291,6 +1396,7 @@ export class WorkflowBuilderService {
 
   /**
    * Duplicate a workflow
+   * Automatically generates a unique name if the requested/default name already exists
    */
   async duplicateWorkflow(
     userId: number,
@@ -1300,7 +1406,12 @@ export class WorkflowBuilderService {
     const workflow = await this.getWorkflow(userId, workflowId, true);
     await this.verifyTeamAccess(userId, workflow.teamId, ['owner', 'admin']);
 
-    const newName = dto?.name ?? `${workflow.name} (Copy)`;
+    // Generate a unique name for the duplicate
+    const baseName = dto?.name ?? `${workflow.name} (Copy)`;
+    const uniqueName = await this.generateUniqueWorkflowName(
+      workflow.teamId,
+      baseName,
+    );
 
     // Create new workflow
     const [newWorkflow] = await db
@@ -1308,7 +1419,7 @@ export class WorkflowBuilderService {
       .values({
         teamId: workflow.teamId,
         createdBy: userId,
-        name: newName,
+        name: uniqueName,
         description: workflow.description,
         icon: workflow.icon,
         color: workflow.color,
@@ -1702,9 +1813,12 @@ export class WorkflowBuilderService {
 
     const conditions: SQL<unknown>[] = [];
 
-    // Filter by team workflows
+    // Filter by team workflows (exclude soft-deleted)
     const teamWorkflows = await db.query.workflows.findMany({
-      where: eq(workflows.teamId, teamId),
+      where: and(
+        eq(workflows.teamId, teamId),
+        sql`${workflows.deletedAt} IS NULL`,
+      ),
       columns: { id: true },
     });
     const workflowIds = teamWorkflows.map((w) => w.id);
@@ -1884,8 +1998,12 @@ export class WorkflowBuilderService {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - periodDays);
 
+    // Get team workflows (exclude soft-deleted)
     const teamWorkflows = await db.query.workflows.findMany({
-      where: eq(workflows.teamId, teamId),
+      where: and(
+        eq(workflows.teamId, teamId),
+        sql`${workflows.deletedAt} IS NULL`,
+      ),
     });
 
     const workflowIds = teamWorkflows.map((w) => w.id);
@@ -2248,31 +2366,16 @@ export class WorkflowBuilderService {
       })
       .where(eq(workflowTemplates.id, templateId));
 
-    // Create the workflow
-    const workflowName = dto?.name || `${template.name} (Copy)`;
-
-    // Check for duplicate name
-    const existingCount = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(workflows)
-      .where(
-        and(
-          eq(workflows.teamId, teamId),
-          ilike(workflows.name, `${workflowName}%`),
-        ),
-      );
-
-    const finalName =
-      existingCount[0]?.count > 0
-        ? `${workflowName} ${existingCount[0].count + 1}`
-        : workflowName;
+    // Create the workflow with a unique name
+    const baseName = dto?.name || `${template.name} (Copy)`;
+    const uniqueName = await this.generateUniqueWorkflowName(teamId, baseName);
 
     const [workflow] = await db
       .insert(workflows)
       .values({
         teamId,
         createdBy: userId,
-        name: finalName,
+        name: uniqueName,
         description: template.description,
         icon: template.icon,
         status: 'draft',

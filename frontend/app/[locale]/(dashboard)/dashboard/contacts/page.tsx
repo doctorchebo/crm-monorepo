@@ -4,8 +4,6 @@ import { DeleteConfirmationDialog } from "@/components/dialogs/delete-confirmati
 import { SelectSenderModal } from "@/components/dialogs/select-sender-modal";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { PageLayout } from "@/components/ui/page-layout";
-import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
@@ -14,16 +12,25 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { PageLayout } from "@/components/ui/page-layout";
 import { Pagination } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuthProtection } from "@/hooks/use-auth";
 import { useNotification } from "@/hooks/use-notification";
+import { usePaginatedData } from "@/hooks/use-paginated-data";
 import { backendApi, Contact } from "@/lib/api/endpoints";
-import { MoreVertical, Phone, Plus, Search, Trash2, Upload, X } from "lucide-react";
+import {
+  MoreVertical,
+  Phone,
+  Plus,
+  Search,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import useSWR from "swr";
+import { useEffect, useMemo, useState } from "react";
 
 interface Sender {
   id: number;
@@ -75,14 +82,12 @@ function formatDateTime(dateString: string | null): string {
 
 function getInitials(
   firstName: string,
-  lastName: string | undefined | null
+  lastName: string | undefined | null,
 ): string {
   const first = firstName.charAt(0).toUpperCase();
   const last = lastName ? lastName.charAt(0).toUpperCase() : "";
   return (first + last).slice(0, 2);
 }
-
-
 
 export default function ContactsPage() {
   const router = useRouter();
@@ -96,14 +101,9 @@ export default function ContactsPage() {
   // Protect this route - redirect to login if token is missing or expired
   useAuthProtection();
 
-  // Pagination and search state
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  // Filter state (managed separately for controlled inputs)
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedSearch = useDebounce(searchQuery, 300);
-
-  // Selection state
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // Modal and dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -114,30 +114,45 @@ export default function ContactsPage() {
   const [contactToDelete, setContactToDelete] = useState<Contact | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // Reset page when search or page size changes
-  useEffect(() => {
-    setPage(1);
-    setSelectedIds(new Set());
-  }, [debouncedSearch, pageSize]);
-
-  // Fetch contacts with pagination and search
-  const {
-    data,
-    isLoading,
-    mutate,
-  } = useSWR(
-    ["contacts", page, pageSize, debouncedSearch],
-    async () => {
-      return await backendApi.contacts.list({
-        page,
-        limit: pageSize,
-        search: debouncedSearch || undefined,
-      });
-    }
+  // Memoize filters
+  const filters = useMemo(
+    () => ({ search: debouncedSearch }),
+    [debouncedSearch],
   );
 
-  const contacts = data?.data || [];
-  const pagination = data?.pagination || { page: 1, totalPages: 1, totalItems: 0, limit: pageSize };
+  // Use the paginated data hook for robust pagination and selection management
+  const {
+    items: contacts,
+    total,
+    isLoading,
+    page,
+    pageSize,
+    totalPages,
+    setPage,
+    setPageSize,
+    selectedIds,
+    selectedCount,
+    isAllSelected,
+    toggleSelect,
+    toggleSelectAll,
+    clearSelection,
+    refreshAfterDelete,
+    swrResponse: { mutate },
+  } = usePaginatedData<Contact, { search: string }>({
+    cacheKeyPrefix: "contacts",
+    initialPageSize: 10,
+    pageSizeOptions: [10, 25, 50],
+    filters,
+    fetcher: async ({ page, pageSize, filters }) => {
+      const result = await backendApi.contacts.list({
+        page,
+        limit: pageSize,
+        search: filters.search || undefined,
+      });
+      return { items: result.data, total: result.pagination.totalItems };
+    },
+    getItemId: (contact) => contact.contactId,
+  });
 
   // Sort contacts by last message time (client-side for display)
   const sortedContacts = useMemo(() => {
@@ -152,31 +167,6 @@ export default function ContactsPage() {
       );
     });
   }, [contacts]);
-
-  // Selection handlers
-  const toggleSelectAll = useCallback(() => {
-    if (selectedIds.size === contacts.length && contacts.length > 0) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(contacts.map((c) => c.contactId)));
-    }
-  }, [contacts, selectedIds.size]);
-
-  const toggleSelect = useCallback((contactId: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(contactId)) {
-        next.delete(contactId);
-      } else {
-        next.add(contactId);
-      }
-      return next;
-    });
-  }, []);
-
-  const clearSelection = useCallback(() => {
-    setSelectedIds(new Set());
-  }, []);
 
   // Navigation handlers
   const handleContactClick = (contactId: string) => {
@@ -195,7 +185,7 @@ export default function ContactsPage() {
       if (!senders || senders.length === 0) {
         addNotification(
           "No WhatsApp senders configured. Please add a sender first.",
-          "error"
+          "error",
         );
         return;
       }
@@ -212,14 +202,15 @@ export default function ContactsPage() {
 
   const handleSenderSelected = async (
     senderId: number,
-    senderPhoneNumber: string
+    senderPhoneNumber: string,
   ) => {
     if (!selectedContact) return;
 
     try {
       const participantPhone = selectedContact.phoneNumber;
-      const participantName = `${selectedContact.firstName} ${selectedContact.lastName || ""
-        }`.trim();
+      const participantName = `${selectedContact.firstName} ${
+        selectedContact.lastName || ""
+      }`.trim();
 
       const createdChat = await backendApi.chats.startWithContact({
         businessPhone: senderPhoneNumber,
@@ -256,9 +247,10 @@ export default function ContactsPage() {
     try {
       await backendApi.contacts.delete(contactToDelete.contactId);
       addNotification(
-        `${contactToDelete.firstName} ${contactToDelete.lastName || ""
+        `${contactToDelete.firstName} ${
+          contactToDelete.lastName || ""
         } deleted successfully`,
-        "success"
+        "success",
       );
       mutate();
       setDeleteDialogOpen(false);
@@ -273,18 +265,20 @@ export default function ContactsPage() {
 
   // Bulk delete
   const handleBulkDelete = async () => {
-    if (selectedIds.size === 0) return;
+    if (selectedCount === 0) return;
 
     setIsDeleting(true);
     try {
-      const result = await backendApi.contacts.bulkDelete(Array.from(selectedIds));
+      const result = await backendApi.contacts.bulkDelete(
+        Array.from(selectedIds),
+      );
       addNotification(
         t("bulkDeleteSuccess", { count: result.deletedCount }),
-        "success"
+        "success",
       );
-      setSelectedIds(new Set());
       setBulkDeleteDialogOpen(false);
-      mutate();
+      // Use refreshAfterDelete for automatic page adjustment when last page becomes empty
+      await refreshAfterDelete(result.deletedCount);
     } catch (err) {
       console.error("Failed to bulk delete contacts:", err);
       addNotification("Failed to delete contacts", "error");
@@ -297,7 +291,7 @@ export default function ContactsPage() {
     <PageLayout
       className="gap-4"
       title={t("title")}
-      description={t("totalContacts", { count: pagination.totalItems })}
+      description={t("totalContacts", { count: total })}
       headerActions={
         <div className="flex gap-2">
           <Button
@@ -317,66 +311,67 @@ export default function ContactsPage() {
       }
     >
       {/* Search and Pagination Controls */}
-        <div className="flex flex-col sm:flex-row gap-4 justify-between items-end sm:items-center">
-          <div className="relative w-full sm:w-auto sm:min-w-[300px]">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder={t("searchContactsPlaceholder")}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9"
-            />
-          </div>
-
-          <Pagination
-            page={pagination.page}
-            totalPages={pagination.totalPages}
-            onPageChange={setPage}
-            pageSize={pageSize}
-            onPageSizeChange={setPageSize}
-            translations={{
-              page: t("pagination.page", { current: pagination.page, total: pagination.totalPages }),
-              previous: t("pagination.previous"),
-              next: t("pagination.next"),
-              first: t("pagination.first"),
-              last: t("pagination.last"),
-              rowsPerPage: t("pagination.rowsPerPage")
-            }}
-            compact
+      <div className="flex flex-col sm:flex-row gap-4 justify-between items-end sm:items-center">
+        <div className="relative w-full sm:w-auto sm:min-w-[300px]">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder={t("searchContactsPlaceholder")}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9"
           />
         </div>
 
-        {/* Bulk Actions Bar */}
-        {selectedIds.size > 0 && (
-          <div className="flex items-center justify-between p-2 bg-muted/50 rounded-lg border animate-in fade-in slide-in-from-top-1">
-            <div className="flex items-center gap-4 px-2">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={clearSelection}
-                className="h-8 w-8 text-muted-foreground hover:text-foreground"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-              <span className="text-sm font-medium">
-                {selectedIds.size} selected
-              </span>
-            </div>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => setBulkDeleteDialogOpen(true)}
-              className="h-8"
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </div>
-        )}
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          onPageChange={setPage}
+          pageSize={pageSize}
+          onPageSizeChange={setPageSize}
+          translations={{
+            page: t("pagination.page", {
+              current: page,
+              total: totalPages,
+            }),
+            previous: t("pagination.previous"),
+            next: t("pagination.next"),
+            first: t("pagination.first"),
+            last: t("pagination.last"),
+            rowsPerPage: t("pagination.rowsPerPage"),
+          }}
+          compact
+        />
+      </div>
 
+      {/* Bulk Actions Bar */}
+      {selectedCount > 0 && (
+        <div className="flex items-center justify-between p-2 bg-muted/50 rounded-lg border animate-in fade-in slide-in-from-top-1">
+          <div className="flex items-center gap-4 px-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={clearSelection}
+              className="h-8 w-8 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+            <span className="text-sm font-medium">
+              {selectedCount} selected
+            </span>
+          </div>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setBulkDeleteDialogOpen(true)}
+            className="h-8"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
 
       {/* Main Content */}
       <div className="flex-1 space-y-4 overflow-hidden flex flex-col">
-
         {isLoading ? (
           <div className="space-y-3">
             {Array.from({ length: 5 }).map((_, i) => (
@@ -396,13 +391,13 @@ export default function ContactsPage() {
             <div className="text-5xl mb-4">👥</div>
             <h3 className="text-lg font-semibold">{t("noContacts")}</h3>
             <p className="text-muted-foreground mt-2 mb-4">
-              {searchQuery
-                ? t("noSearchResults")
-                : t("createFirstContact")}
+              {searchQuery ? t("noSearchResults") : t("createFirstContact")}
             </p>
             {!searchQuery && (
               <Button
-                onClick={() => router.push(`/${locale}/dashboard/contacts/form`)}
+                onClick={() =>
+                  router.push(`/${locale}/dashboard/contacts/form`)
+                }
               >
                 <Plus className="mr-2 h-4 w-4" />
                 {t("addContact")}
@@ -412,10 +407,10 @@ export default function ContactsPage() {
         ) : (
           <>
             {/* Select All Header */}
-            {selectedIds.size > 0 && (
+            {selectedCount > 0 && (
               <div className="flex items-center gap-3 px-3 py-2 border-b mb-2">
                 <Checkbox
-                  checked={selectedIds.size === contacts.length && contacts.length > 0}
+                  checked={isAllSelected}
                   onCheckedChange={toggleSelectAll}
                   aria-label="Select all contacts"
                 />
@@ -435,11 +430,13 @@ export default function ContactsPage() {
                 >
                   <div className="flex items-center gap-3 flex-1 min-w-0">
                     {/* Checkbox */}
-                    {selectedIds.size > 0 && (
+                    {selectedCount > 0 && (
                       <div onClick={(e) => e.stopPropagation()}>
                         <Checkbox
                           checked={selectedIds.has(contact.contactId)}
-                          onCheckedChange={() => toggleSelect(contact.contactId)}
+                          onCheckedChange={() =>
+                            toggleSelect(contact.contactId)
+                          }
                           aria-label={`Select ${contact.firstName}`}
                         />
                       </div>
@@ -496,13 +493,15 @@ export default function ContactsPage() {
                         >
                           {tCommon("edit")}
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleStartChat(contact)}>
+                        <DropdownMenuItem
+                          onClick={() => handleStartChat(contact)}
+                        >
                           {t("startChat")}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={(e) => {
                             e.stopPropagation();
-                            setSelectedIds(new Set([contact.contactId]));
+                            handleDeleteClick(contact);
                           }}
                           className="text-red-600 dark:text-red-400 focus:bg-red-50 dark:focus:bg-red-900/20"
                         >
@@ -514,8 +513,6 @@ export default function ContactsPage() {
                 </div>
               ))}
             </div>
-
-
           </>
         )}
       </div>
@@ -537,7 +534,7 @@ export default function ContactsPage() {
       <DeleteConfirmationDialog
         isOpen={bulkDeleteDialogOpen}
         title={t("bulkDeleteTitle")}
-        description={t("bulkDeleteDescription", { count: selectedIds.size })}
+        description={t("bulkDeleteDescription", { count: selectedCount })}
         onConfirm={handleBulkDelete}
         onCancel={() => setBulkDeleteDialogOpen(false)}
         isLoading={isDeleting}

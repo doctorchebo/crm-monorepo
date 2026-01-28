@@ -1,21 +1,16 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
+import { getBranchNodeBranches } from "@/lib/workflow/branch-utils";
 import type { NodeProps } from "@xyflow/react";
 import { GitBranch } from "lucide-react";
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { BaseNode } from "./base-node";
 
 interface BranchNodeData {
   label: string;
   description?: string;
-  config?: {
-    branches?: Array<{
-      name: string;
-      condition?: Record<string, unknown>;
-    }>;
-    defaultBranch?: string;
-  };
+  config?: Record<string, unknown>;
   isEntryPoint?: boolean;
   isExitPoint?: boolean;
 }
@@ -24,23 +19,16 @@ export const BranchNode = memo(function BranchNode({
   data,
   selected,
 }: NodeProps & { data: BranchNodeData }) {
-  const branches = data.config?.branches || [];
+  // Get branches using centralized utility
+  const branchConfig = useMemo(
+    () => getBranchNodeBranches(data.config),
+    [data.config],
+  );
 
-  // Generate outputs for each branch
-  const outputs = branches.map((branch, idx) => ({
-    id: branch.name || `branch_${idx}`,
-    label: branch.name,
-    color: `hsl(${(idx * 60) % 360}, 70%, 50%)`,
-  }));
-
-  // Add default branch if specified
-  if (data.config?.defaultBranch) {
-    outputs.push({
-      id: "default",
-      label: data.config.defaultBranch,
-      color: "#64748b",
-    });
-  }
+  // Extract branch names for display (excluding default/fallback)
+  const displayBranches = branchConfig.branches.filter(
+    (b) => b.id !== "default",
+  );
 
   return (
     <BaseNode
@@ -53,22 +41,34 @@ export const BranchNode = memo(function BranchNode({
       isExitPoint={data.isExitPoint}
       handles={{
         inputs: [{ id: "input" }],
-        outputs: outputs.length > 0 ? outputs : [{ id: "output" }],
+        outputs:
+          branchConfig.branches.length > 0
+            ? branchConfig.branches
+            : [{ id: "output", label: "Default", color: "#64748b" }],
       }}
     >
       <div className="space-y-1">
         <p className="text-xs text-muted-foreground">
-          {branches.length} branch{branches.length !== 1 ? "es" : ""}
+          {displayBranches.length} branch
+          {displayBranches.length !== 1 ? "es" : ""}
         </p>
         <div className="flex flex-wrap gap-1">
-          {branches.slice(0, 3).map((branch, idx) => (
-            <Badge key={idx} variant="secondary" className="text-[10px]">
-              {branch.name}
+          {displayBranches.slice(0, 3).map((branch, idx) => (
+            <Badge
+              key={idx}
+              variant="secondary"
+              className="text-[10px]"
+              style={{
+                borderLeftWidth: 2,
+                borderLeftColor: branch.color,
+              }}
+            >
+              {branch.label}
             </Badge>
           ))}
-          {branches.length > 3 && (
+          {displayBranches.length > 3 && (
             <span className="text-[10px] text-muted-foreground">
-              +{branches.length - 3}
+              +{displayBranches.length - 3}
             </span>
           )}
         </div>

@@ -1645,10 +1645,24 @@
   "workflows": {
     "title": "Workflows",
     "description": "Build automated workflows with visual canvas",
+    "totalWorkflows": "{count, plural, =0 {No workflows} one {# workflow} other {# workflows}}",
     "newWorkflowName": "New Workflow",
     "noDescription": "No description",
     "searchPlaceholder": "Search workflows...",
     "updatedAt": "Updated {date}",
+    "selectedCount": "{count} selected",
+    "selectAll": "Select all",
+    "bulkDeleteTitle": "Delete Workflows",
+    "bulkDeleteDescription": "Are you sure you want to delete {count} workflows? This action cannot be undone.",
+    "bulkDeleteSuccess": "{count} workflows deleted successfully",
+    "pagination": {
+      "page": "Page {current} of {total}",
+      "previous": "Previous",
+      "next": "Next",
+      "first": "First",
+      "last": "Last",
+      "rowsPerPage": "Per page"
+    },
     "status": {
       "draft": "Draft",
       "published": "Published",

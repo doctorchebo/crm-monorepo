@@ -182,11 +182,13 @@ export const workflows = pgTable(
     // Timestamps
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
+    deletedAt: timestamp('deleted_at'), // Soft delete - null means active
   },
   (table) => ({
     teamIdIndex: index('idx_workflows_team_id').on(table.teamId),
     statusIndex: index('idx_workflows_status').on(table.status),
     priorityIndex: index('idx_workflows_priority').on(table.priority),
+    deletedAtIndex: index('idx_workflows_deleted_at').on(table.deletedAt),
     teamNameUnique: unique('uq_workflows_team_name').on(
       table.teamId,
       table.name,

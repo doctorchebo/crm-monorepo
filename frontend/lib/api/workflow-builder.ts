@@ -99,6 +99,12 @@ export const workflowBuilderApi = {
     apiClient.delete(`/workflow-builder/workflows/${workflowId}`),
 
   /**
+   * Bulk delete workflows (soft delete)
+   */
+  bulkDelete: (workflowIds: string[]): Promise<{ deletedCount: number }> =>
+    apiClient.post("/workflow-builder/workflows/bulk-delete", { workflowIds }),
+
+  /**
    * Duplicate a workflow
    */
   duplicate: (workflowId: string, data: { name?: string }): Promise<Workflow> =>

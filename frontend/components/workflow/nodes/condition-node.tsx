@@ -1,27 +1,16 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
+import { getConditionBranches } from "@/lib/workflow/branch-utils";
 import type { NodeProps } from "@xyflow/react";
 import { Bot, Clock, Filter, User } from "lucide-react";
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { BaseNode } from "./base-node";
 
 interface ConditionNodeData {
   label: string;
   description?: string;
-  config?: {
-    conditionType?: string;
-    aiClassification?: {
-      categories?: Array<{ name: string }>;
-    };
-    keywordMatch?: {
-      keywords?: string[];
-    };
-    contactField?: {
-      fieldPath?: string;
-      operator?: string;
-    };
-  };
+  config?: Record<string, unknown>;
   isEntryPoint?: boolean;
   isExitPoint?: boolean;
 }
@@ -38,27 +27,25 @@ export const ConditionNode = memo(function ConditionNode({
   data,
   selected,
 }: NodeProps & { data: ConditionNodeData }) {
-  const conditionType = data.config?.conditionType || "expression";
+  const conditionType = (data.config?.conditionType as string) || "expression";
   const icon = CONDITION_ICONS[conditionType] || CONDITION_ICONS.default;
 
-  // Determine outputs based on condition type
-  let outputs = [
-    { id: "true", label: "Yes", color: "#22c55e" },
-    { id: "false", label: "No", color: "#ef4444" },
-  ];
+  // Get branches using centralized utility
+  const branchConfig = useMemo(
+    () => getConditionBranches(data.config),
+    [data.config],
+  );
 
-  // AI classification has multiple outputs
-  if (
-    conditionType === "ai_classification" &&
-    data.config?.aiClassification?.categories
-  ) {
-    outputs = data.config.aiClassification.categories.map((cat) => ({
-      id: cat.name,
-      label: cat.name,
-      color: "#3b82f6",
-    }));
-    outputs.push({ id: "fallback", label: "Other", color: "#64748b" });
-  }
+  // Extract type-specific config for display
+  const keywordMatch = data.config?.keywordMatch as
+    | { keywords?: string[] }
+    | undefined;
+  const contactField = data.config?.contactField as
+    | { fieldPath?: string; operator?: string }
+    | undefined;
+  const aiClassification = data.config?.aiClassification as
+    | { categories?: Array<{ name: string; description?: string }> }
+    | undefined;
 
   return (
     <BaseNode
@@ -70,34 +57,64 @@ export const ConditionNode = memo(function ConditionNode({
       isEntryPoint={data.isEntryPoint}
       handles={{
         inputs: [{ id: "input" }],
-        outputs,
+        outputs: branchConfig.branches,
       }}
     >
       <div className="space-y-1.5">
         <Badge variant="outline" className="text-[10px]">
-          {conditionType.replace("_", " ")}
+          {conditionType.replace(/_/g, " ")}
         </Badge>
 
-        {conditionType === "keyword_match" &&
-          data.config?.keywordMatch?.keywords && (
-            <div className="flex flex-wrap gap-1">
-              {data.config.keywordMatch.keywords.slice(0, 3).map((kw, idx) => (
-                <Badge key={idx} variant="secondary" className="text-[10px]">
-                  {kw}
-                </Badge>
-              ))}
-              {data.config.keywordMatch.keywords.length > 3 && (
-                <span className="text-[10px] text-muted-foreground">
-                  +{data.config.keywordMatch.keywords.length - 3}
-                </span>
-              )}
+        {/* AI Classification: Show category count and names */}
+        {conditionType === "ai_classification" &&
+          aiClassification?.categories && (
+            <div className="space-y-1">
+              <p className="text-[10px] text-muted-foreground">
+                {aiClassification.categories.length} categories
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {aiClassification.categories.slice(0, 3).map((cat, idx) => (
+                  <Badge
+                    key={idx}
+                    variant="secondary"
+                    className="text-[10px]"
+                    style={{
+                      borderLeftWidth: 2,
+                      borderLeftColor: branchConfig.branches[idx]?.color,
+                    }}
+                  >
+                    {cat.name}
+                  </Badge>
+                ))}
+                {aiClassification.categories.length > 3 && (
+                  <span className="text-[10px] text-muted-foreground">
+                    +{aiClassification.categories.length - 3}
+                  </span>
+                )}
+              </div>
             </div>
           )}
 
-        {conditionType === "contact_field" && data.config?.contactField && (
+        {/* Keyword Match: Show keywords */}
+        {conditionType === "keyword_match" && keywordMatch?.keywords && (
+          <div className="flex flex-wrap gap-1">
+            {keywordMatch.keywords.slice(0, 3).map((kw, idx) => (
+              <Badge key={idx} variant="secondary" className="text-[10px]">
+                {kw}
+              </Badge>
+            ))}
+            {keywordMatch.keywords.length > 3 && (
+              <span className="text-[10px] text-muted-foreground">
+                +{keywordMatch.keywords.length - 3}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Contact Field: Show field and operator */}
+        {conditionType === "contact_field" && contactField && (
           <p className="text-[10px] text-muted-foreground truncate">
-            {data.config.contactField.fieldPath}{" "}
-            {data.config.contactField.operator}
+            {contactField.fieldPath} {contactField.operator}
           </p>
         )}
       </div>

@@ -1,7 +1,9 @@
 "use client";
 
+import { DeleteConfirmationDialog } from "@/components/dialogs/delete-confirmation-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,10 +12,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Pagination } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TemplateLibraryDialog, WorkflowIcon } from "@/components/workflow";
 import { useNotification } from "@/hooks/use-notification";
+import { usePaginatedData } from "@/hooks/use-paginated-data";
 import { workflowBuilderApi } from "@/lib/api/workflow-builder";
 import type { Workflow, WorkflowStatus } from "@/lib/types/workflow.types";
 import {
@@ -27,10 +31,28 @@ import {
   Plus,
   Search,
   Trash2,
+  X,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+/** Debounce hook for search */
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState<T>(value);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [value, delay]);
+
+  return debouncedValue;
+}
 
 const STATUS_COLORS: Record<WorkflowStatus, string> = {
   draft:
@@ -43,12 +65,18 @@ const STATUS_COLORS: Record<WorkflowStatus, string> = {
 
 function WorkflowCard({
   workflow,
+  isSelected,
+  showCheckbox,
+  onToggleSelect,
   onEdit,
   onDuplicate,
   onDelete,
   onArchive,
 }: {
   workflow: Workflow;
+  isSelected: boolean;
+  showCheckbox: boolean;
+  onToggleSelect: (id: string) => void;
   onEdit: (id: string) => void;
   onDuplicate: (id: string) => void;
   onDelete: (id: string) => void;
@@ -66,7 +94,8 @@ function WorkflowCard({
     if (
       target.closest("button") ||
       target.closest('[role="menuitem"]') ||
-      target.closest("[data-radix-collection-item]")
+      target.closest("[data-radix-collection-item]") ||
+      target.closest('[role="checkbox"]')
     ) {
       return;
     }
@@ -87,12 +116,23 @@ function WorkflowCard({
 
   return (
     <Card
-      className="hover:shadow-md transition-shadow cursor-pointer group"
+      className={`hover:shadow-md transition-shadow cursor-pointer group ${
+        isSelected ? "ring-2 ring-primary" : ""
+      }`}
       onClick={handleCardClick}
     >
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-2">
+            {showCheckbox && (
+              <div onClick={(e) => e.stopPropagation()}>
+                <Checkbox
+                  checked={isSelected}
+                  onCheckedChange={() => onToggleSelect(workflow.id)}
+                  aria-label={`Select ${workflow.name}`}
+                />
+              </div>
+            )}
             <WorkflowIcon
               icon={workflow.icon}
               color={workflow.color}
@@ -142,7 +182,7 @@ function WorkflowCard({
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={(e) => handleMenuAction(e, onDelete)}
-                className="text-destructive focus:text-destructive"
+                className="text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400 focus:bg-red-50 dark:focus:bg-red-900/20"
               >
                 <Trash2 className="mr-2 h-4 w-4" />
                 {t("actions.delete")}
@@ -195,39 +235,74 @@ function WorkflowListSkeleton() {
   );
 }
 
+/** Workflow filters interface */
+interface WorkflowFilters {
+  status: WorkflowStatus | "all";
+  search: string;
+}
+
 export default function WorkflowsPage() {
   const t = useTranslations("workflows");
   const router = useRouter();
   const { addNotification } = useNotification();
-  const [workflows, setWorkflows] = useState<Workflow[]>([]);
-  const [loading, setLoading] = useState(true);
+
+  // Filter state (managed separately for controlled inputs)
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search, 300);
   const [statusFilter, setStatusFilter] = useState<WorkflowStatus | "all">(
     "all",
   );
+
+  // Dialog state
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
-  const fetchWorkflows = useCallback(async () => {
-    try {
-      setLoading(true);
-      const response = await workflowBuilderApi.list({
-        status: statusFilter === "all" ? undefined : statusFilter,
-        search: search || undefined,
+  // Memoize filters to prevent unnecessary re-renders
+  const filters = useMemo<WorkflowFilters>(
+    () => ({
+      status: statusFilter,
+      search: debouncedSearch,
+    }),
+    [statusFilter, debouncedSearch],
+  );
+
+  // Use the paginated data hook for robust pagination and selection management
+  const {
+    items: workflows,
+    total,
+    isLoading,
+    page,
+    pageSize,
+    totalPages,
+    pageSizeOptions,
+    setPage,
+    setPageSize,
+    selectedIds,
+    selectedCount,
+    isAllSelected,
+    toggleSelect,
+    toggleSelectAll,
+    clearSelection,
+    selectOne,
+    refreshAfterDelete,
+    swrResponse: { mutate },
+  } = usePaginatedData<Workflow, WorkflowFilters>({
+    cacheKeyPrefix: "workflows",
+    initialPageSize: 12,
+    pageSizeOptions: [12, 24, 48],
+    filters,
+    fetcher: async ({ page, pageSize, filters }) => {
+      const result = await workflowBuilderApi.list({
+        status: filters.status === "all" ? undefined : filters.status,
+        search: filters.search || undefined,
+        page,
+        limit: pageSize,
       });
-      setWorkflows(response.workflows);
-    } catch (error) {
-      addNotification(
-        `${t("errors.loadFailed")}: ${error instanceof Error ? error.message : "Unknown error"}`,
-        "error",
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [statusFilter, search, addNotification, t]);
-
-  useEffect(() => {
-    fetchWorkflows();
-  }, [fetchWorkflows]);
+      return { items: result.workflows, total: result.total };
+    },
+    getItemId: (workflow) => workflow.id,
+  });
 
   const handleCreateWorkflow = async () => {
     try {
@@ -255,7 +330,7 @@ export default function WorkflowsPage() {
         `${t("notifications.duplicated")}: ${t("notifications.duplicatedMessage", { name: workflow.name })}`,
         "success",
       );
-      fetchWorkflows();
+      mutate();
     } catch (error) {
       addNotification(
         `${t("errors.duplicateFailed")}: ${error instanceof Error ? error.message : "Unknown error"}`,
@@ -265,19 +340,8 @@ export default function WorkflowsPage() {
   };
 
   const handleDeleteWorkflow = async (id: string) => {
-    try {
-      await workflowBuilderApi.delete(id);
-      addNotification(
-        `${t("notifications.deleted")}: ${t("notifications.deletedMessage")}`,
-        "success",
-      );
-      fetchWorkflows();
-    } catch (error) {
-      addNotification(
-        `${t("errors.deleteFailed")}: ${error instanceof Error ? error.message : "Unknown error"}`,
-        "error",
-      );
-    }
+    // Enable selection mode with this workflow selected
+    selectOne(id);
   };
 
   const handleArchiveWorkflow = async (id: string) => {
@@ -291,12 +355,39 @@ export default function WorkflowsPage() {
           : t("notifications.unarchived"),
         "success",
       );
-      fetchWorkflows();
+      mutate();
     } catch (error) {
       addNotification(
         `${t("errors.archiveFailed")}: ${error instanceof Error ? error.message : "Unknown error"}`,
         "error",
       );
+    }
+  };
+
+  // Bulk delete handler
+  const handleBulkDelete = async () => {
+    if (selectedCount === 0) return;
+
+    setIsDeleting(true);
+    try {
+      const result = await workflowBuilderApi.bulkDelete(
+        Array.from(selectedIds),
+      );
+      addNotification(
+        t("bulkDeleteSuccess", { count: result.deletedCount }),
+        "success",
+      );
+      setBulkDeleteDialogOpen(false);
+      // Use refreshAfterDelete for automatic page adjustment when last page becomes empty
+      await refreshAfterDelete(result.deletedCount);
+    } catch (error) {
+      console.error("Failed to bulk delete workflows:", error);
+      addNotification(
+        `${t("errors.deleteFailed")}: ${error instanceof Error ? error.message : "Unknown error"}`,
+        "error",
+      );
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -306,7 +397,9 @@ export default function WorkflowsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">{t("title")}</h1>
-          <p className="text-muted-foreground">{t("description")}</p>
+          <p className="text-muted-foreground">
+            {t("totalWorkflows", { count: total })}
+          </p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => setTemplateDialogOpen(true)}>
@@ -324,34 +417,97 @@ export default function WorkflowsPage() {
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="flex items-center gap-4">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder={t("searchPlaceholder")}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
-          />
+      {/* Filters and Pagination */}
+      <div className="flex flex-col lg:flex-row items-start lg:items-center gap-4 justify-between">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+          <div className="relative flex-1 min-w-[250px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder={t("searchPlaceholder")}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+          <Tabs
+            value={statusFilter}
+            onValueChange={(v) => setStatusFilter(v as WorkflowStatus | "all")}
+          >
+            <TabsList>
+              <TabsTrigger value="all">{t("filters.all")}</TabsTrigger>
+              <TabsTrigger value="draft">{t("filters.draft")}</TabsTrigger>
+              <TabsTrigger value="published">
+                {t("filters.published")}
+              </TabsTrigger>
+              <TabsTrigger value="archived">
+                {t("filters.archived")}
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
         </div>
-        <Tabs
-          value={statusFilter}
-          onValueChange={(v) => setStatusFilter(v as WorkflowStatus | "all")}
-        >
-          <TabsList>
-            <TabsTrigger value="all">{t("filters.all")}</TabsTrigger>
-            <TabsTrigger value="draft">{t("filters.draft")}</TabsTrigger>
-            <TabsTrigger value="published">
-              {t("filters.published")}
-            </TabsTrigger>
-            <TabsTrigger value="archived">{t("filters.archived")}</TabsTrigger>
-          </TabsList>
-        </Tabs>
+
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          onPageChange={setPage}
+          pageSize={pageSize}
+          onPageSizeChange={setPageSize}
+          pageSizeOptions={[12, 24, 48]}
+          translations={{
+            page: t("pagination.page", { current: page, total: totalPages }),
+            previous: t("pagination.previous"),
+            next: t("pagination.next"),
+            first: t("pagination.first"),
+            last: t("pagination.last"),
+            rowsPerPage: t("pagination.rowsPerPage"),
+          }}
+          compact
+        />
       </div>
 
+      {/* Bulk Actions Bar */}
+      {selectedCount > 0 && (
+        <div className="flex items-center justify-between p-2 bg-muted/50 rounded-lg border animate-in fade-in slide-in-from-top-1">
+          <div className="flex items-center gap-4 px-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={clearSelection}
+              className="h-8 w-8 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+            <span className="text-sm font-medium">
+              {t("selectedCount", { count: selectedCount })}
+            </span>
+          </div>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setBulkDeleteDialogOpen(true)}
+            className="h-8"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
+
+      {/* Select All Header (shown when in selection mode) */}
+      {selectedCount > 0 && workflows.length > 0 && (
+        <div className="flex items-center gap-3 px-3 py-2 border-b">
+          <Checkbox
+            checked={isAllSelected}
+            onCheckedChange={toggleSelectAll}
+            aria-label="Select all workflows"
+          />
+          <span className="text-sm text-muted-foreground">
+            {t("selectAll")}
+          </span>
+        </div>
+      )}
+
       {/* Workflow Grid */}
-      {loading ? (
+      {isLoading ? (
         <WorkflowListSkeleton />
       ) : workflows.length === 0 ? (
         <Card className="p-12">
@@ -375,6 +531,9 @@ export default function WorkflowsPage() {
             <WorkflowCard
               key={workflow.id}
               workflow={workflow}
+              isSelected={selectedIds.has(workflow.id)}
+              showCheckbox={selectedCount > 0}
+              onToggleSelect={toggleSelect}
               onEdit={handleEditWorkflow}
               onDuplicate={handleDuplicateWorkflow}
               onDelete={handleDeleteWorkflow}
@@ -383,6 +542,16 @@ export default function WorkflowsPage() {
           ))}
         </div>
       )}
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <DeleteConfirmationDialog
+        isOpen={bulkDeleteDialogOpen}
+        title={t("bulkDeleteTitle")}
+        description={t("bulkDeleteDescription", { count: selectedCount })}
+        onConfirm={handleBulkDelete}
+        onCancel={() => setBulkDeleteDialogOpen(false)}
+        isLoading={isDeleting}
+      />
 
       {/* Template Library Dialog */}
       <TemplateLibraryDialog
