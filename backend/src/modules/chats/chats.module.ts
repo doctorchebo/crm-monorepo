@@ -8,6 +8,7 @@ import { AiMemoryModule } from '../ai-memory/ai-memory.module';
 import { TeamModule } from '../team/team.module';
 import { WhatsAppGateway } from '../whatsapp/whatsapp.gateway';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
+import { WorkflowModule } from '../workflow/workflow.module';
 import { ChatsController } from './chats.controller';
 import { ChatsService } from './chats.service';
 import { ChatAssignmentController } from './controllers/chat-assignment.controller';
@@ -28,6 +29,7 @@ import {
   imports: [
     ConfigModule,
     forwardRef(() => WhatsAppModule),
+    forwardRef(() => WorkflowModule),
     AiMemoryModule,
     TeamModule,
   ],

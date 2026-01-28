@@ -42,10 +42,12 @@ import {
   UpdateWorkflowDto,
   UpdateWorkflowTemplateCategoryDto,
   UpdateWorkflowTemplateDto,
+  UpdateTeamWorkflowSettingsDto,
   UseWorkflowTemplateDto,
   WorkflowAnalyticsQueryDto,
 } from '../dto/workflow-builder.dto';
 import { WorkflowBuilderService } from '../services/workflow-builder.service';
+import { WorkflowAssignmentService } from '../services/workflow-assignment.service';
 import { WorkflowExecutionEngine } from '../services/workflow-execution.engine';
 
 @Controller('workflow-builder')
@@ -54,6 +56,7 @@ export class WorkflowBuilderController {
   constructor(
     private readonly workflowBuilderService: WorkflowBuilderService,
     private readonly workflowExecutionEngine: WorkflowExecutionEngine,
+    private readonly workflowAssignmentService: WorkflowAssignmentService,
   ) {}
 
   // ============================================================================
@@ -124,6 +127,36 @@ export class WorkflowBuilderController {
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.workflowBuilderService.deleteWorkflow(req.user.userId, id);
+  }
+
+  // ============================================================================
+  // Team Workflow Settings
+  // ============================================================================
+
+  @Get('settings')
+  async getTeamSettings(@Req() req: AuthenticatedRequest) {
+    const teamId = await this.workflowBuilderService['getUserTeamId'](
+      req.user.userId,
+    );
+    return this.workflowBuilderService.getTeamSettings(
+      req.user.userId,
+      teamId.toString(),
+    );
+  }
+
+  @Patch('settings')
+  async updateTeamSettings(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: UpdateTeamWorkflowSettingsDto,
+  ) {
+    const teamId = await this.workflowBuilderService['getUserTeamId'](
+      req.user.userId,
+    );
+    return this.workflowBuilderService.updateTeamSettings(
+      req.user.userId,
+      teamId.toString(),
+      dto.defaultWorkflowId,
+    );
   }
 
   // ============================================================================
@@ -435,6 +468,28 @@ export class WorkflowBuilderController {
       req.user.userId,
       chatId,
     );
+  }
+
+  @Post('chats/:chatId/workflow')
+  async assignWorkflow(
+    @Req() req: AuthenticatedRequest,
+    @Param('chatId') chatId: string,
+    @Body('workflowId') workflowId: string,
+  ) {
+    return this.workflowAssignmentService.assignWorkflow(
+      chatId,
+      workflowId,
+      'manual',
+      req.user.userId,
+    );
+  }
+
+  @Delete('chats/:chatId/workflow')
+  async unassignWorkflow(
+    @Req() req: AuthenticatedRequest,
+    @Param('chatId') chatId: string,
+  ) {
+    return this.workflowAssignmentService.unassignWorkflow(chatId);
   }
 
   // ============================================================================

@@ -938,3 +938,51 @@ export const workflowAnalyticsRelations = relations(
     }),
   }),
 );
+
+// ============================================================================
+// TEAM WORKFLOW SETTINGS
+// ============================================================================
+
+/**
+ * Team Workflow Settings - team-level workflow configuration
+ * Stores default workflow for new customer-initiated chats
+ */
+export const teamWorkflowSettings = pgTable(
+  'team_workflow_settings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    teamId: integer('team_id')
+      .notNull()
+      .unique()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    defaultWorkflowId: uuid('default_workflow_id').references(
+      () => workflows.id,
+      { onDelete: 'set null' },
+    ),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (table) => ({
+    teamIdIndex: index('idx_team_workflow_settings_team').on(table.teamId),
+    workflowIdIndex: index('idx_team_workflow_settings_workflow').on(
+      table.defaultWorkflowId,
+    ),
+  }),
+);
+
+export type TeamWorkflowSettings = typeof teamWorkflowSettings.$inferSelect;
+export type NewTeamWorkflowSettings = typeof teamWorkflowSettings.$inferInsert;
+
+export const teamWorkflowSettingsRelations = relations(
+  teamWorkflowSettings,
+  ({ one }) => ({
+    team: one(teams, {
+      fields: [teamWorkflowSettings.teamId],
+      references: [teams.id],
+    }),
+    defaultWorkflow: one(workflows, {
+      fields: [teamWorkflowSettings.defaultWorkflowId],
+      references: [workflows.id],
+    }),
+  }),
+);

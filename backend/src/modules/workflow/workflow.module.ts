@@ -70,6 +70,7 @@ import {
   WorkflowEngineService,
   WorkflowExecutionEngine,
   WorkflowStatusService,
+  WorkflowAssignmentService,
 } from './services';
 import { WorkflowController } from './workflow.controller';
 
@@ -95,7 +96,10 @@ import { WorkflowController } from './workflow.controller';
 
     // Visual Workflow Builder
     WorkflowBuilderService,
+    // Visual Workflow Builder
+    WorkflowBuilderService,
     WorkflowExecutionEngine,
+    WorkflowAssignmentService,
 
     // AI configuration
     AiConfigurationService,
@@ -134,7 +138,10 @@ import { WorkflowController } from './workflow.controller';
 
     // Visual Workflow Builder
     WorkflowBuilderService,
+    // Visual Workflow Builder
+    WorkflowBuilderService,
     WorkflowExecutionEngine,
+    WorkflowAssignmentService,
 
     // AI configuration
     AiConfigurationService,

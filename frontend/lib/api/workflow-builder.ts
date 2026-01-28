@@ -147,8 +147,12 @@ export const workflowBuilderApi = {
 
   /**
    * Publish a workflow (create new version and set status to published)
+   * Backend returns { workflow, version } object
    */
-  publish: (workflowId: string, data?: PublishWorkflowDto): Promise<Workflow> =>
+  publish: (
+    workflowId: string,
+    data?: PublishWorkflowDto,
+  ): Promise<{ workflow: Workflow; version: WorkflowVersion }> =>
     apiClient.post(
       `/workflow-builder/workflows/${workflowId}/publish`,
       data || {},
@@ -388,6 +392,20 @@ export const workflowBuilderApi = {
         `/workflow-builder/chats/${chatId}/workflow-state/reset`,
         {},
       ),
+
+    /**
+     * Assign a workflow to a chat
+     */
+    assign: (chatId: string, workflowId: string): Promise<void> =>
+      apiClient.post(`/workflow-builder/chats/${chatId}/workflow`, {
+        workflowId,
+      }),
+
+    /**
+     * Unassign current workflow from a chat
+     */
+    unassign: (chatId: string): Promise<void> =>
+      apiClient.delete(`/workflow-builder/chats/${chatId}/workflow`),
   },
 
   // ============================================================================
@@ -460,5 +478,25 @@ export const workflowBuilderApi = {
       data: { name?: string },
     ): Promise<Workflow> =>
       apiClient.post(`/workflow-builder/templates/${templateId}/use`, data),
+  },
+
+  // ============================================================================
+  // Team Settings
+  // ============================================================================
+
+  settings: {
+    /**
+     * Get team workflow settings
+     */
+    get: (): Promise<{ teamId: number; defaultWorkflowId: string | null }> =>
+      apiClient.get("/workflow-builder/settings"),
+
+    /**
+     * Update team workflow settings
+     */
+    update: (data: {
+      defaultWorkflowId: string | null;
+    }): Promise<{ teamId: number; defaultWorkflowId: string | null }> =>
+      apiClient.patch("/workflow-builder/settings", data),
   },
 };

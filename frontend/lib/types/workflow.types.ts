@@ -10,7 +10,12 @@
 export type WorkflowStatus = "draft" | "published" | "archived" | "disabled";
 
 export type WorkflowNodeType =
-  | "trigger"
+  | "trigger_message"
+  | "trigger_time"
+  | "trigger_webhook"
+  | "trigger_manual"
+  | "trigger_tag"
+  | "trigger_stage_enter"
   | "condition"
   | "action"
   | "delay"

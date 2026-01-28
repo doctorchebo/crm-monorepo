@@ -622,6 +622,12 @@ export class ImportWorkflowDto {
   name?: string;
 }
 
+export class UpdateTeamWorkflowSettingsDto {
+  @IsOptional()
+  @IsUUID()
+  defaultWorkflowId?: string | null;
+}
+
 // ============================================================================
 // Query DTOs
 // ============================================================================

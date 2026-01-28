@@ -259,19 +259,20 @@ export default function WorkflowEditorPage() {
         await handleSave();
       }
 
-      const published = await workflowBuilderApi.publish(workflowId);
+      const { workflow: publishedWorkflow, version: publishedVersion } = await workflowBuilderApi.publish(workflowId);
+      
       setWorkflow((prev) =>
         prev
           ? {
               ...prev,
-              status: published.status,
-              version: published.version,
-              publishedAt: published.publishedAt,
+              status: publishedWorkflow.status,
+              version: publishedWorkflow.version,
+              publishedAt: publishedWorkflow.publishedAt,
             }
           : null,
       );
       addNotification(
-        `${t("notifications.published")}: ${t("notifications.publishedMessage", { version: published.version })}`,
+        `${t("notifications.published")}: ${t("notifications.publishedMessage", { version: String(publishedVersion.version) })}`,
         "success",
       );
     } catch (error) {

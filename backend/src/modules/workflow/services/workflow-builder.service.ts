@@ -28,6 +28,7 @@ import {
   workflowTemplateCategories,
   WorkflowTemplateCategory,
   workflowTemplates,
+  teamWorkflowSettings,
   WorkflowVariable,
   workflowVariables,
   WorkflowVersion,
@@ -391,6 +392,28 @@ export class WorkflowBuilderService {
     const workflow = await this.getWorkflow(userId, workflowId, false);
     await this.verifyTeamAccess(userId, workflow.teamId, ['owner', 'admin']);
 
+    // Check if workflow is assigned to any active chats
+    const activeAssignment = await db.query.workflowChatState.findFirst({
+      where: eq(workflowChatState.activeWorkflowId, workflowId),
+    });
+
+    if (activeAssignment) {
+      throw new BadRequestException(
+        'Cannot delete workflow: it is currently assigned to active chats. Please unassign it from all chats first.',
+      );
+    }
+
+    // Check if workflow is a default workflow for any team
+    const defaultSetting = await db.query.teamWorkflowSettings.findFirst({
+      where: eq(teamWorkflowSettings.defaultWorkflowId, workflowId),
+    });
+
+    if (defaultSetting) {
+      throw new BadRequestException(
+        'Cannot delete workflow: it is configured as the default workflow for a team.',
+      );
+    }
+
     const now = new Date();
 
     // Soft delete by setting deletedAt timestamp
@@ -399,7 +422,13 @@ export class WorkflowBuilderService {
       .set({ deletedAt: now, updatedAt: now })
       .where(eq(workflows.id, workflowId));
 
-    // Clear any chat states pointing to this workflow
+    // Clear any chat states pointing to this workflow (although we checked for active ones, this cleans up inactive/historical pointers if any remain, but strictly we prevented active ones)
+    // Actually, if we prevent deletion when active, we don't need to clear activeWorkflowId.
+    // But we might want to clear it if it was "paused" or something?
+    // The previous implementation cleared it. Let's keep it but maybe it's redundant if we block active ones.
+    // However, `activeAssignment` check above prevents this if there ARE any.
+    // So this cleanup code 아래 might rarely hit anything unless race condition.
+    // Let's keep it as safe guard.
     await db
       .update(workflowChatState)
       .set({
@@ -466,6 +495,77 @@ export class WorkflowBuilderService {
     this.logger.log(`Bulk soft deleted ${workflowIds.length} workflows`);
 
     return { deletedCount: workflowIds.length };
+  }
+
+  // ============================================================================
+  // Team Workflow Settings
+  // ============================================================================
+
+  /**
+   * Get team workflow settings
+   */
+  async getTeamSettings(userId: number, teamId: string) {
+    const parsedTeamId = parseInt(teamId);
+    await this.verifyTeamAccess(userId, parsedTeamId);
+
+    const settings = await db.query.teamWorkflowSettings.findFirst({
+      where: eq(teamWorkflowSettings.teamId, parsedTeamId),
+      with: {
+        defaultWorkflow: true,
+      } as any,
+    });
+
+    return settings || { teamId: parsedTeamId, defaultWorkflowId: null };
+  }
+
+  /**
+   * Update team workflow settings
+   */
+  async updateTeamSettings(
+    userId: number,
+    teamId: string,
+    defaultWorkflowId: string | null,
+  ) {
+    const parsedTeamId = parseInt(teamId);
+    await this.verifyTeamAccess(userId, parsedTeamId, ['owner', 'admin']);
+
+    if (defaultWorkflowId) {
+      // Verify workflow exists and belongs to team
+      const workflow = await db.query.workflows.findFirst({
+        where: and(
+          eq(workflows.id, defaultWorkflowId),
+          eq(workflows.teamId, parsedTeamId),
+          sql`${workflows.deletedAt} IS NULL`,
+        ),
+      });
+
+      if (!workflow) {
+        throw new NotFoundException('Workflow not found');
+      }
+
+      if (workflow.status !== 'published' && workflow.status !== 'active') {
+        throw new BadRequestException(
+          'Default workflow must be published or active',
+        );
+      }
+    }
+
+    const [settings] = await db
+      .insert(teamWorkflowSettings)
+      .values({
+        teamId: parsedTeamId,
+        defaultWorkflowId,
+      })
+      .onConflictDoUpdate({
+        target: teamWorkflowSettings.teamId,
+        set: {
+          defaultWorkflowId,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+
+    return settings;
   }
 
   // ============================================================================
@@ -1165,8 +1265,9 @@ export class WorkflowBuilderService {
     await this.verifyTeamAccess(userId, workflow.teamId, ['owner', 'admin']);
 
     // Validate workflow has at least one trigger node
-    const triggerNodes = (workflow.nodes ?? []).filter((n) =>
-      n.nodeType.startsWith('trigger_'),
+    // Accept both legacy generic 'trigger' type and specific trigger types (trigger_message, etc.)
+    const triggerNodes = (workflow.nodes ?? []).filter(
+      (n) => n.nodeType === 'trigger' || n.nodeType.startsWith('trigger_'),
     );
 
     if (triggerNodes.length === 0) {

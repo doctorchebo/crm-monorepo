@@ -5,9 +5,12 @@ import { ChatAIControls } from "@/components/chat-ai-controls";
 import { HandoffBanner } from "@/components/handoff-banner";
 import { Button } from "@/components/ui/button";
 import { useHandoff } from "@/hooks/use-handoff";
-import { Search } from "lucide-react";
+import { Search, Workflow } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState, useEffect } from "react";
+import { WorkflowAssignmentDialog } from "./workflow-assignment-dialog";
+import { workflowBuilderApi } from "@/lib/api/workflow-builder";
+import useSWR from "swr";
 import type { Chat } from "../types";
 import { AssigneeSelector } from "@/components/chat/assignee-selector";
 
@@ -43,10 +46,19 @@ export function ChatHeader({
   } = useHandoff(chat.chatId);
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isWorkflowDialogOpen, setIsWorkflowDialogOpen] = useState(false);
+
+  // Fetch current workflow state
+  const { data: workflowState } = useSWR(
+    ["chat-workflow-state", chat.chatId],
+    () => workflowBuilderApi.chatState.get(chat.chatId)
+  );
+
+  const activeWorkflowName = workflowState?.activeWorkflow?.name;
 
 
+  // ... (handlers)
 
-  // ... (maintain existing handlers) -> Replacing with actual code
   const handleToggleAI = async (shouldEnable: boolean) => {
     // If parent provides a handler, use it (for auto-trigger logic)
     if (onAIToggle) {
@@ -113,6 +125,20 @@ export function ChatHeader({
             assigneeId={chat.assignedTo}
             teamId={chat.teamId}
           />
+
+          {/* Workflow Assignment */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex items-center gap-2 h-8"
+            onClick={() => setIsWorkflowDialogOpen(true)}
+            title={activeWorkflowName ? `Active Workflow: ${activeWorkflowName}` : "Assign Workflow"}
+          >
+            <Workflow className="h-4 w-4" />
+            <span className="hidden sm:inline-block max-w-[100px] truncate">
+              {activeWorkflowName || "Workflow"}
+            </span>
+          </Button>
           
           {/* AI Controls */}
           <ChatAIControls
@@ -169,6 +195,12 @@ export function ChatHeader({
         />
       )}
 
+      <WorkflowAssignmentDialog
+        chatId={chat.chatId}
+        activeWorkflowId={workflowState?.activeWorkflowId || null}
+        open={isWorkflowDialogOpen}
+        onOpenChange={setIsWorkflowDialogOpen}
+      />
     </div>
   );
 }

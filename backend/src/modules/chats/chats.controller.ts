@@ -3,7 +3,6 @@ import {
   Controller,
   Delete,
   Get,
-  Logger,
   Param,
   Patch,
   Post,
@@ -11,49 +10,33 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ProfilePictureUrlService } from '@shared/services/profile-picture-url.service';
-import { JwtPayload } from '@shared/types';
 import { JwtAuthGuard } from '../auth/auth.guard';
 import { RequirePermission } from '../auth/guards/permissions.guard';
-import { TeamService } from '../team/team.service';
 import { ChatsService } from './chats.service';
 import { CreateChatDto } from './dto/create-chat.dto';
 import { SearchChatsDto } from './dto/search-chats.dto';
 import { SearchMessagesDto } from './dto/search-messages.dto';
 import { UpdateChatDto } from './dto/update-chat.dto';
-
-interface StartChatDto {
-  businessPhone: string;
-  participantPhone: string;
-  participantName?: string;
-  senderId?: number;
-}
-
-interface AssignChatDto {
-  userId: number | null;
-}
+import { TeamService } from '../team/team.service';
 
 @Controller('chats')
 @UseGuards(JwtAuthGuard)
 export class ChatsController {
-  private readonly logger = new Logger(ChatsController.name);
-
   constructor(
     private chatsService: ChatsService,
     private teamService: TeamService,
-    private profilePictureUrlService: ProfilePictureUrlService,
   ) {}
 
   async create(@Req() req: any, @Body() createChatDto: CreateChatDto) {
-    const user = req.user as JwtPayload;
-    const teams = await this.teamService.getUserTeams(user.userId);
+    const userId = req.user.userId;
+    const teams = await this.teamService.getUserTeams(userId);
     const teamId = teams[0]?.id.toString();
 
     if (!teamId) {
       throw new Error('User does not belong to any team');
     }
 
-    return this.chatsService.create(user.userId, teamId, createChatDto);
+    return this.chatsService.create(userId, teamId, createChatDto);
   }
 
   /**
@@ -62,10 +45,19 @@ export class ChatsController {
    * Requires: businessPhone, participantPhone, participantName (optional)
    */
   @Post('contact/start')
-  async startChatWithContact(@Req() req: any, @Body() body: StartChatDto) {
-    const user = req.user as JwtPayload;
+  async startChatWithContact(
+    @Req() req: any,
+    @Body()
+    body: {
+      businessPhone: string;
+      participantPhone: string;
+      participantName?: string;
+      senderId?: number;
+    },
+  ) {
+    const userId = req.user.userId;
     return this.chatsService.createOrGetChatWithContact(
-      user.userId,
+      userId,
       body.businessPhone,
       body.participantPhone,
       body.participantName,
@@ -80,41 +72,29 @@ export class ChatsController {
     @Query('take') take: number = 20,
     @Query('teamId') teamIdParam?: string,
   ) {
-    const user = req.user as JwtPayload;
+    const userId = req.user.userId;
 
-    this.logger.log(
-      `findByTeam called. User: ${user.userId}, TeamIdParam: ${teamIdParam}`,
+    console.log(
+      `[ChatsController] findByTeam called. User: ${userId}, TeamIdParam: ${teamIdParam}`,
     );
 
     let teamId = teamIdParam;
     if (!teamId) {
-      const teams = await this.teamService.getUserTeams(user.userId);
-      this.logger.log(
-        `User teams found: ${teams.length}. First: ${teams[0]?.id}`,
+      const teams = await this.teamService.getUserTeams(userId);
+      console.log(
+        `[ChatsController] User teams found: ${teams.length}. First: ${teams[0]?.id}`,
       );
       teamId = teams[0]?.id.toString();
     }
 
     if (!teamId) {
-      this.logger.warn(
-        `No team ID found for user ${user.userId}. Returning empty.`,
+      console.warn(
+        `[ChatsController] No team ID found for user ${userId}. Returning empty list.`,
       );
       return []; // Return empty if no team
     }
 
-    const chats = await this.chatsService.findByTeam(
-      user.userId,
-      teamId,
-      skip,
-      take,
-    );
-
-    // Generate presigned URLs for assignee profile pictures using centralized service
-    return this.profilePictureUrlService.transformArrayWithUrls(
-      chats,
-      'assigneeProfilePictureKey',
-      'assigneeProfilePictureUrl',
-    );
+    return this.chatsService.findByTeam(userId, teamId, skip, take);
   }
 
   /**
@@ -127,8 +107,8 @@ export class ChatsController {
     @Query('skip') skip: number = 0,
     @Query('take') take: number = 20,
   ) {
-    const user = req.user as JwtPayload;
-    return this.chatsService.getArchivedChats(user.userId, skip, take);
+    const userId = req.user.userId;
+    return this.chatsService.getArchivedChats(userId, skip, take);
   }
 
   /**
@@ -142,8 +122,8 @@ export class ChatsController {
    */
   @Get('search')
   async searchChats(@Req() req: any, @Query() searchDto: SearchChatsDto) {
-    const user = req.user as JwtPayload;
-    return this.chatsService.searchChats(user.userId, searchDto);
+    const userId = req.user.userId;
+    return this.chatsService.searchChats(userId, searchDto);
   }
 
   @Get(':id')
@@ -186,8 +166,8 @@ export class ChatsController {
    */
   @Delete(':id')
   async deleteChat(@Req() req: any, @Param('id') id: string) {
-    const user = req.user as JwtPayload;
-    await this.chatsService.deleteChat(id, user.userId);
+    const userId = req.user.userId;
+    await this.chatsService.deleteChat(id, userId);
     return { success: true, message: 'Chat deleted successfully' };
   }
 
@@ -201,10 +181,10 @@ export class ChatsController {
   async assignChat(
     @Req() req: any,
     @Param('id') id: string,
-    @Body() body: AssignChatDto,
+    @Body() body: { userId: number | null },
   ) {
-    const user = req.user as JwtPayload;
-    return this.chatsService.assignChat(id, user.userId, body.userId);
+    const assignerId = req.user.userId;
+    return this.chatsService.assignChat(id, assignerId, body.userId);
   }
 
   /**

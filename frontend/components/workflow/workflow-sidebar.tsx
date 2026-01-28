@@ -52,7 +52,7 @@ interface NodeTypeDefinition {
 const NODE_TYPES: NodeTypeDefinition[] = [
   // Triggers
   {
-    type: "trigger",
+    type: "trigger_message",
     label: "Message Received",
     description: "Start when a message is received",
     icon: <MessageSquare className="h-4 w-4" />,
@@ -60,7 +60,7 @@ const NODE_TYPES: NodeTypeDefinition[] = [
     color: "#22c55e",
   },
   {
-    type: "trigger",
+    type: "trigger_webhook",
     label: "Webhook",
     description: "Start from external webhook",
     icon: <Webhook className="h-4 w-4" />,
@@ -68,7 +68,7 @@ const NODE_TYPES: NodeTypeDefinition[] = [
     color: "#22c55e",
   },
   {
-    type: "trigger",
+    type: "trigger_tag",
     label: "Tag Added",
     description: "Start when tag is added to contact",
     icon: <Tag className="h-4 w-4" />,
@@ -76,7 +76,7 @@ const NODE_TYPES: NodeTypeDefinition[] = [
     color: "#22c55e",
   },
   {
-    type: "trigger",
+    type: "trigger_stage_enter",
     label: "Stage Changed",
     description: "Start when chat enters a stage",
     icon: <Target className="h-4 w-4" />,

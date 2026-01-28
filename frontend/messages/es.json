@@ -1628,6 +1628,7 @@
     "status": {
       "draft": "Borrador",
       "published": "Publicado",
+      "active": "Activo",
       "archived": "Archivado",
       "disabled": "Deshabilitado"
     },

@@ -142,6 +142,12 @@ export const navigationConfig: NavItem[] = [
         href: "/dashboard/settings/chats",
       },
       {
+        id: "settings-workflow",
+        labelKey: "dashboard.settingsWorkflow",
+        icon: GitBranch,
+        href: "/dashboard/settings/workflow",
+      },
+      {
         id: "settings-security",
         labelKey: "dashboard.security",
         icon: Shield,

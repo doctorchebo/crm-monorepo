@@ -55,7 +55,8 @@
     "navigation": "Navigation",
     "settings": "Settings",
     "settingsAi": "AI",
-    "settingsChats": "Chats"
+    "settingsChats": "Chats",
+    "settingsWorkflow": "Workflow"
   },
   "chats": {
     "title": "Chats",
@@ -1667,6 +1668,7 @@
     "status": {
       "draft": "Draft",
       "published": "Published",
+      "active": "Active",
       "archived": "Archived",
       "disabled": "Disabled"
     },
@@ -1794,6 +1796,47 @@
         "created": "Workflow created",
         "createdMessage": "Created from template: {name}"
       }
+    }
+  },
+  "workflow": {
+    "common": {
+      "loading": "Loading...",
+      "select_workflow": "Select workflow",
+      "search_workflows": "Search workflows...",
+      "no_workflows_found": "No workflows found",
+      "none": "None",
+      "active": "Active",
+      "inactive": "Inactive",
+      "draft": "Draft"
+    },
+    "settings": {
+      "title": "Default Workflow",
+      "description": "Configure the default workflow that will be automatically assigned to new chats.",
+      "default_workflow_title": "Default Team Workflow",
+      "default_workflow_description": "Select the workflow that will be assigned to all new chats.",
+      "default_workflow_label": "Workflow",
+      "default_workflow_help": "This workflow will be applied when a new chat starts.",
+      "select_default_workflow": "Select a workflow",
+      "save_changes": "Save Changes",
+      "settings_saved": "Settings saved successfully",
+      "settings_save_error": "Failed to save settings"
+    },
+    "assignment": {
+      "title": "Assign Workflow",
+      "description": "Select a workflow to assign to this chat.",
+      "select_label": "Workflow",
+      "select_placeholder": "Select a workflow",
+      "warning_stop_workflow": "Warning: Assigning a new workflow will stop the current one.",
+      "confirm_title": "Confirm Assignment",
+      "confirm_reassign_message": "Are you sure you want to reassign the workflow? The current workflow will be stopped.",
+      "confirm_stop_message": "Are you sure you want to stop the current workflow?",
+      "confirm": "Confirm",
+      "cancel": "Cancel",
+      "save": "Save",
+      "success_assigned": "Workflow assigned successfully",
+      "error_assigning": "Failed to assign workflow",
+      "success_unassigned": "Workflow unassigned successfully",
+      "error_unassigning": "Failed to unassign workflow"
     }
   }
 }
