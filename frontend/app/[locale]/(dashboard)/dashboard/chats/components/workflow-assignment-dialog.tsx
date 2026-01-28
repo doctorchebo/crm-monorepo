@@ -25,7 +25,7 @@ import { workflowBuilderApi } from '@/lib/api/workflow-builder';
 import useSWR, { mutate } from 'swr';
 import { Loader2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNotification } from '@/hooks/use-notification';
 
 interface WorkflowAssignmentDialogProps {
@@ -43,9 +43,20 @@ export function WorkflowAssignmentDialog({
 }: WorkflowAssignmentDialogProps) {
   const t = useTranslations('workflow.assignment');
   const { addNotification } = useNotification();
+  /*
+   * Sync active workflow ID when the dialog opens or when the prop changes.
+   * This ensures that if the data loads after the component mounts,
+   * or if the user re-opens the dialog, the correct value is shown.
+   */
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(
     activeWorkflowId
   );
+
+  useEffect(() => {
+    if (open) {
+      setSelectedWorkflowId(activeWorkflowId);
+    }
+  }, [open, activeWorkflowId]);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -127,8 +138,8 @@ export function WorkflowAssignmentDialog({
                 placeholder={t('select_placeholder')}
               />
             </div>
-            {activeWorkflowId && !selectedWorkflowId && (
-              <p className="text-sm text-destructive">
+            {activeWorkflowId && selectedWorkflowId !== activeWorkflowId && (
+              <p className="text-sm font-medium text-destructive dark:text-red-400">
                 {t('warning_stop_workflow')}
               </p>
             )}

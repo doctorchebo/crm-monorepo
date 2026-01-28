@@ -89,12 +89,13 @@ export function WorkflowSelector({
                   onChange(null);
                   setOpen(false);
                 }}
-                className="text-muted-foreground italic"
+                disabled={false} // Always enabled
+                className="cursor-pointer text-muted-foreground italic data-[disabled]:pointer-events-auto data-[disabled]:opacity-100"
               >
                 <Check
                   className={cn(
                     'mr-2 h-4 w-4',
-                    value === null ? 'opacity-100' : 'opacity-0'
+                     !value ? 'opacity-100' : 'opacity-0'
                   )}
                 />
                 {t('none')}
