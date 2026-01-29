@@ -15,7 +15,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import useSWR, { type SWRConfiguration, type SWRResponse } from "swr";
+import useSWR, {
+  useSWRConfig,
+  type SWRConfiguration,
+  type SWRResponse,
+} from "swr";
 
 export interface PaginatedResponse<T> {
   items: T[];
@@ -158,6 +162,9 @@ export function usePaginatedData<T, TFilters = Record<string, unknown>>({
   getItemId,
   swrOptions,
 }: UsePaginatedDataOptions<T, TFilters>): UsePaginatedDataReturn<T> {
+  // Get global mutate for invalidating cache keys
+  const { mutate: globalMutate } = useSWRConfig();
+
   // Pagination state
   const [page, setPageState] = useState(initialPage);
   const [pageSize, setPageSizeState] = useState(initialPageSize);
@@ -281,15 +288,20 @@ export function usePaginatedData<T, TFilters = Record<string, unknown>>({
 
       // If current page would be beyond the new total pages, adjust
       if (page > newTotalPages && newTotalPages > 0) {
-        // Navigate to the last valid page first, then refresh
+        // Invalidate all cached pages for this prefix to ensure fresh data
+        await globalMutate(
+          (key) => Array.isArray(key) && key[0] === cacheKeyPrefix,
+          undefined,
+          { revalidate: false },
+        );
+        // Navigate to the last valid page
         setPageState(newTotalPages);
-        // The page change will trigger a new SWR fetch automatically
       } else {
         // Same page, just refresh
         await mutate(undefined, { revalidate: true });
       }
     },
-    [total, pageSize, page, mutate],
+    [total, pageSize, page, mutate, globalMutate, cacheKeyPrefix],
   );
 
   // Specialized refresh for bulk delete operations
@@ -302,16 +314,27 @@ export function usePaginatedData<T, TFilters = Record<string, unknown>>({
       const newTotal = total - deletedCount;
       const newTotalPages = Math.max(1, Math.ceil(newTotal / pageSize));
 
-      if (page > newTotalPages && newTotalPages >= 1) {
+      // Determine the target page
+      const targetPage = page > newTotalPages ? newTotalPages : page;
+
+      // Invalidate all cached pages for this prefix to ensure fresh data
+      // This is important because the total counts have changed
+      await globalMutate(
+        (key) => Array.isArray(key) && key[0] === cacheKeyPrefix,
+        undefined,
+        { revalidate: false },
+      );
+
+      if (targetPage !== page) {
         // Current page is now invalid, go to last valid page
-        setPageState(newTotalPages);
-        // SWR will automatically fetch data for the new page
+        // The page state change will trigger SWR to fetch the new page
+        setPageState(targetPage);
       } else {
-        // Current page is still valid, just refresh
+        // Current page is still valid, refetch it
         await mutate(undefined, { revalidate: true });
       }
     },
-    [total, pageSize, page, mutate],
+    [total, pageSize, page, mutate, globalMutate, cacheKeyPrefix],
   );
 
   return {
