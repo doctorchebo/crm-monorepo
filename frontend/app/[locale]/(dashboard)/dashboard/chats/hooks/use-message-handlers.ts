@@ -78,7 +78,7 @@ interface UseMessageHandlersReturn {
   handleScrollToMessage: (
     messageId: string,
     messagesContainerRef?: React.RefObject<HTMLDivElement | null>,
-    contextMessages?: Array<{ messageId: string }>
+    contextMessages?: Array<{ messageId: string }>,
   ) => void;
   handleSendMessage: (messageText: string) => Promise<void>;
   handleDeleteMessage: (messageId: string) => void;
@@ -101,7 +101,7 @@ interface UseMessageHandlersReturn {
 }
 
 export function useMessageHandlers(
-  props: UseMessageHandlersProps
+  props: UseMessageHandlersProps,
 ): UseMessageHandlersReturn {
   const {
     selectedChatId,
@@ -124,7 +124,7 @@ export function useMessageHandlers(
 
   // Reply state
   const [replyingToMessage, setReplyingToMessage] = useState<Message | null>(
-    null
+    null,
   );
   const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
@@ -138,7 +138,7 @@ export function useMessageHandlers(
   // Selection mode state
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(
-    new Set()
+    new Set(),
   );
 
   // WebSocket for real-time updates
@@ -161,7 +161,7 @@ export function useMessageHandlers(
       // Trigger focus via centralized callback
       onFocusInput?.();
     },
-    [messages, onFocusInput]
+    [messages, onFocusInput],
   );
 
   // Focus the message input when reply is set
@@ -199,7 +199,7 @@ export function useMessageHandlers(
     (
       messageId: string,
       messagesContainerRef?: React.RefObject<HTMLDivElement | null>,
-      contextMessages?: Array<{ messageId: string }>
+      contextMessages?: Array<{ messageId: string }>,
     ) => {
       // Use provided context messages if available, otherwise fall back to hook's messages
       const messagesForCheck = contextMessages || messages;
@@ -273,13 +273,13 @@ export function useMessageHandlers(
           if (attempts >= maxAttempts) {
             console.warn(
               `[handleScrollToMessage] Message element not found after ${maxAttempts} attempts:`,
-              messageId
+              messageId,
             );
           }
         }
       }, 50);
     },
-    [messages]
+    [messages],
   );
 
   // Send text message
@@ -310,7 +310,7 @@ export function useMessageHandlers(
         // Refresh messages - but only if we're still on the same chat
         if (currentMessagesChatIdRef.current !== selectedChatId) {
           console.log(
-            "[MessageHandlers] Skipping message refresh - chat changed"
+            "[MessageHandlers] Skipping message refresh - chat changed",
           );
           return;
         }
@@ -318,13 +318,13 @@ export function useMessageHandlers(
         const response = await backendApi.whatsapp.getChatMessages(
           selectedChatId,
           0,
-          PAGE_SIZE
+          PAGE_SIZE,
         );
 
         // Double-check after async operation
         if (currentMessagesChatIdRef.current !== selectedChatId) {
           console.log(
-            "[MessageHandlers] Skipping message update - chat changed"
+            "[MessageHandlers] Skipping message update - chat changed",
           );
           return;
         }
@@ -332,19 +332,19 @@ export function useMessageHandlers(
         if (response && response.messages) {
           const sorted = [...response.messages].sort(
             (a, b) =>
-              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
           );
           const cachedData = messagesCacheRef.current.get(selectedChatId);
           let combined = sorted;
           if (cachedData && cachedData.cursor > PAGE_SIZE) {
             const existingIds = new Set(sorted.map((m) => m.messageId));
             const olderMessages = cachedData.messages.filter(
-              (m) => !existingIds.has(m.messageId)
+              (m) => !existingIds.has(m.messageId),
             );
             combined = [...olderMessages, ...sorted].sort(
               (a, b) =>
                 new Date(a.timestamp).getTime() -
-                new Date(b.timestamp).getTime()
+                new Date(b.timestamp).getTime(),
             );
           }
           setMessages(combined);
@@ -369,7 +369,7 @@ export function useMessageHandlers(
           const errorData = err.response.data;
           setError(
             errorData.message ||
-            "Cannot send message: Outside 24-hour conversation window. Use an approved template."
+              "Cannot send message: Outside 24-hour conversation window. Use an approved template.",
           );
         } else {
           setError("Failed to send message");
@@ -387,7 +387,7 @@ export function useMessageHandlers(
       setError,
       setShouldAutoScroll,
       scrollHelperRequestScroll,
-    ]
+    ],
   );
 
   // Selection handlers
@@ -424,7 +424,7 @@ export function useMessageHandlers(
     (messageId: string) => {
       handleEnterSelectionMode(messageId);
     },
-    [handleEnterSelectionMode]
+    [handleEnterSelectionMode],
   );
 
   const handleConfirmDeleteMessage = useCallback(
@@ -436,7 +436,7 @@ export function useMessageHandlers(
           const deletePromises = Array.from(selectedMessageIds).map((id) =>
             backendApi.whatsapp.deleteMessage(id, {
               chatId: selectedChatId || undefined,
-            })
+            }),
           );
 
           await Promise.all(deletePromises);
@@ -446,13 +446,13 @@ export function useMessageHandlers(
             prevMessages.map((msg) =>
               selectedMessageIds.has(msg.messageId)
                 ? {
-                  ...msg,
-                  text: null,
-                  isDeleted: true,
-                  deletedAt: new Date().toISOString(),
-                }
-                : msg
-            )
+                    ...msg,
+                    text: null,
+                    isDeleted: true,
+                    deletedAt: new Date().toISOString(),
+                  }
+                : msg,
+            ),
           );
 
           // Exit selection mode
@@ -472,13 +472,13 @@ export function useMessageHandlers(
           prevMessages.map((msg) =>
             msg.messageId === messageId
               ? {
-                ...msg,
-                text: null,
-                isDeleted: true,
-                deletedAt: new Date().toISOString(),
-              }
-              : msg
-          )
+                  ...msg,
+                  text: null,
+                  isDeleted: true,
+                  deletedAt: new Date().toISOString(),
+                }
+              : msg,
+          ),
         );
       } catch (err) {
         console.error("Failed to delete message:", err);
@@ -491,7 +491,7 @@ export function useMessageHandlers(
       setError,
       selectedMessageIds,
       handleExitSelectionMode,
-    ]
+    ],
   );
 
   // Apply template - resolves variables against actual contact data via backend API
@@ -516,24 +516,24 @@ export function useMessageHandlers(
 
           console.log(
             "[Template Selection] Customer language:",
-            customerLanguage
+            customerLanguage,
           );
           console.log(
             "[Template Selection] Available locales:",
             template.locales.map((l: any) => ({
               locale: l.locale,
               status: l.approvalStatus,
-            }))
+            })),
           );
 
           if (customerLanguage) {
             // Try to find a locale matching the customer's language (check both approved and draft for flexibility)
             const matchingLocale = template.locales.find(
-              (l: any) => l.locale === customerLanguage
+              (l: any) => l.locale === customerLanguage,
             );
             console.log(
               "[Template Selection] Matching locale found:",
-              matchingLocale?.locale
+              matchingLocale?.locale,
             );
             if (matchingLocale) {
               locale = matchingLocale;
@@ -547,7 +547,7 @@ export function useMessageHandlers(
             customerLanguage !== "en"
           ) {
             const englishLocale = template.locales.find(
-              (l: any) => l.locale === "en"
+              (l: any) => l.locale === "en",
             );
             if (englishLocale) {
               locale = englishLocale;
@@ -595,13 +595,13 @@ export function useMessageHandlers(
         Object.entries(locale.exampleVars).forEach(([key, value]) => {
           body = body.replace(
             new RegExp(`\\{\\{${key}\\}\\}`, "g"),
-            String(value || "")
+            String(value || ""),
           );
         });
       }
       setTemplateInput(body);
     },
-    [chats, selectedChatId, selectedContactId]
+    [chats, selectedChatId, selectedContactId],
   );
 
   // Merge inbound WebSocket messages into the message list
@@ -618,7 +618,7 @@ export function useMessageHandlers(
         {
           selectedChatId,
           currentMessagesChatId: currentMessagesChatIdRef.current,
-        }
+        },
       );
       return;
     }
@@ -626,7 +626,7 @@ export function useMessageHandlers(
     const container = messagesContainerRef.current;
     const isCurrentlyAtBottom = container
       ? container.scrollHeight - container.scrollTop - container.clientHeight <
-      100
+        100
       : true;
 
     // Track how many messages were actually added
@@ -642,7 +642,7 @@ export function useMessageHandlers(
       // Filter for messages that belong to the current chat and don't already exist
       const newMessages = inboundMessages.filter(
         (wsMsg: InboundMessage) =>
-          !existingIds.has(wsMsg.messageId) && wsMsg.chatId === selectedChatId
+          !existingIds.has(wsMsg.messageId) && wsMsg.chatId === selectedChatId,
       );
 
       if (newMessages.length === 0) return prevMessages;
@@ -655,11 +655,11 @@ export function useMessageHandlers(
           // For inbound messages, default to 'delivered'
           const messageStatus = wsMsg.status
             ? (wsMsg.status as
-              | "pending"
-              | "sent"
-              | "delivered"
-              | "read"
-              | "failed")
+                | "pending"
+                | "sent"
+                | "delivered"
+                | "read"
+                | "failed")
             : wsMsg.direction === "outbound"
               ? "sent"
               : "delivered";
@@ -675,38 +675,45 @@ export function useMessageHandlers(
             status: messageStatus,
             attachments: wsMsg.attachments
               ? wsMsg.attachments.map((att: any) => ({
-                id: att.id || att.mediaId,
-                type: att.type as "image" | "video" | "audio" | "document",
-                mediaId: att.id || att.mediaId,
-                fileName: att.fileName || "",
-                mimeType: att.mimeType || "application/octet-stream",
-                size: att.size || 0,
-                s3Key: att.s3Key || att.id || att.mediaId,
-                // Thumbnail fields - critical for displaying thumbnails instead of originals
-                thumbnailKey: att.thumbnailKey,
-                thumbnailStatus: att.thumbnailStatus,
-                width: att.width,
-                height: att.height,
-                blurhash: att.blurhash,
-                duration: att.duration,
-                status: att.status || ("success" as const),
-                uploadedAt: wsMsg.timestamp,
-                isVoiceNote: att.isVoiceNote || false,
-                isAnimated: att.isAnimated,
-              }))
+                  id: att.id || att.mediaId,
+                  type: att.type as "image" | "video" | "audio" | "document",
+                  mediaId: att.id || att.mediaId,
+                  fileName: att.fileName || "",
+                  mimeType: att.mimeType || "application/octet-stream",
+                  size: att.size || 0,
+                  s3Key: att.s3Key || att.id || att.mediaId,
+                  // Thumbnail fields - critical for displaying thumbnails instead of originals
+                  thumbnailKey: att.thumbnailKey,
+                  thumbnailStatus: att.thumbnailStatus,
+                  width: att.width,
+                  height: att.height,
+                  blurhash: att.blurhash,
+                  duration: att.duration,
+                  status: att.status || ("success" as const),
+                  uploadedAt: wsMsg.timestamp,
+                  isVoiceNote: att.isVoiceNote || false,
+                  isAnimated: att.isAnimated,
+                }))
               : undefined,
             sentAt: wsMsg.timestamp,
             deliveredAt: new Date().toISOString(),
             readAt: undefined,
             isDeleted: false,
+            // Include reply context if present
+            replyToMessageId: wsMsg.replyToMessageId,
+            replyPreview: wsMsg.replyPreview,
+            // Include AI generation metadata
+            isAiGenerated: wsMsg.isAiGenerated,
+            // Include interactive message metadata (buttons, lists)
+            metadata: wsMsg.metadata,
           };
-        }
+        },
       );
 
       const merged = [...prevMessages, ...newMessageObjects];
       return merged.sort(
         (a, b) =>
-          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
       );
     });
 
@@ -759,7 +766,7 @@ export function useMessageHandlers(
           };
         }
         return msg;
-      })
+      }),
     );
   }, [socketStatusMap, setMessages]);
 
@@ -797,7 +804,7 @@ export function useMessageHandlers(
               if (eventIsStaging && attachmentIsPromoted) {
                 console.log(
                   `📷 Ignoring stale staging thumbnail for promoted attachment ${attachment.id}:`,
-                  `event thumbnailKey=${event.thumbnailKey}, attachment s3Key=${attachment.s3Key}`
+                  `event thumbnailKey=${event.thumbnailKey}, attachment s3Key=${attachment.s3Key}`,
                 );
                 // Return attachment unchanged - don't apply stale staging path
                 return attachment;
@@ -814,7 +821,7 @@ export function useMessageHandlers(
                   ? { pageCount: event.duration, duration: event.duration }
                   : {}),
               };
-            }
+            },
           );
 
           return {
@@ -875,7 +882,7 @@ export function useMessageHandlers(
                       ? { pageCount: event.duration, duration: event.duration }
                       : {}),
                   };
-                }
+                },
               );
 
               return {
@@ -891,14 +898,14 @@ export function useMessageHandlers(
           }
           console.log(
             `📷 Updated messages cache for chat ${targetChatId} with thumbnail data` +
-            (targetChatId !== selectedChatId
-              ? ` (while viewing chat ${selectedChatId})`
-              : "")
+              (targetChatId !== selectedChatId
+                ? ` (while viewing chat ${selectedChatId})`
+                : ""),
           );
         }
       } else if (targetChatId) {
         console.log(
-          `📷 No cache entry for chat ${targetChatId} - thumbnail data will be fetched from server when chat is selected`
+          `📷 No cache entry for chat ${targetChatId} - thumbnail data will be fetched from server when chat is selected`,
         );
       }
 
@@ -906,8 +913,8 @@ export function useMessageHandlers(
       if (container) {
         const isAtBottom =
           container.scrollHeight -
-          container.scrollTop -
-          container.clientHeight <
+            container.scrollTop -
+            container.clientHeight <
           100;
         if (isAtBottom) {
           setTimeout(() => {
@@ -916,7 +923,7 @@ export function useMessageHandlers(
         }
       }
     },
-    [setMessages, messagesContainerRef, selectedChatId, messagesCacheRef]
+    [setMessages, messagesContainerRef, selectedChatId, messagesCacheRef],
   );
 
   useThumbnailUpdates({

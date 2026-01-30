@@ -25,11 +25,11 @@ export interface HandoffStatus {
   // Extended fields for banner display
   priority?: "low" | "medium" | "high" | "critical";
   status?:
-  | "pending"
-  | "acknowledged"
-  | "in_progress"
-  | "resolved"
-  | "escalated";
+    | "pending"
+    | "acknowledged"
+    | "in_progress"
+    | "resolved"
+    | "escalated";
   reason?: string;
   aiReasoning?: string;
   triggeredAt?: string;
@@ -47,7 +47,7 @@ export interface AIStatus {
 
 export function useHandoff(chatId: string | null) {
   const [handoffStatus, setHandoffStatus] = useState<HandoffStatus | null>(
-    null
+    null,
   );
   const [aiStatus, setAIStatus] = useState<AIStatus | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -109,11 +109,11 @@ export function useHandoff(chatId: string | null) {
         await fetchStatus();
       } catch (err) {
         setError(
-          err instanceof Error ? err.message : "Failed to request handoff"
+          err instanceof Error ? err.message : "Failed to request handoff",
         );
       }
     },
-    [chatId, fetchStatus]
+    [chatId, fetchStatus],
   );
 
   // Resolve handoff
@@ -130,11 +130,11 @@ export function useHandoff(chatId: string | null) {
         await fetchStatus();
       } catch (err) {
         setError(
-          err instanceof Error ? err.message : "Failed to resolve handoff"
+          err instanceof Error ? err.message : "Failed to resolve handoff",
         );
       }
     },
-    [chatId, fetchStatus]
+    [chatId, fetchStatus],
   );
 
   // Fetch on mount and when chatId changes

@@ -169,8 +169,11 @@ export default function ChatsPage() {
     isAIProcessing,
     rateLimitInfo,
     pendingReview,
+    showRegenerateBanner,
     clearPendingReview,
     setAIProcessing,
+    enableRegenerateBanner,
+    hideRegenerateBanner,
   } = useAIEvents(chatState.selectedChatId, socket);
 
   // AI state from useHandoff - source of truth for AI toggle
@@ -220,6 +223,24 @@ export default function ChatsPage() {
     fetchRateLimitStatus();
   }, [chatState.selectedChatId]);
 
+  // Auto-scroll to bottom when AI typing indicator appears
+  // This ensures the typing animation is visible without user needing to scroll
+  useEffect(() => {
+    if (isAITyping && chatState.selectedChatId) {
+      // Only auto-scroll if user is already near the bottom
+      // This respects users who are reading older messages
+      const isNearBottom = chatState.scrollHelperIsAtBottom(200);
+      if (isNearBottom) {
+        chatState.scrollHelperRequestScroll(true); // smooth scroll
+      }
+    }
+  }, [
+    isAITyping,
+    chatState.selectedChatId,
+    chatState.scrollHelperIsAtBottom,
+    chatState.scrollHelperRequestScroll,
+  ]);
+
   // If socket rate limit event comes in, trigger refetch
   useEffect(() => {
     if (rateLimitInfo) {
@@ -232,6 +253,8 @@ export default function ChatsPage() {
     async (shouldEnable: boolean) => {
       if (shouldEnable) {
         await resumeAI();
+        // Hide regenerate banner when AI is resumed
+        hideRegenerateBanner();
         // Check if last message is inbound and trigger AI response
         const lastMessage = chatState.messages[chatState.messages.length - 1];
         if (lastMessage?.direction === "inbound" && chatState.selectedChatId) {
@@ -243,9 +266,21 @@ export default function ChatsPage() {
         }
       } else {
         await pauseAI();
+        // Show regenerate banner if last message is inbound (user paused while waiting for response)
+        const lastMessage = chatState.messages[chatState.messages.length - 1];
+        if (lastMessage?.direction === "inbound") {
+          enableRegenerateBanner();
+        }
       }
     },
-    [resumeAI, pauseAI, chatState.messages, chatState.selectedChatId],
+    [
+      resumeAI,
+      pauseAI,
+      chatState.messages,
+      chatState.selectedChatId,
+      enableRegenerateBanner,
+      hideRegenerateBanner,
+    ],
   );
 
   // AI Review Handlers
@@ -260,9 +295,8 @@ export default function ChatsPage() {
           interactiveData,
         });
         clearPendingReview();
-        // Optimistically add message or rely on socket?
-        // Socket should handle incoming message or we can refresh messages.
-        // For now, let's assume we rely on standard refresh or socket.
+        hideRegenerateBanner(); // Hide banner after successful send
+        // The message will also be received via WebSocket which will hide the banner
       } catch (error) {
         console.error("Failed to send reviewed AI response:", error);
         addNotification(
@@ -271,7 +305,13 @@ export default function ChatsPage() {
         );
       }
     },
-    [chatState.selectedChatId, clearPendingReview, addNotification, t],
+    [
+      chatState.selectedChatId,
+      clearPendingReview,
+      hideRegenerateBanner,
+      addNotification,
+      t,
+    ],
   );
 
   const handleAiDiscard = useCallback(async () => {
@@ -279,11 +319,14 @@ export default function ChatsPage() {
     try {
       await backendApi.aiReview.discardPending(chatState.selectedChatId);
       clearPendingReview();
+      // Enable regenerate banner since user discarded the AI response
+      enableRegenerateBanner();
     } catch (error) {
       console.error("Failed to discard AI review:", error);
       clearPendingReview(); // Clear locally anyway
+      enableRegenerateBanner();
     }
-  }, [chatState.selectedChatId, clearPendingReview]);
+  }, [chatState.selectedChatId, clearPendingReview, enableRegenerateBanner]);
 
   // Chat search hook - manages searching through chat list
   const chatSearch = useChatSearch({ debounceMs: 200, minChars: 1 });
@@ -1040,18 +1083,19 @@ export default function ChatsPage() {
                     />
                   )}
 
-                  {/* AI Regeneration Banner */}
-                  {!pendingReview &&
+                  {/* AI Regeneration Banner - Only shown after user explicitly discards AI response */}
+                  {showRegenerateBanner &&
+                    !pendingReview &&
                     !activeRateLimit &&
                     !isAITyping &&
-                    !isAIProcessing &&
                     automationEnabled &&
                     chatState.messages[chatState.messages.length - 1]
                       ?.direction === "inbound" && (
                       <AiRegenerateBanner
                         chatId={effectiveSelectedChat.chatId}
                         onRegenerateTriggered={() => {
-                          // Optional: add loading state or notification
+                          // Hide the banner after triggering regeneration
+                          hideRegenerateBanner();
                           console.log("Regeneration triggered");
                         }}
                       />

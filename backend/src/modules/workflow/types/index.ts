@@ -1,5 +1,7 @@
+export * from './workflow-ai-context.types';
 export * from './workflow-builder.types';
 export * from './workflow.types';
+
 // Export workflow-engine types (WorkflowStageConfig comes from workflow.types)
 export {
   AI_CONFIDENCE_THRESHOLD,

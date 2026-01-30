@@ -75,15 +75,17 @@ export function ChatAIControls({
   onConfigSaved,
   isConfigModalOpen: controlledIsOpen,
   onOpenConfigModal: controlledOnOpenChange,
-  aiConfigEnabled = true,
+  aiConfigEnabled = false,
   className,
 }: ChatAIControlsProps) {
   const [isToggling, setIsToggling] = useState(false);
   const [isRequestingHandoff, setIsRequestingHandoff] = useState(false);
-  const [internalIsConfigModalOpen, setInternalIsConfigModalOpen] = useState(false);
+  const [internalIsConfigModalOpen, setInternalIsConfigModalOpen] =
+    useState(false);
 
   const isConfigModalOpen = controlledIsOpen ?? internalIsConfigModalOpen;
-  const setIsConfigModalOpen = controlledOnOpenChange ?? setInternalIsConfigModalOpen;
+  const setIsConfigModalOpen =
+    controlledOnOpenChange ?? setInternalIsConfigModalOpen;
 
   const handleToggleAI = async () => {
     setIsToggling(true);
@@ -122,7 +124,7 @@ export function ChatAIControls({
                     "flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium transition-colors",
                     isAIPaused
                       ? "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
-                      : "bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400"
+                      : "bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400",
                   )}
                 >
                   {isToggling || isLoading ? (
@@ -165,11 +167,11 @@ export function ChatAIControls({
                 className={cn(
                   "h-7 gap-1",
                   handoffPriority === "critical" &&
-                  "border-red-500 text-red-600",
+                    "border-red-500 text-red-600",
                   handoffPriority === "high" &&
-                  "border-orange-500 text-orange-600",
+                    "border-orange-500 text-orange-600",
                   handoffPriority === "medium" &&
-                  "border-amber-500 text-amber-600"
+                    "border-amber-500 text-amber-600",
                 )}
               >
                 <Hand className="h-3 w-3" />
@@ -288,7 +290,7 @@ export function AIToggle({
               <Bot
                 className={cn(
                   "h-3 w-3",
-                  isAIPaused ? "text-muted-foreground" : "text-violet-500"
+                  isAIPaused ? "text-muted-foreground" : "text-violet-500",
                 )}
               />
             )}
@@ -338,7 +340,7 @@ export function ChatAIStatusBadge({
         className={cn(
           "flex items-center justify-center h-5 w-5 rounded-full",
           priorityColors[handoffPriority || "medium"],
-          className
+          className,
         )}
       >
         <Hand className="h-3 w-3" />
@@ -352,7 +354,7 @@ export function ChatAIStatusBadge({
         className={cn(
           "flex items-center justify-center h-5 w-5 rounded-full",
           "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400",
-          className
+          className,
         )}
       >
         <PauseCircle className="h-3 w-3" />
@@ -366,7 +368,7 @@ export function ChatAIStatusBadge({
       className={cn(
         "flex items-center justify-center h-5 w-5 rounded-full",
         "bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400",
-        className
+        className,
       )}
     >
       <Sparkles className="h-3 w-3" />

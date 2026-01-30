@@ -12,13 +12,17 @@
  * - Anti-ban safeguards with rate limiting
  * - Usage tracking, billing, and throttling
  * - Real-time alerts via WebSocket
+ * - Workflow-aware AI response generation
+ * - Workflow AI testing and validation
  *
  * Architecture:
  * ┌────────────────────────────────────────────────────────────────┐
  * │                      WorkflowModule                            │
  * ├────────────────────────────────────────────────────────────────┤
- * │  WorkflowController                                            │
- * │    └── REST API endpoints for all workflow operations          │
+ * │  Controllers:                                                  │
+ * │    ├── WorkflowController (REST API for workflow operations)   │
+ * │    ├── WorkflowBuilderController (Visual builder API)          │
+ * │    └── WorkflowAITestingController (AI testing & validation)   │
  * ├────────────────────────────────────────────────────────────────┤
  * │  Services:                                                     │
  * │    ├── WorkflowEngineService (main orchestrator)               │
@@ -34,7 +38,11 @@
  * │    ├── GuardrailAlertGateway (WebSocket notifications)         │
  * │    ├── UsageTrackingService (token/cost tracking)              │
  * │    ├── UsageThrottleService (throttling orchestration)         │
- * │    └── HandoffNotificationGateway (handoff WebSocket)          │
+ * │    ├── HandoffNotificationGateway (handoff WebSocket)          │
+ * │    ├── WorkflowAIInstructionResolverService (AI instructions)  │
+ * │    ├── WorkflowContextProviderService (workflow context)       │
+ * │    ├── WorkflowAwareAIResponseGenerator (enhanced AI gen)      │
+ * │    └── WorkflowAITestingService (AI behavior testing)          │
  * └────────────────────────────────────────────────────────────────┘
  */
 
@@ -48,6 +56,7 @@ import { ConfigModule } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ProfilePictureUrlService } from '@shared/services/profile-picture-url.service';
+import { WorkflowAITestingController } from './controllers/workflow-ai-testing.controller';
 import { WorkflowBuilderController } from './controllers/workflow-builder.controller';
 import {
   AiActionLoggerService,
@@ -66,11 +75,15 @@ import {
   StageService,
   UsageThrottleService,
   UsageTrackingService,
+  WorkflowAIInstructionResolver,
+  WorkflowAITestingService,
+  WorkflowAssignmentService,
+  WorkflowAwareAIResponseGenerator,
   WorkflowBuilderService,
+  WorkflowContextProviderService,
   WorkflowEngineService,
   WorkflowExecutionEngine,
   WorkflowStatusService,
-  WorkflowAssignmentService,
 } from './services';
 import { WorkflowController } from './workflow.controller';
 
@@ -82,10 +95,14 @@ import { WorkflowController } from './workflow.controller';
     forwardRef(() => AIReplyModule),
     forwardRef(() => ChatsModule),
     forwardRef(() => KnowledgeBaseModule),
-    forwardRef(() => WhatsAppModule), // Fix circular dependency
+    forwardRef(() => WhatsAppModule),
     EventEmitterModule.forRoot(),
   ],
-  controllers: [WorkflowController, WorkflowBuilderController],
+  controllers: [
+    WorkflowController,
+    WorkflowBuilderController,
+    WorkflowAITestingController,
+  ],
   providers: [
     // Core services
     LLMService,
@@ -96,13 +113,17 @@ import { WorkflowController } from './workflow.controller';
 
     // Visual Workflow Builder
     WorkflowBuilderService,
-    // Visual Workflow Builder
-    WorkflowBuilderService,
     WorkflowExecutionEngine,
     WorkflowAssignmentService,
 
     // AI configuration
     AiConfigurationService,
+
+    // Workflow AI Context & Instructions
+    WorkflowAIInstructionResolver,
+    WorkflowContextProviderService,
+    WorkflowAwareAIResponseGenerator,
+    WorkflowAITestingService,
 
     // Anti-ban safeguards
     RateLimiterService,
@@ -138,13 +159,17 @@ import { WorkflowController } from './workflow.controller';
 
     // Visual Workflow Builder
     WorkflowBuilderService,
-    // Visual Workflow Builder
-    WorkflowBuilderService,
     WorkflowExecutionEngine,
     WorkflowAssignmentService,
 
     // AI configuration
     AiConfigurationService,
+
+    // Workflow AI Context & Instructions
+    WorkflowAIInstructionResolver,
+    WorkflowContextProviderService,
+    WorkflowAwareAIResponseGenerator,
+    WorkflowAITestingService,
 
     // Anti-ban safeguards
     AntiBanSafeguardService,

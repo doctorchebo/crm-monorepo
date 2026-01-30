@@ -7,30 +7,29 @@ import {
   Message,
   messages,
   senders,
-  teamMembers,
 } from '@database/schema';
 import { MessageMemoryIntegration } from '@modules/ai-memory/services/message-memory-integration.service';
-import { RateLimiterService } from '@modules/workflow/services/rate-limiter.service';
 import { WorkflowEngineService } from '@modules/workflow/services';
+import { RateLimiterService } from '@modules/workflow/services/rate-limiter.service';
 import {
   BadRequestException,
   ForbiddenException,
-  Inject,
   forwardRef,
+  Inject,
   Injectable,
   Logger,
-  Optional,
   OnModuleInit,
+  Optional,
 } from '@nestjs/common';
-import { ModuleRef } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
+import { ModuleRef } from '@nestjs/core';
 import { MetaCloudAPIConfigService } from '@shared/services/meta-cloud-api.config';
 import { S3Service } from '@shared/services/s3.service';
 import { withRetry } from '@shared/utils/retry.util';
 import { and, asc, desc, eq, gt, inArray, or, sql } from 'drizzle-orm';
+import { ChatVisibilityService } from '../chats/services/chat-visibility.service';
 import { reactionsGatewayInstance } from '../reactions/reactions.gateway';
 import { ThumbnailQueueService } from '../thumbnail/thumbnail-queue.service';
-import { ChatVisibilityService } from '../chats/services/chat-visibility.service';
 import {
   supportsThumbnail,
   ThumbnailJobData,
@@ -635,6 +634,24 @@ export class WhatsAppService implements OnModuleInit {
         replyToMessageId: messageDto.replyToMessageId,
         replyPreview,
       });
+
+      // Emit WebSocket event for real-time UI update
+      // This is critical for AI-generated messages and messages sent from other tabs/devices
+      if (whatsAppGatewayInstance) {
+        whatsAppGatewayInstance.emitMessage({
+          messageId: waMessageId,
+          chatId,
+          sender: senderPhoneNumber,
+          text: messageDto.body || '',
+          type: hasAttachments ? 'media' : 'text',
+          timestamp: new Date(),
+          direction: 'outbound',
+          status: 'sent',
+          attachments: messageDto.attachments,
+          replyToMessageId: messageDto.replyToMessageId,
+          replyPreview,
+        });
+      }
 
       return {
         success: true,
@@ -2602,6 +2619,7 @@ export class WhatsAppService implements OnModuleInit {
                           timestamp: new Date(),
                           direction: 'outbound',
                           status: 'sent',
+                          isAiGenerated: true,
                         });
                       }
                     } else {
@@ -2631,6 +2649,14 @@ export class WhatsAppService implements OnModuleInit {
                           timestamp: new Date(),
                           direction: 'outbound',
                           status: 'sent',
+                          isAiGenerated: true,
+                          metadata: {
+                            interactiveType: 'button',
+                            interactiveData: {
+                              buttons: interactiveData.buttons,
+                              footerText: interactiveData.footerText,
+                            },
+                          },
                         });
                       }
                     }
@@ -2692,6 +2718,7 @@ export class WhatsAppService implements OnModuleInit {
                         timestamp: new Date(),
                         direction: 'outbound',
                         status: 'sent',
+                        isAiGenerated: true,
                       });
                     }
                   }
@@ -2700,6 +2727,12 @@ export class WhatsAppService implements OnModuleInit {
                 this.logger.error(
                   `[Workflow] Failed to send AI response: ${sendError}`,
                 );
+              } finally {
+                // Always emit typing stop after AI response processing completes
+                // This ensures the typing indicator is cleared regardless of success/failure
+                if (whatsAppGatewayInstance) {
+                  whatsAppGatewayInstance.emitAITypingStop(chatId);
+                }
               }
             }
 
@@ -2716,16 +2749,35 @@ export class WhatsAppService implements OnModuleInit {
                 `[Workflow] Stage transition: ${workflowResult.stageTransition.from?.name || 'unassigned'} → ${workflowResult.stageTransition.to.name}`,
               );
             }
+
+            // Emit typing stop if AI didn't send a response (handled in finally block above when sending)
+            // This covers cases where AI decided not to respond (low confidence, handoff, disabled, etc.)
+            if (
+              !workflowResult.aiResponse?.shouldSend ||
+              !workflowResult.aiResponse?.content
+            ) {
+              if (whatsAppGatewayInstance) {
+                whatsAppGatewayInstance.emitAITypingStop(chatId);
+              }
+            }
           } else {
             this.logger.warn(
               `[Workflow] Message processing failed: ${workflowResult.error}`,
             );
+            // Emit typing stop on workflow failure
+            if (whatsAppGatewayInstance) {
+              whatsAppGatewayInstance.emitAITypingStop(chatId);
+            }
           }
         } catch (workflowError) {
           // Don't fail the entire message processing if workflow fails
           this.logger.error(
             `[Workflow] Error processing message through workflow: ${workflowError}`,
           );
+          // Emit typing stop on workflow error
+          if (whatsAppGatewayInstance) {
+            whatsAppGatewayInstance.emitAITypingStop(chatId);
+          }
         }
       } else {
         this.logger.debug(

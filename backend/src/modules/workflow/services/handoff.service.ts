@@ -29,7 +29,7 @@ import { RateLimiterService } from './rate-limiter.service';
 export class HandoffService {
   private readonly logger = new Logger(HandoffService.name);
 
-  constructor(private readonly rateLimiter: RateLimiterService) { }
+  constructor(private readonly rateLimiter: RateLimiterService) {}
 
   /**
    * Get or create chat stage assignment
@@ -81,13 +81,14 @@ export class HandoffService {
       return existing;
     }
 
-    // Create a new override with AI enabled by default
+    // Create a new override with AI disabled by default (safe default - user must explicitly enable)
+    // This matches the modal UI which shows AI as disabled by default
     const [created] = await db
       .insert(chatAiOverrides)
       .values({
         chatId,
         userId,
-        aiEnabled: true,
+        aiEnabled: false,
       })
       .returning();
 
@@ -345,7 +346,9 @@ export class HandoffService {
       return {
         chatId,
         awaitingHandoff: false,
-        aiPaused: !(override.aiEnabled ?? true),
+        // Default to paused (true) - user must explicitly enable AI via the toggle switch
+        // This ensures AI doesn't auto-start when the config is enabled
+        aiPaused: true,
         currentStageName: 'No Stage',
       };
     }
@@ -505,9 +508,9 @@ export class HandoffService {
       .where(eq(chatAiOverrides.chatId, chatId))
       .limit(1);
 
-    // Default to true if no override exists (or false if you prefer safe defaults)
-    // Based on getOrCreateAiOverride, we default to true.
-    const configEnabled = override?.aiEnabled ?? true;
+    // Default to false if no override exists (safe default - AI must be explicitly enabled)
+    // This matches the modal UI which shows AI as disabled by default
+    const configEnabled = override?.aiEnabled ?? false;
 
     if (override && override.aiEnabled === false) {
       return {
@@ -518,6 +521,9 @@ export class HandoffService {
     }
 
     // 2. Check Stage Assignments (Paused, Handoff)
+    let hasAssignment = false;
+    let isExplicitlyUnpaused = false;
+
     try {
       const [assignment] = await db
         .select()
@@ -526,6 +532,7 @@ export class HandoffService {
         .limit(1);
 
       if (assignment) {
+        hasAssignment = true;
         // Handoff always takes precedence
         if (assignment.awaitingHandoff) {
           return {
@@ -543,6 +550,9 @@ export class HandoffService {
             reason: 'AI is paused for this chat',
           };
         }
+
+        // AI is explicitly unpaused (aiPaused is false)
+        isExplicitlyUnpaused = assignment.aiPaused === false;
       }
     } catch (error) {
       this.logger.error(`Error checking stage assignments: ${error}`);
@@ -551,6 +561,16 @@ export class HandoffService {
         canSend: false,
         configEnabled, // We know this from Step 1
         reason: 'Error verifying chat status',
+      };
+    }
+
+    // If AI is enabled in config but no assignment exists (or no explicit unpause),
+    // default to paused - user must explicitly enable AI via the toggle switch
+    if (configEnabled && !hasAssignment) {
+      return {
+        canSend: false,
+        configEnabled,
+        reason: 'AI is paused for this chat (default state)',
       };
     }
 
@@ -566,7 +586,7 @@ export class HandoffService {
 
     if (!rateLimit.allowed) {
       // Extract hourly limit info for frontend banner
-      const hourLimit = rateLimit.limits.find(l => l.type === 'hour');
+      const hourLimit = rateLimit.limits.find((l) => l.type === 'hour');
       return {
         canSend: false,
         configEnabled,
@@ -616,20 +636,24 @@ export class HandoffService {
       // Ignore
     }
 
-
     // 5. Fallback: Check Override for ENABLED status or Default
     const finalResult = {
       canSend: override?.aiEnabled === true,
-      configEnabled,  // will be false if override didn't exist or was false
-      reason: override?.aiEnabled === true
-        ? undefined
-        : 'AI not configured for this chat - enable in AI Settings',
+      configEnabled, // will be false if override didn't exist or was false
+      reason:
+        override?.aiEnabled === true
+          ? undefined
+          : 'AI not configured for this chat - enable in AI Settings',
     };
 
     if (finalResult.canSend) {
-      this.logger.debug(`[canAISend] Allowed by Fallback/Override. Assignment found? ${false}`);
+      this.logger.debug(
+        `[canAISend] Allowed by Fallback/Override. Assignment found? ${false}`,
+      );
     } else {
-      this.logger.debug(`[canAISend] Blocked by Fallback/Default. Reason: ${finalResult.reason}`);
+      this.logger.debug(
+        `[canAISend] Blocked by Fallback/Default. Reason: ${finalResult.reason}`,
+      );
     }
 
     return finalResult;

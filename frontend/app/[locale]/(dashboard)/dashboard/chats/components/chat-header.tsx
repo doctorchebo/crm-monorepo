@@ -1,18 +1,17 @@
 "use client";
 
-import { backendApi } from "@/lib/api/endpoints";
 import { ChatAIControls } from "@/components/chat-ai-controls";
+import { AssigneeSelector } from "@/components/chat/assignee-selector";
 import { HandoffBanner } from "@/components/handoff-banner";
 import { Button } from "@/components/ui/button";
 import { useHandoff } from "@/hooks/use-handoff";
+import { workflowBuilderApi } from "@/lib/api/workflow-builder";
 import { Search, Workflow } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState, useEffect } from "react";
-import { WorkflowAssignmentDialog } from "./workflow-assignment-dialog";
-import { workflowBuilderApi } from "@/lib/api/workflow-builder";
+import { useState } from "react";
 import useSWR from "swr";
 import type { Chat } from "../types";
-import { AssigneeSelector } from "@/components/chat/assignee-selector";
+import { WorkflowAssignmentDialog } from "./workflow-assignment-dialog";
 
 interface ChatHeaderProps {
   chat: Chat;
@@ -51,11 +50,10 @@ export function ChatHeader({
   // Fetch current workflow state
   const { data: workflowState } = useSWR(
     ["chat-workflow-state", chat.chatId],
-    () => workflowBuilderApi.chatState.get(chat.chatId)
+    () => workflowBuilderApi.chatState.get(chat.chatId),
   );
 
   const activeWorkflowName = workflowState?.activeWorkflow?.name;
-
 
   // ... (handlers)
 
@@ -78,7 +76,6 @@ export function ChatHeader({
       console.error("Failed to toggle AI:", error);
     }
   };
-
 
   const handleRequestHandoff = async () => {
     await requestHandoff("Manual handoff requested by user");
@@ -132,14 +129,18 @@ export function ChatHeader({
             size="sm"
             className="flex items-center gap-2 h-8"
             onClick={() => setIsWorkflowDialogOpen(true)}
-            title={activeWorkflowName ? `Active Workflow: ${activeWorkflowName}` : "Assign Workflow"}
+            title={
+              activeWorkflowName
+                ? `Active Workflow: ${activeWorkflowName}`
+                : "Assign Workflow"
+            }
           >
             <Workflow className="h-4 w-4" />
             <span className="hidden sm:inline-block max-w-[100px] truncate">
               {activeWorkflowName || "Workflow"}
             </span>
           </Button>
-          
+
           {/* AI Controls */}
           <ChatAIControls
             chatId={chat.chatId}
@@ -155,7 +156,7 @@ export function ChatHeader({
             onConfigSaved={handleConfigSaved}
             isConfigModalOpen={isSettingsOpen}
             onOpenConfigModal={setIsSettingsOpen}
-            aiConfigEnabled={aiStatus?.aiConfigEnabled ?? true}
+            aiConfigEnabled={aiStatus?.aiConfigEnabled ?? false}
           />
 
           {/* Search button */}

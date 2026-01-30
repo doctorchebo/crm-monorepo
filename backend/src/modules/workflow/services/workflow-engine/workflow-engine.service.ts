@@ -50,43 +50,45 @@ import { desc, eq } from 'drizzle-orm';
 // Types
 import type { EvaluateRulesRequest, WorkflowStageConfig } from '../../types';
 import {
+  type AiStatusResult,
+  type ChatWorkflowStatus,
   type ProcessMessageInput,
   type ProcessMessageResult,
   type WorkflowSummary,
-  type ChatWorkflowStatus,
-  type AiStatusResult,
   AI_CONFIDENCE_THRESHOLD,
   AUTO_HANDOFF_CATEGORIES,
 } from '../../types/workflow-engine.types';
 
 // Services
+import { AiConfigurationService } from '../ai-configuration.service';
 import { HandoffService } from '../handoff.service';
 import { ClassificationResult } from '../llm.service';
 import { PolicySimulationService } from '../policy-simulation.service';
-import { RuleEngineService } from '../rule-engine.service';
-import { AiConfigurationService } from '../ai-configuration.service';
 import { RateLimiterService } from '../rate-limiter.service';
+import { RuleEngineService } from '../rule-engine.service';
 import { StageService } from '../stage.service';
+import { WorkflowContextProviderService } from '../workflow-context-provider.service';
 
 // Chat Lock Service for AI Safety
 import { ChatLockService } from '@modules/chats/services/chat-lock.service';
 
 // Workflow Engine components
-import { InteractiveResponseHandler } from './interactive-response.handler';
 import { AiResponseGenerator } from './ai-response.generator';
+import { InteractiveResponseHandler } from './interactive-response.handler';
+import { WorkflowAwareAIResponseGenerator } from './workflow-aware-ai-generator.service';
 import { WorkflowStatusService } from './workflow-status.service';
 import {
   checkHandoffRequest,
-  getWhatsAppMediaType,
   getContactLanguage,
+  getWhatsAppMediaType,
 } from './workflow-utils';
 
 // Re-export types for backward compatibility
 export type {
+  ChatWorkflowStatus,
   ProcessMessageInput,
   ProcessMessageResult,
   WorkflowSummary,
-  ChatWorkflowStatus,
 };
 
 @Injectable()
@@ -104,6 +106,12 @@ export class WorkflowEngineService implements OnModuleInit {
     private readonly interactiveHandler: InteractiveResponseHandler,
     private readonly aiResponseGenerator: AiResponseGenerator,
     private readonly workflowStatusService: WorkflowStatusService,
+
+    // Workflow-aware AI (uses assigned workflow context)
+    @Optional()
+    private readonly workflowAwareAIGenerator?: WorkflowAwareAIResponseGenerator,
+    @Optional()
+    private readonly workflowContextProvider?: WorkflowContextProviderService,
 
     // Optional services
     @Optional()
@@ -133,6 +141,12 @@ export class WorkflowEngineService implements OnModuleInit {
     );
     this.logger.log(
       `[Workflow Engine] InteractiveMessageService: ${this.interactiveMessageService ? 'AVAILABLE' : 'NOT INJECTED'}`,
+    );
+    this.logger.log(
+      `[Workflow Engine] WorkflowAwareAIGenerator: ${this.workflowAwareAIGenerator ? 'AVAILABLE' : 'NOT INJECTED'}`,
+    );
+    this.logger.log(
+      `[Workflow Engine] WorkflowContextProvider: ${this.workflowContextProvider ? 'AVAILABLE' : 'NOT INJECTED'}`,
     );
   }
 
@@ -531,14 +545,86 @@ export class WorkflowEngineService implements OnModuleInit {
     }
 
     // STEP 2: Generate AI response WITH media context
-    this.logger.log(`[AI Response] Calling LLM for chat ${chatId}...`);
-    const response = await this.aiResponseGenerator.generateAIResponse(
-      chatId,
-      messageContent,
-      classification,
-      userId,
-      mediaPreCheck,
-    );
+    // Check if workflow-aware AI generation is available and a workflow is assigned
+    let response: string;
+
+    const useWorkflowAwareAI =
+      this.workflowAwareAIGenerator && this.workflowContextProvider;
+
+    if (useWorkflowAwareAI) {
+      // Check if a workflow is assigned to this chat
+      const { context, validation } =
+        await this.workflowContextProvider!.getAIContext(chatId, userId);
+
+      if (context.assignment.isAssigned && validation.canProceed) {
+        this.logger.log(
+          `[AI Response] Using WORKFLOW-AWARE AI for chat ${chatId} ` +
+            `(workflow: ${context.assignment.workflowName}, node: ${context.nodeInstructions?.nodeId ?? 'none'})`,
+        );
+
+        try {
+          const workflowAIResult =
+            await this.workflowAwareAIGenerator!.generateResponse({
+              chatId,
+              userId,
+              customerMessage: messageContent,
+              classification,
+              mediaContext: mediaPreCheck
+                ? {
+                    willHaveMedia: mediaPreCheck.willHaveMedia,
+                    mediaDescription: mediaPreCheck.mediaDescription,
+                    mediaType: mediaPreCheck.mediaType,
+                    mediaFileName: mediaPreCheck.mediaFileName,
+                    aiInstructions: mediaPreCheck.aiInstructions,
+                  }
+                : undefined,
+              debugMode: false,
+            });
+
+          response = workflowAIResult.content;
+
+          this.logger.log(
+            `[AI Response] Workflow-aware response generated ` +
+              `(shouldSend: ${workflowAIResult.shouldSend}, escalation: ${workflowAIResult.escalationTriggered})`,
+          );
+        } catch (workflowAIError) {
+          // Fallback to standard AI if workflow-aware fails
+          this.logger.warn(
+            `[AI Response] Workflow-aware AI failed, falling back to standard: ${(workflowAIError as Error).message}`,
+          );
+          response = await this.aiResponseGenerator.generateAIResponse(
+            chatId,
+            messageContent,
+            classification,
+            userId,
+            mediaPreCheck,
+          );
+        }
+      } else {
+        // No workflow assigned or workflow invalid - use standard AI
+        this.logger.log(
+          `[AI Response] No active workflow for chat ${chatId}, using standard AI`,
+        );
+        response = await this.aiResponseGenerator.generateAIResponse(
+          chatId,
+          messageContent,
+          classification,
+          userId,
+          mediaPreCheck,
+        );
+      }
+    } else {
+      // Workflow-aware AI not available - use standard AI
+      this.logger.log(`[AI Response] Calling LLM for chat ${chatId}...`);
+      response = await this.aiResponseGenerator.generateAIResponse(
+        chatId,
+        messageContent,
+        classification,
+        userId,
+        mediaPreCheck,
+      );
+    }
+
     this.logger.log(
       `[AI Response] LLM response received: "${response.substring(0, 100)}..."`,
     );
