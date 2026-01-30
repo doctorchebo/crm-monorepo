@@ -82,6 +82,8 @@ export function useUser() {
     revalidateOnMount: true,
     // Dedupe requests within 2 seconds
     dedupingInterval: 2000,
+    // Keep previous data while revalidating to prevent flash
+    keepPreviousData: true,
   });
 
   return {

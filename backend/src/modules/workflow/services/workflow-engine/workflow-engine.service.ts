@@ -68,6 +68,7 @@ import { RateLimiterService } from '../rate-limiter.service';
 import { RuleEngineService } from '../rule-engine.service';
 import { StageService } from '../stage.service';
 import { WorkflowContextProviderService } from '../workflow-context-provider.service';
+import { WorkflowExecutionEngine } from '../workflow-execution.engine';
 
 // Chat Lock Service for AI Safety
 import { ChatLockService } from '@modules/chats/services/chat-lock.service';
@@ -106,6 +107,9 @@ export class WorkflowEngineService implements OnModuleInit {
     private readonly interactiveHandler: InteractiveResponseHandler,
     private readonly aiResponseGenerator: AiResponseGenerator,
     private readonly workflowStatusService: WorkflowStatusService,
+
+    // Visual workflow execution engine
+    private readonly workflowExecutionEngine: WorkflowExecutionEngine,
 
     // Workflow-aware AI (uses assigned workflow context)
     @Optional()
@@ -148,6 +152,9 @@ export class WorkflowEngineService implements OnModuleInit {
     this.logger.log(
       `[Workflow Engine] WorkflowContextProvider: ${this.workflowContextProvider ? 'AVAILABLE' : 'NOT INJECTED'}`,
     );
+    this.logger.log(
+      `[Workflow Engine] WorkflowExecutionEngine: ${this.workflowExecutionEngine ? 'AVAILABLE' : 'NOT INJECTED'}`,
+    );
   }
 
   /**
@@ -158,6 +165,7 @@ export class WorkflowEngineService implements OnModuleInit {
   ): Promise<ProcessMessageResult> {
     const {
       chatId,
+      messageId,
       messageContent,
       userId,
       isFromCustomer,
@@ -170,7 +178,34 @@ export class WorkflowEngineService implements OnModuleInit {
         return { success: true };
       }
 
-      // Step 0: Handle interactive response (button/list clicks) if present
+      // Step 0a: Process visual workflow execution (if a workflow is assigned)
+      // This triggers the workflow execution engine to execute nodes based on the trigger
+      if (this.workflowExecutionEngine && userId) {
+        try {
+          const executionResult =
+            await this.workflowExecutionEngine.processMessageForAssignedWorkflow(
+              chatId,
+              messageId || '',
+              messageContent,
+              'text',
+              userId,
+            );
+
+          if (executionResult.triggered) {
+            this.logger.log(
+              `[Workflow Execution] Visual workflow triggered for chat ${chatId}, execution IDs: ${executionResult.executionIds.join(', ')}`,
+            );
+          }
+        } catch (execError) {
+          // Log but don't fail the overall message processing
+          this.logger.error(
+            `[Workflow Execution] Error processing message for visual workflow: ${execError.message}`,
+            execError.stack,
+          );
+        }
+      }
+
+      // Step 0b: Handle interactive response (button/list clicks) if present
       // This takes priority over normal message processing
       if (interactiveResponse) {
         return this.interactiveHandler.handleInteractiveResponse(

@@ -10,18 +10,21 @@
 export type WorkflowStatus = "draft" | "published" | "archived" | "disabled";
 
 export type WorkflowNodeType =
-  | "trigger_message"
-  | "trigger_time"
-  | "trigger_webhook"
-  | "trigger_manual"
-  | "trigger_tag"
-  | "trigger_stage_enter"
+  // Base types (used by visualization and ReactFlow)
+  | "trigger"
   | "condition"
   | "action"
   | "delay"
   | "branch"
   | "sub_workflow"
-  | "end";
+  | "end"
+  // Specific trigger types
+  | "trigger_message"
+  | "trigger_time"
+  | "trigger_webhook"
+  | "trigger_manual"
+  | "trigger_tag"
+  | "trigger_stage_enter";
 
 export type WorkflowExecutionStatus =
   | "running"
@@ -657,6 +660,82 @@ export interface WorkflowCanvasEdge {
     condition?: ConnectionCondition;
     priority?: number;
   };
+}
+
+// ============================================================================
+// Workflow Visualization Types
+// ============================================================================
+
+/**
+ * Visualization node - simplified node for read-only canvas display
+ */
+export interface WorkflowVisualizationNode {
+  id: string;
+  type: string;
+  name: string;
+  description: string | null;
+  positionX: number;
+  positionY: number;
+  config: Record<string, unknown>;
+  isEntryPoint: boolean;
+  isExitPoint: boolean;
+  metadata: Record<string, unknown>;
+}
+
+/**
+ * Visualization connection - simplified connection for read-only canvas display
+ */
+export interface WorkflowVisualizationConnection {
+  id: string;
+  sourceNodeId: string;
+  targetNodeId: string;
+  sourceHandle: string | null;
+  targetHandle: string | null;
+  type: string;
+  label: string | null;
+}
+
+/**
+ * Execution path step - represents a node that was visited during execution
+ */
+export interface WorkflowExecutionPathStep {
+  nodeId: string;
+  nodeName: string;
+  nodeType: string;
+  action: string;
+  executedAt: string;
+  durationMs: number | null;
+  conditionResult: boolean | null;
+  errorMessage: string | null;
+  output: Record<string, unknown> | null;
+}
+
+/**
+ * Execution metadata for history panel
+ */
+export interface WorkflowExecutionMetadata {
+  id: string;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
+/**
+ * Workflow visualization data - complete data for rendering a read-only workflow canvas
+ */
+export interface WorkflowVisualizationData {
+  workflow: {
+    id: string;
+    name: string;
+    description: string | null;
+    icon: string | null;
+    color: string | null;
+  } | null;
+  nodes: WorkflowVisualizationNode[];
+  connections: WorkflowVisualizationConnection[];
+  executionPath: WorkflowExecutionPathStep[];
+  currentNodeId: string | null;
+  status: "running" | "waiting" | "completed" | "failed" | "no_workflow";
+  execution: WorkflowExecutionMetadata | null;
 }
 
 // ============================================================================

@@ -29,10 +29,12 @@ import type {
   WorkflowTemplateCategory,
   WorkflowVariable,
   WorkflowVersion,
+  WorkflowVisualizationData,
   WorkflowWithDetails,
 } from "@/lib/types/workflow.types";
 import { apiClient } from "./client";
 import {
+  type BackendVisualizationResponse,
   type BackendWorkflowConnection,
   type BackendWorkflowNode,
   type BackendWorkflowWithDetails,
@@ -41,6 +43,7 @@ import {
   transformConnectionToFrontend,
   transformNodeToFrontend,
   transformSaveCanvasResponse,
+  transformVisualizationResponse,
   transformWorkflowToFrontend,
 } from "./workflow-transformers";
 
@@ -383,6 +386,22 @@ export const workflowBuilderApi = {
       allowedKbTemplates: string[] | null;
     } | null> =>
       apiClient.get(`/workflow-builder/chats/${chatId}/workflow-state`),
+
+    /**
+     * Get workflow visualization data for a chat
+     * Returns workflow structure with execution path for visual display
+     */
+    getVisualization: async (
+      chatId: string,
+    ): Promise<WorkflowVisualizationData | null> => {
+      const response = await apiClient.get<BackendVisualizationResponse | null>(
+        `/workflow-builder/chats/${chatId}/workflow-visualization`,
+      );
+      if (!response) return null;
+      return transformVisualizationResponse(
+        response,
+      ) as WorkflowVisualizationData;
+    },
 
     /**
      * Reset workflow state for a chat

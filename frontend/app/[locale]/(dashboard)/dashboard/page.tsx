@@ -1,6 +1,5 @@
 "use client";
 
-import * as React from "react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,43 +11,134 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageLayout } from "@/components/ui/page-layout";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { useAuthProtection } from "@/hooks/use-auth";
 import { useNotification } from "@/hooks/use-notification";
-import { TeamDataWithMembers, User } from "@/lib/db/schema";
+import { useTeam } from "@/hooks/use-team";
+import { useUser } from "@/hooks/use-user";
+import { User } from "@/lib/db/schema";
 import { customerPortalAction } from "@/lib/payments/actions";
 import { Loader2, PlusCircle } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { Suspense, useActionState } from "react";
-import useSWR from "swr";
+import * as React from "react";
+import { useActionState } from "react";
 import { inviteTeamMember, removeTeamMember } from "../../(login)/actions";
-import { useAuthProtection } from "@/hooks/use-auth";
-import { PageLayout } from "@/components/ui/page-layout";
-import { backendApi } from "@/lib/api/endpoints";
 
 type ActionState = {
   error?: string;
   success?: string;
 };
 
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
+// ============================================================================
+// Loading Skeletons
+// ============================================================================
 
 function SubscriptionSkeleton() {
   const t = useTranslations("team");
   return (
-    <Card className="mb-8 h-[140px]">
+    <Card className="mb-8">
       <CardHeader>
         <CardTitle>{t("subscription")}</CardTitle>
       </CardHeader>
+      <CardContent>
+        <div className="animate-pulse space-y-4">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center">
+            <div className="mb-4 sm:mb-0 space-y-2">
+              <div className="h-5 w-32 bg-gray-200 dark:bg-gray-700 rounded"></div>
+              <div className="h-4 w-24 bg-gray-200 dark:bg-gray-700 rounded"></div>
+            </div>
+            <div className="h-9 w-36 bg-gray-200 dark:bg-gray-700 rounded"></div>
+          </div>
+        </div>
+      </CardContent>
     </Card>
   );
 }
 
+function TeamMembersSkeleton() {
+  const t = useTranslations("team");
+  return (
+    <Card className="mb-8">
+      <CardHeader>
+        <CardTitle>{t("members")}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="animate-pulse space-y-4">
+          <div className="flex items-center space-x-4">
+            <div className="size-10 rounded-full bg-gray-200 dark:bg-gray-700"></div>
+            <div className="space-y-2">
+              <div className="h-4 w-32 bg-gray-200 dark:bg-gray-700 rounded"></div>
+              <div className="h-3 w-16 bg-gray-200 dark:bg-gray-700 rounded"></div>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function InviteTeamMemberSkeleton() {
+  const t = useTranslations("team");
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("invite")}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="animate-pulse space-y-4">
+          <div className="space-y-2">
+            <div className="h-4 w-12 bg-gray-200 dark:bg-gray-700 rounded"></div>
+            <div className="h-10 w-full bg-gray-200 dark:bg-gray-700 rounded"></div>
+          </div>
+          <div className="space-y-2">
+            <div className="h-4 w-12 bg-gray-200 dark:bg-gray-700 rounded"></div>
+            <div className="flex space-x-4">
+              <div className="h-5 w-20 bg-gray-200 dark:bg-gray-700 rounded"></div>
+              <div className="h-5 w-20 bg-gray-200 dark:bg-gray-700 rounded"></div>
+            </div>
+          </div>
+          <div className="h-10 w-32 bg-gray-200 dark:bg-gray-700 rounded"></div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/**
+ * Get a display name for a user, falling back through name -> email -> "Unknown User"
+ */
+function getUserDisplayName(user: Pick<User, "id" | "name" | "email">): string {
+  return user.name || user.email || "Unknown User";
+}
+
+/**
+ * Get initials from a display name for avatar fallback
+ */
+function getInitials(name: string): string {
+  return name
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
+}
+
+// ============================================================================
+// Feature Components
+// ============================================================================
+
 function ManageSubscription() {
   const t = useTranslations("team");
-  const { data: teamData } = useSWR<TeamDataWithMembers>(
-    "team-details",
-    () => backendApi.team.get() as Promise<any>
-  );
+  const { team, isLoading } = useTeam();
+
+  if (isLoading) {
+    return <SubscriptionSkeleton />;
+  }
 
   return (
     <Card className="mb-8">
@@ -60,14 +150,14 @@ function ManageSubscription() {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center">
             <div className="mb-4 sm:mb-0">
               <p className="font-medium">
-                {t("current")}: {teamData?.planName || "Free"}
+                {t("current")}: {team?.planName || "Free"}
               </p>
               <p className="text-sm text-muted-foreground">
-                {teamData?.subscriptionStatus === "active"
+                {team?.subscriptionStatus === "active"
                   ? t("billedMonthly")
-                  : teamData?.subscriptionStatus === "trialing"
-                  ? t("trial")
-                  : t("noSubscription")}
+                  : team?.subscriptionStatus === "trialing"
+                    ? t("trial")
+                    : t("noSubscription")}
               </p>
             </div>
             <form action={customerPortalAction}>
@@ -82,44 +172,19 @@ function ManageSubscription() {
   );
 }
 
-function TeamMembersSkeleton() {
-  const t = useTranslations("team");
-  return (
-    <Card className="mb-8 h-[140px]">
-      <CardHeader>
-        <CardTitle>{t("members")}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="animate-pulse space-y-4 mt-1">
-          <div className="flex items-center space-x-4">
-            <div className="size-8 rounded-full bg-gray-200"></div>
-            <div className="space-y-2">
-              <div className="h-4 w-32 bg-gray-200 rounded"></div>
-              <div className="h-3 w-14 bg-gray-200 rounded"></div>
-            </div>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 function TeamMembers() {
   const t = useTranslations("team");
-  const { data: teamData } = useSWR<TeamDataWithMembers>(
-    "team-details",
-    () => backendApi.team.get() as Promise<any>
-  );
+  const { team, isLoading } = useTeam();
   const [removeState, removeAction, isRemovePending] = useActionState<
     ActionState,
     FormData
   >(removeTeamMember, {});
 
-  const getUserDisplayName = (user: Pick<User, "id" | "name" | "email">) => {
-    return user.name || user.email || "Unknown User";
-  };
+  if (isLoading) {
+    return <TeamMembersSkeleton />;
+  }
 
-  if (!teamData?.teamMembers?.length) {
+  if (!team?.teamMembers?.length) {
     return (
       <Card className="mb-8">
         <CardHeader>
@@ -139,24 +204,12 @@ function TeamMembers() {
       </CardHeader>
       <CardContent>
         <ul className="space-y-4">
-          {teamData.teamMembers.map((member, index) => (
+          {team.teamMembers.map((member, index) => (
             <li key={member.id} className="flex items-center justify-between">
               <div className="flex items-center space-x-4">
                 <Avatar>
-                  {/* 
-                    This app doesn't save profile images, but here
-                    is how you'd show them:
-
-                    <AvatarImage
-                      src={member.user.image || ''}
-                      alt={getUserDisplayName(member.user)}
-                    />
-                  */}
                   <AvatarFallback>
-                    {getUserDisplayName(member.user)
-                      .split(" ")
-                      .map((n) => n[0])
-                      .join("")}
+                    {getInitials(getUserDisplayName(member.user))}
                   </AvatarFallback>
                 </Avatar>
                 <div>
@@ -192,36 +245,23 @@ function TeamMembers() {
   );
 }
 
-function InviteTeamMemberSkeleton() {
-  const t = useTranslations("team");
-  return (
-    <Card className="h-[260px]">
-      <CardHeader>
-        <CardTitle>{t("invite")}</CardTitle>
-      </CardHeader>
-    </Card>
-  );
-}
-
 function InviteTeamMember() {
   const t = useTranslations("team");
-  const { data: user } = useSWR<User>(
-    "user-profile",
-    () => backendApi.user.getProfile() as Promise<any>
-  );
+  const { user, isLoading } = useUser();
   const isOwner = user?.role === "owner";
   const [inviteState, inviteAction, isInvitePending] = useActionState<
     ActionState,
     FormData
   >(inviteTeamMember, {});
-  const [lastProcessedState, setLastProcessedState] = React.useState<ActionState | null>(null);
+  const [lastProcessedState, setLastProcessedState] =
+    React.useState<ActionState | null>(null);
   const { addNotification } = useNotification();
 
   // Show notifications when invitation state changes
   React.useEffect(() => {
     // Avoid showing notification for the same state twice
     if (!inviteState || inviteState === lastProcessedState) return;
-    
+
     if (inviteState.success) {
       addNotification(t("invitationSent"), "success");
       setLastProcessedState(inviteState);
@@ -230,6 +270,10 @@ function InviteTeamMember() {
       setLastProcessedState(inviteState);
     }
   }, [inviteState, lastProcessedState, addNotification, t]);
+
+  if (isLoading) {
+    return <InviteTeamMemberSkeleton />;
+  }
 
   return (
     <Card>
@@ -295,6 +339,10 @@ function InviteTeamMember() {
   );
 }
 
+// ============================================================================
+// Main Page Component
+// ============================================================================
+
 export default function SettingsPage() {
   const t = useTranslations("team");
 
@@ -303,15 +351,9 @@ export default function SettingsPage() {
 
   return (
     <PageLayout title={t("title")}>
-      <Suspense fallback={<SubscriptionSkeleton />}>
-        <ManageSubscription />
-      </Suspense>
-      <Suspense fallback={<TeamMembersSkeleton />}>
-        <TeamMembers />
-      </Suspense>
-      <Suspense fallback={<InviteTeamMemberSkeleton />}>
-        <InviteTeamMember />
-      </Suspense>
+      <ManageSubscription />
+      <TeamMembers />
+      <InviteTeamMember />
     </PageLayout>
   );
 }

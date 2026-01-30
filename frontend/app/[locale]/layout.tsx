@@ -1,8 +1,8 @@
+import { AudioUnlockInitializer } from "@/components/audio-unlock-initializer";
 import { NotificationContainer } from "@/components/notifications/notification-container";
 import { NotificationProvider } from "@/hooks/use-notification";
 import { defaultLocale, locales } from "@/i18n";
 import { TokenProvider } from "@/lib/auth/token-provider";
-import { getTeamForUser, getUser } from "@/lib/db/queries";
 import { ThemeProvider } from "@/lib/theme/theme-provider";
 import { ThemeScript } from "@/lib/theme/theme-script";
 import { routing } from "@/src/i18n/routing";
@@ -13,7 +13,6 @@ import { Manrope } from "next/font/google";
 import { notFound } from "next/navigation";
 import { SWRConfig } from "swr";
 import "./globals.css";
-import { AudioUnlockInitializer } from "@/components/audio-unlock-initializer";
 
 export const metadata: Metadata = {
   title: "Next.js SaaS Starter",
@@ -62,12 +61,12 @@ export default async function RootLayout({ children, params }: Props) {
               <ThemeProvider>
                 <SWRConfig
                   value={{
-                    fallback: {
-                      // We do NOT await here
-                      // Only components that read this data will suspend
-                      "user-profile": getUser(),
-                      "team-details": getTeamForUser(),
-                    },
+                    // Global SWR configuration
+                    // Don't use fallback data from server-side DB queries
+                    // as they use a different auth context than the backend API
+                    revalidateOnFocus: false,
+                    shouldRetryOnError: false,
+                    dedupingInterval: 2000,
                   }}
                 >
                   {children}

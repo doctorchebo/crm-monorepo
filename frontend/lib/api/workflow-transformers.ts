@@ -351,3 +351,158 @@ export function transformSaveCanvasResponse(
     connections: response.connections.map(transformConnectionToFrontend),
   };
 }
+
+// ============================================================================
+// Visualization Response Types and Transformers
+// ============================================================================
+
+/**
+ * Backend response for workflow visualization endpoint
+ */
+export interface BackendVisualizationResponse {
+  workflow: {
+    id: string;
+    name: string;
+    description: string | null;
+    icon: string | null;
+    color: string | null;
+  } | null;
+  nodes: BackendWorkflowNode[];
+  connections: BackendWorkflowConnection[];
+  executionPath: Array<{
+    nodeId: string;
+    nodeName: string;
+    nodeType: string;
+    action: string;
+    executedAt: string;
+    durationMs: number | null;
+    conditionResult: boolean | null;
+    errorMessage: string | null;
+    output: Record<string, unknown> | null;
+  }>;
+  currentNodeId: string | null;
+  status: "running" | "waiting" | "completed" | "failed" | "no_workflow";
+  execution: {
+    id: string;
+    startedAt: string | null;
+    completedAt: string | null;
+  } | null;
+}
+
+/**
+ * Transform visualization node to frontend format (simplified version for read-only display)
+ */
+export function transformVisualizationNodeToFrontend(
+  node: BackendWorkflowNode,
+): {
+  id: string;
+  type: WorkflowNodeType;
+  name: string;
+  description: string | null;
+  positionX: number;
+  positionY: number;
+  config: Record<string, unknown>;
+  isEntryPoint: boolean;
+  isExitPoint: boolean;
+  metadata: Record<string, unknown>;
+} {
+  const baseType = getBaseNodeType(node.nodeType);
+
+  return {
+    id: node.id,
+    type: baseType,
+    name: node.label || "Unnamed Node",
+    description: node.description || null,
+    positionX: node.positionX,
+    positionY: node.positionY,
+    config: {
+      ...node.config,
+      _originalNodeType: node.nodeType,
+    },
+    isEntryPoint: isEntryPointNodeType(node.nodeType),
+    isExitPoint: isExitPointNodeType(node.nodeType),
+    metadata: {
+      aiInstructions: node.aiInstructions,
+      aiTone: node.aiTone,
+      aiGoal: node.aiGoal,
+      allowedKbTemplates: node.allowedKbTemplates,
+      onErrorNodeId: node.onErrorNodeId,
+      continueOnError: node.continueOnError,
+    },
+  };
+}
+
+/**
+ * Transform visualization connection to frontend format (simplified version for read-only display)
+ */
+export function transformVisualizationConnectionToFrontend(
+  conn: BackendWorkflowConnection,
+): {
+  id: string;
+  sourceNodeId: string;
+  targetNodeId: string;
+  sourceHandle: string | null;
+  targetHandle: string | null;
+  type: string;
+  label: string | null;
+} {
+  const sourceHandle =
+    conn.branch && conn.branch !== "default" ? conn.branch : null;
+
+  return {
+    id: conn.id,
+    sourceNodeId: conn.fromNodeId,
+    targetNodeId: conn.toNodeId,
+    sourceHandle,
+    targetHandle: null,
+    type: conn.branch,
+    label: conn.label || null,
+  };
+}
+
+/**
+ * Transform complete visualization response to frontend format
+ */
+export function transformVisualizationResponse(
+  response: BackendVisualizationResponse,
+): {
+  workflow: {
+    id: string;
+    name: string;
+    description: string | null;
+    icon: string | null;
+    color: string | null;
+  } | null;
+  nodes: ReturnType<typeof transformVisualizationNodeToFrontend>[];
+  connections: ReturnType<typeof transformVisualizationConnectionToFrontend>[];
+  executionPath: Array<{
+    nodeId: string;
+    nodeName: string;
+    nodeType: string;
+    action: string;
+    executedAt: string;
+    durationMs: number | null;
+    conditionResult: boolean | null;
+    errorMessage: string | null;
+    output: Record<string, unknown> | null;
+  }>;
+  currentNodeId: string | null;
+  status: "running" | "waiting" | "completed" | "failed" | "no_workflow";
+  execution: {
+    id: string;
+    startedAt: string | null;
+    completedAt: string | null;
+  } | null;
+} {
+  return {
+    workflow: response.workflow,
+    nodes: response.nodes.map(transformVisualizationNodeToFrontend),
+    connections: response.connections.map(
+      transformVisualizationConnectionToFrontend,
+    ),
+    executionPath: response.executionPath,
+    currentNodeId: response.currentNodeId,
+    status: response.status,
+    execution: response.execution,
+  };
+}

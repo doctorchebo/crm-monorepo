@@ -1837,6 +1837,24 @@
       "error_assigning": "Failed to assign workflow",
       "success_unassigned": "Workflow unassigned successfully",
       "error_unassigning": "Failed to unassign workflow"
+    },
+    "visualization": {
+      "title": "Workflow Progress",
+      "viewProgress": "View Progress",
+      "changeWorkflow": "Change Workflow",
+      "assignWorkflow": "Assign Workflow",
+      "noActiveWorkflow": "No Active Workflow",
+      "noActiveWorkflowDescription": "This conversation doesn't have an active workflow assigned. Assign a workflow to see the execution path here.",
+      "loadingWorkflow": "Loading workflow...",
+      "executionPath": "Execution Path",
+      "steps": "{count} steps",
+      "status": {
+        "running": "Running",
+        "waiting": "Waiting",
+        "completed": "Completed",
+        "failed": "Failed",
+        "noWorkflow": "No Workflow"
+      }
     }
   }
 }

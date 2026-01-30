@@ -203,6 +203,182 @@ export class WorkflowExecutionEngine implements OnModuleInit {
   // ============================================================================
 
   /**
+   * Process an incoming message for a chat's assigned workflow.
+   * This is the primary entry point when a chat has a workflow manually assigned.
+   *
+   * Unlike processMessage() which searches all workflows by team,
+   * this method specifically handles the assigned workflow for a chat.
+   */
+  async processMessageForAssignedWorkflow(
+    chatId: string,
+    messageId: string,
+    messageContent: string,
+    messageType: string,
+    userId: number,
+  ): Promise<{ triggered: boolean; executionIds: string[] }> {
+    const executionIds: string[] = [];
+
+    this.logger.log(
+      `[Workflow Execution] Processing message for chat ${chatId}, messageType: ${messageType}`,
+    );
+
+    try {
+      // Check if chat has an assigned workflow
+      const chatState = await db.query.workflowChatState.findFirst({
+        where: eq(workflowChatState.chatId, chatId),
+      });
+
+      this.logger.debug(
+        `[Workflow Execution] Chat state: ${JSON.stringify({
+          hasState: !!chatState,
+          activeWorkflowId: chatState?.activeWorkflowId,
+          activeExecutionId: chatState?.activeExecutionId,
+          currentNodeId: chatState?.currentNodeId,
+        })}`,
+      );
+
+      // No workflow assigned to this chat
+      if (!chatState?.activeWorkflowId) {
+        this.logger.debug(
+          `[Workflow Execution] No workflow assigned to chat ${chatId}`,
+        );
+        return { triggered: false, executionIds: [] };
+      }
+
+      // If there's an active execution in 'waiting' status, resume it
+      if (chatState.activeExecutionId) {
+        const execution = await db.query.workflowExecutions.findFirst({
+          where: eq(workflowExecutions.id, chatState.activeExecutionId),
+        });
+
+        if (execution && execution.status === 'waiting') {
+          // Resume the waiting execution with the new message
+          await this.resumeExecution(execution.id, {
+            message: {
+              id: messageId,
+              content: messageContent,
+              type: messageType,
+              direction: 'inbound',
+              timestamp: new Date(),
+            },
+          });
+          return { triggered: true, executionIds: [execution.id] };
+        }
+
+        // If execution exists but not waiting, check if it's completed or failed
+        // In that case, we can start a new execution if there's a matching trigger
+        if (execution?.status === 'running') {
+          // Workflow is still running, don't interrupt
+          return { triggered: false, executionIds: [] };
+        }
+      }
+
+      // Get the assigned workflow with nodes and connections
+      const workflow = await db.query.workflows.findFirst({
+        where: and(
+          eq(workflows.id, chatState.activeWorkflowId),
+          sql`${workflows.deletedAt} IS NULL`,
+        ),
+        with: {
+          nodes: true,
+          connections: true,
+        },
+      });
+
+      if (
+        !workflow ||
+        (workflow.status !== 'active' && workflow.status !== 'published')
+      ) {
+        this.logger.debug(
+          `Assigned workflow ${chatState.activeWorkflowId} is not active/published or not found (status: ${workflow?.status})`,
+        );
+        return { triggered: false, executionIds: [] };
+      }
+
+      // Find message trigger nodes (handles both 'trigger' and 'trigger_message' types)
+      const triggerNodes = workflow.nodes.filter((n) =>
+        this.isMessageTriggerNode(n.nodeType),
+      );
+
+      this.logger.debug(
+        `[Workflow Execution] Found ${triggerNodes.length} trigger nodes in workflow ${workflow.id}`,
+      );
+
+      if (triggerNodes.length === 0) {
+        this.logger.debug(
+          `Workflow ${workflow.id} has no message triggers. Node types: ${workflow.nodes.map((n) => n.nodeType).join(', ')}`,
+        );
+        return { triggered: false, executionIds: [] };
+      }
+
+      // Check each trigger node for a match
+      for (const triggerNode of triggerNodes) {
+        const config = (triggerNode.config || {}) as TriggerMessageConfig;
+
+        this.logger.debug(
+          `[Workflow Execution] Checking trigger node ${triggerNode.id} with config: ${JSON.stringify(config)}`,
+        );
+
+        // Check if this trigger matches the incoming message
+        if (this.messageTriggerMatches(config, messageContent, messageType)) {
+          this.logger.log(
+            `[Workflow Execution] Trigger matched for node ${triggerNode.id}`,
+          );
+
+          // Check max executions per chat
+          if (workflow.maxExecutionsPerChat) {
+            const executionCount = await db
+              .select({ count: sql<number>`count(*)` })
+              .from(workflowExecutions)
+              .where(
+                and(
+                  eq(workflowExecutions.workflowId, workflow.id),
+                  eq(workflowExecutions.chatId, chatId),
+                ),
+              );
+
+            if (
+              Number(executionCount[0]?.count ?? 0) >=
+              workflow.maxExecutionsPerChat
+            ) {
+              this.logger.debug(
+                `Max executions reached for workflow ${workflow.id} on chat ${chatId}`,
+              );
+              continue;
+            }
+          }
+
+          // Start execution
+          const executionId = await this.startExecution(
+            workflow,
+            chatId,
+            triggerNode.id,
+            'message',
+            messageId,
+            userId,
+          );
+
+          executionIds.push(executionId);
+
+          // Only trigger one execution per message for assigned workflows
+          break;
+        }
+      }
+
+      return {
+        triggered: executionIds.length > 0,
+        executionIds,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error processing message for assigned workflow: ${error.message}`,
+        error.stack,
+      );
+      return { triggered: false, executionIds: [] };
+    }
+  }
+
+  /**
    * Process an incoming message - find and trigger matching workflows
    */
   async processMessage(
@@ -257,12 +433,12 @@ export class WorkflowExecutionEngine implements OnModuleInit {
 
       // Find workflows with message triggers that match
       for (const workflow of activeWorkflows) {
-        const triggerNodes = workflow.nodes.filter(
-          (n) => n.nodeType === 'trigger_message',
+        const triggerNodes = workflow.nodes.filter((n) =>
+          this.isMessageTriggerNode(n.nodeType),
         );
 
         for (const triggerNode of triggerNodes) {
-          const config = triggerNode.config as TriggerMessageConfig;
+          const config = (triggerNode.config || {}) as TriggerMessageConfig;
 
           // Check if trigger matches
           if (this.messageTriggerMatches(config, messageContent, messageType)) {
@@ -322,6 +498,30 @@ export class WorkflowExecutionEngine implements OnModuleInit {
       );
       return { triggered: false, executionIds: [] };
     }
+  }
+
+  /**
+   * Check if a node type represents a message trigger
+   * Handles both generic 'trigger' type and specific 'trigger_message' type
+   */
+  private isMessageTriggerNode(nodeType: string): boolean {
+    return nodeType === 'trigger' || nodeType === 'trigger_message';
+  }
+
+  /**
+   * Check if a node type represents any trigger (for manual, webhook, etc)
+   */
+  private isTriggerNode(nodeType: string): boolean {
+    return (
+      nodeType === 'trigger' ||
+      nodeType.startsWith('trigger_') ||
+      nodeType === 'trigger_message' ||
+      nodeType === 'trigger_manual' ||
+      nodeType === 'trigger_webhook' ||
+      nodeType === 'trigger_time' ||
+      nodeType === 'trigger_tag' ||
+      nodeType === 'trigger_stage_enter'
+    );
   }
 
   /**
@@ -391,8 +591,11 @@ export class WorkflowExecutionEngine implements OnModuleInit {
       with: { nodes: true, connections: true },
     });
 
-    if (!workflow || workflow.status !== 'active') {
-      throw new Error('Workflow not found or not active');
+    if (
+      !workflow ||
+      (workflow.status !== 'active' && workflow.status !== 'published')
+    ) {
+      throw new Error('Workflow not found or not active/published');
     }
 
     const triggerNode = workflow.nodes.find(
@@ -438,7 +641,11 @@ export class WorkflowExecutionEngine implements OnModuleInit {
     });
 
     for (const triggerNode of triggeredWorkflows) {
-      if (triggerNode.workflow.status !== 'active') continue;
+      if (
+        triggerNode.workflow.status !== 'active' &&
+        triggerNode.workflow.status !== 'published'
+      )
+        continue;
 
       // If chatId provided, use it; otherwise extract from payload
       const targetChatId = chatId ?? (payload.chatId as string);
@@ -488,6 +695,9 @@ export class WorkflowExecutionEngine implements OnModuleInit {
     parentExecutionId?: string,
     parentNodeId?: string,
   ): Promise<string> {
+    // Get the trigger node for its name
+    const triggerNode = workflow.nodes.find((n) => n.id === triggerNodeId);
+
     // Create execution record
     const [execution] = await db
       .insert(workflowExecutions)
@@ -517,8 +727,14 @@ export class WorkflowExecutionEngine implements OnModuleInit {
       triggerNodeId,
     );
 
-    // Log execution start
-    await this.logExecution(execution.id, triggerNodeId, 'entered', 'trigger');
+    // Log execution start with node name
+    await this.logExecution(
+      execution.id,
+      triggerNodeId,
+      'entered',
+      triggerNode?.nodeType || 'trigger',
+      triggerNode?.label || 'Trigger',
+    );
 
     this.logger.log(
       `Started workflow execution ${execution.id} for chat ${chatId}`,
@@ -586,6 +802,7 @@ export class WorkflowExecutionEngine implements OnModuleInit {
         executingNodeId,
         'entered',
         node.nodeType,
+        node.label || 'Unnamed Node',
       );
 
       const startTime = Date.now();
@@ -602,6 +819,7 @@ export class WorkflowExecutionEngine implements OnModuleInit {
           executingNodeId,
           result.success ? 'executed' : 'error',
           node.nodeType,
+          node.label || 'Unnamed Node',
           result.output,
           result.conditionResult,
           result.conditionDetails,
@@ -675,10 +893,11 @@ export class WorkflowExecutionEngine implements OnModuleInit {
           executingNodeId,
           'error',
           node.nodeType,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
+          node.label || 'Unnamed Node',
+          undefined, // output
+          undefined, // conditionResult
+          undefined, // conditionDetails
+          undefined, // aiClassification
           error.message,
           Date.now() - startTime,
         );
@@ -935,12 +1154,25 @@ export class WorkflowExecutionEngine implements OnModuleInit {
 
   /**
    * Log execution step
+   *
+   * @param executionId - The execution ID
+   * @param nodeId - The node being executed
+   * @param action - The action type ('entered', 'executed', 'error', 'skipped')
+   * @param nodeType - The type of node
+   * @param nodeName - The display name of the node
+   * @param output - Any output from the node execution
+   * @param conditionResult - Result of condition evaluation (for condition nodes)
+   * @param conditionDetails - Details about condition evaluation
+   * @param aiClassification - AI classification data (if applicable)
+   * @param errorMessage - Error message (if action = 'error')
+   * @param durationMs - Duration of execution in milliseconds
    */
   private async logExecution(
     executionId: string,
     nodeId: string,
     action: string,
     nodeType?: string,
+    nodeName?: string,
     output?: unknown,
     conditionResult?: boolean,
     conditionDetails?: unknown,
@@ -948,18 +1180,48 @@ export class WorkflowExecutionEngine implements OnModuleInit {
     errorMessage?: string,
     durationMs?: number,
   ): Promise<void> {
-    await db.insert(workflowExecutionLogs).values({
-      executionId,
-      nodeId,
-      action,
-      nodeType,
-      output: output ?? null,
-      conditionResult,
-      conditionDetails: conditionDetails ?? null,
-      aiClassification: aiClassification ?? null,
-      errorMessage,
-      durationMs,
-    });
+    // Derive status from action
+    let status: string;
+    switch (action) {
+      case 'executed':
+        status = 'success';
+        break;
+      case 'error':
+        status = 'error';
+        break;
+      case 'skipped':
+        status = 'skipped';
+        break;
+      case 'entered':
+      case 'waiting':
+      default:
+        status = 'pending';
+        break;
+    }
+
+    try {
+      await db.insert(workflowExecutionLogs).values({
+        executionId,
+        nodeId,
+        nodeName: nodeName ?? null,
+        nodeType: nodeType ?? null,
+        action,
+        status,
+        output: output ?? null,
+        conditionResult: conditionResult ?? null,
+        conditionDetails: conditionDetails ?? null,
+        aiClassification: aiClassification ?? null,
+        errorMessage: errorMessage ?? null,
+        durationMs: durationMs ?? null,
+        executedAt: new Date(),
+      });
+    } catch (error) {
+      this.logger.error(
+        `[Workflow Execution] Failed to log execution step: ${error.message}`,
+        error.stack,
+      );
+      // Don't throw - logging failure shouldn't stop execution
+    }
   }
 
   // ============================================================================

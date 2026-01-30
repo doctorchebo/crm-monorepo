@@ -1,7 +1,7 @@
-import { Injectable, ConflictException, Logger } from '@nestjs/common';
-import { eq, and, lt } from 'drizzle-orm';
+import { ConflictException, Injectable, Logger } from '@nestjs/common';
+import { and, eq, lt } from 'drizzle-orm';
 import { db } from '../../../database/db.connection';
-import { chatLocks, activityLogs } from '../../../database/schema';
+import { activityLogs, chatLocks, chats } from '../../../database/schema';
 
 /**
  * Lock types with their corresponding TTL in milliseconds
@@ -388,8 +388,26 @@ export class ChatLockService {
     metadata: Record<string, unknown>,
   ): Promise<void> {
     try {
+      // Get the team ID from the chat for proper audit logging
+      const chat = await db
+        .select({ teamId: chats.teamId })
+        .from(chats)
+        .where(eq(chats.chatId, chatId))
+        .limit(1);
+
+      const teamId = chat[0]?.teamId ?? null;
+
+      // Skip logging if we can't determine the team (shouldn't happen in practice)
+      if (teamId === null) {
+        this.logger.warn(
+          `Skipping activity log for chat ${chatId}: no team_id found`,
+        );
+        return;
+      }
+
       await db.insert(activityLogs).values({
         userId,
+        teamId,
         entityType: 'chat_lock',
         entityId: chatId,
         action,

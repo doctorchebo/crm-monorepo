@@ -13,14 +13,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageLayout } from "@/components/ui/page-layout";
-import { backendApi } from "@/lib/api/endpoints";
-import { User } from "@/lib/db/schema";
+import { useUser } from "@/hooks/use-user";
 import { Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useActionState, useEffect, useState } from "react";
-import useSWR from "swr";
-
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 type ActionState = {
   name?: string;
@@ -79,17 +75,14 @@ function AccountFormWithData({
   state: ActionState;
   t: ReturnType<typeof useTranslations>;
 }) {
-  const { data: user, mutate } = useSWR<User>(
-    "user-profile",
-    () => backendApi.user.getProfile() as Promise<any>,
-  );
+  const { user, isLoading } = useUser();
   const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
     setIsMounted(true);
   }, []);
 
-  if (!isMounted) {
+  if (!isMounted || isLoading) {
     return <AccountForm state={state} t={t} />;
   }
 
@@ -105,10 +98,7 @@ function AccountFormWithData({
 
 function ProfilePictureSection() {
   const t = useTranslations("settings.profilePicture");
-  const { data: user } = useSWR<User>(
-    "user-profile",
-    () => backendApi.user.getProfile() as Promise<any>,
-  );
+  const { user } = useUser();
 
   return (
     <Card>

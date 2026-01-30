@@ -5,6 +5,7 @@ export { WorkflowCanvas } from "./workflow-canvas";
 export { WorkflowHeader } from "./workflow-header";
 export { WorkflowIcon, type WorkflowIconSize } from "./workflow-icon";
 export { WorkflowSidebar } from "./workflow-sidebar";
+export { WorkflowVisualizationModal } from "./workflow-visualization-modal";
 
 // Node components
 export { ActionNode } from "./nodes/action-node";

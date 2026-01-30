@@ -15,6 +15,7 @@
 import { db } from '@database/db.connection';
 import { teamMembers } from '@database/schema';
 import {
+  teamWorkflowSettings,
   Workflow,
   workflowChatState,
   WorkflowConnection,
@@ -28,7 +29,6 @@ import {
   workflowTemplateCategories,
   WorkflowTemplateCategory,
   workflowTemplates,
-  teamWorkflowSettings,
   WorkflowVariable,
   workflowVariables,
   WorkflowVersion,
@@ -2199,6 +2199,248 @@ export class WorkflowBuilderService {
     this.logger.log(`Reset workflow state for chat ${chatId}`);
 
     return { success: true };
+  }
+
+  /**
+   * Get workflow visualization data for a chat
+   * Returns workflow structure with execution path for visual display
+   * Returns raw backend format - frontend should transform using workflow-transformers
+   */
+  async getChatWorkflowVisualization(
+    userId: number,
+    chatId: string,
+  ): Promise<{
+    workflow: {
+      id: string;
+      name: string;
+      description: string | null;
+      icon: string | null;
+      color: string | null;
+    } | null;
+    nodes: Array<{
+      id: string;
+      workflowId: string;
+      nodeType: string;
+      label: string | null;
+      description: string | null;
+      positionX: number;
+      positionY: number;
+      config: Record<string, unknown>;
+      aiInstructions: string | null;
+      aiTone: string | null;
+      aiGoal: string | null;
+      allowedKbTemplates: unknown;
+      onErrorNodeId: string | null;
+      continueOnError: boolean | null;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+    connections: Array<{
+      id: string;
+      workflowId: string;
+      fromNodeId: string;
+      toNodeId: string;
+      branch: string;
+      conditionLabel: string | null;
+      conditionConfig: unknown;
+      label: string | null;
+      animated: boolean | null;
+      sortOrder: number | null;
+      createdAt: string;
+    }>;
+    executionPath: Array<{
+      nodeId: string;
+      action: string;
+      executedAt: Date;
+      durationMs: number | null;
+      conditionResult: boolean | null;
+    }>;
+    currentNodeId: string | null;
+    status: 'running' | 'waiting' | 'completed' | 'failed' | 'no_workflow';
+  } | null> {
+    const teamId = await this.getUserTeamId(userId);
+    await this.verifyTeamAccess(userId, teamId);
+
+    // Get current workflow state for the chat
+    const state = await db.query.workflowChatState.findFirst({
+      where: eq(workflowChatState.chatId, chatId),
+    });
+
+    // No active workflow
+    if (!state?.activeWorkflowId) {
+      return {
+        workflow: null,
+        nodes: [],
+        connections: [],
+        executionPath: [],
+        currentNodeId: null,
+        status: 'no_workflow',
+      };
+    }
+
+    // Get the workflow with nodes and connections
+    const workflow = await db.query.workflows.findFirst({
+      where: eq(workflows.id, state.activeWorkflowId),
+    });
+
+    if (!workflow) {
+      return {
+        workflow: null,
+        nodes: [],
+        connections: [],
+        executionPath: [],
+        currentNodeId: null,
+        status: 'no_workflow',
+      };
+    }
+
+    // Get all nodes for this workflow
+    const nodes = await db.query.workflowNodes.findMany({
+      where: eq(workflowNodes.workflowId, state.activeWorkflowId),
+      orderBy: [asc(workflowNodes.createdAt)],
+    });
+
+    // Get all connections for this workflow
+    const connections = await db.query.workflowConnections.findMany({
+      where: eq(workflowConnections.workflowId, state.activeWorkflowId),
+      orderBy: [asc(workflowConnections.sortOrder)],
+    });
+
+    // Get execution logs if there's an active execution
+    let executionPath: Array<{
+      nodeId: string;
+      nodeName: string;
+      nodeType: string;
+      action: string;
+      executedAt: Date;
+      durationMs: number | null;
+      conditionResult: boolean | null;
+      errorMessage: string | null;
+      output: Record<string, unknown> | null;
+    }> = [];
+
+    // Default status depends on whether we have execution history
+    let executionStatus: 'running' | 'waiting' | 'completed' | 'failed' =
+      'waiting';
+    let executionStartedAt: Date | null = null;
+    let executionCompletedAt: Date | null = null;
+
+    // Try to get execution data - first from active execution, then from most recent
+    let executionId = state.activeExecutionId;
+
+    if (executionId) {
+      // Active execution exists - get its status
+      const execution = await db.query.workflowExecutions.findFirst({
+        where: eq(workflowExecutions.id, executionId),
+      });
+
+      if (execution) {
+        executionStatus = execution.status as typeof executionStatus;
+        executionStartedAt = execution.startedAt;
+        executionCompletedAt = execution.completedAt;
+      }
+    } else {
+      // No active execution - try to find the most recent execution for this chat
+      const recentExecution = await db.query.workflowExecutions.findFirst({
+        where: and(
+          eq(workflowExecutions.chatId, chatId),
+          eq(workflowExecutions.workflowId, state.activeWorkflowId),
+        ),
+        orderBy: [desc(workflowExecutions.startedAt)],
+      });
+
+      if (recentExecution) {
+        executionId = recentExecution.id;
+        executionStatus = recentExecution.status as typeof executionStatus;
+        executionStartedAt = recentExecution.startedAt;
+        executionCompletedAt = recentExecution.completedAt;
+      }
+    }
+
+    // Create a map of node IDs to node details
+    const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+
+    // Get execution logs for the path if we have an execution
+    if (executionId) {
+      const logs = await db.query.workflowExecutionLogs.findMany({
+        where: eq(workflowExecutionLogs.executionId, executionId),
+        orderBy: [asc(workflowExecutionLogs.executedAt)],
+      });
+
+      executionPath = logs
+        .filter((log) => log.nodeId !== null)
+        .map((log) => {
+          const node = nodeMap.get(log.nodeId!);
+          return {
+            nodeId: log.nodeId!,
+            nodeName: node?.label || 'Unknown Node',
+            nodeType: node?.nodeType || 'unknown',
+            action: log.action,
+            executedAt: log.executedAt!,
+            durationMs: log.durationMs,
+            conditionResult: log.conditionResult,
+            errorMessage: log.errorMessage,
+            output: log.output as Record<string, unknown> | null,
+          };
+        });
+    }
+
+    return {
+      workflow: {
+        id: workflow.id,
+        name: workflow.name,
+        description: workflow.description,
+        icon: workflow.icon,
+        color: workflow.color,
+      },
+      // Return raw backend data - frontend will transform using existing transformers
+      nodes: nodes.map((node) => ({
+        id: node.id,
+        workflowId: node.workflowId,
+        nodeType: node.nodeType, // Backend uses 'nodeType'
+        label: node.label, // Backend uses 'label' (frontend transforms to 'name')
+        description: node.description,
+        positionX: node.positionX,
+        positionY: node.positionY,
+        config: node.config as Record<string, unknown>,
+        aiInstructions: node.aiInstructions,
+        aiTone: node.aiTone,
+        aiGoal: node.aiGoal,
+        allowedKbTemplates: node.allowedKbTemplates,
+        onErrorNodeId: node.onErrorNodeId,
+        continueOnError: node.continueOnError,
+        createdAt: node.createdAt?.toISOString() ?? new Date().toISOString(),
+        updatedAt: node.updatedAt?.toISOString() ?? new Date().toISOString(),
+      })),
+      // Return raw backend data - frontend will transform
+      connections: connections.map((conn) => ({
+        id: conn.id,
+        workflowId: conn.workflowId,
+        fromNodeId: conn.fromNodeId, // Backend uses 'fromNodeId'
+        toNodeId: conn.toNodeId, // Backend uses 'toNodeId'
+        branch: conn.branch, // Backend uses 'branch'
+        conditionLabel: conn.conditionLabel,
+        conditionConfig: conn.conditionConfig,
+        label: conn.label,
+        animated: conn.animated,
+        sortOrder: conn.sortOrder,
+        createdAt: conn.createdAt?.toISOString() ?? new Date().toISOString(),
+      })),
+      executionPath: executionPath.map((step) => ({
+        ...step,
+        executedAt: step.executedAt.toISOString(),
+      })),
+      currentNodeId: state.currentNodeId,
+      status: executionStatus,
+      // Execution metadata for history panel
+      execution: executionId
+        ? {
+            id: executionId,
+            startedAt: executionStartedAt?.toISOString() ?? null,
+            completedAt: executionCompletedAt?.toISOString() ?? null,
+          }
+        : null,
+    };
   }
 
   // ============================================================================

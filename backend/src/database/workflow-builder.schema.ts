@@ -532,13 +532,22 @@ export const workflowExecutionLogs = pgTable(
       onDelete: 'set null',
     }),
 
-    // What happened
-    action: varchar('action', { length: 50 }).notNull(), // 'entered', 'executed', 'exited', 'error', 'skipped'
+    // Node info (denormalized for easier querying)
+    nodeName: varchar('node_name', { length: 255 }),
     nodeType: varchar('node_type', { length: 50 }),
+
+    // What happened
+    action: varchar('action', { length: 100 }).notNull(), // 'entered', 'executed', 'exited', 'error', 'skipped'
+    status: varchar('status', { length: 50 }).notNull(), // 'success', 'error', 'skipped', 'pending'
 
     // Input/output for this step
     input: jsonb('input'),
     output: jsonb('output'),
+
+    // Error details (if action = 'error' or status = 'error')
+    error: text('error'),
+    errorStack: text('error_stack'),
+    errorMessage: text('error_message'),
 
     // Condition evaluation result (for condition nodes)
     conditionResult: boolean('condition_result'),
@@ -548,19 +557,19 @@ export const workflowExecutionLogs = pgTable(
     aiClassification: jsonb('ai_classification'),
     aiConfidence: real('ai_confidence'),
 
-    // Error details (if action = 'error')
-    errorMessage: text('error_message'),
-    errorStack: text('error_stack'),
-
     // Timing
     durationMs: integer('duration_ms'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
     executedAt: timestamp('executed_at').defaultNow(),
   },
   (table) => ({
-    executionIdIndex: index('idx_workflow_logs_execution').on(
+    executionIdIndex: index('idx_workflow_execution_logs_execution_id').on(
       table.executionId,
     ),
-    nodeIdIndex: index('idx_workflow_logs_node').on(table.nodeId),
+    nodeIdIndex: index('idx_workflow_execution_logs_node_id').on(table.nodeId),
+    createdAtIndex: index('idx_workflow_execution_logs_created_at').on(
+      table.createdAt,
+    ),
     executedAtIndex: index('idx_workflow_logs_executed_at').on(
       table.executedAt,
     ),

@@ -38,16 +38,16 @@ import {
   TriggerWorkflowDto,
   UpdateConnectionDto,
   UpdateNodeDto,
+  UpdateTeamWorkflowSettingsDto,
   UpdateVariableDto,
   UpdateWorkflowDto,
   UpdateWorkflowTemplateCategoryDto,
   UpdateWorkflowTemplateDto,
-  UpdateTeamWorkflowSettingsDto,
   UseWorkflowTemplateDto,
   WorkflowAnalyticsQueryDto,
 } from '../dto/workflow-builder.dto';
-import { WorkflowBuilderService } from '../services/workflow-builder.service';
 import { WorkflowAssignmentService } from '../services/workflow-assignment.service';
+import { WorkflowBuilderService } from '../services/workflow-builder.service';
 import { WorkflowExecutionEngine } from '../services/workflow-execution.engine';
 
 @Controller('workflow-builder')
@@ -152,10 +152,13 @@ export class WorkflowBuilderController {
     const teamId = await this.workflowBuilderService['getUserTeamId'](
       req.user.userId,
     );
+    // Ensure we pass string | null, not undefined
+    const defaultWorkflowId: string | null =
+      dto.defaultWorkflowId !== undefined ? dto.defaultWorkflowId : null;
     return this.workflowBuilderService.updateTeamSettings(
       req.user.userId,
       teamId.toString(),
-      dto.defaultWorkflowId,
+      defaultWorkflowId,
     );
   }
 
@@ -454,6 +457,21 @@ export class WorkflowBuilderController {
     @Param('chatId') chatId: string,
   ) {
     return this.workflowBuilderService.getChatWorkflowState(
+      req.user.userId,
+      chatId,
+    );
+  }
+
+  /**
+   * Get workflow visualization data for a chat
+   * Returns the workflow canvas structure with execution path highlighted
+   */
+  @Get('chats/:chatId/workflow-visualization')
+  async getChatWorkflowVisualization(
+    @Req() req: AuthenticatedRequest,
+    @Param('chatId') chatId: string,
+  ) {
+    return this.workflowBuilderService.getChatWorkflowVisualization(
       req.user.userId,
       chatId,
     );

@@ -1710,5 +1710,64 @@
         "workflowSettings": "Configuración del Flujo"
       }
     }
+  },
+  "workflow": {
+    "common": {
+      "loading": "Cargando...",
+      "select_workflow": "Seleccionar flujo de trabajo",
+      "search_workflows": "Buscar flujos de trabajo...",
+      "no_workflows_found": "No se encontraron flujos de trabajo",
+      "none": "Ninguno",
+      "active": "Activo",
+      "inactive": "Inactivo",
+      "draft": "Borrador"
+    },
+    "settings": {
+      "title": "Flujo de Trabajo Predeterminado",
+      "description": "Configura el flujo de trabajo predeterminado que se asignará automáticamente a los chats nuevos.",
+      "default_workflow_title": "Flujo de Trabajo Predeterminado del Equipo",
+      "default_workflow_description": "Selecciona el flujo de trabajo que se asignará a todos los chats nuevos.",
+      "default_workflow_label": "Flujo de trabajo",
+      "default_workflow_help": "Este flujo de trabajo se aplicará cuando se inicie un nuevo chat.",
+      "select_default_workflow": "Seleccionar un flujo de trabajo",
+      "save_changes": "Guardar Cambios",
+      "settings_saved": "Configuración guardada correctamente",
+      "settings_save_error": "Error al guardar la configuración"
+    },
+    "assignment": {
+      "title": "Asignar Flujo de Trabajo",
+      "description": "Selecciona un flujo de trabajo para asignar a este chat.",
+      "select_label": "Flujo de trabajo",
+      "select_placeholder": "Seleccionar un flujo de trabajo",
+      "warning_stop_workflow": "Advertencia: Asignar un nuevo flujo de trabajo detendrá el actual.",
+      "confirm_title": "Confirmar Asignación",
+      "confirm_reassign_message": "¿Estás seguro de que deseas reasignar el flujo de trabajo? El flujo de trabajo actual se detendrá.",
+      "confirm_stop_message": "¿Estás seguro de que deseas detener el flujo de trabajo actual?",
+      "confirm": "Confirmar",
+      "cancel": "Cancelar",
+      "save": "Guardar",
+      "success_assigned": "Flujo de trabajo asignado correctamente",
+      "error_assigning": "Error al asignar el flujo de trabajo",
+      "success_unassigned": "Flujo de trabajo desasignado correctamente",
+      "error_unassigning": "Error al desasignar el flujo de trabajo"
+    },
+    "visualization": {
+      "title": "Progreso del Flujo de Trabajo",
+      "viewProgress": "Ver Progreso",
+      "changeWorkflow": "Cambiar Flujo de Trabajo",
+      "assignWorkflow": "Asignar Flujo de Trabajo",
+      "noActiveWorkflow": "Sin Flujo de Trabajo Activo",
+      "noActiveWorkflowDescription": "Esta conversación no tiene un flujo de trabajo activo asignado. Asigna un flujo de trabajo para ver la ruta de ejecución aquí.",
+      "loadingWorkflow": "Cargando flujo de trabajo...",
+      "executionPath": "Ruta de Ejecución",
+      "steps": "{count} pasos",
+      "status": {
+        "running": "En Ejecución",
+        "waiting": "Esperando",
+        "completed": "Completado",
+        "failed": "Fallido",
+        "noWorkflow": "Sin Flujo de Trabajo"
+      }
+    }
   }
 }
