@@ -21,7 +21,13 @@
     "dashboard": "Panel",
     "signOut": "Cerrar sesión",
     "language": "Idioma",
-    "settings": "Configuración"
+    "settings": "Configuración",
+    "goToApp": "Ir a la App"
+  },
+  "sidebar": {
+    "freePlan": "Gratis",
+    "loading": "Cargando...",
+    "user": "Usuario"
   },
   "dashboard": {
     "home": "Inicio",
@@ -1487,6 +1493,13 @@
   "settings": {
     "title": "Configuración",
     "description": "Configura tu automatización de WhatsApp y tus configuraciones de integración",
+    "general": "General",
+    "generalDescription": "Administra las preferencias de la aplicación",
+    "theme": "Tema",
+    "themeLight": "Claro",
+    "themeDark": "Oscuro",
+    "themeSystem": "Sistema",
+    "language": "Idioma",
     "profileSettings": "Configuración de Perfil",
     "updateInfo": "Actualiza tu información de cuenta",
     "displayName": "Nombre para Mostrar",

@@ -33,7 +33,13 @@
     "dashboard": "Dashboard",
     "signOut": "Sign out",
     "language": "Language",
-    "settings": "Settings"
+    "settings": "Settings",
+    "goToApp": "Go to App"
+  },
+  "sidebar": {
+    "freePlan": "Free",
+    "loading": "Loading...",
+    "user": "User"
   },
   "dashboard": {
     "home": "Home",
@@ -1527,6 +1533,13 @@
   "settings": {
     "title": "Settings",
     "description": "Configure your WhatsApp automation and integration settings",
+    "general": "General",
+    "generalDescription": "Manage your application preferences",
+    "theme": "Theme",
+    "themeLight": "Light",
+    "themeDark": "Dark",
+    "themeSystem": "System",
+    "language": "Language",
     "profileSettings": "Profile Settings",
     "updateInfo": "Update your account information",
     "displayName": "Display Name",

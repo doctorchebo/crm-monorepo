@@ -5,7 +5,6 @@ import { Terminal } from "./terminal";
 
 export default function HomePage() {
   const t = useTranslations("home");
-  const tHeader = useTranslations("header");
 
   return (
     <main>

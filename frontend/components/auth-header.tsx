@@ -8,13 +8,18 @@ import Link from "next/link";
 /**
  * AuthHeader - A minimal header component for authentication pages (sign-in, sign-up).
  *
- * This component provides essential functionality that should persist across all pages:
+ * This component provides essential functionality for auth pages:
  * - Theme toggle (light/dark/system) - uses localStorage for persistence
  * - Language switcher - uses NEXT_LOCALE cookie for persistence
  * - Brand logo link to home
  *
- * Unlike the main Header component, this doesn't include user-specific elements
- * like the user menu, dashboard links, or sign-out functionality.
+ * Note: "Go to App" button is NOT shown here because:
+ * - Users on sign-in/sign-up pages are typically not authenticated
+ * - If they were authenticated, they would be redirected automatically
+ *
+ * Theme/Language controls are shown here because:
+ * - Users should be able to set their preferences before signing in
+ * - These settings are the only place outside the app where users can configure them
  *
  * @example
  * // Used in the (login) layout to provide controls on auth pages

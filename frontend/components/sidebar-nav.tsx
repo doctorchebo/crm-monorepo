@@ -12,6 +12,7 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import {
   type NavItem,
@@ -44,6 +45,8 @@ function NavMenuItem({ item, pathname, t, level = 0 }: NavMenuItemProps) {
   const isActive = isNavItemActive(item, pathname);
   const shouldExpand = shouldExpandNavItem(item, pathname);
   const [isOpen, setIsOpen] = useState(shouldExpand);
+  const { state, setOpen } = useSidebar();
+  const isCollapsed = state === "collapsed";
 
   // Update open state when pathname changes
   useEffect(() => {
@@ -56,12 +59,24 @@ function NavMenuItem({ item, pathname, t, level = 0 }: NavMenuItemProps) {
   const labelParts = item.labelKey.split(".");
   const label = t(labelParts[1] || labelParts[0]);
 
+  // Handle click on menu item with children when sidebar is collapsed
+  const handleCollapsibleChange = (open: boolean) => {
+    if (isCollapsed && open) {
+      // Expand sidebar first, then open the submenu
+      setOpen(true);
+      // Small delay to let sidebar expand before opening submenu
+      setTimeout(() => setIsOpen(true), 150);
+    } else {
+      setIsOpen(open);
+    }
+  };
+
   // If item has children, render as collapsible
   if (hasChildren) {
     return (
       <Collapsible
         open={isOpen}
-        onOpenChange={setIsOpen}
+        onOpenChange={handleCollapsibleChange}
         className="group/collapsible"
       >
         <SidebarMenuItem>
@@ -71,13 +86,15 @@ function NavMenuItem({ item, pathname, t, level = 0 }: NavMenuItemProps) {
               isActive={isActive}
               className="cursor-pointer w-full"
             >
-              <item.icon className="h-4 w-4" />
+              <item.icon className="h-4 w-4 shrink-0" />
               <span className="flex-1">{label}</span>
-              <ChevronDown
-                className={`h-4 w-4 shrink-0 transition-transform duration-200 ${
-                  isOpen ? "rotate-180" : ""
-                }`}
-              />
+              {!isCollapsed && (
+                <ChevronDown
+                  className={`h-4 w-4 shrink-0 transition-transform duration-200 ${
+                    isOpen ? "rotate-180" : ""
+                  }`}
+                />
+              )}
             </SidebarMenuButton>
           </CollapsibleTrigger>
           <CollapsibleContent>

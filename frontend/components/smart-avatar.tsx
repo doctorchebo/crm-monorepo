@@ -151,6 +151,7 @@ export function SmartAvatar({
   alt,
 }: SmartAvatarProps) {
   const [imageStatus, setImageStatus] = useState<ImageStatus>("idle");
+  const imgRef = useRef<HTMLImageElement>(null);
   const initials = getInitials(name, email);
   const bgColor = getAvatarColor(name, email);
 
@@ -184,6 +185,13 @@ export function SmartAvatar({
     }
     // Note: If URL is the same, we don't change state at all
   }, [profilePictureUrl, shouldLoadImage]);
+
+  // Check if image is already loaded (cached) on mount or when URL changes
+  useEffect(() => {
+    if (imgRef.current?.complete && imgRef.current?.naturalHeight > 0) {
+      setImageStatus("loaded");
+    }
+  }, [profilePictureUrl]);
 
   // Image load handler - memoized with no dependencies to remain stable
   const handleImageLoad = useCallback(() => {
@@ -236,17 +244,6 @@ export function SmartAvatar({
         className,
       )}
     >
-      {/* Hidden image for preloading - only render when we should load */}
-      {shouldLoadImage && profilePictureUrl && (
-        <img
-          src={profilePictureUrl}
-          alt=""
-          className="sr-only"
-          onLoad={handleImageLoad}
-          onError={handleImageError}
-        />
-      )}
-
       {/* Skeleton loader */}
       {showSkeleton && (
         <div
@@ -258,16 +255,24 @@ export function SmartAvatar({
         />
       )}
 
-      {/* Actual image - use regular img instead of Radix to avoid its internal state */}
-      {showImage && (
+      {/* Image - always render when we should load, but control visibility */}
+      {/* This ensures onLoad fires even for cached images */}
+      {shouldLoadImage && profilePictureUrl && (
         <img
-          src={profilePictureUrl!}
+          ref={imgRef}
+          src={profilePictureUrl}
           alt={alt || name || email || "User avatar"}
-          className="aspect-square h-full w-full object-cover"
+          className={cn(
+            "aspect-square h-full w-full object-cover",
+            // Hide while loading, show when loaded
+            !showImage && "invisible",
+          )}
+          onLoad={handleImageLoad}
+          onError={handleImageError}
         />
       )}
 
-      {/* Fallback with initials - use div instead of Radix Fallback to avoid its internal state */}
+      {/* Fallback with initials */}
       {showFallback && (
         <div
           className={cn(

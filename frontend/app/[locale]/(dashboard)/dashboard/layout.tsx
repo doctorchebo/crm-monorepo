@@ -2,6 +2,7 @@
 
 import { EmojiPickerProvider } from "@/components/emoji-picker";
 import { SidebarNav } from "@/components/sidebar-nav";
+import { SidebarUserProfile } from "@/components/sidebar-user-profile";
 import { Separator } from "@/components/ui/separator";
 import {
   Sidebar,
@@ -13,26 +14,49 @@ import {
 } from "@/components/ui/sidebar";
 import { AudioPlaybackProvider } from "@/lib/audio-playback-context";
 import { navigationConfig } from "@/lib/navigation";
+import { CircleIcon } from "lucide-react";
 import { useTranslations } from "next-intl";
+import Link from "next/link";
 
+/**
+ * DashboardSidebar - Main navigation sidebar for the dashboard
+ *
+ * Contains:
+ * - Brand logo and app name in the header
+ * - Navigation menu items
+ * - User profile with settings and logout at the bottom
+ */
 function DashboardSidebar() {
   const t = useTranslations("dashboard");
 
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="p-4">
-        <div className="flex items-center">
-          <span className="font-semibold text-lg">{t("navigation")}</span>
-        </div>
+        <Link href="/" className="flex items-center gap-2">
+          <CircleIcon className="h-6 w-6 text-orange-500 shrink-0" />
+          <span className="font-semibold text-lg group-data-[collapsible=icon]:hidden">
+            ACME
+          </span>
+        </Link>
       </SidebarHeader>
       <Separator />
       <SidebarContent>
         <SidebarNav items={navigationConfig} />
       </SidebarContent>
+      <SidebarUserProfile />
     </Sidebar>
   );
 }
 
+/**
+ * DashboardLayout - Layout wrapper for all dashboard pages
+ *
+ * Provides:
+ * - Audio playback context for media handling
+ * - Emoji picker context for chat functionality
+ * - Sidebar navigation with user profile
+ * - Responsive mobile trigger
+ */
 export default function DashboardLayout({
   children,
 }: {
