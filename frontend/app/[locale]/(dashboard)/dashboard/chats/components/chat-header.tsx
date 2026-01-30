@@ -11,11 +11,24 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { WorkflowVisualizationModal } from "@/components/workflow";
 import { useHandoff } from "@/hooks/use-handoff";
 import { workflowBuilderApi } from "@/lib/api/workflow-builder";
 import type { WorkflowVisualizationData } from "@/lib/types/workflow.types";
-import { ChevronDown, Eye, Search, Settings2, Workflow } from "lucide-react";
+import {
+  ChevronDown,
+  Eye,
+  PanelRightClose,
+  PanelRightOpen,
+  Search,
+  Settings2,
+  Workflow,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useState } from "react";
 import useSWR from "swr";
@@ -29,6 +42,10 @@ interface ChatHeaderProps {
   onAIToggle?: (enabled: boolean) => Promise<void>;
   isRateLimited?: boolean;
   onConfigSaved?: () => void;
+  /** Whether the sidebar panel is expanded */
+  isSidebarExpanded?: boolean;
+  /** Callback when sidebar toggle is clicked */
+  onSidebarToggle?: () => void;
 }
 
 export function ChatHeader({
@@ -38,8 +55,11 @@ export function ChatHeader({
   onAIToggle,
   isRateLimited,
   onConfigSaved: parentOnConfigSaved,
+  isSidebarExpanded,
+  onSidebarToggle,
 }: ChatHeaderProps) {
   const t = useTranslations("chats.search");
+  const tSidebar = useTranslations("chats.sidebar");
   const {
     handoffStatus,
     aiStatus,
@@ -222,6 +242,36 @@ export function ChatHeader({
             <Search className="h-4 w-4" />
             <span className="sr-only">{t("title")}</span>
           </Button>
+
+          {/* Sidebar toggle button - only visible on xl screens where sidebar can be shown */}
+          {onSidebarToggle && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 hidden xl:flex"
+                  onClick={onSidebarToggle}
+                >
+                  {isSidebarExpanded ? (
+                    <PanelRightClose className="h-4 w-4" />
+                  ) : (
+                    <PanelRightOpen className="h-4 w-4" />
+                  )}
+                  <span className="sr-only">
+                    {isSidebarExpanded
+                      ? tSidebar("collapsePanel")
+                      : tSidebar("expandPanel")}
+                  </span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {isSidebarExpanded
+                  ? tSidebar("collapsePanel")
+                  : tSidebar("expandPanel")}
+              </TooltipContent>
+            </Tooltip>
+          )}
         </div>
       </div>
 

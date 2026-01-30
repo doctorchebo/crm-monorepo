@@ -242,6 +242,10 @@
         "youReacted": "You reacted {emoji} to:",
         "theyReacted": "Reacted {emoji} to:"
       }
+    },
+    "sidebar": {
+      "expandPanel": "Show profile & notes panel",
+      "collapsePanel": "Hide profile & notes panel"
     }
   },
   "customerProfile": {

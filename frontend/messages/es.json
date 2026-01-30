@@ -229,6 +229,10 @@
         "youReacted": "Reaccionaste {emoji} a:",
         "theyReacted": "Reaccionó {emoji} a:"
       }
+    },
+    "sidebar": {
+      "expandPanel": "Mostrar panel de perfil y notas",
+      "collapsePanel": "Ocultar panel de perfil y notas"
     }
   },
   "customerProfile": {

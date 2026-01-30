@@ -29,6 +29,8 @@ interface UseChatPersistenceOptions {
 interface UseChatPersistenceReturn {
   /** The persisted sidebar tab (for initial load only) */
   persistedTab: SidebarTab | null;
+  /** Whether a chat was previously selected (for skeleton loading) */
+  hadPreviousChat: boolean;
   /** Save the current chat selection */
   persistChatId: (chatId: string | null) => void;
   /** Save the current sidebar tab (only call on user interaction) */
@@ -76,6 +78,7 @@ export function useChatPersistence({
   defaultTab = "profile",
 }: UseChatPersistenceOptions = {}): UseChatPersistenceReturn {
   const [persistedTab, setPersistedTab] = useState<SidebarTab | null>(null);
+  const [hadPreviousChat, setHadPreviousChat] = useState(false);
   const [isRestoring, setIsRestoring] = useState(true);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const hasRestoredRef = useRef(false);
@@ -93,8 +96,11 @@ export function useChatPersistence({
 
     // Restore chat ID
     const savedChatId = storage.get(STORAGE_KEY_CHAT);
-    if (savedChatId && onRestoreChatId) {
-      onRestoreChatId(savedChatId);
+    if (savedChatId) {
+      setHadPreviousChat(true);
+      if (onRestoreChatId) {
+        onRestoreChatId(savedChatId);
+      }
     }
 
     // Restore sidebar tab
@@ -145,6 +151,7 @@ export function useChatPersistence({
     storage.remove(STORAGE_KEY_CHAT);
     storage.remove(STORAGE_KEY_TAB);
     setPersistedTab(null);
+    setHadPreviousChat(false);
   }, [storage]);
 
   // Cleanup timeout on unmount
@@ -158,6 +165,7 @@ export function useChatPersistence({
 
   return {
     persistedTab,
+    hadPreviousChat,
     persistChatId,
     persistSidebarTab,
     clearPersistedState,

@@ -38,6 +38,7 @@ import { useAuthProtection } from "@/hooks/use-auth";
 import { useChatNotifications } from "@/hooks/use-chat-notifications";
 import { useMediaUpload } from "@/hooks/use-media-upload";
 import { useNotification } from "@/hooks/use-notification";
+import { useSidebarExpanded } from "@/hooks/use-sidebar-expanded";
 import { backendApi } from "@/lib/api/endpoints";
 import { PendingUpload } from "@/lib/media/types";
 
@@ -49,7 +50,10 @@ import { useChatPersistence } from "@/hooks/use-chat-persistence";
 import { useHandoff } from "@/hooks/use-handoff";
 import type { SupportedLanguage } from "@/lib/api/endpoints";
 import {
+  ChatDetailSkeleton,
+  ChatEmptyStateSkeleton,
   ChatHeader,
+  ChatListSkeleton,
   ChatSearchResults,
   ChatsModals,
   MessageInputArea,
@@ -146,6 +150,15 @@ export default function ChatsPage() {
       [chatState.setSelectedChatId],
     ),
   });
+
+  // Sidebar expanded/collapsed state persistence
+  // - Default is expanded (true)
+  // - User's preference persists across sessions via localStorage
+  const {
+    isExpanded: isSidebarExpanded,
+    toggle: toggleSidebar,
+    isHydrated: isSidebarHydrated,
+  } = useSidebarExpanded();
 
   // Persist chat selection whenever it changes
   useEffect(() => {
@@ -888,9 +901,7 @@ export default function ChatsPage() {
           </div>
           <div className="flex-1 overflow-y-auto">
             {chatState.loading && !chatSearch.isSearchMode ? (
-              <div className="p-4 text-center text-muted-foreground">
-                {t("chatList.loadingChats")}
-              </div>
+              <ChatListSkeleton />
             ) : chatSearch.isSearchMode ? (
               /* Search Results Mode */
               chatSearch.searchResults.length === 0 &&
@@ -974,6 +985,8 @@ export default function ChatsPage() {
                   setFetchedRateLimitInfo(null);
                   refetchHandoff();
                 }}
+                isSidebarExpanded={isSidebarExpanded}
+                onSidebarToggle={toggleSidebar}
               />
 
               {/* Messages + Notes/Search Container */}
@@ -1273,66 +1286,78 @@ export default function ChatsPage() {
                   />
                 </div>
 
-                {/* Resizable Separator - only show when search is not open */}
-                {!messageSearch.isSearchOpen && (
-                  <div
-                    ref={separatorRef}
-                    onMouseDown={handleMouseDown}
-                    className="w-1 bg-border hover:bg-primary/50 cursor-col-resize transition-colors"
-                    title="Drag to resize"
-                  />
-                )}
-
-                {/* Notes Panel or Search Panel */}
-                <div
-                  ref={notesPanelRef}
-                  className="hidden xl:flex flex-col overflow-hidden"
-                  style={{ width: `${notesPanelWidth}px` }}
-                >
-                  {messageSearch.isSearchOpen ? (
-                    // Search Panel - slides in from right
-                    <MessageSearchPanel
-                      chatId={chatState.selectedChatId!}
-                      participantName={effectiveSelectedChat?.participantName}
-                      isOpen={messageSearch.isSearchOpen}
-                      onClose={messageSearch.closeSearch}
-                      onSelectMessage={handleSearchSelectMessage}
+                {/* Resizable Separator - only show when sidebar is expanded and search is not open */}
+                {isSidebarHydrated &&
+                  isSidebarExpanded &&
+                  !messageSearch.isSearchOpen && (
+                    <div
+                      ref={separatorRef}
+                      onMouseDown={handleMouseDown}
+                      className="w-1 bg-border hover:bg-primary/50 cursor-col-resize transition-colors"
+                      title="Drag to resize"
                     />
-                  ) : (
-                    // Notes/Profile Panel
-                    chatState.selectedChatId &&
-                    currentUserId && (
-                      <ChatSidebar
-                        ref={chatSidebarRef}
-                        chatId={chatState.selectedChatId}
-                        contactId={selectedContactId}
-                        currentUserId={currentUserId}
-                        onProfileUpdate={() => {}}
-                        participantPhone={
-                          effectiveSelectedChat?.participantPhone
-                        }
-                        participantName={effectiveSelectedChat?.participantName}
-                        onContactCreated={handleContactResolved}
-                        initialTab={chatPersistence.persistedTab || "profile"}
-                        onTabChange={handleSidebarTabChange}
-                      />
-                    )
                   )}
-                </div>
+
+                {/* Notes Panel or Search Panel - only show when sidebar is expanded */}
+                {isSidebarHydrated && isSidebarExpanded && (
+                  <div
+                    ref={notesPanelRef}
+                    className="hidden xl:flex flex-col overflow-hidden"
+                    style={{ width: `${notesPanelWidth}px` }}
+                  >
+                    {messageSearch.isSearchOpen ? (
+                      // Search Panel - slides in from right
+                      <MessageSearchPanel
+                        chatId={chatState.selectedChatId!}
+                        participantName={effectiveSelectedChat?.participantName}
+                        isOpen={messageSearch.isSearchOpen}
+                        onClose={messageSearch.closeSearch}
+                        onSelectMessage={handleSearchSelectMessage}
+                      />
+                    ) : (
+                      // Notes/Profile Panel
+                      chatState.selectedChatId &&
+                      currentUserId && (
+                        <ChatSidebar
+                          ref={chatSidebarRef}
+                          chatId={chatState.selectedChatId}
+                          contactId={selectedContactId}
+                          currentUserId={currentUserId}
+                          onProfileUpdate={() => {}}
+                          participantPhone={
+                            effectiveSelectedChat?.participantPhone
+                          }
+                          participantName={
+                            effectiveSelectedChat?.participantName
+                          }
+                          onContactCreated={handleContactResolved}
+                          initialTab={chatPersistence.persistedTab || "profile"}
+                          onTabChange={handleSidebarTabChange}
+                        />
+                      )
+                    )}
+                  </div>
+                )}
               </div>
             </>
+          ) : chatState.loading ? (
+            // Loading state - show appropriate skeleton based on whether a chat was previously selected
+            chatPersistence.hadPreviousChat ? (
+              <ChatDetailSkeleton />
+            ) : (
+              <ChatEmptyStateSkeleton />
+            )
           ) : (
+            // Not loading, no chat selected - show empty state
             <div className="flex-1 flex items-center justify-center bg-muted/10">
               <div className="text-center max-w-sm px-4">
                 <div className="w-20 h-20 rounded-full bg-muted/30 flex items-center justify-center mx-auto mb-6">
                   <MessageSquare className="h-10 w-10 text-muted-foreground/50" />
                 </div>
                 <h3 className="text-lg font-medium text-foreground mb-2">
-                  {chatState.loading
-                    ? t("loading") || "Loading..."
-                    : t("selectChat")}
+                  {t("selectChat")}
                 </h3>
-                {!chatState.loading && chatState.chats.length > 0 && (
+                {chatState.chats.length > 0 && (
                   <p className="text-sm text-muted-foreground">
                     {t("selectChatHint") ||
                       "Choose a conversation from the list to start messaging"}
