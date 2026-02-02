@@ -2,13 +2,15 @@
 
 import { SettingsCategory, SettingsPage } from "@/components/settings";
 import { AiConfigSettings } from "@/components/settings/ai-config-settings";
+import { AiDefaultsSettings } from "@/components/settings/ai-defaults-settings";
 import { useTranslations } from "next-intl";
 
 /**
  * AI Settings Page
  *
  * Provides comprehensive AI configuration options including:
- * - Default AI behavior settings (tone, style, formality)
+ * - Default AI behavior for new chats (AI Replies & AI Paused switches)
+ * - Default AI style settings (tone, style, formality)
  * - Rate limiting and response limits
  * - Language preferences
  * - Template behavior settings
@@ -24,6 +26,17 @@ export default function AiSettingsPage() {
 
   return (
     <SettingsPage title={t("title")} description={t("description")}>
+      {/* Default AI Behavior for New Chats */}
+      <SettingsCategory
+        title={t("defaultsCategory")}
+        description={t("defaultsCategoryDescription")}
+      >
+        <div className="-mx-6 -my-4">
+          <AiDefaultsSettings variant="embedded" />
+        </div>
+      </SettingsCategory>
+
+      {/* AI Style & Behavior Configuration */}
       <SettingsCategory
         title={t("defaultBehaviorCategory")}
         description={t("defaultBehaviorDescription")}

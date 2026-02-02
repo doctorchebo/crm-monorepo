@@ -367,15 +367,17 @@ export const workflowBuilderApi = {
   chatState: {
     /**
      * Get current workflow state for a chat
+     * Returns data for both header display and resume modal
      */
     get: (
       chatId: string,
     ): Promise<{
+      // Standard fields for header display
       chatId: string;
       activeWorkflowId: string | null;
-      activeWorkflow: Workflow | null;
+      activeWorkflow: { id: string; name: string } | null;
       currentNodeId: string | null;
-      currentNode: WorkflowNode | null;
+      currentNode: { id: string; label: string | null } | null;
       isPaused: boolean;
       pausedAt: string | null;
       pausedBy: number | null;
@@ -384,6 +386,23 @@ export const workflowBuilderApi = {
       currentAiTone: string | null;
       currentAiGoal: string | null;
       allowedKbTemplates: string[] | null;
+      // Additional fields for resume modal
+      workflowId: string | null;
+      workflowName: string | null;
+      currentNodeLabel: string | null;
+      nodes: Array<{
+        id: string;
+        nodeType: string;
+        label: string | null;
+        positionX: number;
+        positionY: number;
+      }>;
+      connections: Array<{
+        id: string;
+        fromNodeId: string;
+        toNodeId: string;
+        label: string | null;
+      }>;
     } | null> =>
       apiClient.get(`/workflow-builder/chats/${chatId}/workflow-state`),
 
@@ -425,6 +444,49 @@ export const workflowBuilderApi = {
      */
     unassign: (chatId: string): Promise<void> =>
       apiClient.delete(`/workflow-builder/chats/${chatId}/workflow`),
+
+    /**
+     * Get workflow state for resume modal
+     * Returns workflow nodes and connections for the node selector
+     */
+    getResumeState: (
+      chatId: string,
+    ): Promise<{
+      workflowId: string | null;
+      workflowName: string | null;
+      isPaused: boolean;
+      pauseReason: string | null;
+      currentNodeId: string | null;
+      currentNodeLabel: string | null;
+      nodes: Array<{
+        id: string;
+        nodeType: string;
+        label: string | null;
+        positionX: number;
+        positionY: number;
+      }>;
+      connections: Array<{
+        id: string;
+        fromNodeId: string;
+        toNodeId: string;
+        label: string | null;
+      }>;
+    } | null> =>
+      apiClient.get(`/workflow-builder/chats/${chatId}/workflow-state`),
+
+    /**
+     * Resume a paused workflow from a selected node
+     * Called when user re-enables AI and selects where to continue
+     */
+    resumeFromNode: (
+      chatId: string,
+      nodeId: string | null,
+      action: "resume" | "restart" | "cancel",
+    ): Promise<{ success: boolean; message: string }> =>
+      apiClient.post(`/workflow-builder/chat/${chatId}/resume-workflow`, {
+        nodeId,
+        action,
+      }),
   },
 
   // ============================================================================

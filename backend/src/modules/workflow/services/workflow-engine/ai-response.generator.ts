@@ -4,17 +4,17 @@
  */
 
 import { db } from '@database/db.connection';
-import { messages } from '@database/schema';
-import { Injectable, Logger, Optional } from '@nestjs/common';
-import { desc, eq } from 'drizzle-orm';
+import { chats, messages } from '@database/schema';
 import { RetrievalService } from '@modules/knowledge-base/services';
-import { LLMService, ClassificationResult } from '../llm.service';
+import { Injectable, Logger } from '@nestjs/common';
+import { desc, eq } from 'drizzle-orm';
+import type { MediaPreCheckResult } from '../../types/workflow-engine.types';
+import { ClassificationResult, LLMService } from '../llm.service';
 import { StageService } from '../stage.service';
 import {
   buildConversationContextForRetrieval,
   getMediaTypeLabel,
 } from './workflow-utils';
-import type { MediaPreCheckResult } from '../../types/workflow-engine.types';
 
 @Injectable()
 export class AiResponseGenerator {
@@ -72,6 +72,12 @@ export class AiResponseGenerator {
       .where(eq(messages.chatId, chatId))
       .orderBy(desc(messages.timestamp))
       .limit(10);
+
+    // Get customer info for personalization
+    const chat = await db.query.chats.findFirst({
+      where: eq(chats.chatId, chatId),
+    });
+    const customerName = chat?.participantName || null;
 
     // Get current stage for context
     const stageAssignment = await this.stageService.getChatStage(chatId);
@@ -147,6 +153,7 @@ END OF KNOWLEDGE BASE DATA
       knowledgeContext,
       hasKnowledgeBase,
       mediaContext,
+      customerName,
     );
 
     // Build context messages
@@ -189,8 +196,24 @@ END OF KNOWLEDGE BASE DATA
     knowledgeContext: string,
     hasKnowledgeBase: boolean,
     mediaContext?: MediaPreCheckResult,
+    customerName?: string | null,
   ): string {
+    // Start with customer info if available
+    let customerInfo = '';
+    if (customerName) {
+      customerInfo = `
+==========================================================================
+CUSTOMER INFORMATION
+==========================================================================
+
+Customer Name: ${customerName}
+
+IMPORTANT: Use the customer's actual name when addressing them. Never use placeholders like "[Customer's Name]".
+`;
+    }
+
     const basePrompt = `You are a friendly and professional sales assistant.
+${customerInfo}
 The customer is in the "${stageName}" stage of the process.
 Message classification: category=${classification.category}, intent=${classification.intent || 'unknown'}, sentiment=${classification.sentiment}.`;
 

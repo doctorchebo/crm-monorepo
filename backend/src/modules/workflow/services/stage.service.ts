@@ -19,7 +19,8 @@ import {
   workflowStages,
 } from '@database/schema';
 import { ChatVisibilityService } from '@modules/chats/services/chat-visibility.service';
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
+import { getDefaultChatStageAssignmentValues } from '@shared/constants/ai-defaults';
 import { and, asc, desc, eq } from 'drizzle-orm';
 import {
   CreateStageRequest,
@@ -27,12 +28,17 @@ import {
   UpdateStageRequest,
   WorkflowStageConfig,
 } from '../types';
+import { AiConfigurationService } from './ai-configuration.service';
 
 @Injectable()
 export class StageService {
   private readonly logger = new Logger(StageService.name);
 
-  constructor(private readonly chatVisibilityService: ChatVisibilityService) {}
+  constructor(
+    private readonly chatVisibilityService: ChatVisibilityService,
+    @Inject(forwardRef(() => AiConfigurationService))
+    private readonly aiConfigService: AiConfigurationService,
+  ) {}
 
   /**
    * Helper to resolve the correct user ID for stage operations.
@@ -529,9 +535,22 @@ export class StageService {
         })
         .where(eq(chatStageAssignments.chatId, chatId));
     } else {
+      // New assignment - fetch user's AI defaults, falling back to system defaults
+      let userDefaults = null;
+      try {
+        userDefaults = await this.aiConfigService.getUserAiDefaults(userId);
+      } catch (error) {
+        this.logger.debug(
+          `Could not fetch user AI defaults for user ${userId}, using system defaults`,
+        );
+      }
+
+      const defaults = getDefaultChatStageAssignmentValues(userDefaults);
       await db.insert(chatStageAssignments).values({
         chatId,
         stageId: toStageId,
+        aiPaused: defaults.aiPaused,
+        awaitingHandoff: defaults.awaitingHandoff,
       });
     }
 

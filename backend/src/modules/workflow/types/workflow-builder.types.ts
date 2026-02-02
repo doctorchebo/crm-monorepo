@@ -503,7 +503,8 @@ export interface ExecutionContext {
 export interface NodeExecutionResult {
   success: boolean;
   nextNodeId?: string;
-  branch?: 'default' | 'true' | 'false' | 'timeout' | 'error';
+  // Branch can be a standard value or a custom category name from AI classification
+  branch?: string;
   output?: unknown;
   error?: {
     code: string;

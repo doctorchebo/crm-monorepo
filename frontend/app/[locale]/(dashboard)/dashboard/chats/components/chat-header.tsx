@@ -16,8 +16,12 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { WorkflowVisualizationModal } from "@/components/workflow";
+import {
+  WorkflowResumeModal,
+  WorkflowVisualizationModal,
+} from "@/components/workflow";
 import { useHandoff } from "@/hooks/use-handoff";
+import { useWorkflowResume } from "@/hooks/use-workflow-resume";
 import { workflowBuilderApi } from "@/lib/api/workflow-builder";
 import type { WorkflowVisualizationData } from "@/lib/types/workflow.types";
 import {
@@ -46,6 +50,8 @@ interface ChatHeaderProps {
   isSidebarExpanded?: boolean;
   /** Callback when sidebar toggle is clicked */
   onSidebarToggle?: () => void;
+  /** Callback to refresh parent's handoff state after workflow resume */
+  onWorkflowResumed?: () => void;
 }
 
 export function ChatHeader({
@@ -57,6 +63,7 @@ export function ChatHeader({
   onConfigSaved: parentOnConfigSaved,
   isSidebarExpanded,
   onSidebarToggle,
+  onWorkflowResumed,
 }: ChatHeaderProps) {
   const t = useTranslations("chats.search");
   const tSidebar = useTranslations("chats.sidebar");
@@ -79,6 +86,47 @@ export function ChatHeader({
   const [visualizationData, setVisualizationData] =
     useState<WorkflowVisualizationData | null>(null);
   const [isVisualizationLoading, setIsVisualizationLoading] = useState(false);
+
+  /**
+   * Complete the AI resume process when NO workflow modal is needed.
+   * This triggers the parent's handler which may auto-generate AI response.
+   *
+   * NOTE: This should NOT be called when resuming via workflow modal,
+   * because resumeWorkflowFromNode already executes the workflow and sends response.
+   */
+  const completeAIResumeWithoutWorkflow = useCallback(async () => {
+    try {
+      // If parent provides a handler, use it (for auto-trigger logic)
+      if (onAIToggle) {
+        await onAIToggle(true);
+      } else {
+        await resumeAI();
+      }
+      refetch();
+    } catch (error) {
+      console.error("Failed to complete AI resume:", error);
+    }
+  }, [onAIToggle, resumeAI, refetch]);
+
+  // Workflow resume hook - handles modal and resume logic
+  const workflowResume = useWorkflowResume({
+    chatId: chat.chatId,
+    onResumeComplete: () => {
+      // IMPORTANT: When resuming via workflow modal, the backend resumeWorkflowFromNode already:
+      // 1. Unpaused the workflow state (workflowChatState.isPaused = false)
+      // 2. Unpaused the chat AI (chatStageAssignments.aiPaused = false)
+      // 3. Executed the workflow from the selected node
+      // 4. Sent any AI responses as part of workflow execution
+      //
+      // We ONLY need to refresh the UI state to reflect the new AI status.
+      // Do NOT call completeAIResumeWithoutWorkflow() here as it would:
+      // - Call /ai/resume endpoint which triggers ANOTHER workflow execution
+      // - Cause duplicate AI responses
+      refetch();
+      // Also refresh parent's handoff state so the UI toggle updates immediately
+      onWorkflowResumed?.();
+    },
+  });
 
   // Fetch current workflow state
   const { data: workflowState } = useSWR(
@@ -107,25 +155,75 @@ export function ChatHeader({
     }
   }, [chat.chatId]);
 
-  const handleToggleAI = async (shouldEnable: boolean) => {
-    // If parent provides a handler, use it (for auto-trigger logic)
-    if (onAIToggle) {
-      await onAIToggle(shouldEnable);
-      refetch();
-      return;
-    }
-    // Otherwise use local logic
-    try {
-      if (shouldEnable) {
-        await resumeAI();
-      } else {
-        await pauseAI();
+  /**
+   * Handle AI toggle with workflow resume modal support.
+   *
+   * When enabling AI:
+   * 1. Check if there's an active workflow that needs user input
+   * 2. If yes, show the workflow resume modal to select where to continue
+   * 3. If no workflow or fresh start, resume AI immediately
+   *
+   * When disabling AI:
+   * - Pause the AI using parent handler if available (to update parent state)
+   */
+  const handleToggleAI = useCallback(
+    async (shouldEnable: boolean) => {
+      console.log(
+        "[ChatHeader] handleToggleAI called, shouldEnable:",
+        shouldEnable,
+      );
+      // Disabling AI - use parent handler if available to ensure state sync
+      if (!shouldEnable) {
+        try {
+          if (onAIToggle) {
+            // Use parent's handler to ensure page state is updated
+            await onAIToggle(false);
+          } else {
+            await pauseAI();
+          }
+          refetch();
+        } catch (error) {
+          console.error("Failed to pause AI:", error);
+        }
+        return;
       }
-      refetch();
-    } catch (error) {
-      console.error("Failed to toggle AI:", error);
-    }
-  };
+
+      // Enabling AI - check if we need workflow selection
+      try {
+        console.log("[ChatHeader] Checking if workflow selection is needed...");
+        const needsWorkflowSelection =
+          await workflowResume.checkNeedsWorkflowSelection();
+        console.log(
+          "[ChatHeader] needsWorkflowSelection:",
+          needsWorkflowSelection,
+        );
+
+        if (needsWorkflowSelection) {
+          // Show the modal - onResumeComplete will just refresh UI state
+          // The workflow execution handles the actual AI response
+          console.log("[ChatHeader] Opening workflow resume modal...");
+          await workflowResume.openModal();
+        } else {
+          // No workflow or no selection needed - use parent handler to trigger AI response
+          console.log(
+            "[ChatHeader] No workflow selection needed, completing resume...",
+          );
+          await completeAIResumeWithoutWorkflow();
+        }
+      } catch (error) {
+        console.error("Failed to check workflow state:", error);
+        // On error, fall back to direct resume
+        await completeAIResumeWithoutWorkflow();
+      }
+    },
+    [
+      onAIToggle,
+      pauseAI,
+      refetch,
+      workflowResume,
+      completeAIResumeWithoutWorkflow,
+    ],
+  );
 
   const handleRequestHandoff = async () => {
     await requestHandoff("Manual handoff requested by user");
@@ -139,6 +237,34 @@ export function ChatHeader({
     // Resolve handoff but keep AI paused (Manual Mode)
     await resolveHandoff(false, "Resolved by user (Manual Mode)");
   };
+
+  /**
+   * Handle resolve handoff with workflow resume modal support.
+   * Similar to handleToggleAI but for the handoff resolution flow.
+   *
+   * Note: When using the workflow modal, the workflow execution resumes AI and
+   * sends the response. Resolving handoff is handled separately since the
+   * backend resumeWorkflowFromNode already unpauses AI.
+   */
+  const handleResolveHandoffWithWorkflow = useCallback(async () => {
+    try {
+      const needsWorkflowSelection =
+        await workflowResume.checkNeedsWorkflowSelection();
+
+      if (needsWorkflowSelection) {
+        // Show the modal - workflow execution will handle AI resume and response
+        // The handoff is effectively resolved since AI is enabled via workflow resume
+        await workflowResume.openModal();
+      } else {
+        // No workflow selection needed - resolve and resume directly
+        await resolveHandoff(true, "Resolved by user (AI Resumed)");
+      }
+    } catch (error) {
+      console.error("Failed to check workflow state:", error);
+      // On error, fall back to direct resolve
+      await resolveHandoff(true, "Resolved by user (AI Resumed)");
+    }
+  }, [resolveHandoff, workflowResume]);
 
   const handleConfigSaved = () => {
     // Refresh the AI status after configuration is saved
@@ -290,9 +416,9 @@ export function ChatHeader({
           }
           acknowledgedAt={handoffStatus.acknowledgedAt}
           isAIPaused={isAIPaused ?? false}
-          onResolve={handleResolveHandoff}
+          onResolve={handleResolveHandoffWithWorkflow}
           onResolveManual={handleResolveManual}
-          onResumeAI={resumeAI}
+          onResumeAI={() => handleToggleAI(true)}
           onPauseAI={pauseAI}
           className="mx-4 mt-2"
         />
@@ -312,6 +438,16 @@ export function ChatHeader({
         onOpenChange={setIsVisualizationOpen}
         data={visualizationData}
         isLoading={isVisualizationLoading}
+      />
+
+      {/* Workflow Resume Modal - shown when AI is resumed and workflow needs step selection */}
+      <WorkflowResumeModal
+        open={workflowResume.isModalOpen}
+        onOpenChange={workflowResume.closeModal}
+        workflowState={workflowResume.workflowState}
+        onResume={workflowResume.executeResume}
+        isLoading={workflowResume.isLoading}
+        error={workflowResume.error}
       />
     </div>
   );

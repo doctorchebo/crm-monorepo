@@ -20,20 +20,33 @@ import {
   chatStageHistory,
   workflowStages,
 } from '@database/schema';
+import { workflowChatState } from '@database/workflow-builder.schema';
 import { Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import {
+  AI_DEFAULTS,
+  getDefaultAiOverrideValues,
+  getDefaultChatStageAssignmentValues,
+} from '@shared/constants/ai-defaults';
 import { eq } from 'drizzle-orm';
 import { HandoffRequest, HandoffStatus, ResolveHandoffRequest } from '../types';
+import { AiConfigurationService } from './ai-configuration.service';
 import { RateLimiterService } from './rate-limiter.service';
 
 @Injectable()
 export class HandoffService {
   private readonly logger = new Logger(HandoffService.name);
 
-  constructor(private readonly rateLimiter: RateLimiterService) {}
+  constructor(
+    private readonly rateLimiter: RateLimiterService,
+    private readonly eventEmitter: EventEmitter2,
+    private readonly aiConfigService: AiConfigurationService,
+  ) {}
 
   /**
    * Get or create chat stage assignment
    * Creates a minimal assignment if none exists
+   * Uses user's configured defaults for AI behavior, falling back to system defaults
    */
   private async getOrCreateAssignment(chatId: string, userId?: number) {
     try {
@@ -48,17 +61,32 @@ export class HandoffService {
       }
 
       // Create a new assignment without a stage (stage-less workflow)
+      // Fetch user's AI defaults if userId is provided, otherwise use system defaults
+      let userDefaults = null;
+      if (userId) {
+        try {
+          userDefaults = await this.aiConfigService.getUserAiDefaults(userId);
+        } catch (error) {
+          this.logger.debug(
+            `Could not fetch user AI defaults for user ${userId}, using system defaults`,
+          );
+        }
+      }
+
+      const defaults = getDefaultChatStageAssignmentValues(userDefaults);
       const [created] = await db
         .insert(chatStageAssignments)
         .values({
           chatId,
           stageId: null as any, // No stage assigned yet
-          aiPaused: false,
-          awaitingHandoff: false,
+          aiPaused: defaults.aiPaused,
+          awaitingHandoff: defaults.awaitingHandoff,
         })
         .returning();
 
-      this.logger.debug(`Created stage assignment for chat ${chatId}`);
+      this.logger.debug(
+        `Created stage assignment for chat ${chatId} with aiPaused=${defaults.aiPaused} (using ${userDefaults ? 'user' : 'system'} defaults)`,
+      );
       return created;
     } catch (error) {
       // Table might not exist yet, return null to trigger fallback
@@ -69,6 +97,7 @@ export class HandoffService {
 
   /**
    * Get AI override for a chat (fallback when stage assignments not available)
+   * Uses user's configured defaults for AI behavior, falling back to system defaults
    */
   private async getOrCreateAiOverride(chatId: string, userId: number) {
     const [existing] = await db
@@ -81,18 +110,30 @@ export class HandoffService {
       return existing;
     }
 
-    // Create a new override with AI disabled by default (safe default - user must explicitly enable)
-    // This matches the modal UI which shows AI as disabled by default
+    // Fetch user's AI defaults
+    let userDefaults = null;
+    try {
+      userDefaults = await this.aiConfigService.getUserAiDefaults(userId);
+    } catch (error) {
+      this.logger.debug(
+        `Could not fetch user AI defaults for user ${userId}, using system defaults`,
+      );
+    }
+
+    // Create a new override using user's configured defaults
+    const defaults = getDefaultAiOverrideValues(userDefaults);
     const [created] = await db
       .insert(chatAiOverrides)
       .values({
         chatId,
         userId,
-        aiEnabled: false,
+        aiEnabled: defaults.aiEnabled,
       })
       .returning();
 
-    this.logger.debug(`Created AI override for chat ${chatId}`);
+    this.logger.debug(
+      `Created AI override for chat ${chatId} with aiEnabled=${defaults.aiEnabled} (using ${userDefaults ? 'user' : 'system'} defaults)`,
+    );
     return created;
   }
 
@@ -358,6 +399,7 @@ export class HandoffService {
 
   /**
    * Pause AI for a chat
+   * Also pauses any active workflow execution so user can reply manually
    */
   async pauseAI(chatId: string, userId: number): Promise<boolean> {
     // Try stage assignments first
@@ -375,6 +417,10 @@ export class HandoffService {
 
       if (result.length > 0) {
         this.logger.log(`AI paused for chat ${chatId} by user ${userId}`);
+
+        // Also pause any active workflow
+        await this.pauseWorkflowForAi(chatId, userId);
+
         return true;
       }
 
@@ -390,6 +436,10 @@ export class HandoffService {
       this.logger.log(
         `AI paused for chat ${chatId} by user ${userId} (new assignment)`,
       );
+
+      // Also pause any active workflow
+      await this.pauseWorkflowForAi(chatId, userId);
+
       return true;
     } catch (error) {
       this.logger.debug(
@@ -420,6 +470,9 @@ export class HandoffService {
       });
     }
 
+    // Also pause any active workflow
+    await this.pauseWorkflowForAi(chatId, userId);
+
     this.logger.log(
       `AI paused (via override) for chat ${chatId} by user ${userId}`,
     );
@@ -427,9 +480,96 @@ export class HandoffService {
   }
 
   /**
-   * Resume AI for a chat
+   * Pause the workflow when AI is disabled
+   * The workflow will be resumed when AI is re-enabled via the node selector modal
    */
-  async resumeAI(chatId: string, userId: number): Promise<boolean> {
+  private async pauseWorkflowForAi(
+    chatId: string,
+    userId: number,
+  ): Promise<void> {
+    try {
+      // Check if there's an active workflow for this chat
+      const chatState = await db.query.workflowChatState.findFirst({
+        where: eq(workflowChatState.chatId, chatId),
+      });
+
+      if (
+        !chatState ||
+        !chatState.activeWorkflowId ||
+        chatState.isPaused // Already paused
+      ) {
+        return;
+      }
+
+      // Pause the workflow
+      await db
+        .update(workflowChatState)
+        .set({
+          isPaused: true,
+          pausedAt: new Date(),
+          pausedBy: userId,
+          pauseReason: 'ai_disabled', // Special marker for AI-triggered pause
+          updatedAt: new Date(),
+        })
+        .where(eq(workflowChatState.chatId, chatId));
+
+      this.logger.log(
+        `[WorkflowPause] Workflow paused for chat ${chatId} due to AI being disabled`,
+      );
+
+      // Emit event for frontend to update UI
+      this.eventEmitter.emit('workflow.paused', {
+        chatId,
+        workflowId: chatState.activeWorkflowId,
+        reason: 'ai_disabled',
+        userId,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to pause workflow for chat ${chatId}: ${error.message}`,
+      );
+    }
+  }
+
+  /**
+   * Resume AI for a chat
+   * If workflow was paused due to AI being disabled, emits event to show node selector
+   */
+  async resumeAI(
+    chatId: string,
+    userId: number,
+  ): Promise<{ success: boolean; workflowResumePending?: boolean }> {
+    let workflowResumePending = false;
+
+    // Check if workflow needs resume prompt
+    try {
+      const chatState = await db.query.workflowChatState.findFirst({
+        where: eq(workflowChatState.chatId, chatId),
+      });
+
+      if (
+        chatState?.isPaused &&
+        chatState?.pauseReason === 'ai_disabled' &&
+        chatState?.activeWorkflowId
+      ) {
+        // Workflow was paused when AI was disabled
+        // Emit event to show node selector modal
+        this.eventEmitter.emit('workflow.resume_required', {
+          chatId,
+          workflowId: chatState.activeWorkflowId,
+          currentNodeId: chatState.currentNodeId,
+          userId,
+        });
+        workflowResumePending = true;
+
+        this.logger.log(
+          `[WorkflowResume] Workflow ${chatState.activeWorkflowId} needs manual resume for chat ${chatId}`,
+        );
+      }
+    } catch (error) {
+      this.logger.error(`Failed to check workflow state: ${error.message}`);
+    }
+
     // Try stage assignments first
     try {
       const result = await db
@@ -445,7 +585,7 @@ export class HandoffService {
 
       if (result.length > 0) {
         this.logger.log(`AI resumed for chat ${chatId} by user ${userId}`);
-        return true;
+        return { success: true, workflowResumePending };
       }
     } catch (error) {
       this.logger.debug(
@@ -479,7 +619,7 @@ export class HandoffService {
     this.logger.log(
       `AI resumed (via override) for chat ${chatId} by user ${userId}`,
     );
-    return true;
+    return { success: true, workflowResumePending };
   }
 
   /**
@@ -508,9 +648,9 @@ export class HandoffService {
       .where(eq(chatAiOverrides.chatId, chatId))
       .limit(1);
 
-    // Default to false if no override exists (safe default - AI must be explicitly enabled)
-    // This matches the modal UI which shows AI as disabled by default
-    const configEnabled = override?.aiEnabled ?? false;
+    // Default to AI_DEFAULTS.AI_ENABLED if no override exists (AI capability is enabled by default)
+    // The actual AI response is controlled by aiPaused in stage assignments
+    const configEnabled = override?.aiEnabled ?? AI_DEFAULTS.AI_ENABLED;
 
     if (override && override.aiEnabled === false) {
       return {
@@ -564,13 +704,14 @@ export class HandoffService {
       };
     }
 
-    // If AI is enabled in config but no assignment exists (or no explicit unpause),
-    // default to paused - user must explicitly enable AI via the toggle switch
+    // If AI is enabled in config but no assignment exists,
+    // default to paused - user must explicitly unpause AI via the toggle switch
+    // This implements the "AI Reply ON, AI Paused TRUE" default behavior
     if (configEnabled && !hasAssignment) {
       return {
         canSend: false,
         configEnabled,
-        reason: 'AI is paused for this chat (default state)',
+        reason: 'AI is paused for this chat (default state - toggle to enable)',
       };
     }
 
@@ -636,24 +777,30 @@ export class HandoffService {
       // Ignore
     }
 
-    // 5. Fallback: Check Override for ENABLED status or Default
+    // 5. Final Decision: AI can send if:
+    //    - Config is enabled (aiEnabled = true, default for new chats)
+    //    - Assignment exists with aiPaused = false (user explicitly unpaused)
+    // Note: We reach here only if all other checks passed
+    const canSend = configEnabled && hasAssignment && isExplicitlyUnpaused;
+
     const finalResult = {
-      canSend: override?.aiEnabled === true,
-      configEnabled, // will be false if override didn't exist or was false
-      reason:
-        override?.aiEnabled === true
-          ? undefined
-          : 'AI not configured for this chat - enable in AI Settings',
+      canSend,
+      configEnabled,
+      reason: canSend
+        ? undefined
+        : !configEnabled
+          ? 'AI is disabled for this chat - enable in AI Settings'
+          : !hasAssignment
+            ? 'AI is paused for this chat (default state - toggle to enable)'
+            : 'AI is paused for this chat',
     };
 
     if (finalResult.canSend) {
       this.logger.debug(
-        `[canAISend] Allowed by Fallback/Override. Assignment found? ${false}`,
+        `[canAISend] Allowed - configEnabled: ${configEnabled}, hasAssignment: ${hasAssignment}, isExplicitlyUnpaused: ${isExplicitlyUnpaused}`,
       );
     } else {
-      this.logger.debug(
-        `[canAISend] Blocked by Fallback/Default. Reason: ${finalResult.reason}`,
-      );
+      this.logger.debug(`[canAISend] Blocked. Reason: ${finalResult.reason}`);
     }
 
     return finalResult;

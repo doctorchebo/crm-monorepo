@@ -529,6 +529,82 @@ interface VisualizationCanvasInnerProps {
   visibleStepCount: number | null; // null means show all steps
 }
 
+/**
+ * Helper function to convert a workflow node to ReactFlow format.
+ * This is the same transformation used in the workflow builder canvas.
+ */
+function nodeToReactFlow(
+  node: WorkflowVisualizationData["nodes"][0],
+  isVisited: boolean,
+  isCurrent: boolean,
+  hasExecutionPath: boolean,
+): Node {
+  // Only dim nodes when there's an execution path AND the node hasn't been visited
+  // When there's no execution path, show all nodes at full opacity
+  const shouldDim = hasExecutionPath && !isVisited && !isCurrent;
+
+  return {
+    id: node.id,
+    type: node.type,
+    position: { x: node.positionX, y: node.positionY },
+    data: {
+      label: node.name,
+      description: node.description,
+      config: node.config,
+      isEntryPoint: node.isEntryPoint,
+      isExitPoint: node.isExitPoint,
+      metadata: node.metadata,
+    },
+    className: cn(
+      // Current node gets a highlight ring
+      isCurrent && "ring-2 ring-primary ring-offset-2 ring-offset-background",
+      // Dim unvisited nodes only when there's an execution path
+      shouldDim && "opacity-40",
+    ),
+    selectable: false,
+    draggable: false,
+  };
+}
+
+/**
+ * Helper function to convert a workflow connection to ReactFlow edge format.
+ * This mirrors the transformation used in the workflow builder canvas.
+ */
+function connectionToReactFlowEdge(
+  conn: WorkflowVisualizationData["connections"][0],
+  isTraversed: boolean,
+  hasExecutionPath: boolean,
+): Edge {
+  const edgeColor = getEdgeColor(
+    conn.type as Parameters<typeof getEdgeColor>[0],
+    conn.sourceHandle,
+  );
+
+  // When there's an execution path, highlight traversed edges and dim others
+  // When there's no execution path, show all edges normally
+  const showHighlighted = hasExecutionPath && isTraversed;
+  const shouldDim = hasExecutionPath && !isTraversed;
+
+  return {
+    id: conn.id,
+    source: conn.sourceNodeId,
+    target: conn.targetNodeId,
+    sourceHandle: conn.sourceHandle || undefined,
+    targetHandle: conn.targetHandle || undefined,
+    label: conn.label || undefined,
+    type: "smoothstep",
+    animated: showHighlighted,
+    style: {
+      stroke: showHighlighted ? edgeColor : "hsl(var(--muted-foreground))",
+      strokeWidth: showHighlighted ? 3 : 2,
+      opacity: shouldDim ? 0.3 : 1,
+    },
+    data: {
+      connectionType: conn.type,
+    },
+  };
+}
+
 function VisualizationCanvasInner({
   data,
   visibleStepCount,
@@ -543,6 +619,9 @@ function VisualizationCanvasInner({
     // Include steps up to and including the selected index
     return data.executionPath.slice(0, visibleStepCount + 1);
   }, [data.executionPath, visibleStepCount]);
+
+  // Determine if we have an execution path to show
+  const hasExecutionPath = visibleExecutionPath.length > 0;
 
   // Build set of visited node IDs for highlighting
   const visitedNodeIds = useMemo(() => {
@@ -579,71 +658,24 @@ function VisualizationCanvasInner({
     return traversed;
   }, [visibleExecutionPath, data.connections]);
 
-  // Convert visualization nodes to ReactFlow format
+  // Convert workflow nodes to ReactFlow format
   const nodes: Node[] = useMemo(() => {
     return data.nodes.map((node) => {
       const isVisited = visitedNodeIds.has(node.id);
       const isCurrent = node.id === currentNodeId;
-
-      return {
-        id: node.id,
-        type: node.type,
-        position: { x: node.positionX, y: node.positionY },
-        data: {
-          label: node.name,
-          description: node.description,
-          config: node.config,
-          isEntryPoint: node.isEntryPoint,
-          isExitPoint: node.isExitPoint,
-          metadata: {
-            ...node.metadata,
-            __isVisited: isVisited,
-            __isCurrent: isCurrent,
-          },
-        },
-        className: cn(
-          isCurrent &&
-            "ring-2 ring-primary ring-offset-2 ring-offset-background",
-          isVisited && !isCurrent && "opacity-100",
-          !isVisited && "opacity-50",
-        ),
-        selectable: false,
-        draggable: false,
-      };
+      return nodeToReactFlow(node, isVisited, isCurrent, hasExecutionPath);
     });
-  }, [data.nodes, visitedNodeIds, currentNodeId]);
+  }, [data.nodes, visitedNodeIds, currentNodeId, hasExecutionPath]);
 
-  // Convert visualization connections to ReactFlow edges
+  // Convert workflow connections to ReactFlow edges
   const edges: Edge[] = useMemo(() => {
     return data.connections.map((conn) => {
       const isTraversed = traversedConnectionIds.has(conn.id);
-      const edgeColor = getEdgeColor(
-        conn.type as Parameters<typeof getEdgeColor>[0],
-        conn.sourceHandle,
-      );
-
-      return {
-        id: conn.id,
-        source: conn.sourceNodeId,
-        target: conn.targetNodeId,
-        sourceHandle: conn.sourceHandle || undefined,
-        targetHandle: conn.targetHandle || undefined,
-        label: conn.label || undefined,
-        type: "smoothstep",
-        animated: isTraversed,
-        style: {
-          stroke: isTraversed ? edgeColor : "hsl(var(--border))",
-          strokeWidth: isTraversed ? 3 : 2,
-          opacity: isTraversed ? 1 : 0.4,
-        },
-        data: {
-          connectionType: conn.type,
-        },
-      };
+      return connectionToReactFlowEdge(conn, isTraversed, hasExecutionPath);
     });
-  }, [data.connections, traversedConnectionIds]);
+  }, [data.connections, traversedConnectionIds, hasExecutionPath]);
 
-  // Fit view on mount
+  // Fit view on mount and when nodes change
   useEffect(() => {
     const timer = setTimeout(() => {
       fitView({ padding: 0.2, duration: 300 });
@@ -654,14 +686,19 @@ function VisualizationCanvasInner({
   // MiniMap node color function
   const getMiniMapNodeColor = useCallback(
     (node: Node): string => {
+      if (!hasExecutionPath) {
+        // No execution path - use neutral color for all nodes
+        return "#64748b"; // slate-500
+      }
+
       const isVisited = visitedNodeIds.has(node.id);
       const isCurrent = node.id === currentNodeId;
 
       if (isCurrent) return "#3b82f6"; // blue-500
       if (isVisited) return "#22c55e"; // green-500
-      return "#94a3b8"; // slate-400
+      return "#94a3b8"; // slate-400 (dimmed)
     },
-    [visitedNodeIds, currentNodeId],
+    [visitedNodeIds, currentNodeId, hasExecutionPath],
   );
 
   return (
@@ -698,7 +735,7 @@ function VisualizationCanvasInner({
           backgroundColor: "hsl(var(--card))",
           border: "1px solid hsl(var(--border))",
         }}
-        maskColor="rgba(0, 0, 0, 0.15)"
+        maskColor="rgba(0, 0, 0, 0.1)"
       />
     </ReactFlow>
   );

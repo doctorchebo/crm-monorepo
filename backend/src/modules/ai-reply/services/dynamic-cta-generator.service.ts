@@ -217,11 +217,26 @@ Think like a helpful assistant that anticipates what the customer might want to 
 3. Be action-oriented and specific (not vague)
 4. Feel natural, not pushy or sales-y
 
-CRITICAL CONSTRAINTS:
+⚠️ CRITICAL CHARACTER LIMIT - READ CAREFULLY:
+- Each button title MUST be EXACTLY ${MAX_BUTTON_TITLE_LENGTH} characters or LESS
+- Count the characters BEFORE you write. "Explore buying options" = 22 chars = TOO LONG
+- Aim for 12-18 characters (2-3 short words)
 - Generate exactly 2-3 suggestions (never more than ${MAX_REPLY_BUTTONS})
-- Each suggestion title MUST be ${MAX_BUTTON_TITLE_LENGTH} characters or less
-- Titles should be concise action phrases (e.g., "See floor plans", "Get pricing", "Ask about amenities")
-- Use natural, conversational language
+
+✅ GOOD titles (≤${MAX_BUTTON_TITLE_LENGTH} chars - COUNT THEM):
+- "See floor plans" (15 chars) ✓
+- "Get pricing" (11 chars) ✓
+- "Book a tour" (11 chars) ✓
+- "Share budget" (12 chars) ✓
+- "View photos" (11 chars) ✓
+- "Ask question" (12 chars) ✓
+- "More options" (12 chars) ✓
+- "Learn more" (10 chars) ✓
+
+❌ BAD titles (>${MAX_BUTTON_TITLE_LENGTH} chars):
+- "Share my budget range" (21 chars) ✗
+- "Explore buying options" (22 chars) ✗
+- "Ask about renting" (17 chars) - borderline, prefer shorter
 
 ${context.businessContext ? `Business context: ${context.businessContext}` : 'This is a customer service conversation.'}
 
@@ -230,7 +245,7 @@ Respond with JSON in this exact format:
   "ctas": [
     {
       "id": "unique_id_1",
-      "title": "Short action text",
+      "title": "Short text here",
       "intent": "one of the valid intents",
       "reasoning": "Why this is relevant"
     }
@@ -268,7 +283,7 @@ Valid intents: request_more_info, request_specific_detail, request_clarification
       prompt += `Topics mentioned: ${context.mentionedTopics.join(', ')}\n\n`;
     }
 
-    prompt += `Based on this context, suggest 2-3 natural follow-up options the customer might want. Remember: titles must be ${MAX_BUTTON_TITLE_LENGTH} characters or less.`;
+    prompt += `Based on this context, suggest 2-3 natural follow-up options the customer might want. IMPORTANT: titles must be ${MAX_BUTTON_TITLE_LENGTH} characters or less (use 2-4 words).`;
 
     return prompt;
   }

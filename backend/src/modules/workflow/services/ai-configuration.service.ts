@@ -21,6 +21,7 @@ import {
   type WorkflowStageAiSetting,
 } from '@database/schema';
 import { Injectable, Logger } from '@nestjs/common';
+import { AI_DEFAULTS } from '@shared/constants/ai-defaults';
 import { eq } from 'drizzle-orm';
 
 // ============================================================================
@@ -41,6 +42,9 @@ export interface ResolvedAiConfig {
     hasStageConfig: boolean;
     hasChatOverride: boolean;
   };
+
+  // Conversation strategy
+  conversationStrategy: 'direct' | 'qualifying' | 'guided';
 
   // Tone and style
   tone: string;
@@ -87,6 +91,12 @@ export interface ResolvedAiConfig {
  * DTO for creating/updating user AI configuration
  */
 export interface AiConfigurationDto {
+  // Default AI behavior for new chats
+  defaultAiRepliesEnabled?: boolean;
+  defaultAiPaused?: boolean;
+  // Conversation strategy - how AI handles initial/vague messages
+  conversationStrategy?: 'direct' | 'qualifying' | 'guided';
+  // Style settings
   defaultTone?: string;
   defaultStyle?: string;
   formalityLevel?: string;
@@ -148,6 +158,7 @@ export interface WorkflowStageAiSettingsDto {
 // ============================================================================
 
 const DEFAULT_CONFIG: Omit<ResolvedAiConfig, 'source'> = {
+  conversationStrategy: 'qualifying',
   tone: 'friendly',
   style: 'concise',
   formalityLevel: 'balanced',
@@ -212,6 +223,20 @@ export class AiConfigurationService {
   }
 
   /**
+   * Get user's default AI settings for new chats
+   * Returns the defaultAiRepliesEnabled and defaultAiPaused settings
+   */
+  async getUserAiDefaults(
+    userId: number,
+  ): Promise<{ defaultAiRepliesEnabled: boolean; defaultAiPaused: boolean }> {
+    const config = await this.getUserConfiguration(userId);
+    return {
+      defaultAiRepliesEnabled: config.defaultAiRepliesEnabled ?? false,
+      defaultAiPaused: config.defaultAiPaused ?? true,
+    };
+  }
+
+  /**
    * Update user's AI configuration
    */
   async updateUserConfiguration(
@@ -224,6 +249,12 @@ export class AiConfigurationService {
     const [updated] = await db
       .update(aiConfigurations)
       .set({
+        // Default AI behavior for new chats
+        defaultAiRepliesEnabled: dto.defaultAiRepliesEnabled,
+        defaultAiPaused: dto.defaultAiPaused,
+        // Conversation strategy
+        conversationStrategy: dto.conversationStrategy,
+        // Style settings
         defaultTone: dto.defaultTone,
         defaultStyle: dto.defaultStyle,
         formalityLevel: dto.formalityLevel,
@@ -325,7 +356,7 @@ export class AiConfigurationService {
         avoidTopics: dto.avoidTopics
           ? JSON.stringify(dto.avoidTopics)
           : undefined,
-        aiEnabled: dto.aiEnabled ?? true,
+        aiEnabled: dto.aiEnabled ?? AI_DEFAULTS.AI_ENABLED,
         useTemplatesOnly: dto.useTemplatesOnly ?? false,
         reviewBeforeSend: dto.reviewBeforeSend ?? false,
         overrideReason: dto.overrideReason,
@@ -580,6 +611,12 @@ export class AiConfigurationService {
     };
 
     return {
+      // Conversation strategy (user-level only for now)
+      conversationStrategy:
+        (userConfig.conversationStrategy as
+          | 'direct'
+          | 'qualifying'
+          | 'guided') || DEFAULT_CONFIG.conversationStrategy,
       // Tone and style
       tone: pick(
         chatOverride?.tone,
@@ -724,6 +761,21 @@ export class AiConfigurationService {
    */
   buildPromptInstructions(config: ResolvedAiConfig): string {
     const instructions: string[] = [];
+
+    // Conversation strategy - how to handle initial/vague messages
+    const conversationStrategyInstructions: Record<string, string> = {
+      direct:
+        'When a user asks about products, services, or listings, provide relevant information from the knowledge base immediately. Be helpful and informative right away.',
+      qualifying:
+        'When a user sends a general or vague message (like "I\'m interested in your services" or "Tell me more"), DO NOT immediately provide product/service information from the knowledge base. Instead, ask clarifying questions first to understand their specific needs, preferences, budget, or what they are looking for. Only provide detailed information after you understand what they actually want.',
+      guided:
+        'Guide users through a discovery process. Ask a series of questions to understand their needs, preferences, and requirements before recommending specific products or services. Build rapport and understand context before sharing detailed information.',
+    };
+    if (conversationStrategyInstructions[config.conversationStrategy]) {
+      instructions.push(
+        `CONVERSATION APPROACH: ${conversationStrategyInstructions[config.conversationStrategy]}`,
+      );
+    }
 
     // Tone instruction
     const toneInstructions: Record<string, string> = {

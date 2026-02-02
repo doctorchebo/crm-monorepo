@@ -120,7 +120,14 @@ export function useAIEvents(
 
     // AI typing start
     const handleTypingStart = (data: { chatId: string; timestamp: string }) => {
+      console.log(
+        "[AI Events] Received ai:typing_start:",
+        data,
+        "currentChatId:",
+        chatId,
+      );
       if (data.chatId === chatId) {
+        console.log("[AI Events] Setting isAITyping = true for chat:", chatId);
         setIsAITyping(true);
         setIsAIProcessing(false); // Clear processing state when typing starts
         setShowRegenerateBanner(false); // Hide regenerate banner when AI starts
@@ -130,7 +137,14 @@ export function useAIEvents(
 
     // AI typing stop
     const handleTypingStop = (data: { chatId: string; timestamp: string }) => {
+      console.log(
+        "[AI Events] Received ai:typing_stop:",
+        data,
+        "currentChatId:",
+        chatId,
+      );
       if (data.chatId === chatId) {
+        console.log("[AI Events] Setting isAITyping = false for chat:", chatId);
         setIsAITyping(false);
         setIsAIProcessing(false); // Clear processing state
         waitingForAIResponse.current = false;
@@ -179,6 +193,12 @@ export function useAIEvents(
     };
 
     // Subscribe to events
+    console.log(
+      "[AI Events] Subscribing to AI events for chat:",
+      chatId,
+      "socket connected:",
+      socket.connected,
+    );
     socket.on("ai:typing_start", handleTypingStart);
     socket.on("ai:typing_stop", handleTypingStop);
     socket.on("ai:rate_limit_exceeded", handleRateLimitExceeded);
@@ -187,6 +207,7 @@ export function useAIEvents(
 
     // Cleanup
     return () => {
+      console.log("[AI Events] Unsubscribing from AI events for chat:", chatId);
       socket.off("ai:typing_start", handleTypingStart);
       socket.off("ai:typing_stop", handleTypingStop);
       socket.off("ai:rate_limit_exceeded", handleRateLimitExceeded);

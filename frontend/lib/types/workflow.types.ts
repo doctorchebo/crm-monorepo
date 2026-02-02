@@ -667,35 +667,6 @@ export interface WorkflowCanvasEdge {
 // ============================================================================
 
 /**
- * Visualization node - simplified node for read-only canvas display
- */
-export interface WorkflowVisualizationNode {
-  id: string;
-  type: string;
-  name: string;
-  description: string | null;
-  positionX: number;
-  positionY: number;
-  config: Record<string, unknown>;
-  isEntryPoint: boolean;
-  isExitPoint: boolean;
-  metadata: Record<string, unknown>;
-}
-
-/**
- * Visualization connection - simplified connection for read-only canvas display
- */
-export interface WorkflowVisualizationConnection {
-  id: string;
-  sourceNodeId: string;
-  targetNodeId: string;
-  sourceHandle: string | null;
-  targetHandle: string | null;
-  type: string;
-  label: string | null;
-}
-
-/**
  * Execution path step - represents a node that was visited during execution
  */
 export interface WorkflowExecutionPathStep {
@@ -721,6 +692,9 @@ export interface WorkflowExecutionMetadata {
 
 /**
  * Workflow visualization data - complete data for rendering a read-only workflow canvas
+ *
+ * Uses the same node/connection types as the workflow builder for consistency.
+ * The visualization adds execution context (path, status, current node).
  */
 export interface WorkflowVisualizationData {
   workflow: {
@@ -730,11 +704,17 @@ export interface WorkflowVisualizationData {
     icon: string | null;
     color: string | null;
   } | null;
-  nodes: WorkflowVisualizationNode[];
-  connections: WorkflowVisualizationConnection[];
+  /** Workflow nodes - same format as WorkflowWithDetails.nodes */
+  nodes: WorkflowNode[];
+  /** Workflow connections - same format as WorkflowWithDetails.connections */
+  connections: WorkflowConnection[];
+  /** Execution path showing which nodes were visited and in what order */
   executionPath: WorkflowExecutionPathStep[];
+  /** ID of the node currently being executed (if any) */
   currentNodeId: string | null;
+  /** Current execution status */
   status: "running" | "waiting" | "completed" | "failed" | "no_workflow";
+  /** Execution metadata for the history panel */
   execution: WorkflowExecutionMetadata | null;
 }
 

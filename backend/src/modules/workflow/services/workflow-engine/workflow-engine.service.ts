@@ -36,16 +36,12 @@ import {
 import { AIReplyInteractiveData } from '@modules/ai-reply/types';
 import { MediaOrchestratorService } from '@modules/knowledge-base/services/media-orchestrator.service';
 import { WhatsAppGateway } from '@modules/whatsapp/whatsapp.gateway';
-import { WhatsAppService } from '@modules/whatsapp/whatsapp.service';
-import {
-  Inject,
-  Injectable,
-  Logger,
-  OnModuleInit,
-  Optional,
-  forwardRef,
-} from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { desc, eq } from 'drizzle-orm';
+
+// Type-only import to avoid circular dependency at module load time
+import type { WhatsAppService } from '@modules/whatsapp/whatsapp.service';
 
 // Types
 import type { EvaluateRulesRequest, WorkflowStageConfig } from '../../types';
@@ -67,6 +63,7 @@ import { PolicySimulationService } from '../policy-simulation.service';
 import { RateLimiterService } from '../rate-limiter.service';
 import { RuleEngineService } from '../rule-engine.service';
 import { StageService } from '../stage.service';
+import { WorkflowAssignmentService } from '../workflow-assignment.service';
 import { WorkflowContextProviderService } from '../workflow-context-provider.service';
 import { WorkflowExecutionEngine } from '../workflow-execution.engine';
 
@@ -96,12 +93,21 @@ export type {
 export class WorkflowEngineService implements OnModuleInit {
   private readonly logger = new Logger(WorkflowEngineService.name);
 
+  // Lazily resolved to break circular dependency
+  private whatsappService: WhatsAppService | undefined;
+
+  // Interface for lazy-resolved WorkflowActionHandlerService
+  private workflowActionHandler:
+    | { hasWorkflowRecentlySentMessage(chatId: string): Promise<boolean> }
+    | undefined;
+
   constructor(
     // Core services
     private readonly stageService: StageService,
     private readonly ruleEngineService: RuleEngineService,
     private readonly handoffService: HandoffService,
     private readonly policySimulationService: PolicySimulationService,
+    private readonly workflowAssignmentService: WorkflowAssignmentService,
 
     // Workflow engine components
     private readonly interactiveHandler: InteractiveResponseHandler,
@@ -110,6 +116,9 @@ export class WorkflowEngineService implements OnModuleInit {
 
     // Visual workflow execution engine
     private readonly workflowExecutionEngine: WorkflowExecutionEngine,
+
+    // Module ref for lazy resolution
+    private readonly moduleRef: ModuleRef,
 
     // Workflow-aware AI (uses assigned workflow context)
     @Optional()
@@ -130,15 +139,12 @@ export class WorkflowEngineService implements OnModuleInit {
     private readonly aiConfigService?: AiConfigurationService,
     @Optional()
     private readonly rateLimiter?: RateLimiterService,
-    @Inject(forwardRef(() => WhatsAppService))
-    @Optional()
-    private readonly whatsappService?: WhatsAppService,
     // Chat Lock Service for AI Safety (ensuring only one actor controls a chat)
     @Optional()
     private readonly chatLockService?: ChatLockService,
   ) {}
 
-  onModuleInit(): void {
+  async onModuleInit(): Promise<void> {
     this.logger.log('Workflow Engine initialized');
     this.logger.log(
       `[Workflow Engine] MediaOrchestratorService: ${this.mediaOrchestratorService ? 'AVAILABLE' : 'NOT INJECTED'}`,
@@ -155,6 +161,41 @@ export class WorkflowEngineService implements OnModuleInit {
     this.logger.log(
       `[Workflow Engine] WorkflowExecutionEngine: ${this.workflowExecutionEngine ? 'AVAILABLE' : 'NOT INJECTED'}`,
     );
+
+    // Lazily resolve WhatsAppService to break circular dependency
+    try {
+      const { WhatsAppService } =
+        await import('@modules/whatsapp/whatsapp.service');
+      this.whatsappService = this.moduleRef.get(WhatsAppService, {
+        strict: false,
+      });
+      this.logger.log(
+        `[Workflow Engine] WhatsAppService: ${this.whatsappService ? 'AVAILABLE' : 'NOT RESOLVED'}`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        'Failed to resolve WhatsAppService lazily - this is expected in some test environments',
+      );
+    }
+
+    // Lazily resolve WorkflowActionHandlerService to break circular dependency
+    try {
+      const { WorkflowActionHandlerService } =
+        await import('../workflow-action-handler.service');
+      this.workflowActionHandler = this.moduleRef.get(
+        WorkflowActionHandlerService,
+        {
+          strict: false,
+        },
+      );
+      this.logger.log(
+        `[Workflow Engine] WorkflowActionHandler: ${this.workflowActionHandler ? 'AVAILABLE' : 'NOT RESOLVED'}`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        'Failed to resolve WorkflowActionHandlerService lazily - this is expected in some test environments',
+      );
+    }
   }
 
   /**
@@ -170,6 +211,7 @@ export class WorkflowEngineService implements OnModuleInit {
       userId,
       isFromCustomer,
       interactiveResponse,
+      skipWorkflowExecution,
     } = input;
 
     try {
@@ -180,7 +222,10 @@ export class WorkflowEngineService implements OnModuleInit {
 
       // Step 0a: Process visual workflow execution (if a workflow is assigned)
       // This triggers the workflow execution engine to execute nodes based on the trigger
-      if (this.workflowExecutionEngine && userId) {
+      // Skip if workflow was already executed (e.g., via resumeWorkflowFromNode)
+      let workflowHandledMessage = false; // True if workflow processed the message (sent message OR completed)
+      let workflowSentMessage = false;
+      if (this.workflowExecutionEngine && userId && !skipWorkflowExecution) {
         try {
           const executionResult =
             await this.workflowExecutionEngine.processMessageForAssignedWorkflow(
@@ -195,6 +240,21 @@ export class WorkflowEngineService implements OnModuleInit {
             this.logger.log(
               `[Workflow Execution] Visual workflow triggered for chat ${chatId}, execution IDs: ${executionResult.executionIds.join(', ')}`,
             );
+
+            // Use the execution result directly - no need to wait or check handler
+            workflowSentMessage = executionResult.messageSent;
+
+            // Workflow "handled" the message if it either:
+            // 1. Sent a static message (workflow responded)
+            // 2. Completed processing (workflow processed and chose not to respond)
+            workflowHandledMessage =
+              executionResult.messageSent || executionResult.workflowCompleted;
+
+            if (workflowHandledMessage) {
+              this.logger.log(
+                `[Workflow Execution] Workflow handled message for chat ${chatId} (sent: ${executionResult.messageSent}, completed: ${executionResult.workflowCompleted}), will skip AI response`,
+              );
+            }
           }
         } catch (execError) {
           // Log but don't fail the overall message processing
@@ -202,6 +262,26 @@ export class WorkflowEngineService implements OnModuleInit {
             `[Workflow Execution] Error processing message for visual workflow: ${execError.message}`,
             execError.stack,
           );
+        }
+      } else if (skipWorkflowExecution) {
+        this.logger.log(
+          `[Workflow Execution] Skipping visual workflow execution for chat ${chatId} (already executed)`,
+        );
+
+        // CRITICAL: Even when skipping workflow execution, check if workflow recently sent a message
+        // This prevents duplicate AI responses when resuming from a workflow node that sends a message
+        if (this.workflowActionHandler) {
+          workflowSentMessage =
+            await this.workflowActionHandler.hasWorkflowRecentlySentMessage(
+              chatId,
+            );
+
+          if (workflowSentMessage) {
+            workflowHandledMessage = true;
+            this.logger.log(
+              `[Workflow Execution] Workflow recently sent a message for chat ${chatId}, will skip AI response`,
+            );
+          }
         }
       }
 
@@ -332,7 +412,20 @@ export class WorkflowEngineService implements OnModuleInit {
       let aiResponse: ProcessMessageResult['aiResponse'];
       let aiLockAcquired = false;
 
-      if (canAI) {
+      // Skip AI response if workflow handled the message (sent a message OR completed processing)
+      // This prevents AI from responding when a workflow has already processed the message,
+      // even if the workflow chose not to send a reply (e.g., just tagged and ended)
+      if (workflowHandledMessage) {
+        this.logger.log(
+          `[AI Response] Skipping AI response - workflow already handled message for chat ${chatId}`,
+        );
+        aiResponse = {
+          content: '',
+          confidence: 0,
+          shouldSend: false,
+          requiresHandoff: false,
+        };
+      } else if (canAI) {
         // CRITICAL: AI Safety - Acquire lock before any AI action
         // AI MUST check for existing locks and cannot override human locks
         if (this.chatLockService) {
@@ -432,6 +525,21 @@ export class WorkflowEngineService implements OnModuleInit {
             ) {
               this.logger.log(
                 `[AI Response] AI is disabled for chat ${chatId} via configuration`,
+              );
+              aiResponse = {
+                content: '',
+                confidence: 0,
+                shouldSend: false,
+                requiresHandoff: false,
+              };
+            } else if (
+              error instanceof Error &&
+              error.message === 'No chat provider available'
+            ) {
+              // No LLM provider configured (missing API key or health check failed)
+              // This is expected if AI features haven't been set up yet
+              this.logger.warn(
+                `[AI Response] No AI provider available for chat ${chatId} - AI responses disabled until provider is configured`,
               );
               aiResponse = {
                 content: '',
@@ -959,6 +1067,9 @@ export class WorkflowEngineService implements OnModuleInit {
 
   /**
    * Initialize workflow for a new chat
+   * This method handles both:
+   * 1. Kanban stage assignment (for the pipeline view)
+   * 2. Visual workflow assignment (from team's default workflow settings)
    */
   async initializeChatWorkflow(
     chatId: string,
@@ -966,9 +1077,10 @@ export class WorkflowEngineService implements OnModuleInit {
     options?: {
       initialStageId?: string;
       metadata?: Record<string, unknown>;
+      skipDefaultWorkflow?: boolean; // Set to true if you want to skip auto-assigning the default workflow
     },
   ): Promise<void> {
-    // Get or create default stages
+    // Get or create default stages for Kanban view
     let stages = await this.stageService.getStages(userId);
 
     if (stages.length === 0) {
@@ -976,7 +1088,7 @@ export class WorkflowEngineService implements OnModuleInit {
       stages = await this.stageService.getStages(userId);
     }
 
-    // Determine initial stage
+    // Determine initial stage for Kanban
     const initialStageId =
       options?.initialStageId ||
       stages.find((s) => s.isDefault)?.id ||
@@ -993,6 +1105,35 @@ export class WorkflowEngineService implements OnModuleInit {
           ...options?.metadata,
         },
       );
+    }
+
+    // Auto-assign the team's default visual workflow (if configured)
+    // This enables AI-powered automation from the first message
+    if (!options?.skipDefaultWorkflow) {
+      this.logger.debug(
+        `[initializeChatWorkflow] Attempting to auto-assign default workflow for chat ${chatId}, user ${userId}`,
+      );
+      try {
+        const assignment =
+          await this.workflowAssignmentService.assignDefaultWorkflowToNewChat(
+            chatId,
+            userId,
+          );
+        if (assignment) {
+          this.logger.log(
+            `Default workflow ${assignment.activeWorkflowId} assigned to chat ${chatId}`,
+          );
+        } else {
+          this.logger.debug(
+            `[initializeChatWorkflow] No default workflow assigned for chat ${chatId} (returned null)`,
+          );
+        }
+      } catch (error) {
+        // Log but don't fail - workflow assignment is not critical for chat creation
+        this.logger.warn(
+          `Failed to assign default workflow to chat ${chatId}: ${(error as Error).message}`,
+        );
+      }
     }
   }
 

@@ -343,6 +343,20 @@ END OF KNOWLEDGE BASE DATA
     // Base role and context
     parts.push(`You are a helpful assistant.`);
 
+    // Add customer info for personalization
+    if (context.customerInfo?.name) {
+      parts.push(`
+==========================================================================
+CUSTOMER INFORMATION
+==========================================================================
+
+Customer Name: ${context.customerInfo.name}
+${context.customerInfo.language ? `Preferred Language: ${context.customerInfo.language}` : ''}
+
+IMPORTANT: Use the customer's actual name when addressing them. Never use placeholders like "[Customer's Name]".
+`);
+    }
+
     // Add workflow context
     if (context.assignment.isAssigned) {
       parts.push(`
@@ -576,6 +590,7 @@ If specific details are needed, let the customer know an agent will follow up.
       workflowVariables: {},
       aiEnabled: true,
       aiDisabledReason: null,
+      customerInfo: null,
     };
   }
 

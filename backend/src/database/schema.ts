@@ -1448,6 +1448,8 @@ export type NewWorkflowRule = typeof workflowRules.$inferInsert;
  * Chat Stage Assignments table - tracks which stage each chat is in
  * One-to-one relationship with chats
  * Note: stageId is nullable to support stage-less workflow (AI pause without stage)
+ * Note: aiPaused defaults to TRUE - AI starts paused, user must explicitly enable.
+ *       This is controlled centrally via AI_DEFAULTS in @shared/constants/ai-defaults.ts
  */
 export const chatStageAssignments = pgTable(
   'chat_stage_assignments',
@@ -1465,7 +1467,8 @@ export const chatStageAssignments = pgTable(
     handoffRequestedAt: timestamp('handoff_requested_at'),
     handoffReason: text('handoff_reason'),
     // AI pause status - prevents AI from sending messages
-    aiPaused: boolean('ai_paused').default(false),
+    // DEFAULT: true - AI is paused by default, user must explicitly unpause
+    aiPaused: boolean('ai_paused').default(true),
     aiPausedAt: timestamp('ai_paused_at'),
     aiPausedBy: integer('ai_paused_by').references(() => users.id),
     aiPauseReason: text('ai_pause_reason'), // Reason for AI pause
@@ -2119,6 +2122,38 @@ export const aiConfigurations = pgTable(
       .notNull()
       .unique()
       .references(() => users.id, { onDelete: 'cascade' }),
+    // =========================================================================
+    // Default AI Behavior for New Chats
+    // These settings control the initial state of AI for newly created chats
+    // =========================================================================
+    /**
+     * Whether AI replies are enabled by default for new chats.
+     * When false, AI is completely disabled for new chats (master switch OFF).
+     * When true, AI capability is enabled, and defaultAiPaused controls initial state.
+     * Default: false (conservative - AI off until explicitly enabled in settings)
+     */
+    defaultAiRepliesEnabled: boolean('default_ai_replies_enabled').default(
+      false,
+    ),
+    /**
+     * Whether AI is paused by default for new chats when AI replies are enabled.
+     * When true, AI starts paused (user must manually unpause in chat).
+     * When false, AI will automatically respond to incoming messages.
+     * Only effective when defaultAiRepliesEnabled is true.
+     * Default: true (even when enabled, AI starts paused for extra safety)
+     */
+    defaultAiPaused: boolean('default_ai_paused').default(true),
+    /**
+     * Conversation strategy - determines how AI responds to initial/vague messages.
+     * - 'direct': Provide information immediately when relevant knowledge base content exists
+     * - 'qualifying': Ask clarifying questions first to understand user's specific needs
+     * - 'guided': Guide users through a discovery process before providing detailed info
+     * Default: 'qualifying' (more conversational, asks questions to understand needs)
+     */
+    conversationStrategy: varchar('conversation_strategy', {
+      length: 30,
+    }).default('qualifying'), // 'direct', 'qualifying', 'guided'
+    // =========================================================================
     // Tone and style
     defaultTone: varchar('default_tone', { length: 50 }).default('friendly'), // 'friendly', 'professional', 'casual', 'formal'
     defaultStyle: varchar('default_style', { length: 50 }).default('concise'), // 'concise', 'detailed', 'conversational', 'technical'

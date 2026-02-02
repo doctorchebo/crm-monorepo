@@ -7,10 +7,11 @@ import {
   Message,
   messages,
   senders,
+  teamMembers,
 } from '@database/schema';
 import { MessageMemoryIntegration } from '@modules/ai-memory/services/message-memory-integration.service';
-import { WorkflowEngineService } from '@modules/workflow/services';
 import { RateLimiterService } from '@modules/workflow/services/rate-limiter.service';
+import { WorkflowEngineService } from '@modules/workflow/services/workflow-engine/workflow-engine.service';
 import {
   BadRequestException,
   ForbiddenException,
@@ -1166,6 +1167,30 @@ export class WhatsAppService implements OnModuleInit {
         isAiGenerated: options?.isAiGenerated ?? false,
       });
 
+      // Emit WebSocket event for real-time UI update
+      // CRITICAL: Without this, messages won't appear in UI until page refresh
+      if (whatsAppGatewayInstance) {
+        whatsAppGatewayInstance.emitMessage({
+          messageId: waMessageId,
+          chatId,
+          sender: senderRecord.phoneNumber,
+          text: bodyText,
+          type: 'interactive',
+          timestamp: new Date(),
+          direction: 'outbound',
+          status: 'sent',
+          metadata: {
+            interactiveType: 'button',
+            interactiveData: {
+              buttons,
+              footerText,
+              headerText,
+            },
+          },
+          isAiGenerated: options?.isAiGenerated ?? false,
+        });
+      }
+
       return {
         success: true,
         messageId,
@@ -1349,6 +1374,30 @@ export class WhatsAppService implements OnModuleInit {
         interactiveType: 'list',
         interactiveData: { buttonText, sections, footerText, headerText },
       });
+
+      // Emit WebSocket event for real-time UI update
+      // CRITICAL: Without this, messages won't appear in UI until page refresh
+      if (whatsAppGatewayInstance) {
+        whatsAppGatewayInstance.emitMessage({
+          messageId: waMessageId,
+          chatId,
+          sender: senderRecord.phoneNumber,
+          text: bodyText,
+          type: 'interactive',
+          timestamp: new Date(),
+          direction: 'outbound',
+          status: 'sent',
+          metadata: {
+            interactiveType: 'list',
+            interactiveData: {
+              buttonText,
+              sections,
+              footerText,
+              headerText,
+            },
+          },
+        });
+      }
 
       return {
         success: true,
@@ -2794,12 +2843,23 @@ export class WhatsAppService implements OnModuleInit {
    * Manually trigger AI response for a chat (used when Resuming AI)
    * Reprocesses the last customer message and dispatches a response if AI generates one.
    */
+  /**
+   * Trigger AI response generation for a chat when resuming from handoff/pause.
+   *
+   * @param chatId - The chat ID to generate response for
+   * @param userId - The user ID (owner of the chat)
+   * @param skipWorkflowExecution - If true, skip visual workflow execution step.
+   *   Use this when workflow has already been executed (e.g., via resumeWorkflowFromNode).
+   */
   async triggerAiResponseForResume(
     chatId: string,
     userId: number,
+    skipWorkflowExecution = false,
   ): Promise<void> {
     try {
-      this.logger.log(`[Resume AI] Triggering AI response for chat ${chatId}`);
+      this.logger.log(
+        `[Resume AI] Triggering AI response for chat ${chatId} (skipWorkflow: ${skipWorkflowExecution})`,
+      );
 
       // 1. Get Chat details
       const chat = await db.query.chats.findFirst({
@@ -2848,6 +2908,7 @@ export class WhatsAppService implements OnModuleInit {
         senderId: chat.senderId,
         userId,
         isFromCustomer: true,
+        skipWorkflowExecution, // Skip if workflow already executed via resume modal
       });
 
       // 5. Dispatch Response
@@ -4198,6 +4259,25 @@ export class WhatsAppService implements OnModuleInit {
         const participantName =
           await this.getContactNameForReply(participantPhone);
 
+        // Get the user's team ID for proper access control
+        let teamId: number | undefined;
+        if (sender?.userId) {
+          const membership = await db.query.teamMembers.findFirst({
+            where: and(
+              eq(teamMembers.userId, sender.userId),
+              eq(teamMembers.isActive, true),
+            ),
+          });
+          teamId = membership?.teamId;
+          this.logger.debug(
+            `[getOrCreateChat] Team lookup for userId ${sender.userId}: membership=${JSON.stringify(membership)}, teamId=${teamId}`,
+          );
+        } else {
+          this.logger.warn(
+            `[getOrCreateChat] No userId found for sender ${senderId}`,
+          );
+        }
+
         const [newChat] = await db
           .insert(chats)
           .values({
@@ -4207,12 +4287,13 @@ export class WhatsAppService implements OnModuleInit {
             participantName,
             senderId,
             userId: sender?.userId,
+            teamId, // Associate chat with user's team for access control
             isActive: true,
           })
           .returning();
 
         this.logger.log(
-          `Chat created: ${chatId} for sender ${senderId} with participant name: ${participantName}`,
+          `Chat created: ${chatId} for sender ${senderId} with participant name: ${participantName}, teamId: ${teamId}`,
         );
 
         // Initialize workflow for the new chat - assigns to first/default stage

@@ -10,6 +10,8 @@ export * from './rule-engine.service';
 export * from './stage.service';
 
 // Visual Workflow Builder
+// Note: workflow-action-handler.service is NOT re-exported here to avoid circular dependencies
+// Import it directly when needed: import { WorkflowActionHandlerService } from './workflow-action-handler.service'
 export * from './workflow-assignment.service';
 export * from './workflow-builder.service';
 export * from './workflow-engine';
@@ -35,3 +37,6 @@ export * from './usage-tracking.service';
 
 // AI configuration
 export * from './ai-configuration.service';
+
+// Chat lifecycle cleanup
+export * from './chat-workflow-cleanup.service';

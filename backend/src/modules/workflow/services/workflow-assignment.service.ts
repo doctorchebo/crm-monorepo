@@ -1,4 +1,5 @@
 import { db } from '@database/db.connection';
+import { teamMembers } from '@database/schema';
 import {
   teamWorkflowSettings,
   WorkflowChatState,
@@ -119,28 +120,87 @@ export class WorkflowAssignmentService {
    * Get current workflow assignment
    */
   async getAssignment(chatId: string): Promise<WorkflowChatState | null> {
-    return db.query.workflowChatState.findFirst({
+    const result = await db.query.workflowChatState.findFirst({
       where: eq(workflowChatState.chatId, chatId),
       with: {
         activeWorkflow: true,
       } as any, // Explicit cast to avoid type issues with relations not fully propagated
     });
+    return result ?? null;
+  }
+
+  /**
+   * Get user's primary team ID
+   * Returns the first active team the user belongs to
+   */
+  private async getUserTeamId(userId: number): Promise<number | null> {
+    const membership = await db.query.teamMembers.findFirst({
+      where: and(
+        eq(teamMembers.userId, userId),
+        eq(teamMembers.isActive, true),
+      ),
+    });
+    return membership?.teamId ?? null;
+  }
+
+  /**
+   * Auto-assign default workflow to a new chat using user ID
+   * Looks up the user's team and assigns the team's default workflow
+   */
+  async assignDefaultWorkflowToNewChat(
+    chatId: string,
+    userId: number,
+  ): Promise<WorkflowChatState | null> {
+    try {
+      this.logger.debug(
+        `[assignDefaultWorkflowToNewChat] Looking up team for user ${userId}`,
+      );
+      const teamId = await this.getUserTeamId(userId);
+      this.logger.debug(
+        `[assignDefaultWorkflowToNewChat] User ${userId} teamId: ${teamId}`,
+      );
+      if (!teamId) {
+        this.logger.debug(
+          `User ${userId} has no active team, skipping default workflow assignment`,
+        );
+        return null;
+      }
+      return this.assignDefaultToNewChatByTeamId(chatId, teamId);
+    } catch (error) {
+      this.logger.error(
+        `Error assigning default workflow to chat ${chatId} for user ${userId}: ${error.message}`,
+        error.stack,
+      );
+      return null;
+    }
   }
 
   /**
    * Auto-assign default workflow to a new chat based on team settings
+   * Use assignDefaultWorkflowToNewChat(chatId, userId) if you only have a userId
    */
-  async assignDefaultToNewChat(
+  async assignDefaultToNewChatByTeamId(
     chatId: string,
     teamId: number,
   ): Promise<WorkflowChatState | null> {
     try {
+      this.logger.debug(
+        `[assignDefaultToNewChatByTeamId] Looking up team settings for team ${teamId}, chat ${chatId}`,
+      );
+
       // Get team settings
       const settings = await db.query.teamWorkflowSettings.findFirst({
         where: eq(teamWorkflowSettings.teamId, teamId),
       });
 
+      this.logger.debug(
+        `[assignDefaultToNewChatByTeamId] Team settings: ${JSON.stringify(settings)}`,
+      );
+
       if (!settings?.defaultWorkflowId) {
+        this.logger.debug(
+          `[assignDefaultToNewChatByTeamId] No default workflow configured for team ${teamId}`,
+        );
         return null;
       }
 

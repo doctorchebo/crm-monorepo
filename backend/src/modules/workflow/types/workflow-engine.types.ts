@@ -3,8 +3,8 @@
  * Type definitions for the workflow engine module
  */
 
-import type { WorkflowStageConfig } from './workflow.types';
 import type { AIReplyInteractiveData } from '@modules/ai-reply/types';
+import type { WorkflowStageConfig } from './workflow.types';
 
 // Re-export WorkflowStageConfig for convenience
 export type { WorkflowStageConfig };
@@ -50,6 +50,12 @@ export interface ProcessMessageInput {
     rowTitle?: string;
     rowDescription?: string;
   };
+  /**
+   * Skip the visual workflow execution step (Step 0a in processMessage).
+   * Used when workflow has already been executed (e.g., via resumeWorkflowFromNode)
+   * and we only want to trigger AI response generation.
+   */
+  skipWorkflowExecution?: boolean;
 }
 
 // ============================================================================

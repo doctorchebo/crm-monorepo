@@ -312,6 +312,55 @@ export class HandoffNotificationGateway
     );
   }
 
+  /**
+   * Handle workflow paused events (when AI is disabled)
+   */
+  @OnEvent('workflow.paused')
+  handleWorkflowPaused(payload: {
+    chatId: string;
+    workflowId: string;
+    reason: string;
+    userId: number;
+  }): void {
+    const room = `user:${payload.userId}`;
+
+    this.server.to(room).emit('notification:workflow-paused', {
+      chatId: payload.chatId,
+      workflowId: payload.workflowId,
+      reason: payload.reason,
+      timestamp: new Date(),
+    });
+
+    this.logger.log(
+      `Workflow ${payload.workflowId} paused for chat ${payload.chatId}: ${payload.reason}`,
+    );
+  }
+
+  /**
+   * Handle workflow resume required events
+   * Emitted when AI is re-enabled and user needs to select where to continue workflow
+   */
+  @OnEvent('workflow.resume_required')
+  handleWorkflowResumeRequired(payload: {
+    chatId: string;
+    workflowId: string;
+    currentNodeId: string | null;
+    userId: number;
+  }): void {
+    const room = `user:${payload.userId}`;
+
+    this.server.to(room).emit('notification:workflow-resume-required', {
+      chatId: payload.chatId,
+      workflowId: payload.workflowId,
+      currentNodeId: payload.currentNodeId,
+      timestamp: new Date(),
+    });
+
+    this.logger.log(
+      `Workflow ${payload.workflowId} resume required for chat ${payload.chatId}`,
+    );
+  }
+
   // ==========================================================================
   // Utility Methods
   // ==========================================================================

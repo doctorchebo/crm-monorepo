@@ -77,6 +77,18 @@ export interface WorkflowTriggerContext {
 }
 
 /**
+ * Customer information for AI context
+ */
+export interface CustomerInfo {
+  /** Customer's name (from contact or chat participantName) */
+  name: string | null;
+  /** Customer's phone number */
+  phone: string;
+  /** Customer's language preference (if known) */
+  language: string | null;
+}
+
+/**
  * Complete workflow context for AI response generation
  */
 export interface WorkflowAIContext {
@@ -94,6 +106,8 @@ export interface WorkflowAIContext {
   aiEnabled: boolean;
   /** Reason if AI is disabled */
   aiDisabledReason: string | null;
+  /** Customer information for personalization */
+  customerInfo: CustomerInfo | null;
 }
 
 // ============================================================================

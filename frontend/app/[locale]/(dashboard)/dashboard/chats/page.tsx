@@ -262,21 +262,16 @@ export default function ChatsPage() {
   }, [rateLimitInfo, refetchHandoff]);
 
   // Handler for when AI is toggled ON - auto-trigger response if last message is inbound
+  // Note: The backend /ai/resume endpoint already triggers AI response via
+  // triggerAiResponseForResume(), so we don't need to call regenerate() here.
   const handleAIToggle = useCallback(
     async (shouldEnable: boolean) => {
       if (shouldEnable) {
         await resumeAI();
         // Hide regenerate banner when AI is resumed
         hideRegenerateBanner();
-        // Check if last message is inbound and trigger AI response
-        const lastMessage = chatState.messages[chatState.messages.length - 1];
-        if (lastMessage?.direction === "inbound" && chatState.selectedChatId) {
-          try {
-            await backendApi.aiReview.regenerate(chatState.selectedChatId);
-          } catch (error) {
-            console.error("Failed to trigger AI response:", error);
-          }
-        }
+        // Note: Backend resumeAI endpoint already triggers AI response for pending messages
+        // No need to call regenerate() here - it would cause duplicate responses
       } else {
         await pauseAI();
         // Show regenerate banner if last message is inbound (user paused while waiting for response)
@@ -290,7 +285,6 @@ export default function ChatsPage() {
       resumeAI,
       pauseAI,
       chatState.messages,
-      chatState.selectedChatId,
       enableRegenerateBanner,
       hideRegenerateBanner,
     ],
@@ -987,6 +981,12 @@ export default function ChatsPage() {
                 }}
                 isSidebarExpanded={isSidebarExpanded}
                 onSidebarToggle={toggleSidebar}
+                onWorkflowResumed={() => {
+                  // Refresh parent's handoff state when workflow modal resumes AI
+                  // This ensures the AI toggle UI updates immediately
+                  refetchHandoff();
+                  hideRegenerateBanner();
+                }}
               />
 
               {/* Messages + Notes/Search Container */}

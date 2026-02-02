@@ -562,14 +562,40 @@ export function validateListMessage(
 }
 
 /**
- * Truncates a string to the specified maximum length
- * If truncation is needed, adds an ellipsis (…) and truncates to maxLength - 1
+ * Truncates a string to the specified maximum length, respecting word boundaries.
+ * This ensures button text doesn't cut words mid-way, providing a better user experience.
+ *
+ * Strategy:
+ * 1. If text fits within limit, return as-is
+ * 2. Find the last complete word that fits within the limit
+ * 3. If no word boundary found, fall back to character truncation with ellipsis
+ *
+ * @param text - The text to truncate
+ * @param maxLength - Maximum allowed length
+ * @returns Truncated text that respects word boundaries when possible
  */
 export function truncateToLimit(text: string, maxLength: number): string {
   if (!text || text.length <= maxLength) {
     return text;
   }
-  return text.substring(0, maxLength - 1) + '…';
+
+  // Try to find a word boundary to truncate at
+  // Look for the last space within the limit (leaving room for potential ellipsis)
+  const truncateAt = maxLength - 1; // Reserve space for ellipsis character
+  const lastSpaceIndex = text.lastIndexOf(' ', truncateAt);
+
+  // If we found a reasonable word boundary (at least 3 chars before it),
+  // use it. Otherwise, just truncate with ellipsis.
+  if (lastSpaceIndex > 3) {
+    // Check if we can fit the word without ellipsis
+    const wordBoundaryText = text.substring(0, lastSpaceIndex).trim();
+    if (wordBoundaryText.length <= maxLength) {
+      return wordBoundaryText;
+    }
+  }
+
+  // Fallback: truncate at character boundary with ellipsis
+  return text.substring(0, truncateAt) + '…';
 }
 
 /**

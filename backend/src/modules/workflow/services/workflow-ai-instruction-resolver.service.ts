@@ -14,6 +14,7 @@
  */
 
 import { db } from '@database/db.connection';
+import { chats } from '@database/schema';
 import {
   workflowChatState,
   workflowNodes,
@@ -30,6 +31,7 @@ import {
 import { StageService } from './stage.service';
 
 import type {
+  CustomerInfo,
   InstructionPriority,
   InstructionSource,
   ResolvedWorkflowAIInstructions,
@@ -206,6 +208,9 @@ export class WorkflowAIInstructionResolver {
       currentStage,
     );
 
+    // Get customer info for personalization
+    const customerInfo = await this.getCustomerInfo(chatId);
+
     return {
       assignment,
       nodeInstructions,
@@ -214,7 +219,34 @@ export class WorkflowAIInstructionResolver {
       workflowVariables: {},
       aiEnabled,
       aiDisabledReason,
+      customerInfo,
     };
+  }
+
+  /**
+   * Get customer information from the chat for personalization
+   */
+  private async getCustomerInfo(chatId: string): Promise<CustomerInfo | null> {
+    try {
+      const chat = await db.query.chats.findFirst({
+        where: eq(chats.chatId, chatId),
+      });
+
+      if (!chat) {
+        return null;
+      }
+
+      return {
+        name: chat.participantName,
+        phone: chat.participantPhone,
+        language: null, // Can be extended to fetch from contact preferences
+      };
+    } catch (error) {
+      this.logger.warn(
+        `Failed to get customer info for chat ${chatId}: ${(error as Error).message}`,
+      );
+      return null;
+    }
   }
 
   /**

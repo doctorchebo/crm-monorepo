@@ -429,20 +429,30 @@ export class WorkflowController {
   @HttpCode(HttpStatus.OK)
   async resumeAI(@Req() req: any, @Param('chatId') chatId: string) {
     const userId = req.user.userId;
-    await this.handoffService.resumeAI(chatId, userId);
+    const result = await this.handoffService.resumeAI(chatId, userId);
 
-    // Trigger AI response for any pending customer message
-    // Run in background to avoid blocking the response
-    this.whatsAppService
-      .triggerAiResponseForResume(chatId, userId)
-      .catch((err) => {
-        console.error(
-          `Error triggering AI response on resume for chat ${chatId}:`,
-          err,
-        );
-      });
+    // Only trigger AI response if there's NO pending workflow resume.
+    // If workflowResumePending is true, the user will see a modal to select
+    // which workflow node to resume from, and the AI response will be triggered
+    // via the /workflow-builder/chat/:chatId/resume-workflow endpoint instead.
+    if (!result.workflowResumePending) {
+      // Trigger AI response for any pending customer message
+      // Run in background to avoid blocking the response
+      this.whatsAppService
+        .triggerAiResponseForResume(chatId, userId)
+        .catch((err) => {
+          console.error(
+            `Error triggering AI response on resume for chat ${chatId}:`,
+            err,
+          );
+        });
+    }
 
-    return { success: true, message: 'AI resumed' };
+    return {
+      success: true,
+      message: 'AI resumed',
+      workflowResumePending: result.workflowResumePending,
+    };
   }
 
   @Get('ai/status/:chatId')

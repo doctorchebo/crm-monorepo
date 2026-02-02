@@ -4,6 +4,13 @@ export { VersionHistoryDrawer } from "./version-history-drawer";
 export { WorkflowCanvas } from "./workflow-canvas";
 export { WorkflowHeader } from "./workflow-header";
 export { WorkflowIcon, type WorkflowIconSize } from "./workflow-icon";
+export {
+  WorkflowResumeModal,
+  type ResumeAction,
+  type WorkflowResumeConnection,
+  type WorkflowResumeNode,
+  type WorkflowResumeState,
+} from "./workflow-resume-modal";
 export { WorkflowSidebar } from "./workflow-sidebar";
 export { WorkflowVisualizationModal } from "./workflow-visualization-modal";
 

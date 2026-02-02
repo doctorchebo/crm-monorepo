@@ -746,6 +746,14 @@ export class UpdateAiConfigurationDto {
   @IsObject()
   @IsOptional()
   metadata?: Record<string, unknown>;
+
+  @IsBoolean()
+  @IsOptional()
+  defaultAiRepliesEnabled?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  defaultAiPaused?: boolean;
 }
 
 /**

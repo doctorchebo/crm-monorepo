@@ -2152,8 +2152,48 @@ export class WorkflowBuilderService {
 
   /**
    * Get workflow state for a chat
+   * Returns structured data for both the workflow header display and the resume modal
+   *
+   * Returns fields in both formats for backward compatibility:
+   * - activeWorkflowId / workflowId (same value)
+   * - activeWorkflow.name / workflowName (same value)
    */
-  async getChatWorkflowState(userId: number, chatId: string): Promise<any> {
+  async getChatWorkflowState(
+    userId: number,
+    chatId: string,
+  ): Promise<{
+    // Standard fields for header display (existing format)
+    chatId: string;
+    activeWorkflowId: string | null;
+    activeWorkflow: { id: string; name: string } | null;
+    currentNodeId: string | null;
+    currentNode: { id: string; label: string | null } | null;
+    isPaused: boolean;
+    pausedAt: Date | null;
+    pausedBy: number | null;
+    pauseReason: string | null;
+    currentAiInstructions: string | null;
+    currentAiTone: string | null;
+    currentAiGoal: string | null;
+    allowedKbTemplates: string[] | null;
+    // Additional fields for resume modal (new format)
+    workflowId: string | null;
+    workflowName: string | null;
+    currentNodeLabel: string | null;
+    nodes: Array<{
+      id: string;
+      nodeType: string;
+      label: string | null;
+      positionX: number;
+      positionY: number;
+    }>;
+    connections: Array<{
+      id: string;
+      fromNodeId: string;
+      toNodeId: string;
+      label: string | null;
+    }>;
+  } | null> {
     const teamId = await this.getUserTeamId(userId);
     await this.verifyTeamAccess(userId, teamId);
 
@@ -2165,7 +2205,86 @@ export class WorkflowBuilderService {
       },
     });
 
-    return state ?? null;
+    // No state found - no workflow assigned
+    if (!state) {
+      return null;
+    }
+
+    // No workflow assigned - return empty state with all required fields
+    if (!state.activeWorkflowId) {
+      return {
+        // Standard fields for header display
+        chatId,
+        activeWorkflowId: null,
+        activeWorkflow: null,
+        currentNodeId: null,
+        currentNode: null,
+        isPaused: false,
+        pausedAt: null,
+        pausedBy: null,
+        pauseReason: null,
+        currentAiInstructions: null,
+        currentAiTone: null,
+        currentAiGoal: null,
+        allowedKbTemplates: null,
+        // Resume modal fields
+        workflowId: null,
+        workflowName: null,
+        currentNodeLabel: null,
+        nodes: [],
+        connections: [],
+      };
+    }
+
+    // Get workflow nodes and connections
+    const [nodes, connections] = await Promise.all([
+      db.query.workflowNodes.findMany({
+        where: eq(workflowNodes.workflowId, state.activeWorkflowId),
+        orderBy: [asc(workflowNodes.createdAt)],
+      }),
+      db.query.workflowConnections.findMany({
+        where: eq(workflowConnections.workflowId, state.activeWorkflowId),
+        orderBy: [asc(workflowConnections.createdAt)],
+      }),
+    ]);
+
+    return {
+      // Standard fields for header display (existing format)
+      chatId,
+      activeWorkflowId: state.activeWorkflowId,
+      activeWorkflow: state.activeWorkflow
+        ? { id: state.activeWorkflow.id, name: state.activeWorkflow.name }
+        : null,
+      currentNodeId: state.currentNodeId ?? null,
+      currentNode: state.currentNode
+        ? { id: state.currentNode.id, label: state.currentNode.label }
+        : null,
+      isPaused: state.isPaused ?? false,
+      pausedAt: state.pausedAt ?? null,
+      pausedBy: state.pausedBy ?? null,
+      pauseReason: state.pauseReason ?? null,
+      currentAiInstructions: state.currentAiInstructions ?? null,
+      currentAiTone: state.currentAiTone ?? null,
+      currentAiGoal: state.currentAiGoal ?? null,
+      allowedKbTemplates: (state.allowedKbTemplates as string[]) ?? null,
+      // Resume modal fields (additional format)
+      workflowId: state.activeWorkflowId,
+      workflowName: state.activeWorkflow?.name ?? null,
+      currentNodeLabel: state.currentNode?.label ?? null,
+      nodes: nodes.map((n) => ({
+        id: n.id,
+        nodeType: n.nodeType,
+        label: n.label,
+        positionX: n.positionX,
+        positionY: n.positionY,
+      })),
+      connections: connections.map((c) => ({
+        id: c.id,
+        fromNodeId: c.fromNodeId,
+        toNodeId: c.toNodeId,
+        label: c.label,
+      })),
+    };
   }
 
   /**
@@ -2251,12 +2370,17 @@ export class WorkflowBuilderService {
     executionPath: Array<{
       nodeId: string;
       action: string;
-      executedAt: Date;
+      executedAt: string;
       durationMs: number | null;
       conditionResult: boolean | null;
     }>;
     currentNodeId: string | null;
     status: 'running' | 'waiting' | 'completed' | 'failed' | 'no_workflow';
+    execution: {
+      id: string;
+      startedAt: string | null;
+      completedAt: string | null;
+    } | null;
   } | null> {
     const teamId = await this.getUserTeamId(userId);
     await this.verifyTeamAccess(userId, teamId);
@@ -2275,6 +2399,7 @@ export class WorkflowBuilderService {
         executionPath: [],
         currentNodeId: null,
         status: 'no_workflow',
+        execution: null,
       };
     }
 
@@ -2291,6 +2416,7 @@ export class WorkflowBuilderService {
         executionPath: [],
         currentNodeId: null,
         status: 'no_workflow',
+        execution: null,
       };
     }
 

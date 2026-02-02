@@ -433,6 +433,94 @@ export class LLMService {
   }
 
   /**
+   * Classify a message into one of the provided categories using AI.
+   * Used for workflow condition nodes with categories-based classification.
+   */
+  async classifyWithCategories(
+    messageText: string,
+    categories: string[],
+    systemPrompt?: string,
+    options?: {
+      userId?: number;
+      chatId?: string;
+    },
+  ): Promise<ClassificationResult> {
+    const defaultSystemPrompt = `You are a message classifier. Analyze the message and classify it into ONE of these categories: ${categories.join(', ')}.
+
+Respond with ONLY the category name. Nothing else.`;
+
+    const messages: ChatMessage[] = [
+      { role: 'system', content: systemPrompt || defaultSystemPrompt },
+      { role: 'user', content: messageText },
+    ];
+
+    try {
+      const response = await this.chat({
+        userId: options?.userId,
+        chatId: options?.chatId,
+        operationType: 'classification',
+        messages,
+        temperature: 0.1, // Low temperature for consistent classification
+        maxTokens: 50, // Only need category name
+        metadata: {
+          messageLength: messageText.length,
+          categories,
+        },
+      });
+
+      // Extract the category from the response
+      const rawCategory = response.content.trim().toLowerCase();
+
+      // Find the best matching category
+      const normalizedCategories = categories.map((c) => c.toLowerCase());
+      let matchedCategory = rawCategory;
+
+      // Direct match
+      if (normalizedCategories.includes(rawCategory)) {
+        matchedCategory = categories[normalizedCategories.indexOf(rawCategory)];
+      } else {
+        // Fuzzy match - check if response contains any category
+        for (let i = 0; i < normalizedCategories.length; i++) {
+          if (
+            rawCategory.includes(normalizedCategories[i]) ||
+            normalizedCategories[i].includes(rawCategory)
+          ) {
+            matchedCategory = categories[i];
+            break;
+          }
+        }
+      }
+
+      this.logger.debug(
+        `[LLM Classification] Raw: "${rawCategory}" → Matched: "${matchedCategory}"`,
+      );
+
+      return {
+        category: matchedCategory.toLowerCase(),
+        sentiment: 'neutral',
+        sentimentScore: 0,
+        keywords: [],
+        confidence: 85, // Default confidence for category match
+        requiresHandoff: false,
+      };
+    } catch (error) {
+      this.logger.error(
+        `[LLM Classification] Error classifying: ${error.message}`,
+      );
+
+      // Return first category as fallback
+      return {
+        category: categories[0]?.toLowerCase() || 'default',
+        sentiment: 'neutral',
+        sentimentScore: 0,
+        keywords: [],
+        confidence: 0,
+        requiresHandoff: false,
+      };
+    }
+  }
+
+  /**
    * Build classification system prompt
    */
   private buildClassificationPrompt(context?: {

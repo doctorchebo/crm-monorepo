@@ -17,20 +17,24 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { S3Service } from '@shared/services/s3.service';
 import { and, count, desc, eq, ilike, or, sql, SQL } from 'drizzle-orm';
 import { AiMemoryService } from '../../ai-memory/services/ai-memory.service';
+import {
+  CHAT_EVENTS,
+  ChatDeletedPayload,
+} from '../constants/chat-events.constants';
 import {
   SearchChatsDto,
   SearchChatsResponse,
   SearchChatsResult,
 } from '../dto/search-chats.dto';
+import { ChatVisibilityService } from './chat-visibility.service';
 import type { IChatUpdateGateway } from './chat.types';
 import { CHAT_UPDATE_GATEWAY } from './chat.types';
 import { ChatsArchiveService } from './chats-archive.service';
 import { ChatsCrudService } from './chats-crud.service';
-
-import { ChatVisibilityService } from './chat-visibility.service';
 
 /**
  * Chats Cleanup Service
@@ -45,6 +49,7 @@ export class ChatsCleanupService {
     private readonly archiveService: ChatsArchiveService,
     private readonly s3Service: S3Service,
     private readonly aiMemoryService: AiMemoryService,
+    private readonly eventEmitter: EventEmitter2,
     @Inject(forwardRef(() => ChatVisibilityService))
     private readonly chatVisibilityService: ChatVisibilityService,
     @Optional()
@@ -156,9 +161,23 @@ export class ChatsCleanupService {
       await db.delete(chats).where(eq(chats.chatId, chatId));
       this.logger.log(`Deleted chat ${chatId}`);
 
+      // Emit WebSocket event for real-time UI updates
       if (this.chatUpdateGateway?.emitChatDeleted) {
         this.chatUpdateGateway.emitChatDeleted(chatId);
       }
+
+      // Emit internal event for workflow and other module cleanup
+      // Note: Database CASCADE rules handle most workflow data cleanup
+      // This event allows modules to clean up data without FK constraints
+      const eventPayload: ChatDeletedPayload = {
+        chatId,
+        userId,
+        deletedAt: new Date().toISOString(),
+      };
+      this.eventEmitter.emit(CHAT_EVENTS.CHAT_DELETED, eventPayload);
+      this.logger.log(
+        `Emitted ${CHAT_EVENTS.CHAT_DELETED} event for chat ${chatId}`,
+      );
     } catch (error) {
       this.logger.error(`Error deleting chat ${chatId}: ${error.message}`);
       throw error;

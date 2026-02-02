@@ -32,6 +32,7 @@ import {
   chats,
   chatStageAssignments,
   chatStageHistory,
+  messages,
   senders,
 } from '@database/schema';
 import {
@@ -47,6 +48,7 @@ import {
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { getDefaultChatStageAssignmentValues } from '@shared/constants/ai-defaults';
 import { and, desc, eq, isNotNull, lte, sql } from 'drizzle-orm';
 
 import type {
@@ -65,6 +67,7 @@ import type {
   NodeExecutionResult,
   TriggerMessageConfig,
 } from '../types/workflow-builder.types';
+import { AiConfigurationService } from './ai-configuration.service';
 import { HandoffService } from './handoff.service';
 import { LLMService } from './llm.service';
 import { StageService } from './stage.service';
@@ -74,6 +77,52 @@ type NodeHandler = (
   node: WorkflowNode,
   context: ExecutionContext,
 ) => Promise<NodeExecutionResult>;
+
+/**
+ * Get the effective node type for handler lookup.
+ * Nodes may have a generic type (e.g., 'trigger', 'condition', 'action') stored in nodeType,
+ * but the specific type (e.g., 'trigger_message', 'condition_ai_classification') is stored
+ * in config._originalNodeType. This function resolves the correct type for handler lookup.
+ */
+function getEffectiveNodeType(node: WorkflowNode): string {
+  const config = node.config as Record<string, unknown> | null;
+  const originalNodeType = config?._originalNodeType as string | undefined;
+
+  // If we have an _originalNodeType in config, use it
+  if (originalNodeType && typeof originalNodeType === 'string') {
+    return originalNodeType;
+  }
+
+  // Fallback to the stored nodeType
+  return node.nodeType;
+}
+
+/**
+ * Result of workflow execution (internal use)
+ */
+interface ExecutionResult {
+  /** Whether the execution completed without errors */
+  completed: boolean;
+  /** Whether a non-AI message was sent during execution */
+  messageSent: boolean;
+  /** Reason for stopping if not completed */
+  stopReason?: 'paused' | 'error' | 'max_nodes' | 'completed';
+}
+
+/**
+ * Result of processing a message through workflows
+ * This is the public interface returned to callers
+ */
+export interface WorkflowProcessingResult {
+  /** Whether any workflow was triggered for this message */
+  triggered: boolean;
+  /** IDs of executions that were started or resumed */
+  executionIds: string[];
+  /** Whether the workflow completed processing (reached end node or completed all steps) */
+  workflowCompleted: boolean;
+  /** Whether the workflow sent a static (non-AI) message during execution */
+  messageSent: boolean;
+}
 
 @Injectable()
 export class WorkflowExecutionEngine implements OnModuleInit {
@@ -85,6 +134,7 @@ export class WorkflowExecutionEngine implements OnModuleInit {
     private readonly llmService: LLMService,
     private readonly handoffService: HandoffService,
     private readonly stageService: StageService,
+    private readonly aiConfigService: AiConfigurationService,
   ) {}
 
   onModuleInit(): void {
@@ -196,6 +246,132 @@ export class WorkflowExecutionEngine implements OnModuleInit {
 
     // Sub-workflow
     this.nodeHandlers.set('sub_workflow', this.handleSubWorkflow.bind(this));
+
+    // End node - marks successful completion of a workflow branch
+    this.nodeHandlers.set('end', this.handleEndNode.bind(this));
+
+    // =========================================================================
+    // Generic type handlers (delegate to specific handlers based on config)
+    // These handle nodes stored with generic types like 'trigger', 'condition',
+    // 'action' by looking up the specific type from config._originalNodeType
+    // =========================================================================
+    this.nodeHandlers.set('trigger', this.handleGenericTrigger.bind(this));
+    this.nodeHandlers.set('condition', this.handleGenericCondition.bind(this));
+    this.nodeHandlers.set('action', this.handleGenericAction.bind(this));
+    this.nodeHandlers.set('delay', this.handleActionDelay.bind(this));
+    this.nodeHandlers.set('branch', this.handleGenericCondition.bind(this));
+  }
+
+  // ============================================================================
+  // Generic Node Handlers (delegate to specific handlers based on config)
+  // ============================================================================
+
+  /**
+   * Handle generic 'trigger' nodes by delegating to the appropriate specific handler
+   */
+  private async handleGenericTrigger(
+    node: WorkflowNode,
+    context: ExecutionContext,
+  ): Promise<NodeExecutionResult> {
+    const config = node.config as Record<string, unknown>;
+    const originalType = config?._originalNodeType as string;
+    const triggerType = config?.triggerType as string;
+
+    // Try to find a specific handler
+    const specificType =
+      originalType || (triggerType ? `trigger_${triggerType}` : null);
+    if (specificType && specificType !== 'trigger') {
+      const handler = this.nodeHandlers.get(specificType);
+      if (handler) {
+        return handler(node, context);
+      }
+    }
+
+    // Default trigger behavior: pass through
+    return { success: true, branch: 'default' };
+  }
+
+  /**
+   * Handle generic 'condition' nodes by delegating to the appropriate specific handler
+   */
+  private async handleGenericCondition(
+    node: WorkflowNode,
+    context: ExecutionContext,
+  ): Promise<NodeExecutionResult> {
+    const config = node.config as Record<string, unknown>;
+    const originalType = config?._originalNodeType as string;
+    const conditionType = config?.conditionType as string;
+
+    // Try to find a specific handler
+    const specificType =
+      originalType || (conditionType ? `condition_${conditionType}` : null);
+    if (specificType && specificType !== 'condition') {
+      const handler = this.nodeHandlers.get(specificType);
+      if (handler) {
+        return handler(node, context);
+      }
+    }
+
+    // Default: pass through on 'default' branch
+    this.logger.warn(
+      `Generic condition node ${node.id} has no specific handler (type: ${originalType || conditionType})`,
+    );
+    return { success: true, branch: 'default' };
+  }
+
+  /**
+   * Handle generic 'action' nodes by delegating to the appropriate specific handler
+   */
+  private async handleGenericAction(
+    node: WorkflowNode,
+    context: ExecutionContext,
+  ): Promise<NodeExecutionResult> {
+    const config = node.config as Record<string, unknown>;
+    const originalType = config?._originalNodeType as string;
+    const actionType = config?.actionType as string;
+
+    // Try to find a specific handler
+    const specificType =
+      originalType || (actionType ? `action_${actionType}` : null);
+    if (specificType && specificType !== 'action') {
+      const handler = this.nodeHandlers.get(specificType);
+      if (handler) {
+        return handler(node, context);
+      }
+    }
+
+    // Default: emit generic action event and continue
+    this.logger.warn(
+      `Generic action node ${node.id} has no specific handler (type: ${originalType || actionType})`,
+    );
+    this.eventEmitter.emit('workflow.action.generic', {
+      chatId: context.chatId,
+      config: node.config,
+      executionId: context.executionId,
+    });
+    return { success: true, branch: 'default' };
+  }
+
+  /**
+   * Handle 'end' nodes - marks the end of a workflow branch
+   */
+  private async handleEndNode(
+    node: WorkflowNode,
+    context: ExecutionContext,
+  ): Promise<NodeExecutionResult> {
+    const config = node.config as Record<string, unknown>;
+    const exitType = (config?.exitType as string) ?? 'success';
+
+    this.logger.log(
+      `[Workflow Execution] Reached end node ${node.id} with exitType: ${exitType}`,
+    );
+
+    // End nodes signal the end of this branch - return null nextNodeId
+    return {
+      success: true,
+      branch: 'end', // Special branch that signals no more nodes to execute
+      output: { exitType, nodeName: node.label },
+    };
   }
 
   // ============================================================================
@@ -208,6 +384,8 @@ export class WorkflowExecutionEngine implements OnModuleInit {
    *
    * Unlike processMessage() which searches all workflows by team,
    * this method specifically handles the assigned workflow for a chat.
+   *
+   * @returns WorkflowProcessingResult with triggered, executionIds, workflowCompleted, and messageSent flags
    */
   async processMessageForAssignedWorkflow(
     chatId: string,
@@ -215,8 +393,10 @@ export class WorkflowExecutionEngine implements OnModuleInit {
     messageContent: string,
     messageType: string,
     userId: number,
-  ): Promise<{ triggered: boolean; executionIds: string[] }> {
+  ): Promise<WorkflowProcessingResult> {
     const executionIds: string[] = [];
+    let workflowCompleted = false;
+    let messageSent = false;
 
     this.logger.log(
       `[Workflow Execution] Processing message for chat ${chatId}, messageType: ${messageType}`,
@@ -242,7 +422,12 @@ export class WorkflowExecutionEngine implements OnModuleInit {
         this.logger.debug(
           `[Workflow Execution] No workflow assigned to chat ${chatId}`,
         );
-        return { triggered: false, executionIds: [] };
+        return {
+          triggered: false,
+          executionIds: [],
+          workflowCompleted: false,
+          messageSent: false,
+        };
       }
 
       // If there's an active execution in 'waiting' status, resume it
@@ -253,7 +438,10 @@ export class WorkflowExecutionEngine implements OnModuleInit {
 
         if (execution && execution.status === 'waiting') {
           // Resume the waiting execution with the new message
-          await this.resumeExecution(execution.id, {
+          this.logger.log(
+            `[Workflow Execution] Resuming waiting execution ${execution.id}`,
+          );
+          const resumeResult = await this.resumeExecution(execution.id, {
             message: {
               id: messageId,
               content: messageContent,
@@ -262,14 +450,96 @@ export class WorkflowExecutionEngine implements OnModuleInit {
               timestamp: new Date(),
             },
           });
-          return { triggered: true, executionIds: [execution.id] };
+          return {
+            triggered: true,
+            executionIds: [execution.id],
+            workflowCompleted: resumeResult.completed,
+            messageSent: resumeResult.messageSent,
+          };
         }
 
-        // If execution exists but not waiting, check if it's completed or failed
-        // In that case, we can start a new execution if there's a matching trigger
+        // If execution is running but has executed nodes and is at a trigger node,
+        // treat it as waiting for a new message (this handles the initial trigger case)
         if (execution?.status === 'running') {
-          // Workflow is still running, don't interrupt
-          return { triggered: false, executionIds: [] };
+          const currentNode = chatState.currentNodeId;
+
+          // Check if the execution is stuck at the trigger node (nodesExecuted = 0 or 1)
+          // This happens when the trigger node executed but workflow is waiting for the
+          // actual message to process through conditions
+          if (currentNode && (execution.nodesExecuted ?? 0) <= 1) {
+            // Get workflow to check current node type
+            const workflow = await db.query.workflows.findFirst({
+              where: eq(workflows.id, chatState.activeWorkflowId!),
+              with: { nodes: true, connections: true },
+            });
+
+            if (workflow) {
+              const node = workflow.nodes.find((n) => n.id === currentNode);
+              const isTriggerNode =
+                node &&
+                (node.nodeType === 'trigger' ||
+                  node.nodeType.startsWith('trigger_'));
+
+              if (isTriggerNode) {
+                this.logger.log(
+                  `[Workflow Execution] Execution ${execution.id} is at trigger node, continuing with new message`,
+                );
+
+                // Continue execution from the trigger node with the new message context
+                const messageContext = {
+                  id: messageId,
+                  content: messageContent,
+                  type: messageType,
+                  direction: 'inbound' as const,
+                  timestamp: new Date(),
+                };
+
+                // Get next node from the trigger
+                const nextNodeId = await this.getNextNode(
+                  workflow.connections,
+                  currentNode,
+                  'default',
+                );
+
+                if (nextNodeId) {
+                  const execResult = await this.executeFromNode(
+                    execution.id,
+                    workflow as Workflow & {
+                      nodes: WorkflowNode[];
+                      connections: WorkflowConnection[];
+                    },
+                    nextNodeId,
+                    {
+                      executionId: execution.id,
+                      workflowId: workflow.id,
+                      workflowVersion: execution.workflowVersion,
+                      chatId,
+                      variables:
+                        (execution.variables as Record<string, unknown>) ?? {},
+                      message: messageContext,
+                    },
+                  );
+                  return {
+                    triggered: true,
+                    executionIds: [execution.id],
+                    workflowCompleted: execResult.completed,
+                    messageSent: execResult.messageSent,
+                  };
+                }
+              }
+            }
+          }
+
+          // Workflow is still running on a non-trigger node, don't interrupt
+          this.logger.debug(
+            `[Workflow Execution] Execution ${execution.id} is running, not interrupting`,
+          );
+          return {
+            triggered: false,
+            executionIds: [],
+            workflowCompleted: false,
+            messageSent: false,
+          };
         }
       }
 
@@ -292,7 +562,12 @@ export class WorkflowExecutionEngine implements OnModuleInit {
         this.logger.debug(
           `Assigned workflow ${chatState.activeWorkflowId} is not active/published or not found (status: ${workflow?.status})`,
         );
-        return { triggered: false, executionIds: [] };
+        return {
+          triggered: false,
+          executionIds: [],
+          workflowCompleted: false,
+          messageSent: false,
+        };
       }
 
       // Find message trigger nodes (handles both 'trigger' and 'trigger_message' types)
@@ -308,7 +583,12 @@ export class WorkflowExecutionEngine implements OnModuleInit {
         this.logger.debug(
           `Workflow ${workflow.id} has no message triggers. Node types: ${workflow.nodes.map((n) => n.nodeType).join(', ')}`,
         );
-        return { triggered: false, executionIds: [] };
+        return {
+          triggered: false,
+          executionIds: [],
+          workflowCompleted: false,
+          messageSent: false,
+        };
       }
 
       // Check each trigger node for a match
@@ -348,17 +628,31 @@ export class WorkflowExecutionEngine implements OnModuleInit {
             }
           }
 
-          // Start execution
-          const executionId = await this.startExecution(
+          // Start execution - pass message content for AI classification
+          const startResult = await this.startExecution(
             workflow,
             chatId,
             triggerNode.id,
             'message',
             messageId,
             userId,
+            {
+              _triggerMessage: {
+                id: messageId,
+                content: messageContent,
+                type: messageType,
+              },
+            },
           );
 
-          executionIds.push(executionId);
+          executionIds.push(startResult.executionId);
+          messageSent = startResult.messageSent;
+
+          // Check if execution completed immediately (no pause)
+          const executionStatus = await db.query.workflowExecutions.findFirst({
+            where: eq(workflowExecutions.id, startResult.executionId),
+          });
+          workflowCompleted = executionStatus?.status === 'completed';
 
           // Only trigger one execution per message for assigned workflows
           break;
@@ -368,13 +662,20 @@ export class WorkflowExecutionEngine implements OnModuleInit {
       return {
         triggered: executionIds.length > 0,
         executionIds,
+        workflowCompleted,
+        messageSent,
       };
     } catch (error) {
       this.logger.error(
         `Error processing message for assigned workflow: ${error.message}`,
         error.stack,
       );
-      return { triggered: false, executionIds: [] };
+      return {
+        triggered: false,
+        executionIds: [],
+        workflowCompleted: false,
+        messageSent: false,
+      };
     }
   }
 
@@ -469,7 +770,7 @@ export class WorkflowExecutionEngine implements OnModuleInit {
             }
 
             // Start execution
-            const executionId = await this.startExecution(
+            const startResult = await this.startExecution(
               workflow,
               chatId,
               triggerNode.id,
@@ -477,7 +778,7 @@ export class WorkflowExecutionEngine implements OnModuleInit {
               messageId,
             );
 
-            executionIds.push(executionId);
+            executionIds.push(startResult.executionId);
 
             // If exclusive, stop after first match
             if (workflow.isExclusive) {
@@ -606,7 +907,7 @@ export class WorkflowExecutionEngine implements OnModuleInit {
       throw new Error('Workflow does not have a manual trigger');
     }
 
-    return this.startExecution(
+    const result = await this.startExecution(
       workflow,
       chatId,
       triggerNode.id,
@@ -615,6 +916,7 @@ export class WorkflowExecutionEngine implements OnModuleInit {
       userId,
       variables,
     );
+    return result.executionId;
   }
 
   /**
@@ -651,7 +953,7 @@ export class WorkflowExecutionEngine implements OnModuleInit {
       const targetChatId = chatId ?? (payload.chatId as string);
       if (!targetChatId) continue;
 
-      const executionId = await this.startExecution(
+      const startResult = await this.startExecution(
         triggerNode.workflow,
         targetChatId,
         triggerNode.id,
@@ -661,7 +963,7 @@ export class WorkflowExecutionEngine implements OnModuleInit {
         payload,
       );
 
-      executionIds.push(executionId);
+      executionIds.push(startResult.executionId);
     }
 
     return executionIds;
@@ -671,8 +973,50 @@ export class WorkflowExecutionEngine implements OnModuleInit {
   // Execution Management
   // ============================================================================
 
+  // =========================================================================
+  // AI-DEPENDENT NODE TYPES: Nodes that require AI to be enabled to execute
+  // =========================================================================
+  private readonly AI_DEPENDENT_NODE_TYPES = [
+    'condition_ai_classification', // Uses LLM for intent/sentiment classification
+    // Note: 'condition_keyword' is NOT AI-dependent - it's simple string matching
+    // Note: 'action_send_message' is NOT AI-dependent - it sends predefined messages
+  ];
+
+  /**
+   * Check if a workflow contains any AI-dependent nodes
+   */
+  private workflowContainsAIDependentNodes(
+    workflow: Workflow & { nodes: WorkflowNode[] },
+  ): boolean {
+    return workflow.nodes.some((node) => {
+      // Check direct node type
+      if (this.AI_DEPENDENT_NODE_TYPES.includes(node.nodeType)) {
+        return true;
+      }
+
+      // Check original node type in config (for generic nodes)
+      const config = node.config as Record<string, unknown>;
+      const originalType = config?._originalNodeType as string;
+      if (originalType && this.AI_DEPENDENT_NODE_TYPES.includes(originalType)) {
+        return true;
+      }
+
+      // Check condition type in config
+      const conditionType = config?.conditionType as string;
+      if (
+        conditionType &&
+        this.AI_DEPENDENT_NODE_TYPES.includes(`condition_${conditionType}`)
+      ) {
+        return true;
+      }
+
+      return false;
+    });
+  }
+
   /**
    * Start a new workflow execution
+   * @returns Object with executionId and whether a message was sent
    */
   private async startExecution(
     workflow: Workflow & {
@@ -694,18 +1038,37 @@ export class WorkflowExecutionEngine implements OnModuleInit {
     initialVariables?: Record<string, unknown>,
     parentExecutionId?: string,
     parentNodeId?: string,
-  ): Promise<string> {
+  ): Promise<{ executionId: string; messageSent: boolean }> {
     // Get the trigger node for its name
     const triggerNode = workflow.nodes.find((n) => n.id === triggerNodeId);
 
-    // Create execution record
+    // =========================================================================
+    // AI-DEPENDENT WORKFLOW CHECK: If workflow contains AI nodes, check if AI is enabled
+    // This prevents workflows from triggering when AI is disabled for the chat
+    // =========================================================================
+    const hasAIDependentNodes = this.workflowContainsAIDependentNodes(workflow);
+    let shouldStartPaused = false;
+    let pauseReason: string | undefined;
+
+    if (hasAIDependentNodes) {
+      const aiStatus = await this.handoffService.canAISend(chatId);
+      if (!aiStatus.canSend) {
+        shouldStartPaused = true;
+        pauseReason = aiStatus.reason || 'AI is disabled for this chat';
+        this.logger.log(
+          `[Workflow Execution] ⏸️ Workflow ${workflow.id} contains AI-dependent nodes but AI is disabled for chat ${chatId}. Starting execution in PAUSED state. Reason: ${pauseReason}`,
+        );
+      }
+    }
+
+    // Create execution record - start as 'waiting' if AI is disabled and workflow needs AI
     const [execution] = await db
       .insert(workflowExecutions)
       .values({
         workflowId: workflow.id,
         chatId,
         workflowVersion: workflow.version,
-        status: 'running',
+        status: shouldStartPaused ? 'waiting' : 'running',
         currentNodeId: triggerNodeId,
         triggerType,
         triggerNodeId,
@@ -719,13 +1082,54 @@ export class WorkflowExecutionEngine implements OnModuleInit {
       })
       .returning();
 
-    // Update chat state
+    // Update chat state - include pause info if starting paused
     await this.updateChatState(
       chatId,
       workflow.id,
       execution.id,
       triggerNodeId,
     );
+
+    // If starting paused, update the chat state with pause information
+    if (shouldStartPaused) {
+      await db
+        .update(workflowChatState)
+        .set({
+          isPaused: true,
+          pausedAt: new Date(),
+          pausedBy: null, // System pause, not by a user
+          pauseReason: 'ai_disabled',
+        })
+        .where(eq(workflowChatState.chatId, chatId));
+
+      // Log the pause
+      await this.logExecution(
+        execution.id,
+        triggerNodeId,
+        'paused',
+        triggerNode?.nodeType || 'trigger',
+        triggerNode?.label || 'Trigger',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        `Workflow paused at start - ${pauseReason}`,
+      );
+
+      // Emit event for UI notification
+      this.eventEmitter.emit('workflow.paused', {
+        chatId,
+        reason: 'ai_disabled',
+        pausedAtNodeId: triggerNodeId,
+        executionId: execution.id,
+      });
+
+      this.logger.log(
+        `Workflow execution ${execution.id} started in PAUSED state for chat ${chatId}. Will resume when AI is enabled.`,
+      );
+
+      return { executionId: execution.id, messageSent: false };
+    }
 
     // Log execution start with node name
     await this.logExecution(
@@ -740,22 +1144,47 @@ export class WorkflowExecutionEngine implements OnModuleInit {
       `Started workflow execution ${execution.id} for chat ${chatId}`,
     );
 
-    // Execute the workflow starting from trigger node
-    await this.executeFromNode(execution.id, workflow, triggerNodeId, {
-      executionId: execution.id,
-      workflowId: workflow.id,
-      workflowVersion: workflow.version,
-      chatId,
-      variables: initialVariables ?? {},
-      parentExecutionId,
-      parentNodeId,
-    });
+    // Build message context from initial variables if this is a message trigger
+    const messageContext =
+      triggerType === 'message' && initialVariables?._triggerMessage
+        ? {
+            id: (initialVariables._triggerMessage as Record<string, string>).id,
+            content: (
+              initialVariables._triggerMessage as Record<string, string>
+            ).content,
+            type: (initialVariables._triggerMessage as Record<string, string>)
+              .type,
+            direction: 'inbound' as const,
+            timestamp: new Date(),
+          }
+        : undefined;
 
-    return execution.id;
+    // Execute the workflow starting from trigger node
+    const executionResult = await this.executeFromNode(
+      execution.id,
+      workflow,
+      triggerNodeId,
+      {
+        executionId: execution.id,
+        workflowId: workflow.id,
+        workflowVersion: workflow.version,
+        chatId,
+        variables: initialVariables ?? {},
+        message: messageContext,
+        parentExecutionId,
+        parentNodeId,
+      },
+    );
+
+    return {
+      executionId: execution.id,
+      messageSent: executionResult.messageSent,
+    };
   }
 
   /**
    * Execute workflow starting from a specific node
+   * @returns Execution result including whether messages were sent
    */
   private async executeFromNode(
     executionId: string,
@@ -765,10 +1194,15 @@ export class WorkflowExecutionEngine implements OnModuleInit {
     },
     nodeId: string,
     context: ExecutionContext,
-  ): Promise<void> {
+  ): Promise<ExecutionResult> {
     let currentNodeId: string | undefined = nodeId;
     let nodesExecuted = 0;
     const maxNodes = 100; // Prevent infinite loops
+    let messageSentDuringExecution = false; // Track if we sent a non-AI message
+
+    this.logger.debug(
+      `[Workflow Execution] executeFromNode starting - executionId: ${executionId}, startNodeId: ${nodeId}, hasMessage: ${!!context.message}`,
+    );
 
     while (currentNodeId && nodesExecuted < maxNodes) {
       // Save current node ID for logging (won't change in this iteration)
@@ -780,11 +1214,101 @@ export class WorkflowExecutionEngine implements OnModuleInit {
         break;
       }
 
-      // Get the handler for this node type
-      const handler = this.nodeHandlers.get(node.nodeType);
+      // Get the effective node type (handles _originalNodeType in config)
+      const effectiveNodeType = getEffectiveNodeType(node);
+
+      this.logger.debug(
+        `[Workflow Execution] Processing node ${executingNodeId} (${node.label || 'Unnamed'}) [type: ${effectiveNodeType}]`,
+      );
+
+      // =========================================================================
+      // AI-DEPENDENT NODE CHECK: Pause workflow if AI is disabled
+      // This applies to nodes that require AI processing like classification
+      // Uses the class constant AI_DEPENDENT_NODE_TYPES for consistency
+      // =========================================================================
+      if (this.AI_DEPENDENT_NODE_TYPES.includes(effectiveNodeType)) {
+        // Check if AI is enabled for this chat
+        const aiStatus = await this.handoffService.canAISend(context.chatId);
+
+        if (!aiStatus.canSend) {
+          this.logger.log(
+            `[Workflow Execution] ⏸️ PAUSING workflow before AI-dependent node ${executingNodeId} (${effectiveNodeType}) - AI is disabled: ${aiStatus.reason}`,
+          );
+
+          // Update chat state to track where we paused
+          await this.updateChatState(
+            context.chatId,
+            context.workflowId,
+            executionId,
+            executingNodeId, // Pause AT this node, not after
+          );
+
+          // Mark workflow as paused with reason
+          // Note: pausedBy is a userId, so we set it to null for system pauses
+          await db
+            .update(workflowChatState)
+            .set({
+              isPaused: true,
+              pausedAt: new Date(),
+              pausedBy: null, // System pause, not by a user
+              pauseReason: 'ai_disabled',
+            })
+            .where(eq(workflowChatState.chatId, context.chatId));
+
+          // Set execution to waiting
+          await db
+            .update(workflowExecutions)
+            .set({ status: 'waiting' })
+            .where(eq(workflowExecutions.id, executionId));
+
+          // Emit event for UI notification
+          this.eventEmitter.emit('workflow.paused', {
+            chatId: context.chatId,
+            reason: 'ai_disabled',
+            pausedAtNodeId: executingNodeId,
+            executionId: executionId,
+          });
+
+          return {
+            completed: false,
+            messageSent: messageSentDuringExecution,
+            stopReason: 'paused',
+          }; // Exit execution loop - will resume when AI is re-enabled
+        }
+      }
+
+      // Get the handler for this node type - try effective type first, then fallback to stored type
+      let handler = this.nodeHandlers.get(effectiveNodeType);
+      if (!handler && effectiveNodeType !== node.nodeType) {
+        handler = this.nodeHandlers.get(node.nodeType);
+      }
+
       if (!handler) {
-        this.logger.error(`No handler for node type: ${node.nodeType}`);
-        break;
+        this.logger.error(
+          `No handler for node type: ${effectiveNodeType} (stored: ${node.nodeType})`,
+        );
+        await this.logExecution(
+          executionId,
+          executingNodeId,
+          'error',
+          effectiveNodeType,
+          node.label || 'Unnamed Node',
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          `No handler for node type: ${effectiveNodeType}`,
+        );
+        await this.completeExecution(
+          executionId,
+          'failed',
+          `No handler for node type: ${effectiveNodeType}`,
+        );
+        return {
+          completed: false,
+          messageSent: messageSentDuringExecution,
+          stopReason: 'error',
+        };
       }
 
       // Update current node
@@ -801,7 +1325,7 @@ export class WorkflowExecutionEngine implements OnModuleInit {
         executionId,
         executingNodeId,
         'entered',
-        node.nodeType,
+        effectiveNodeType,
         node.label || 'Unnamed Node',
       );
 
@@ -811,6 +1335,21 @@ export class WorkflowExecutionEngine implements OnModuleInit {
         // Execute the node
         const result = await handler(node, context);
 
+        // Track if this node sends a non-AI message
+        // This is used to prevent duplicate AI responses
+        if (effectiveNodeType === 'action_send_message') {
+          const sendConfig = node.config as ActionSendMessageConfig;
+          if (
+            sendConfig.messageType &&
+            sendConfig.messageType !== 'ai_generated'
+          ) {
+            messageSentDuringExecution = true;
+            this.logger.debug(
+              `[Workflow Execution] Node ${executingNodeId} sent static message (type: ${sendConfig.messageType})`,
+            );
+          }
+        }
+
         const durationMs = Date.now() - startTime;
 
         // Log execution result
@@ -818,7 +1357,7 @@ export class WorkflowExecutionEngine implements OnModuleInit {
           executionId,
           executingNodeId,
           result.success ? 'executed' : 'error',
-          node.nodeType,
+          effectiveNodeType,
           node.label || 'Unnamed Node',
           result.output,
           result.conditionResult,
@@ -870,6 +1409,66 @@ export class WorkflowExecutionEngine implements OnModuleInit {
             executingNodeId,
             result.branch ?? 'default',
           );
+
+          this.logger.debug(
+            `[Workflow Execution] Node ${executingNodeId} returned branch: ${result.branch}, next node: ${currentNodeId || 'none'}`,
+          );
+
+          // Auto-pause: If current node is action_send_message and next node is a classification,
+          // pause execution to wait for user's response before classifying
+          if (currentNodeId) {
+            this.logger.log(
+              `[Workflow Execution] Checking auto-pause: currentNodeType=${effectiveNodeType}, nextNodeId=${currentNodeId}`,
+            );
+
+            const nextNode = workflow.nodes.find((n) => n.id === currentNodeId);
+            const nextEffectiveType = nextNode
+              ? getEffectiveNodeType(nextNode)
+              : null;
+
+            this.logger.log(
+              `[Workflow Execution] Next node: type=${nextNode?.nodeType}, effectiveType=${nextEffectiveType}`,
+            );
+
+            // Check if this is a send action followed by classification
+            if (
+              effectiveNodeType === 'action_send_message' ||
+              effectiveNodeType === 'action_send_template'
+            ) {
+              if (
+                nextEffectiveType === 'condition_ai_classification' ||
+                nextEffectiveType === 'condition_keyword_match'
+              ) {
+                this.logger.log(
+                  `[Workflow Execution] ✅ AUTO-PAUSING after ${effectiveNodeType} node ${executingNodeId} - next node ${currentNodeId} is ${nextEffectiveType} which needs user input`,
+                );
+
+                // Update chat state so we know where to resume
+                await this.updateChatState(
+                  context.chatId,
+                  context.workflowId,
+                  executionId,
+                  executingNodeId, // Keep at current send node, will advance on resume
+                );
+
+                // Set execution to waiting
+                await db
+                  .update(workflowExecutions)
+                  .set({ status: 'waiting' })
+                  .where(eq(workflowExecutions.id, executionId));
+
+                return {
+                  completed: false,
+                  messageSent: messageSentDuringExecution,
+                  stopReason: 'paused',
+                }; // Exit execution loop
+              } else {
+                this.logger.log(
+                  `[Workflow Execution] ❌ NOT auto-pausing: nextEffectiveType=${nextEffectiveType} is not a classification node`,
+                );
+              }
+            }
+          }
         }
 
         // Check for delay (pause execution)
@@ -878,7 +1477,11 @@ export class WorkflowExecutionEngine implements OnModuleInit {
         });
         if (execution?.status === 'waiting') {
           this.logger.log(`Execution ${executionId} is waiting for resume`);
-          return;
+          return {
+            completed: false,
+            messageSent: messageSentDuringExecution,
+            stopReason: 'paused',
+          };
         }
 
         nodesExecuted++;
@@ -906,7 +1509,11 @@ export class WorkflowExecutionEngine implements OnModuleInit {
           currentNodeId = node.onErrorNodeId;
         } else if (!node.continueOnError) {
           await this.completeExecution(executionId, 'failed', error.message);
-          return;
+          return {
+            completed: false,
+            messageSent: messageSentDuringExecution,
+            stopReason: 'error',
+          };
         } else {
           currentNodeId = await this.getNextNode(
             workflow.connections,
@@ -920,9 +1527,26 @@ export class WorkflowExecutionEngine implements OnModuleInit {
     // Workflow completed successfully
     if (!currentNodeId) {
       await this.completeExecution(executionId, 'completed');
+      return {
+        completed: true,
+        messageSent: messageSentDuringExecution,
+        stopReason: 'completed',
+      };
     } else if (nodesExecuted >= maxNodes) {
       await this.completeExecution(executionId, 'failed', 'Max nodes exceeded');
+      return {
+        completed: false,
+        messageSent: messageSentDuringExecution,
+        stopReason: 'max_nodes',
+      };
     }
+
+    // Default return (shouldn't reach here normally)
+    return {
+      completed: false,
+      messageSent: messageSentDuringExecution,
+      stopReason: 'paused',
+    };
   }
 
   /**
@@ -950,11 +1574,12 @@ export class WorkflowExecutionEngine implements OnModuleInit {
 
   /**
    * Resume a paused execution (e.g., after delay or waiting for message)
+   * @returns Execution result with completion and message status
    */
   async resumeExecution(
     executionId: string,
     updates?: Partial<ExecutionContext>,
-  ): Promise<void> {
+  ): Promise<ExecutionResult> {
     const execution = await db.query.workflowExecutions.findFirst({
       where: eq(workflowExecutions.id, executionId),
     });
@@ -963,7 +1588,7 @@ export class WorkflowExecutionEngine implements OnModuleInit {
       this.logger.warn(
         `Cannot resume execution ${executionId}: not in waiting state`,
       );
-      return;
+      return { completed: false, messageSent: false, stopReason: 'error' };
     }
 
     // Get workflow (exclude soft-deleted)
@@ -977,7 +1602,7 @@ export class WorkflowExecutionEngine implements OnModuleInit {
 
     if (!workflow) {
       this.logger.error(`Workflow not found for execution ${executionId}`);
-      return;
+      return { completed: false, messageSent: false, stopReason: 'error' };
     }
 
     // Update execution status
@@ -1003,7 +1628,9 @@ export class WorkflowExecutionEngine implements OnModuleInit {
 
     // Get next node from current position
     const currentNodeId = execution.currentNodeId;
-    if (!currentNodeId) return;
+    if (!currentNodeId) {
+      return { completed: false, messageSent: false, stopReason: 'error' };
+    }
 
     const nextNodeId = await this.getNextNode(
       workflow.connections,
@@ -1012,9 +1639,15 @@ export class WorkflowExecutionEngine implements OnModuleInit {
     );
 
     if (nextNodeId) {
-      await this.executeFromNode(executionId, workflow, nextNodeId, context);
+      return await this.executeFromNode(
+        executionId,
+        workflow,
+        nextNodeId,
+        context,
+      );
     } else {
       await this.completeExecution(executionId, 'completed');
+      return { completed: true, messageSent: false, stopReason: 'completed' };
     }
   }
 
@@ -1046,17 +1679,17 @@ export class WorkflowExecutionEngine implements OnModuleInit {
       })
       .where(eq(workflowExecutions.id, executionId));
 
-    // Clear chat state if this was the active execution
+    // Clear execution-related fields but PRESERVE workflow assignment and AI instructions
+    // The workflow is still assigned to the chat, only the execution has completed
+    // AI instructions are kept so the response generator can use them for this message
     await db
       .update(workflowChatState)
       .set({
-        activeWorkflowId: null,
+        // Keep activeWorkflowId - the workflow is still assigned to this chat
+        // Keep currentAiInstructions, currentAiTone, currentAiGoal - needed for AI response
+        // Keep allowedKbTemplates - needed for knowledge base retrieval
         activeExecutionId: null,
         currentNodeId: null,
-        currentAiInstructions: null,
-        currentAiTone: null,
-        currentAiGoal: null,
-        allowedKbTemplates: null,
         updatedAt: new Date(),
       })
       .where(eq(workflowChatState.activeExecutionId, executionId));
@@ -1306,13 +1939,156 @@ export class WorkflowExecutionEngine implements OnModuleInit {
   // Node Handlers - Conditions
   // ============================================================================
 
+  /**
+   * Handle AI classification condition nodes.
+   * Supports two modes:
+   * 1. Legacy mode: Uses classifyType + expectedValues for simple true/false branching
+   * 2. Categories mode: Uses aiClassification.categories for multi-branch classification
+   */
   private async handleConditionAiClassification(
     node: WorkflowNode,
     context: ExecutionContext,
   ): Promise<NodeExecutionResult> {
-    const config = node.config as ConditionAiClassificationConfig;
+    const config = node.config as Record<string, unknown>;
     const messageContent = context.message?.content ?? '';
 
+    // Check for categories-based classification (new workflow UI format)
+    const aiClassification = config.aiClassification as
+      | {
+          prompt?: string;
+          categories?: Array<{ name: string; description: string }>;
+          fallbackCategory?: string;
+        }
+      | undefined;
+
+    if (
+      aiClassification?.categories &&
+      aiClassification.categories.length > 0
+    ) {
+      return this.handleCategoriesBasedClassification(
+        node,
+        context,
+        messageContent,
+        {
+          prompt: aiClassification.prompt,
+          categories: aiClassification.categories,
+          fallbackCategory: aiClassification.fallbackCategory,
+        },
+      );
+    }
+
+    // Legacy mode: simple true/false branching based on classifyType
+    return this.handleLegacyAiClassification(
+      node,
+      context,
+      messageContent,
+      config as unknown as ConditionAiClassificationConfig,
+    );
+  }
+
+  /**
+   * Handle categories-based AI classification.
+   * Uses LLM to classify the message into one of the defined categories.
+   * Returns the category name as the branch (e.g., 'interested', 'support').
+   */
+  private async handleCategoriesBasedClassification(
+    node: WorkflowNode,
+    context: ExecutionContext,
+    messageContent: string,
+    config: {
+      prompt?: string;
+      categories: Array<{ name: string; description: string }>;
+      fallbackCategory?: string;
+    },
+  ): Promise<NodeExecutionResult> {
+    try {
+      // Build the classification prompt
+      const categoryDescriptions = config.categories
+        .map((c) => `- ${c.name}: ${c.description}`)
+        .join('\n');
+
+      const systemPrompt = `You are a message classifier. Analyze the following message and classify it into ONE of these categories:
+
+${categoryDescriptions}
+
+${config.prompt || ''}
+
+IMPORTANT: Respond with ONLY the category name (one of: ${config.categories.map((c) => c.name).join(', ')}). Nothing else.`;
+
+      // Use LLM to classify
+      const classification = await this.llmService.classifyWithCategories(
+        messageContent,
+        config.categories.map((c) => c.name),
+        systemPrompt,
+      );
+
+      const matchedCategory = classification.category?.toLowerCase() ?? '';
+      const validCategories = config.categories.map((c) =>
+        c.name.toLowerCase(),
+      );
+      const isValidCategory = validCategories.includes(matchedCategory);
+
+      // Use matched category or fallback
+      const finalBranch = isValidCategory
+        ? matchedCategory
+        : (config.fallbackCategory?.toLowerCase() ?? 'default');
+
+      this.logger.log(
+        `[AI Classification] Message classified as: ${finalBranch} (confidence: ${classification.confidence})`,
+      );
+
+      return {
+        success: true,
+        branch: finalBranch,
+        conditionResult: isValidCategory,
+        conditionDetails: {
+          categories: config.categories,
+          matchedCategory,
+          finalBranch,
+          confidence: classification.confidence,
+        },
+        aiClassification: classification,
+        variableUpdates: {
+          _lastAiClassification: classification,
+          _classifiedCategory: finalBranch,
+        },
+      };
+    } catch (error) {
+      this.logger.error(
+        `[AI Classification] Error: ${error.message}`,
+        error.stack,
+      );
+
+      // On error, use fallback category or 'default'
+      const fallbackBranch =
+        config.fallbackCategory?.toLowerCase() ?? 'default';
+
+      return {
+        success: true, // Don't fail the workflow, use fallback
+        branch: fallbackBranch,
+        conditionResult: false,
+        conditionDetails: {
+          error: error.message,
+          fallbackUsed: true,
+          finalBranch: fallbackBranch,
+        },
+        variableUpdates: {
+          _classificationError: error.message,
+          _classifiedCategory: fallbackBranch,
+        },
+      };
+    }
+  }
+
+  /**
+   * Handle legacy AI classification (simple true/false branching)
+   */
+  private async handleLegacyAiClassification(
+    node: WorkflowNode,
+    context: ExecutionContext,
+    messageContent: string,
+    config: ConditionAiClassificationConfig,
+  ): Promise<NodeExecutionResult> {
     try {
       // Use LLM service to classify
       const classification =
@@ -1544,12 +2320,29 @@ export class WorkflowExecutionEngine implements OnModuleInit {
         };
       }
 
+      // Fetch user's AI defaults for new assignments
+      let userDefaults = null;
+      if (chat.userId) {
+        try {
+          userDefaults = await this.aiConfigService.getUserAiDefaults(
+            chat.userId,
+          );
+        } catch (error) {
+          this.logger.debug(
+            `Could not fetch user AI defaults for user ${chat.userId}, using system defaults`,
+          );
+        }
+      }
+      const defaults = getDefaultChatStageAssignmentValues(userDefaults);
+
       // Update or create stage assignment
       await db
         .insert(chatStageAssignments)
         .values({
           chatId: context.chatId,
           stageId: config.stageId,
+          aiPaused: defaults.aiPaused,
+          awaitingHandoff: defaults.awaitingHandoff,
           assignedAt: new Date(),
           updatedAt: new Date(),
         })
@@ -1598,6 +2391,55 @@ export class WorkflowExecutionEngine implements OnModuleInit {
   ): Promise<NodeExecutionResult> {
     const config = node.config as ActionSendMessageConfig;
 
+    // Check if this node should wait for a response before continuing
+    // This is needed when the next node is a classification that needs user input
+    const waitForResponse = (node.config as unknown as Record<string, unknown>)
+      ?.waitForResponse as boolean;
+
+    // For AI-generated messages, we need to:
+    // 1. Update chat state with AI instructions so the response generator can use them
+    // 2. Set execution to 'waiting' status - the response will be generated by the inbound message handler
+    // 3. The workflow will resume after the message is sent
+    if (config.messageType === 'ai_generated') {
+      this.logger.log(
+        `[Workflow Execution] Send Message node ${node.id} requires AI generation - updating chat state and pausing`,
+      );
+
+      // Update chat state with this node's AI instructions
+      await this.updateChatState(
+        context.chatId,
+        context.workflowId,
+        context.executionId,
+        node.id,
+      );
+
+      // Set execution to waiting - the AI response will be generated by WorkflowEngineService
+      // using the instructions from this node
+      await db
+        .update(workflowExecutions)
+        .set({
+          status: 'waiting',
+          // Don't set scheduledResumeAt - this will resume when the message is sent
+        })
+        .where(eq(workflowExecutions.id, context.executionId));
+
+      // Emit event for the message handler to know we're waiting for AI
+      this.eventEmitter.emit('workflow.action.send_message', {
+        chatId: context.chatId,
+        config,
+        executionId: context.executionId,
+        aiInstructions: node.aiInstructions,
+        aiTone: node.aiTone,
+        aiGoal: node.aiGoal,
+        allowedKbTemplates: node.allowedKbTemplates,
+        waitingForAI: true,
+      });
+
+      // Return success - execution will be resumed after AI response is sent
+      return { success: true, branch: 'default' };
+    }
+
+    // For static or variable messages, emit the event
     this.eventEmitter.emit('workflow.action.send_message', {
       chatId: context.chatId,
       config,
@@ -1607,6 +2449,33 @@ export class WorkflowExecutionEngine implements OnModuleInit {
       aiGoal: node.aiGoal,
       allowedKbTemplates: node.allowedKbTemplates,
     });
+
+    // If waitForResponse is enabled, pause execution until the user responds
+    // This is useful for nodes that ask questions and need classification of the response
+    if (waitForResponse) {
+      this.logger.log(
+        `[Workflow Execution] Send Message node ${node.id} has waitForResponse=true - pausing for user response`,
+      );
+
+      // Update chat state so we know where to resume
+      await this.updateChatState(
+        context.chatId,
+        context.workflowId,
+        context.executionId,
+        node.id,
+      );
+
+      // Set execution to waiting
+      await db
+        .update(workflowExecutions)
+        .set({
+          status: 'waiting',
+        })
+        .where(eq(workflowExecutions.id, context.executionId));
+
+      // Return success - execution will resume when next message arrives
+      return { success: true, branch: 'default' };
+    }
 
     return { success: true, branch: 'default' };
   }
@@ -1930,6 +2799,333 @@ export class WorkflowExecutionEngine implements OnModuleInit {
       aiTone: state.currentAiTone ?? undefined,
       aiGoal: state.currentAiGoal ?? undefined,
       allowedKbTemplates: (state.allowedKbTemplates as string[]) ?? undefined,
+    };
+  }
+
+  /**
+   * Get the workflow state for a chat
+   * Used by the frontend to show the node selector modal when AI is re-enabled
+   */
+  async getChatWorkflowState(chatId: string): Promise<{
+    workflowId: string | null;
+    workflowName: string | null;
+    isPaused: boolean;
+    pauseReason: string | null;
+    currentNodeId: string | null;
+    currentNodeLabel: string | null;
+    nodes: Array<{
+      id: string;
+      nodeType: string;
+      label: string | null;
+      positionX: number;
+      positionY: number;
+    }>;
+    connections: Array<{
+      id: string;
+      fromNodeId: string;
+      toNodeId: string;
+      label: string | null;
+    }>;
+  } | null> {
+    const state = await db.query.workflowChatState.findFirst({
+      where: eq(workflowChatState.chatId, chatId),
+    });
+
+    if (!state || !state.activeWorkflowId) {
+      return null;
+    }
+
+    // Get the workflow with nodes and connections
+    const workflow = await db.query.workflows.findFirst({
+      where: eq(workflows.id, state.activeWorkflowId),
+      with: {
+        nodes: true,
+        connections: true,
+      },
+    });
+
+    if (!workflow) {
+      return null;
+    }
+
+    // Find current node label
+    const currentNode = state.currentNodeId
+      ? workflow.nodes.find((n) => n.id === state.currentNodeId)
+      : null;
+
+    return {
+      workflowId: workflow.id,
+      workflowName: workflow.name,
+      isPaused: state.isPaused ?? false,
+      pauseReason: state.pauseReason ?? null,
+      currentNodeId: state.currentNodeId ?? null,
+      currentNodeLabel: currentNode?.label ?? null,
+      nodes: workflow.nodes.map((n) => ({
+        id: n.id,
+        nodeType: n.nodeType,
+        label: n.label ?? null,
+        positionX: n.positionX,
+        positionY: n.positionY,
+      })),
+      connections: workflow.connections.map((c) => ({
+        id: c.id,
+        fromNodeId: c.fromNodeId,
+        toNodeId: c.toNodeId,
+        label: c.label ?? null,
+      })),
+    };
+  }
+
+  /**
+   * Resume a workflow from a selected node
+   * Called when the user re-enables AI and selects where to continue the workflow
+   *
+   * @param chatId - The chat ID
+   * @param nodeId - The node ID to resume from (or null for restart/cancel)
+   * @param action - 'resume' to continue from nodeId, 'restart' to start from beginning, 'cancel' to cancel workflow
+   * @param userId - The user ID performing the action
+   * @returns Result with success status, message, and whether a static message was sent
+   */
+  async resumeWorkflowFromNode(
+    chatId: string,
+    nodeId: string | null,
+    action: 'resume' | 'restart' | 'cancel',
+    userId: number,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    sentStaticMessage?: boolean;
+  }> {
+    this.logger.log(
+      `[Workflow Resume] Action: ${action}, Chat: ${chatId}, Node: ${nodeId}`,
+    );
+
+    // Get current workflow state
+    const state = await db.query.workflowChatState.findFirst({
+      where: eq(workflowChatState.chatId, chatId),
+    });
+
+    if (!state || !state.activeWorkflowId) {
+      return { success: false, message: 'No active workflow for this chat' };
+    }
+
+    if (!state.isPaused) {
+      return { success: false, message: 'Workflow is not paused' };
+    }
+
+    // Get the workflow
+    const workflow = await db.query.workflows.findFirst({
+      where: eq(workflows.id, state.activeWorkflowId),
+      with: { nodes: true, connections: true },
+    });
+
+    if (!workflow) {
+      return { success: false, message: 'Workflow not found' };
+    }
+
+    if (action === 'cancel') {
+      // Cancel the workflow - clear the state
+      await db
+        .update(workflowChatState)
+        .set({
+          activeWorkflowId: null,
+          activeExecutionId: null,
+          currentNodeId: null,
+          isPaused: false,
+          pausedAt: null,
+          pausedBy: null,
+          pauseReason: null,
+          currentAiInstructions: null,
+          currentAiTone: null,
+          currentAiGoal: null,
+          allowedKbTemplates: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(workflowChatState.chatId, chatId));
+
+      this.logger.log(
+        `[Workflow Resume] Workflow cancelled for chat ${chatId}`,
+      );
+      return {
+        success: true,
+        message: 'Workflow cancelled',
+        sentStaticMessage: false,
+      };
+    }
+
+    // For resume/restart, we need to start or continue execution
+    let targetNodeId: string;
+    let targetNode: WorkflowNode | undefined;
+
+    if (action === 'restart') {
+      // Find the trigger node to restart from
+      const triggerNode = workflow.nodes.find(
+        (n) => n.nodeType === 'trigger' || n.nodeType.startsWith('trigger_'),
+      );
+      if (!triggerNode) {
+        return { success: false, message: 'No trigger node found in workflow' };
+      }
+      targetNodeId = triggerNode.id;
+      targetNode = triggerNode;
+    } else {
+      // Resume from selected node
+      if (!nodeId) {
+        return {
+          success: false,
+          message: 'Node ID required for resume action',
+        };
+      }
+      targetNode = workflow.nodes.find((n) => n.id === nodeId);
+      if (!targetNode) {
+        return {
+          success: false,
+          message: 'Selected node not found in workflow',
+        };
+      }
+      targetNodeId = nodeId;
+    }
+
+    // Log the target node - actual message tracking happens during execution
+    this.logger.log(
+      `[Workflow Resume] Target node ${targetNodeId} (${targetNode.nodeType})`,
+    );
+
+    // Unpause the workflow
+    await db
+      .update(workflowChatState)
+      .set({
+        isPaused: false,
+        pausedAt: null,
+        pausedBy: null,
+        pauseReason: null,
+        currentNodeId: targetNodeId,
+        updatedAt: new Date(),
+      })
+      .where(eq(workflowChatState.chatId, chatId));
+
+    // CRITICAL: Also unpause AI at the chat level
+    // When user resumes workflow from UI, they expect AI to be enabled
+    // This ensures canAISend() returns true when workflow executes
+    await db
+      .update(chatStageAssignments)
+      .set({
+        aiPaused: false,
+        aiPausedAt: null,
+        aiPausedBy: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(chatStageAssignments.chatId, chatId));
+
+    this.logger.log(
+      `[Workflow Resume] Unpaused both workflow and chat AI for chat ${chatId}`,
+    );
+
+    // Fetch the last inbound message for this chat - needed for classification nodes
+    const lastInboundMessage = await db.query.messages.findFirst({
+      where: and(
+        eq(messages.chatId, chatId),
+        eq(messages.direction, 'inbound'),
+      ),
+      orderBy: desc(messages.timestamp),
+    });
+
+    // Build message context if we have a message
+    const messageContext = lastInboundMessage
+      ? {
+          id: lastInboundMessage.messageId,
+          content: lastInboundMessage.text || '',
+          type: lastInboundMessage.type || 'text',
+          sender: lastInboundMessage.sender,
+          timestamp: lastInboundMessage.timestamp,
+        }
+      : undefined;
+
+    this.logger.debug(
+      `[Workflow Resume] Last inbound message: ${lastInboundMessage ? lastInboundMessage.messageId : 'none'}`,
+    );
+
+    // If there's an existing execution that's waiting, resume it
+    if (state.activeExecutionId) {
+      const execution = await db.query.workflowExecutions.findFirst({
+        where: eq(workflowExecutions.id, state.activeExecutionId),
+      });
+
+      if (execution && execution.status === 'waiting') {
+        // Update execution state and resume
+        await db
+          .update(workflowExecutions)
+          .set({
+            status: 'running',
+            currentNodeId: targetNodeId,
+          })
+          .where(eq(workflowExecutions.id, state.activeExecutionId));
+
+        // Execute from the target node with message context
+        const executionResult = await this.executeFromNode(
+          state.activeExecutionId,
+          workflow as any,
+          targetNodeId,
+          {
+            executionId: state.activeExecutionId,
+            workflowId: workflow.id,
+            workflowVersion: execution.workflowVersion,
+            chatId,
+            variables: (execution.variables as Record<string, unknown>) ?? {},
+            message: messageContext, // Include last message for classification
+          },
+        );
+
+        this.logger.log(
+          `[Workflow Resume] Resumed execution ${state.activeExecutionId} from node ${targetNodeId} - messageSent: ${executionResult.messageSent}`,
+        );
+        return {
+          success: true,
+          message: `Workflow resumed from ${action === 'restart' ? 'beginning' : 'selected node'}`,
+          sentStaticMessage: executionResult.messageSent,
+        };
+      }
+    }
+
+    // No waiting execution - start a new one
+    this.logger.log(
+      `[Workflow Resume] Starting new execution for workflow ${workflow.id} from node ${targetNodeId}`,
+    );
+
+    // Find the trigger node ID (required for startExecution)
+    const triggerNode = workflow.nodes.find(
+      (n) => n.nodeType === 'trigger' || n.nodeType.startsWith('trigger_'),
+    );
+
+    if (!triggerNode) {
+      return { success: false, message: 'No trigger node found in workflow' };
+    }
+
+    // Build initial variables with message context for classification
+    const initialVariables = lastInboundMessage
+      ? {
+          _triggerMessage: {
+            id: lastInboundMessage.messageId,
+            content: lastInboundMessage.text || '',
+            type: lastInboundMessage.type || 'text',
+          },
+        }
+      : undefined;
+
+    // Start new execution - it will start from trigger but we set currentNodeId for context
+    const startResult = await this.startExecution(
+      workflow as any,
+      chatId,
+      triggerNode.id,
+      'manual',
+      lastInboundMessage?.messageId,
+      userId,
+      initialVariables,
+    );
+
+    return {
+      success: true,
+      message: `Workflow ${action === 'restart' ? 'restarted' : 'resumed'} (execution: ${startResult.executionId})`,
+      sentStaticMessage: startResult.messageSent,
     };
   }
 }

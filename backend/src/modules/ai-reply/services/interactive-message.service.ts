@@ -452,12 +452,12 @@ export class InteractiveMessageService {
       const dynamicResult =
         await this.dynamicCTAGenerator.generateDynamicCTAs(ctaContext);
 
-      // Convert dynamic CTAs to InteractiveButtons
+      // Convert dynamic CTAs to InteractiveButtons with proper sanitization
       const buttons: InteractiveButton[] = dynamicResult.ctas
         .slice(0, Math.min(maxCTAs, MAX_REPLY_BUTTONS))
         .map((cta) => ({
           id: cta.id,
-          title: cta.title,
+          title: sanitizeButtonTitle(cta.title),
         }));
 
       // Build minimal funnel analysis for compatibility

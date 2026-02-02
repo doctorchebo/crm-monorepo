@@ -68,7 +68,7 @@ interface UseChatStateReturn {
     messageId: string,
     contextMessages: Message[],
     hasMoreBefore: boolean,
-    hasMoreAfter: boolean
+    hasMoreAfter: boolean,
   ) => Promise<void>;
 
   // Scroll management
@@ -217,7 +217,7 @@ export function useChatState(): UseChatStateReturn {
   useEffect(() => {
     const unsubscribe = onNewChat((newChat: NewChatEvent) => {
       console.log(
-        `[useChatState] 🆕 Received new chat event: ${newChat.chatId}`
+        `[useChatState] 🆕 Received new chat event: ${newChat.chatId}`,
       );
 
       // Add the new chat to the top of the list (most recent first)
@@ -226,7 +226,7 @@ export function useChatState(): UseChatStateReturn {
         const exists = prevChats.some((c) => c.chatId === newChat.chatId);
         if (exists) {
           console.log(
-            `[useChatState] Chat ${newChat.chatId} already exists, skipping`
+            `[useChatState] Chat ${newChat.chatId} already exists, skipping`,
           );
           return prevChats;
         }
@@ -250,7 +250,7 @@ export function useChatState(): UseChatStateReturn {
         };
 
         console.log(
-          `[useChatState] Adding new chat to list: ${chatToAdd.chatId}`
+          `[useChatState] Adding new chat to list: ${chatToAdd.chatId}`,
         );
 
         // Add to beginning of list (newest first)
@@ -267,7 +267,7 @@ export function useChatState(): UseChatStateReturn {
   useEffect(() => {
     const unsubscribe = onChatDeleted((event: ChatDeletedEvent) => {
       console.log(
-        `[useChatState] 🗑️ Received chat deleted event: ${event.chatId}`
+        `[useChatState] 🗑️ Received chat deleted event: ${event.chatId}`,
       );
 
       const deletedChatId = event.chatId;
@@ -277,7 +277,7 @@ export function useChatState(): UseChatStateReturn {
         const filtered = prevChats.filter((c) => c.chatId !== deletedChatId);
         if (filtered.length !== prevChats.length) {
           console.log(
-            `[useChatState] Removed chat ${deletedChatId} from chat list`
+            `[useChatState] Removed chat ${deletedChatId} from chat list`,
           );
         }
         return filtered;
@@ -287,7 +287,7 @@ export function useChatState(): UseChatStateReturn {
       if (messagesCacheRef.current.has(deletedChatId)) {
         messagesCacheRef.current.delete(deletedChatId);
         console.log(
-          `[useChatState] Cleared messages cache for chat ${deletedChatId}`
+          `[useChatState] Cleared messages cache for chat ${deletedChatId}`,
         );
       }
 
@@ -296,10 +296,31 @@ export function useChatState(): UseChatStateReturn {
         initialScrollDoneRef.current.delete(deletedChatId);
       }
 
-      // 4. If this was the currently selected chat, deselect it and clear messages
+      // 4. Clear lastFetchedChatIdRef if it was this chat
+      // CRITICAL: This ensures messages will be fetched fresh if the chat is recreated
+      // (e.g., when the same customer sends a new message after their chat was deleted)
+      if (lastFetchedChatIdRef.current === deletedChatId) {
+        lastFetchedChatIdRef.current = null;
+        console.log(
+          `[useChatState] Cleared lastFetchedChatIdRef for deleted chat ${deletedChatId}`,
+        );
+      }
+
+      // 5. Clear previousChatIdRef if it was this chat
+      // CRITICAL: This ensures the Chat Switch effect will run when the same chatId is recreated
+      // Without this, the guard `selectedChatId !== previousChatIdRef.current` would be false
+      // for recreated chats with the same ID, causing messages not to load
+      if (previousChatIdRef.current === deletedChatId) {
+        previousChatIdRef.current = null;
+        console.log(
+          `[useChatState] Cleared previousChatIdRef for deleted chat ${deletedChatId}`,
+        );
+      }
+
+      // 6. If this was the currently selected chat, deselect it and clear messages
       if (selectedChatIdRef.current === deletedChatId) {
         console.log(
-          `[useChatState] Deleted chat was selected, deselecting and clearing messages`
+          `[useChatState] Deleted chat was selected, deselecting and clearing messages`,
         );
         setSelectedChatId(null);
         setMessages([]);
@@ -347,6 +368,7 @@ export function useChatState(): UseChatStateReturn {
   // Listen for chat updates from WebSocket and update local state
   // IMPORTANT: Skip unread count updates for the currently selected chat
   // Also: mark as read on the backend if new messages arrive for the active chat
+  // Also: fetch and add chat to list if it doesn't exist locally (e.g., after deletion + new inbound)
   useEffect(() => {
     if (chatUpdates.size === 0) return;
 
@@ -363,7 +385,53 @@ export function useChatState(): UseChatStateReturn {
       }
     }
 
+    // First, check if any updates are for chats that don't exist locally
+    // This can happen when: user deleted a chat, then that customer sends a new message
+    // The backend will emit chat:update (not chat:new) since the chat exists in the DB
     setChats((prevChats) => {
+      const existingChatIds = new Set(prevChats.map((c) => c.chatId));
+      const missingChatIds: string[] = [];
+
+      chatUpdates.forEach((update, chatId) => {
+        if (!existingChatIds.has(chatId)) {
+          missingChatIds.push(chatId);
+        }
+      });
+
+      // If we have missing chats, fetch them from the backend and add them
+      // This is done outside the setChats to avoid nested state updates
+      if (missingChatIds.length > 0) {
+        console.log(
+          `[useChatState] 📥 Chat updates received for ${missingChatIds.length} missing chat(s), fetching from backend:`,
+          missingChatIds,
+        );
+
+        // Fetch each missing chat and add to state
+        missingChatIds.forEach((chatId) => {
+          backendApi.chats
+            .get(chatId)
+            .then((response) => {
+              const fetchedChat = response as Chat;
+              console.log(`[useChatState] ✅ Fetched missing chat: ${chatId}`);
+              setChats((currentChats) => {
+                // Double-check it's still missing (avoid race conditions)
+                if (currentChats.some((c) => c.chatId === chatId)) {
+                  return currentChats;
+                }
+                // Add to beginning of list (most recent)
+                return [fetchedChat, ...currentChats];
+              });
+            })
+            .catch((error) => {
+              console.error(
+                `[useChatState] ❌ Failed to fetch missing chat ${chatId}:`,
+                error,
+              );
+            });
+        });
+      }
+
+      // Now update existing chats with the updates
       let hasUpdates = false;
       const updatedChats = prevChats.map((chat) => {
         const update = chatUpdates.get(chat.chatId);
@@ -441,7 +509,7 @@ export function useChatState(): UseChatStateReturn {
 
         // Update local chat state to show 0 unread
         setChats((prev) =>
-          prev.map((c) => (c.chatId === chatId ? { ...c, unreadCount: 0 } : c))
+          prev.map((c) => (c.chatId === chatId ? { ...c, unreadCount: 0 } : c)),
         );
       } catch (error) {
         console.error("Failed to mark chat as read:", error);
@@ -449,7 +517,7 @@ export function useChatState(): UseChatStateReturn {
 
       setSelectedChatId(chatId);
     },
-    [selectedChatId, messages, resetUnreadCount, scrollPositionManager]
+    [selectedChatId, messages, resetUnreadCount, scrollPositionManager],
   );
 
   /**
@@ -518,7 +586,7 @@ export function useChatState(): UseChatStateReturn {
       const response = await backendApi.whatsapp.getChatMessages(
         chatId,
         cursor,
-        PAGE_SIZE
+        PAGE_SIZE,
       );
 
       // Race condition check: user may have switched chats during fetch
@@ -538,7 +606,7 @@ export function useChatState(): UseChatStateReturn {
       // Handle empty response
       if (!response.messages || response.messages.length === 0) {
         scrollDebug(
-          "[loadOlderMessages] COMPLETE: No more messages (empty response)"
+          "[loadOlderMessages] COMPLETE: No more messages (empty response)",
         );
         paginationRef.current.hasMore = false;
         paginationRef.current.isLoading = false;
@@ -550,14 +618,14 @@ export function useChatState(): UseChatStateReturn {
       // Sort older messages by timestamp (ascending for display)
       const sortedOlderMessages = [...response.messages].sort(
         (a, b) =>
-          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
       );
 
       // Update messages state with deduplication
       setMessages((prevMessages) => {
         const existingIds = new Set(prevMessages.map((m) => m.messageId));
         const newMessages = sortedOlderMessages.filter(
-          (m) => !existingIds.has(m.messageId)
+          (m) => !existingIds.has(m.messageId),
         );
         const combined = [...newMessages, ...prevMessages];
 
@@ -593,7 +661,7 @@ export function useChatState(): UseChatStateReturn {
 
       scrollDebug(
         "[loadOlderMessages] COMPLETE - New pagination state:",
-        newPaginationState
+        newPaginationState,
       );
 
       // Update legacy ref and React state
@@ -689,7 +757,7 @@ export function useChatState(): UseChatStateReturn {
       const response = await backendApi.whatsapp.getNewerMessages(
         chatId,
         afterTimestamp,
-        PAGE_SIZE
+        PAGE_SIZE,
       );
 
       // Race condition check: user may have switched chats during fetch
@@ -708,7 +776,7 @@ export function useChatState(): UseChatStateReturn {
       // Handle empty response
       if (!response.messages || response.messages.length === 0) {
         scrollDebug(
-          "[loadNewerMessages] COMPLETE: No more messages (empty response)"
+          "[loadNewerMessages] COMPLETE: No more messages (empty response)",
         );
         paginationRef.current.hasMoreAfter = false;
         paginationRef.current.isLoadingNewer = false;
@@ -720,14 +788,14 @@ export function useChatState(): UseChatStateReturn {
       // Sort newer messages by timestamp (ascending for display)
       const sortedNewerMessages = [...response.messages].sort(
         (a, b) =>
-          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
       );
 
       // Update messages state with deduplication - append to end
       setMessages((prevMessages) => {
         const existingIds = new Set(prevMessages.map((m) => m.messageId));
         const newMessages = sortedNewerMessages.filter(
-          (m) => !existingIds.has(m.messageId)
+          (m) => !existingIds.has(m.messageId),
         );
         const combined = [...prevMessages, ...newMessages];
 
@@ -755,7 +823,7 @@ export function useChatState(): UseChatStateReturn {
 
       scrollDebug(
         "[loadNewerMessages] COMPLETE - hasMoreAfter:",
-        response.hasMore
+        response.hasMore,
       );
     } catch (err) {
       console.error("[loadNewerMessages] ERROR:", err);
@@ -779,7 +847,7 @@ export function useChatState(): UseChatStateReturn {
       messageId: string,
       contextMessages: Message[],
       contextHasMoreBefore: boolean,
-      contextHasMoreAfter: boolean
+      contextHasMoreAfter: boolean,
     ) => {
       const chatId = paginationRef.current.chatId;
       if (!chatId) {
@@ -797,7 +865,7 @@ export function useChatState(): UseChatStateReturn {
       // Sort context messages by timestamp (ascending)
       const sortedMessages = [...contextMessages].sort(
         (a, b) =>
-          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
       );
 
       // CRITICAL: REPLACE messages, don't merge
@@ -840,7 +908,7 @@ export function useChatState(): UseChatStateReturn {
         newestTimestamp: newestMessage?.timestamp,
       });
     },
-    []
+    [],
   );
 
   /**
@@ -867,7 +935,7 @@ export function useChatState(): UseChatStateReturn {
           requestAnimationFrame(() => {
             scrollContainerToAbsoluteBottom(
               messagesContainerRef.current,
-              true // smooth
+              true, // smooth
             );
           });
         });
@@ -884,14 +952,14 @@ export function useChatState(): UseChatStateReturn {
         const response = await backendApi.whatsapp.getChatMessages(
           chatId,
           0,
-          PAGE_SIZE
+          PAGE_SIZE,
         );
 
         if (response.messages && response.messages.length > 0) {
           // Sort messages ascending by timestamp
           const sortedMessages = [...response.messages].sort(
             (a, b) =>
-              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
           );
 
           // Update state
@@ -923,7 +991,7 @@ export function useChatState(): UseChatStateReturn {
       } catch (err) {
         console.error(
           "[handleScrollToBottom] Error fetching latest messages:",
-          err
+          err,
         );
         // Even on error, try to scroll to current bottom
         scrollContainerToAbsoluteBottom(messagesContainerRef.current, true);
@@ -1114,7 +1182,7 @@ export function useChatState(): UseChatStateReturn {
 
       scrollDebug(
         "[Chat Switch] Complete. Pagination ref:",
-        paginationRef.current
+        paginationRef.current,
       );
     }
   }, [selectedChatId]);
@@ -1175,7 +1243,7 @@ export function useChatState(): UseChatStateReturn {
           // Otherwise, leave no chat selected - user must explicitly select one
           if (querySelectedChatId) {
             const chatExists = data.some(
-              (c) => c.chatId === querySelectedChatId
+              (c) => c.chatId === querySelectedChatId,
             );
             if (chatExists) {
               setSelectedChatId(querySelectedChatId);
@@ -1187,8 +1255,8 @@ export function useChatState(): UseChatStateReturn {
                   prev.map((c) =>
                     c.chatId === querySelectedChatId
                       ? { ...c, unreadCount: 0 }
-                      : c
-                  )
+                      : c,
+                  ),
                 );
               } catch (error) {
                 console.error("Failed to mark chat as read:", error);
@@ -1201,7 +1269,7 @@ export function useChatState(): UseChatStateReturn {
                   if (Array.isArray(retryData) && retryData.length > 0) {
                     setChats(retryData);
                     const foundChat = retryData.find(
-                      (c) => c.chatId === querySelectedChatId
+                      (c) => c.chatId === querySelectedChatId,
                     );
                     if (foundChat) {
                       setSelectedChatId(querySelectedChatId);
@@ -1212,8 +1280,8 @@ export function useChatState(): UseChatStateReturn {
                           prev.map((c) =>
                             c.chatId === querySelectedChatId
                               ? { ...c, unreadCount: 0 }
-                              : c
-                          )
+                              : c,
+                          ),
                         );
                       } catch (error) {
                         console.error("Failed to mark chat as read:", error);
@@ -1260,7 +1328,7 @@ export function useChatState(): UseChatStateReturn {
     if (lastFetchedChatIdRef.current === selectedChatId) {
       scrollDebug(
         "[Fetch Messages] Skipping - already fetched for:",
-        selectedChatId
+        selectedChatId,
       );
       return;
     }
@@ -1269,7 +1337,7 @@ export function useChatState(): UseChatStateReturn {
       "[Fetch Messages] Running for:",
       selectedChatId,
       "Previous:",
-      lastFetchedChatIdRef.current
+      lastFetchedChatIdRef.current,
     );
 
     // Mark this chat as the one we're loading
@@ -1312,7 +1380,7 @@ export function useChatState(): UseChatStateReturn {
         // Restore scroll position - this WAITS for media to load (event-driven)
         const result = await scrollPositionManager.restoreScrollPosition(
           chatToLoad,
-          { maxWaitMs: 5000 }
+          { maxWaitMs: 5000 },
         );
 
         // Check again if user switched chats
@@ -1346,7 +1414,7 @@ export function useChatState(): UseChatStateReturn {
         const response = await backendApi.whatsapp.getChatMessages(
           chatToLoad,
           0,
-          PAGE_SIZE
+          PAGE_SIZE,
         );
 
         // CRITICAL: Check if we're still on the same chat
@@ -1366,7 +1434,7 @@ export function useChatState(): UseChatStateReturn {
         if (response && response.messages) {
           const fetchedSorted = [...response.messages].sort(
             (a, b) =>
-              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
           );
 
           // CRITICAL: Replace messages entirely - don't merge with previous chat's messages
@@ -1383,7 +1451,7 @@ export function useChatState(): UseChatStateReturn {
             // These are guaranteed to be for the current chat due to our filtering
             const fetchedIds = new Set(fetchedSorted.map((m) => m.messageId));
             const realtimeMessages = prevMessages.filter(
-              (m) => !fetchedIds.has(m.messageId)
+              (m) => !fetchedIds.has(m.messageId),
             );
 
             if (realtimeMessages.length === 0) {
@@ -1394,11 +1462,11 @@ export function useChatState(): UseChatStateReturn {
             const merged = [...fetchedSorted, ...realtimeMessages].sort(
               (a, b) =>
                 new Date(a.timestamp).getTime() -
-                new Date(b.timestamp).getTime()
+                new Date(b.timestamp).getTime(),
             );
 
             scrollDebug(
-              `[Initial Fetch] Merged ${fetchedSorted.length} fetched with ${realtimeMessages.length} realtime messages`
+              `[Initial Fetch] Merged ${fetchedSorted.length} fetched with ${realtimeMessages.length} realtime messages`,
             );
 
             return merged;
@@ -1422,7 +1490,7 @@ export function useChatState(): UseChatStateReturn {
 
           scrollDebug(
             "[Initial Fetch] Pagination state:",
-            paginationRef.current
+            paginationRef.current,
           );
 
           // Update cache - use fetchedSorted as base, sync messages handled by merge above

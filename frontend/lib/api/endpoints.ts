@@ -2035,6 +2035,12 @@ export interface AiConfigOptions {
 export interface AiConfiguration {
   id: string;
   userId: number;
+  // Default AI behavior for new chats
+  defaultAiRepliesEnabled: boolean;
+  defaultAiPaused: boolean;
+  // Conversation strategy - how AI handles initial/vague messages
+  conversationStrategy: "direct" | "qualifying" | "guided";
+  // Style settings
   defaultTone: string;
   defaultStyle: string;
   formalityLevel: string;
@@ -2057,6 +2063,12 @@ export interface AiConfiguration {
 }
 
 export interface UpdateAiConfigurationDto {
+  // Default AI behavior for new chats
+  defaultAiRepliesEnabled?: boolean;
+  defaultAiPaused?: boolean;
+  // Conversation strategy - how AI handles initial/vague messages
+  conversationStrategy?: "direct" | "qualifying" | "guided";
+  // Style settings
   defaultTone?: string;
   defaultStyle?: string;
   formalityLevel?: string;

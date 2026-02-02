@@ -5,49 +5,68 @@
 
 import { db } from '@database/db.connection';
 import { chatStageAssignments, chats, messages } from '@database/schema';
+import { WhatsAppGateway } from '@modules/whatsapp/whatsapp.gateway';
 import {
-  Inject,
   Injectable,
   Logger,
   NotFoundException,
+  OnModuleInit,
   Optional,
-  forwardRef,
 } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { desc, eq } from 'drizzle-orm';
-import { WhatsAppGateway } from '@modules/whatsapp/whatsapp.gateway';
-import { WhatsAppService } from '@modules/whatsapp/whatsapp.service';
 import type { WorkflowStageConfig } from '../../types';
 import type {
-  WorkflowSummary,
-  ChatWorkflowStatus,
   AiStatusResult,
+  ChatWorkflowStatus,
   ClassificationResultType,
+  WorkflowSummary,
 } from '../../types/workflow-engine.types';
-import { HandoffService } from '../handoff.service';
-import { StageService } from '../stage.service';
 import { AiConfigurationService } from '../ai-configuration.service';
+import { HandoffService } from '../handoff.service';
 import { RateLimiterService } from '../rate-limiter.service';
+import { StageService } from '../stage.service';
 import { AiResponseGenerator } from './ai-response.generator';
 
+// Type-only import to avoid circular dependency at module load time
+import type { WhatsAppService } from '@modules/whatsapp/whatsapp.service';
+
 @Injectable()
-export class WorkflowStatusService {
+export class WorkflowStatusService implements OnModuleInit {
   private readonly logger = new Logger(WorkflowStatusService.name);
+
+  // Lazily resolved to break circular dependency
+  private whatsappService: WhatsAppService | undefined;
 
   constructor(
     private readonly stageService: StageService,
     private readonly handoffService: HandoffService,
+    private readonly moduleRef: ModuleRef,
     @Optional()
     private readonly aiConfigService?: AiConfigurationService,
     @Optional()
     private readonly rateLimiter?: RateLimiterService,
     @Optional()
     private readonly whatsappGateway?: WhatsAppGateway,
-    @Inject(forwardRef(() => WhatsAppService))
-    @Optional()
-    private readonly whatsappService?: WhatsAppService,
     @Optional()
     private readonly aiResponseGenerator?: AiResponseGenerator,
   ) {}
+
+  async onModuleInit() {
+    // Lazily resolve WhatsAppService to break circular dependency
+    try {
+      // Dynamic import to get the class reference at runtime
+      const { WhatsAppService } =
+        await import('@modules/whatsapp/whatsapp.service');
+      this.whatsappService = this.moduleRef.get(WhatsAppService, {
+        strict: false,
+      });
+    } catch (error) {
+      this.logger.warn(
+        'Failed to resolve WhatsAppService lazily - this is expected in some test environments',
+      );
+    }
+  }
 
   /**
    * Get workflow summary for a user/sender

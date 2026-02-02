@@ -51,7 +51,7 @@ import { AIReplyModule } from '@modules/ai-reply/ai-reply.module';
 import { ChatsModule } from '@modules/chats/chats.module';
 import { KnowledgeBaseModule } from '@modules/knowledge-base/knowledge-base.module';
 import { WhatsAppModule } from '@modules/whatsapp/whatsapp.module';
-import { Module, forwardRef } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -63,6 +63,7 @@ import {
   AiConfigurationService,
   AiResponseGenerator,
   AntiBanSafeguardService,
+  ChatWorkflowCleanupService,
   GuardrailAlertGateway,
   GuardrailAlertService,
   HandoffNotificationGateway,
@@ -85,6 +86,8 @@ import {
   WorkflowExecutionEngine,
   WorkflowStatusService,
 } from './services';
+// Import WorkflowActionHandlerService directly to avoid circular dependency through index
+import { WorkflowActionHandlerService } from './services/workflow-action-handler.service';
 import { WorkflowController } from './workflow.controller';
 
 @Module({
@@ -115,6 +118,7 @@ import { WorkflowController } from './workflow.controller';
     WorkflowBuilderService,
     WorkflowExecutionEngine,
     WorkflowAssignmentService,
+    WorkflowActionHandlerService,
 
     // AI configuration
     AiConfigurationService,
@@ -144,6 +148,9 @@ import { WorkflowController } from './workflow.controller';
 
     // Main orchestrator
     WorkflowEngineService,
+
+    // Chat lifecycle cleanup
+    ChatWorkflowCleanupService,
 
     // Shared utilities
     ProfilePictureUrlService,
@@ -180,6 +187,9 @@ import { WorkflowController } from './workflow.controller';
     // Usage tracking
     UsageTrackingService,
     UsageThrottleService,
+
+    // Chat lifecycle cleanup
+    ChatWorkflowCleanupService,
   ],
 })
 export class WorkflowModule {}

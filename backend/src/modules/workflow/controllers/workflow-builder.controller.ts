@@ -9,6 +9,8 @@ import {
   Controller,
   Delete,
   Get,
+  Logger,
+  OnModuleInit,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -17,6 +19,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import type { AuthenticatedRequest } from '@shared/types';
 import {
   BulkDeleteWorkflowsDto,
@@ -50,14 +53,38 @@ import { WorkflowAssignmentService } from '../services/workflow-assignment.servi
 import { WorkflowBuilderService } from '../services/workflow-builder.service';
 import { WorkflowExecutionEngine } from '../services/workflow-execution.engine';
 
+// Type-only import to avoid circular dependency at module load time
+import type { WhatsAppService } from '@modules/whatsapp/whatsapp.service';
+
 @Controller('workflow-builder')
 @UseGuards(JwtAuthGuard)
-export class WorkflowBuilderController {
+export class WorkflowBuilderController implements OnModuleInit {
+  private readonly logger = new Logger(WorkflowBuilderController.name);
+
+  // Lazily resolved to break circular dependency
+  private whatsAppService: WhatsAppService | undefined;
+
   constructor(
     private readonly workflowBuilderService: WorkflowBuilderService,
     private readonly workflowExecutionEngine: WorkflowExecutionEngine,
     private readonly workflowAssignmentService: WorkflowAssignmentService,
+    private readonly moduleRef: ModuleRef,
   ) {}
+
+  async onModuleInit() {
+    // Lazily resolve WhatsAppService to break circular dependency
+    try {
+      const { WhatsAppService } =
+        await import('@modules/whatsapp/whatsapp.service');
+      this.whatsAppService = this.moduleRef.get(WhatsAppService, {
+        strict: false,
+      });
+    } catch (error) {
+      console.warn(
+        'Failed to resolve WhatsAppService lazily in WorkflowBuilderController',
+      );
+    }
+  }
 
   // ============================================================================
   // Workflow CRUD
@@ -415,9 +442,56 @@ export class WorkflowBuilderController {
     return this.workflowBuilderService.getExecutionLogs(req.user.userId, id);
   }
 
-  // ============================================================================
-  // Analytics
-  // ============================================================================
+  /**
+   * Resume a paused workflow from a selected node
+   * Used when AI is re-enabled and the user needs to select where to continue
+   *
+   * After workflow execution completes, triggers AI response generation
+   * for the pending inbound message (if any) - UNLESS the workflow already sent a static message.
+   */
+  @Post('chat/:chatId/resume-workflow')
+  async resumeWorkflowFromNode(
+    @Req() req: AuthenticatedRequest,
+    @Param('chatId') chatId: string,
+    @Body() dto: { nodeId: string; action: 'resume' | 'restart' | 'cancel' },
+  ) {
+    // Execute the workflow from the selected node
+    const result = await this.workflowExecutionEngine.resumeWorkflowFromNode(
+      chatId,
+      dto.nodeId,
+      dto.action,
+      req.user.userId,
+    );
+
+    // After workflow resumes, trigger AI response generation for any pending inbound message.
+    // This is necessary because resumeWorkflowFromNode only executes workflow nodes,
+    // it doesn't generate AI responses. The AI response generation happens in
+    // WorkflowEngineService.processMessage(), which we trigger here.
+    // We pass skipWorkflowExecution=true to avoid running the workflow again.
+    //
+    // IMPORTANT: Skip AI response generation if the workflow already sent a static message.
+    // This prevents duplicate messages (workflow message + AI message).
+    if (
+      result.success &&
+      dto.action !== 'cancel' &&
+      !result.sentStaticMessage
+    ) {
+      // Don't await - let AI response generation happen async
+      this.whatsAppService
+        .triggerAiResponseForResume(chatId, req.user.userId, true) // skipWorkflowExecution=true
+        .catch((err) => {
+          console.error(
+            `[Resume Workflow] Failed to trigger AI response: ${err.message}`,
+          );
+        });
+    } else if (result.sentStaticMessage) {
+      console.log(
+        `[Resume Workflow] Skipping AI response - workflow already sent a static message for chat ${chatId}`,
+      );
+    }
+
+    return result;
+  }
 
   @Get('workflows/:id/analytics')
   async getWorkflowAnalytics(
@@ -456,10 +530,17 @@ export class WorkflowBuilderController {
     @Req() req: AuthenticatedRequest,
     @Param('chatId') chatId: string,
   ) {
-    return this.workflowBuilderService.getChatWorkflowState(
+    this.logger.log(
+      `[WorkflowState] Getting workflow state for chat ${chatId}`,
+    );
+    const result = await this.workflowBuilderService.getChatWorkflowState(
       req.user.userId,
       chatId,
     );
+    this.logger.log(
+      `[WorkflowState] Result for chat ${chatId}: isPaused=${result?.isPaused}, workflowId=${result?.workflowId}, nodes=${result?.nodes?.length ?? 0}`,
+    );
+    return result;
   }
 
   /**
