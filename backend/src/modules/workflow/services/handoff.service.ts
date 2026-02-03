@@ -62,7 +62,10 @@ export class HandoffService {
 
       // Create a new assignment without a stage (stage-less workflow)
       // Fetch user's AI defaults if userId is provided, otherwise use system defaults
-      let userDefaults = null;
+      let userDefaults: {
+        defaultAiRepliesEnabled: boolean;
+        defaultAiPaused: boolean;
+      } | null = null;
       if (userId) {
         try {
           userDefaults = await this.aiConfigService.getUserAiDefaults(userId);
@@ -111,7 +114,10 @@ export class HandoffService {
     }
 
     // Fetch user's AI defaults
-    let userDefaults = null;
+    let userDefaults: {
+      defaultAiRepliesEnabled: boolean;
+      defaultAiPaused: boolean;
+    } | null = null;
     try {
       userDefaults = await this.aiConfigService.getUserAiDefaults(userId);
     } catch (error) {

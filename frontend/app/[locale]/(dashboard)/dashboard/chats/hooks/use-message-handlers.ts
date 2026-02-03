@@ -13,12 +13,7 @@ import {
   useState,
 } from "react";
 import { PAGE_SIZE } from "../constants";
-import type {
-  Chat,
-  InboundMessage,
-  Message,
-  MessagesCacheEntry,
-} from "../types";
+import type { Chat, Message, MessagesCacheEntry } from "../types";
 import { scrollContainerToAbsoluteBottom } from "./scroll-utils";
 
 interface UseMessageHandlersProps {
@@ -641,7 +636,7 @@ export function useMessageHandlers(
       const existingIds = new Set(prevMessages.map((m) => m.messageId));
       // Filter for messages that belong to the current chat and don't already exist
       const newMessages = inboundMessages.filter(
-        (wsMsg: InboundMessage) =>
+        (wsMsg) =>
           !existingIds.has(wsMsg.messageId) && wsMsg.chatId === selectedChatId,
       );
 
@@ -649,66 +644,64 @@ export function useMessageHandlers(
 
       addedCount = newMessages.length;
 
-      const newMessageObjects: Message[] = newMessages.map(
-        (wsMsg: InboundMessage): Message => {
-          // For outbound messages, use the status from WebSocket if provided, otherwise 'sent'
-          // For inbound messages, default to 'delivered'
-          const messageStatus = wsMsg.status
-            ? (wsMsg.status as
-                | "pending"
-                | "sent"
-                | "delivered"
-                | "read"
-                | "failed")
-            : wsMsg.direction === "outbound"
-              ? "sent"
-              : "delivered";
+      const newMessageObjects: Message[] = newMessages.map((wsMsg): Message => {
+        // For outbound messages, use the status from WebSocket if provided, otherwise 'sent'
+        // For inbound messages, default to 'delivered'
+        const messageStatus = wsMsg.status
+          ? (wsMsg.status as
+              | "pending"
+              | "sent"
+              | "delivered"
+              | "read"
+              | "failed")
+          : wsMsg.direction === "outbound"
+            ? "sent"
+            : "delivered";
 
-          return {
-            id: undefined,
-            messageId: wsMsg.messageId,
-            text: wsMsg.text,
-            sender: wsMsg.sender,
-            direction: wsMsg.direction || "inbound",
-            timestamp: wsMsg.timestamp,
-            type: wsMsg.type,
-            status: messageStatus,
-            attachments: wsMsg.attachments
-              ? wsMsg.attachments.map((att: any) => ({
-                  id: att.id || att.mediaId,
-                  type: att.type as "image" | "video" | "audio" | "document",
-                  mediaId: att.id || att.mediaId,
-                  fileName: att.fileName || "",
-                  mimeType: att.mimeType || "application/octet-stream",
-                  size: att.size || 0,
-                  s3Key: att.s3Key || att.id || att.mediaId,
-                  // Thumbnail fields - critical for displaying thumbnails instead of originals
-                  thumbnailKey: att.thumbnailKey,
-                  thumbnailStatus: att.thumbnailStatus,
-                  width: att.width,
-                  height: att.height,
-                  blurhash: att.blurhash,
-                  duration: att.duration,
-                  status: att.status || ("success" as const),
-                  uploadedAt: wsMsg.timestamp,
-                  isVoiceNote: att.isVoiceNote || false,
-                  isAnimated: att.isAnimated,
-                }))
-              : undefined,
-            sentAt: wsMsg.timestamp,
-            deliveredAt: new Date().toISOString(),
-            readAt: undefined,
-            isDeleted: false,
-            // Include reply context if present
-            replyToMessageId: wsMsg.replyToMessageId,
-            replyPreview: wsMsg.replyPreview,
-            // Include AI generation metadata
-            isAiGenerated: wsMsg.isAiGenerated,
-            // Include interactive message metadata (buttons, lists)
-            metadata: wsMsg.metadata,
-          };
-        },
-      );
+        return {
+          id: undefined,
+          messageId: wsMsg.messageId,
+          text: wsMsg.text,
+          sender: wsMsg.sender,
+          direction: wsMsg.direction || "inbound",
+          timestamp: wsMsg.timestamp,
+          type: wsMsg.type,
+          status: messageStatus,
+          attachments: wsMsg.attachments
+            ? wsMsg.attachments.map((att: any) => ({
+                id: att.id || att.mediaId,
+                type: att.type as "image" | "video" | "audio" | "document",
+                mediaId: att.id || att.mediaId,
+                fileName: att.fileName || "",
+                mimeType: att.mimeType || "application/octet-stream",
+                size: att.size || 0,
+                s3Key: att.s3Key || att.id || att.mediaId,
+                // Thumbnail fields - critical for displaying thumbnails instead of originals
+                thumbnailKey: att.thumbnailKey,
+                thumbnailStatus: att.thumbnailStatus,
+                width: att.width,
+                height: att.height,
+                blurhash: att.blurhash,
+                duration: att.duration,
+                status: att.status || ("success" as const),
+                uploadedAt: wsMsg.timestamp,
+                isVoiceNote: att.isVoiceNote || false,
+                isAnimated: att.isAnimated,
+              }))
+            : undefined,
+          sentAt: wsMsg.timestamp,
+          deliveredAt: new Date().toISOString(),
+          readAt: undefined,
+          isDeleted: false,
+          // Include reply context if present
+          replyToMessageId: wsMsg.replyToMessageId,
+          replyPreview: wsMsg.replyPreview,
+          // Include AI generation metadata
+          isAiGenerated: wsMsg.isAiGenerated,
+          // Include interactive message metadata (buttons, lists)
+          metadata: wsMsg.metadata,
+        };
+      });
 
       const merged = [...prevMessages, ...newMessageObjects];
       return merged.sort(

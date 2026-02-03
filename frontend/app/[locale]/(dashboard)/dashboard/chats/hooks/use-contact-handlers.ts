@@ -74,11 +74,11 @@ interface UseContactHandlersReturn {
   handleContactsSelected: (contacts: ContactToSend[]) => void;
   handleSendContacts: () => Promise<void>;
   handleStartChatWithContact: (
-    contact: ContactToSend | ReceivedContact
+    contact: ContactToSend | ReceivedContact,
   ) => void;
   handleSenderSelectedForContact: (
     senderId: number,
-    senderPhoneNumber: string
+    senderPhoneNumber: string,
   ) => Promise<void>;
   handleViewAllContacts: (contacts: ReceivedContact[]) => void;
   handleSaveContactFromMessage: (contact: ReceivedContact) => void;
@@ -92,7 +92,7 @@ interface UseContactHandlersReturn {
 }
 
 export function useContactHandlers(
-  props: UseContactHandlersProps
+  props: UseContactHandlersProps,
 ): UseContactHandlersReturn {
   const {
     selectedChatId,
@@ -120,7 +120,7 @@ export function useContactHandlers(
   const [contactsToSend, setContactsToSend] = useState<ContactToSend[]>([]);
   const [contactsToView, setContactsToView] = useState<ReceivedContact[]>([]);
   const [contactToSave, setContactToSave] = useState<ReceivedContact | null>(
-    null
+    null,
   );
   const [contactToStartChat, setContactToStartChat] = useState<{
     firstName: string;
@@ -138,10 +138,13 @@ export function useContactHandlers(
   const handleContactsClick = useCallback(async () => {
     try {
       setContactsLoading(true);
-      const contactsData = await backendApi.contacts.list(0, 100);
-      if (Array.isArray(contactsData)) {
+      const contactsData = await backendApi.contacts.list({
+        page: 1,
+        limit: 100,
+      });
+      if (contactsData.data && Array.isArray(contactsData.data)) {
         setAllContacts(
-          contactsData.map((c: any) => ({
+          contactsData.data.map((c: any) => ({
             id: c.id?.toString(),
             contactId: c.contactId,
             firstName: c.firstName,
@@ -150,7 +153,7 @@ export function useContactHandlers(
             countryCode: c.countryCode,
             avatar: c.avatar,
             isActive: c.isActive,
-          }))
+          })),
         );
       }
       setSendContactsModalOpen(true);
@@ -206,7 +209,7 @@ export function useContactHandlers(
       // Refresh messages - but only if we're still on the same chat
       if (currentMessagesChatIdRef.current !== selectedChatId) {
         console.log(
-          "[ContactHandlers] Skipping message refresh - chat changed"
+          "[ContactHandlers] Skipping message refresh - chat changed",
         );
         return;
       }
@@ -214,7 +217,7 @@ export function useContactHandlers(
       const response = await backendApi.whatsapp.getChatMessages(
         selectedChatId,
         0,
-        PAGE_SIZE
+        PAGE_SIZE,
       );
 
       // Double-check after async operation
@@ -226,18 +229,18 @@ export function useContactHandlers(
       if (response && response.messages) {
         const sorted = [...response.messages].sort(
           (a, b) =>
-            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
         );
         const cachedData = messagesCacheRef.current.get(selectedChatId);
         let combined = sorted;
         if (cachedData && cachedData.cursor > PAGE_SIZE) {
           const existingIds = new Set(sorted.map((m) => m.messageId));
           const olderMessages = cachedData.messages.filter(
-            (m) => !existingIds.has(m.messageId)
+            (m) => !existingIds.has(m.messageId),
           );
           combined = [...olderMessages, ...sorted].sort(
             (a, b) =>
-              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
           );
         }
         setMessages(combined);
@@ -262,7 +265,7 @@ export function useContactHandlers(
         const errorData = err.response.data;
         setError(
           errorData.message ||
-            "Cannot send contacts: Outside 24-hour conversation window. Use an approved template."
+            "Cannot send contacts: Outside 24-hour conversation window. Use an approved template.",
         );
       } else {
         setError("Failed to send contacts");
@@ -310,7 +313,7 @@ export function useContactHandlers(
       setContactToStartChat({ firstName, lastName, phoneNumber });
       setSenderSelectModalOpen(true);
     },
-    []
+    [],
   );
 
   // Handle sender selection for starting a new chat with contact
@@ -348,7 +351,7 @@ export function useContactHandlers(
         console.error("Failed to start chat:", err);
       }
     },
-    [contactToStartChat, setChats, setSelectedChatId]
+    [contactToStartChat, setChats, setSelectedChatId],
   );
 
   // View all contacts from a contact message
@@ -363,7 +366,7 @@ export function useContactHandlers(
       setContactToSave(contact);
       setQuickContactFormOpen(true);
     },
-    []
+    [],
   );
 
   // Save contact from quick form
@@ -382,7 +385,7 @@ export function useContactHandlers(
         let existingContact: { contactId?: string } | null = null;
         try {
           existingContact = (await backendApi.contacts.getByPhone(
-            fullPhoneNumber
+            fullPhoneNumber,
           )) as { contactId?: string } | null;
         } catch {
           // Contact doesn't exist
@@ -424,7 +427,7 @@ export function useContactHandlers(
         setIsSavingContact(false);
       }
     },
-    []
+    [],
   );
 
   // Parse contacts from message metadata
@@ -474,7 +477,7 @@ export function useContactHandlers(
         return null;
       }
     },
-    []
+    [],
   );
 
   return {

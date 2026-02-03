@@ -56,8 +56,9 @@ export class WorkflowStatusService implements OnModuleInit {
     // Lazily resolve WhatsAppService to break circular dependency
     try {
       // Dynamic import to get the class reference at runtime
+      // @ts-ignore - dynamic import
       const { WhatsAppService } =
-        await import('@modules/whatsapp/whatsapp.service');
+        await import('../../../whatsapp/whatsapp.service.js');
       this.whatsappService = this.moduleRef.get(WhatsAppService, {
         strict: false,
       });

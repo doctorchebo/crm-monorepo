@@ -1,16 +1,11 @@
 "use client";
 
-import { useTranslations } from "next-intl";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { backendApi } from "@/lib/api/endpoints";
-import useSWR from "swr";
 import { Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
+import useSWR from "swr";
 
 interface ManageSubscriptionProps {
   teamId: number;
@@ -18,26 +13,32 @@ interface ManageSubscriptionProps {
 
 export function ManageSubscription({ teamId }: ManageSubscriptionProps) {
   const t = useTranslations("team");
-  
+
   // In a real app, you might fetch specific subscription details
   // Here we reuse the team data fetch which typically includes plan info
-  const { data: teamData, error, isLoading } = useSWR<any>(
-    ['team-subscription', teamId],
-    () => backendApi.team.get().then(teams => teams.find((t: any) => t.id === teamId))
+  const {
+    data: teamData,
+    error,
+    isLoading,
+  } = useSWR<any>(["team-subscription", teamId], () =>
+    backendApi.team
+      .get()
+      .then((teams) => (teams as any[]).find((t: any) => t.id === teamId)),
   );
 
   const handlePortal = async () => {
-     try {
-         // This would redirect to Stripe portal via backend endpoint
-         // await backendApi.billing.createPortalSession(...)
-         window.location.href = "/api/billing/portal"; // Use legacy route for now if needed or backendApi
-     } catch (e) {
-         console.error(e);
-     }
+    try {
+      // This would redirect to Stripe portal via backend endpoint
+      // await backendApi.billing.createPortalSession(...)
+      window.location.href = "/api/billing/portal"; // Use legacy route for now if needed or backendApi
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   if (isLoading) return <Loader2 className="animate-spin" />;
-  if (error || !teamData) return <div className="text-red-500">Failed to load subscription</div>;
+  if (error || !teamData)
+    return <div className="text-red-500">Failed to load subscription</div>;
 
   return (
     <Card className="mb-8">
@@ -55,8 +56,8 @@ export function ManageSubscription({ teamId }: ManageSubscriptionProps) {
                 {teamData?.subscriptionStatus === "active"
                   ? t("billedMonthly")
                   : teamData?.subscriptionStatus === "trialing"
-                  ? t("trial")
-                  : t("noSubscription")}
+                    ? t("trial")
+                    : t("noSubscription")}
               </p>
             </div>
             {/* 
@@ -64,7 +65,7 @@ export function ManageSubscription({ teamId }: ManageSubscriptionProps) {
                 or just redirect to billing settings 
             */}
             <Button variant="outline" onClick={handlePortal}>
-                {t("manageSubscription")}
+              {t("manageSubscription")}
             </Button>
           </div>
         </div>

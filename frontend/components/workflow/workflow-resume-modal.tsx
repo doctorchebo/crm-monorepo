@@ -102,7 +102,7 @@ interface WorkflowResumeModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   workflowState: WorkflowResumeState | null;
-  onResume: (nodeId: string | null, action: ResumeAction) => Promise<void>;
+  onResume: (nodeId: string | null, action: ResumeAction) => Promise<boolean>;
   isLoading?: boolean;
   /** Optional error message to display */
   error?: string | null;

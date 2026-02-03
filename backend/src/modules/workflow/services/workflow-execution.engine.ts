@@ -1390,7 +1390,11 @@ export class WorkflowExecutionEngine implements OnModuleInit {
               'failed',
               result.error?.message,
             );
-            return;
+            return {
+              completed: false,
+              messageSent: messageSentDuringExecution,
+              stopReason: 'error',
+            };
           } else {
             // Continue to next node despite error
             currentNodeId = await this.getNextNode(
@@ -2321,7 +2325,10 @@ IMPORTANT: Respond with ONLY the category name (one of: ${config.categories.map(
       }
 
       // Fetch user's AI defaults for new assignments
-      let userDefaults = null;
+      let userDefaults: {
+        defaultAiRepliesEnabled: boolean;
+        defaultAiPaused: boolean;
+      } | null = null;
       if (chat.userId) {
         try {
           userDefaults = await this.aiConfigService.getUserAiDefaults(
@@ -3035,7 +3042,7 @@ IMPORTANT: Respond with ONLY the category name (one of: ${config.categories.map(
           id: lastInboundMessage.messageId,
           content: lastInboundMessage.text || '',
           type: lastInboundMessage.type || 'text',
-          sender: lastInboundMessage.sender,
+          direction: lastInboundMessage.direction as 'inbound' | 'outbound',
           timestamp: lastInboundMessage.timestamp,
         }
       : undefined;

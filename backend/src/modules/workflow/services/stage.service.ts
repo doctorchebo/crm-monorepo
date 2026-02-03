@@ -536,7 +536,10 @@ export class StageService {
         .where(eq(chatStageAssignments.chatId, chatId));
     } else {
       // New assignment - fetch user's AI defaults, falling back to system defaults
-      let userDefaults = null;
+      let userDefaults: {
+        defaultAiRepliesEnabled: boolean;
+        defaultAiPaused: boolean;
+      } | null = null;
       try {
         userDefaults = await this.aiConfigService.getUserAiDefaults(userId);
       } catch (error) {

@@ -1509,8 +1509,11 @@ export const backendApi = {
 
   // Notes endpoints
   notes: {
-    create: (data: { messageId?: string; chatId?: string; note: string }) =>
-      apiClient.post("/notes", data),
+    create: (data: {
+      messageId?: string;
+      chatId?: string;
+      note: string;
+    }): Promise<NoteResponse> => apiClient.post("/notes", data),
 
     /** @deprecated Use getPaginated for better performance */
     getChatNotes: (chatId: string) => apiClient.get(`/notes/chat/${chatId}`),

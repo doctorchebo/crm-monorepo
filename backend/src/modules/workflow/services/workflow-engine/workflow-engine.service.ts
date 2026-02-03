@@ -164,8 +164,9 @@ export class WorkflowEngineService implements OnModuleInit {
 
     // Lazily resolve WhatsAppService to break circular dependency
     try {
+      // @ts-ignore - dynamic import
       const { WhatsAppService } =
-        await import('@modules/whatsapp/whatsapp.service');
+        await import('../../../whatsapp/whatsapp.service.js');
       this.whatsappService = this.moduleRef.get(WhatsAppService, {
         strict: false,
       });
@@ -180,8 +181,9 @@ export class WorkflowEngineService implements OnModuleInit {
 
     // Lazily resolve WorkflowActionHandlerService to break circular dependency
     try {
+      // @ts-ignore - dynamic import
       const { WorkflowActionHandlerService } =
-        await import('../workflow-action-handler.service');
+        await import('../workflow-action-handler.service.js');
       this.workflowActionHandler = this.moduleRef.get(
         WorkflowActionHandlerService,
         {

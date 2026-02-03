@@ -248,7 +248,11 @@ function TeamMembers() {
 function InviteTeamMember() {
   const t = useTranslations("team");
   const { user, isLoading } = useUser();
-  const isOwner = user?.role === "owner";
+  const { team } = useTeam();
+  const currentUserMember = team?.teamMembers?.find(
+    (member) => member.userId === user?.id,
+  );
+  const isOwner = currentUserMember?.role?.toLowerCase() === "owner";
   const [inviteState, inviteAction, isInvitePending] = useActionState<
     ActionState,
     FormData

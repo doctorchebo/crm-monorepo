@@ -139,7 +139,7 @@ interface NoteItemProps {
   searchQuery?: string;
   onDelete: (noteId: number) => void;
   onHighlightDismiss: () => void;
-  t: (key: string, params?: Record<string, unknown>) => string;
+  t: (key: string, params?: Record<string, any>) => string;
 }
 
 function NoteItem({
@@ -219,7 +219,7 @@ interface SearchResultItemProps {
   result: NoteResponse & { matchContext?: string };
   searchQuery: string;
   onNavigate: (noteId: number) => void;
-  t: (key: string, params?: Record<string, unknown>) => string;
+  t: (key: string, params?: Record<string, any>) => string;
 }
 
 function SearchResultItem({

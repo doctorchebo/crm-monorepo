@@ -74,8 +74,9 @@ export class WorkflowBuilderController implements OnModuleInit {
   async onModuleInit() {
     // Lazily resolve WhatsAppService to break circular dependency
     try {
+      // @ts-ignore - dynamic import
       const { WhatsAppService } =
-        await import('@modules/whatsapp/whatsapp.service');
+        await import('../../whatsapp/whatsapp.service.js');
       this.whatsAppService = this.moduleRef.get(WhatsAppService, {
         strict: false,
       });
@@ -478,7 +479,7 @@ export class WorkflowBuilderController implements OnModuleInit {
     ) {
       // Don't await - let AI response generation happen async
       this.whatsAppService
-        .triggerAiResponseForResume(chatId, req.user.userId, true) // skipWorkflowExecution=true
+        ?.triggerAiResponseForResume(chatId, req.user.userId, true) // skipWorkflowExecution=true
         .catch((err) => {
           console.error(
             `[Resume Workflow] Failed to trigger AI response: ${err.message}`,

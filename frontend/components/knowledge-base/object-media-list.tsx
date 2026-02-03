@@ -202,7 +202,7 @@ function CompressionStatusIndicator({
             {originalFileSize &&
               compressedFileSize &&
               ` ${formatFileSize(originalFileSize)} → ${formatFileSize(
-                compressedFileSize
+                compressedFileSize,
               )}`}
           </span>
         </div>
@@ -266,7 +266,7 @@ function MediaCard({
   const isAiEnabled = true; // media.aiEnabled ?? true;
 
   const roleOption = MEDIA_ROLE_OPTIONS.find(
-    (r) => r.value === media.mediaType
+    (r) => r.value === media.mediaType,
   );
 
   // Determine if we have a valid thumbnail or image URL to display
@@ -517,7 +517,7 @@ function EditMediaDialog({
 
   // Only these need controlled state (for immediate visual feedback)
   const [mediaRole, setMediaRole] = useState<MediaRole>(
-    media.mediaType as MediaRole
+    media.mediaType as MediaRole,
   );
   const [aiEnabled, setAiEnabled] = useState(media.aiEnabled ?? true);
 
@@ -773,7 +773,7 @@ export function ObjectMediaList({
   // for our manual mutate() calls and useEffect dependencies
   const cacheKey = useMemo(
     () => (objectId ? ["object-media", objectId] : null),
-    [objectId]
+    [objectId],
   );
 
   // Fetch media for object
@@ -783,11 +783,11 @@ export function ObjectMediaList({
   // We manually trigger refresh via mutate() when data changes
   const { data: mediaList, isLoading } = useSWR<KbMedia[]>(
     cacheKey,
-    () => kbMediaApi.listObjectMedia(objectId),
+    () => kbMediaApi.listObjectMedia(objectId!),
     {
       revalidateOnFocus: false,
       revalidateOnReconnect: false,
-    }
+    },
   );
 
   // Calculate media limit status from the media list
@@ -820,7 +820,7 @@ export function ObjectMediaList({
     const pendingMedia = mediaList?.filter(
       (m) =>
         m.compressionStatus === "pending" ||
-        m.compressionStatus === "processing"
+        m.compressionStatus === "processing",
     );
 
     if (!pendingMedia || pendingMedia.length === 0) {
@@ -841,13 +841,13 @@ export function ObjectMediaList({
               result.status,
               result.compressionRatio
                 ? `(${result.compressionRatio.toFixed(1)}x reduction)`
-                : ""
+                : "",
             );
           }
         } catch (err) {
           console.error(
             `Failed to check compression status for ${media.id}:`,
-            err
+            err,
           );
         }
       }
@@ -939,9 +939,9 @@ export function ObjectMediaList({
             <CardDescription>
               {mediaList?.length
                 ? t("mediaCountWithLimit", {
-                  count: mediaList.length,
-                  limit: KB_OBJECT_MEDIA_LIMIT,
-                })
+                    count: mediaList.length,
+                    limit: KB_OBJECT_MEDIA_LIMIT,
+                  })
                 : t("noMedia")}
             </CardDescription>
           </div>
@@ -993,7 +993,7 @@ export function ObjectMediaList({
                     // Use real-time progress from WebSocket if available,
                     // otherwise fall back to status-based display
                     getStatus(media.id) === "processing" ||
-                      media.compressionStatus === "processing"
+                    media.compressionStatus === "processing"
                       ? getProgress(media.id)
                       : undefined
                   }
