@@ -55,9 +55,10 @@ export function EmojiPickerButton({
   const handleEmojiSelect = useCallback(
     (emoji: Emoji) => {
       onEmojiSelect(emoji);
-      // Picker closes automatically via FloatingEmojiPicker
+      // Close the picker after selection
+      setIsOpen(false);
     },
-    [onEmojiSelect]
+    [onEmojiSelect],
   );
 
   const handleKeyDown = useCallback(
@@ -67,7 +68,7 @@ export function EmojiPickerButton({
         handleToggle();
       }
     },
-    [handleToggle]
+    [handleToggle],
   );
 
   return (
@@ -82,7 +83,7 @@ export function EmojiPickerButton({
           "p-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded-full transition-colors",
           "disabled:opacity-50 disabled:cursor-not-allowed",
           isOpen && "text-foreground bg-muted",
-          className
+          className,
         )}
         title="Emoji"
         aria-label="Open emoji picker"

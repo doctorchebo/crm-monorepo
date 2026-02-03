@@ -266,6 +266,11 @@ export class ChatsCrudService {
         where: and(...whereConditions),
         with: {
           assignee: true, // Include assignee user data for display
+          chatLabels: {
+            with: {
+              label: true, // Include label details
+            },
+          },
         },
         orderBy: [
           desc(sql`${chats.lastMessageTime} IS NULL`),
@@ -278,23 +283,40 @@ export class ChatsCrudService {
       // Enrich with contact names and flatten assignee info
       const enrichedChats = await this.enrichChatsWithContactNames(result);
 
-      // Add assignee fields for frontend convenience
+      // Add assignee fields and labels for frontend convenience
       return enrichedChats.map((chat) => {
-        const assignee = (
-          chat as Chat & {
-            assignee?: {
-              name?: string;
-              email?: string;
-              profilePictureThumbnailKey?: string | null;
+        const chatWithRelations = chat as Chat & {
+          assignee?: {
+            name?: string;
+            email?: string;
+            profilePictureThumbnailKey?: string | null;
+          };
+          chatLabels?: Array<{
+            label: {
+              id: string;
+              name: string;
+              color: string;
+              emoji?: string | null;
             };
-          }
-        ).assignee;
+          }>;
+        };
+
+        const assignee = chatWithRelations.assignee;
+        const labels =
+          chatWithRelations.chatLabels?.map((cl) => ({
+            id: cl.label.id,
+            name: cl.label.name,
+            color: cl.label.color,
+            emoji: cl.label.emoji,
+          })) || [];
+
         return {
           ...chat,
           assigneeName: assignee?.name || null,
           assigneeEmail: assignee?.email || null,
           assigneeProfilePictureKey:
             assignee?.profilePictureThumbnailKey || null,
+          labels,
         };
       });
     } catch (error) {

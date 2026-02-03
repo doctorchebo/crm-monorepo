@@ -3,6 +3,7 @@ import { signToken, verifyToken } from "@/lib/auth/session";
 import createMiddleware from "next-intl/middleware";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
+
 const protectedRoutes = "/dashboard";
 
 // Create i18n middleware with locale detection
@@ -33,6 +34,20 @@ function getPreferredLocale(request: NextRequest): string {
   return defaultLocale;
 }
 
+/**
+ * Check if a date string represents an expired timestamp
+ */
+function isExpired(dateString: string): boolean {
+  try {
+    const expiresAt = new Date(dateString);
+    const now = new Date();
+    return expiresAt <= now;
+  } catch {
+    // If we can't parse, assume not expired (allow the request)
+    return false;
+  }
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -54,17 +69,19 @@ export async function middleware(request: NextRequest) {
 
   // Also check for client-side expiry tracking cookies
   const accessTokenExpiresAt = request.cookies.get(
-    "jwt_token_expires_at"
+    "jwt_token_expires_at",
   )?.value;
   const refreshTokenExpiresAt = request.cookies.get(
-    "jwt_refresh_token_expires_at"
+    "jwt_refresh_token_expires_at",
   )?.value;
 
   // Redirect to login if accessing protected route without valid tokens
   if (isProtectedRoute) {
-    // If both access and refresh tokens don't exist, redirect to login
-    if (!accessToken || !refreshToken) {
+    // If no tokens exist at all, redirect to login
+    if (!accessToken && !refreshToken) {
+      console.debug("[Middleware] No tokens exist, redirecting to login");
       const response = NextResponse.redirect(new URL("/sign-in", request.url));
+      // Clean up any stale cookies
       response.cookies.delete("jwt_token");
       response.cookies.delete("jwt_refresh_token");
       response.cookies.delete("jwt_token_expires_at");
@@ -73,58 +90,39 @@ export async function middleware(request: NextRequest) {
       return response;
     }
 
-    // IMPORTANT: If tokens exist, we should trust them unless we can PROVE they're expired
-    // The expiration tracking cookies might not be set yet (race condition on first load)
-    // Only redirect if we can prove refresh token is expired
-
-    if (refreshTokenExpiresAt) {
-      try {
-        const expiresAt = new Date(refreshTokenExpiresAt);
-        const now = new Date();
-        if (expiresAt <= now) {
-          // Refresh token is DEFINITELY expired
-          const response = NextResponse.redirect(
-            new URL("/sign-in", request.url)
-          );
-          response.cookies.delete("jwt_token");
-          response.cookies.delete("jwt_refresh_token");
-          response.cookies.delete("jwt_token_expires_at");
-          response.cookies.delete("jwt_refresh_token_expires_at");
-          response.cookies.delete("session");
-          return response;
-        }
-        // Refresh token is still valid, allow request
-      } catch (error) {
-        console.error(
-          "[Middleware] Error parsing refresh token expiry:",
-          error
-        );
-        // If we can't parse expiry, allow request - tokens are probably fine
-      }
-    } else {
-      // No expiration tracking cookie yet - this is normal on first login
-      // Tokens exist in HTTP-only cookies, so allow the request
-      // Client will set tracking cookies asynchronously
+    // CRITICAL: Check refresh token expiration
+    // Only redirect if we can DEFINITIVELY prove the refresh token is expired
+    // If refresh token is still valid, let the request through - client will handle refresh
+    if (refreshTokenExpiresAt && isExpired(refreshTokenExpiresAt)) {
       console.debug(
-        "[Middleware] Tokens exist but no expiration tracking cookies yet - allowing request"
+        "[Middleware] Refresh token is EXPIRED, redirecting to login",
       );
+      const response = NextResponse.redirect(new URL("/sign-in", request.url));
+      // Clear all auth cookies since refresh token is expired
+      response.cookies.delete("jwt_token");
+      response.cookies.delete("jwt_refresh_token");
+      response.cookies.delete("jwt_token_expires_at");
+      response.cookies.delete("jwt_refresh_token_expires_at");
+      response.cookies.delete("session");
+      return response;
     }
 
-    // If access token is expired but refresh token is valid,
-    // let the request through. Client-side will handle refresh automatically.
-    if (accessTokenExpiresAt) {
-      try {
-        const expiresAt = new Date(accessTokenExpiresAt);
-        const now = new Date();
-        if (expiresAt <= now) {
-          console.debug(
-            "[Middleware] Access token expired, but refresh token is valid. Client will refresh."
-          );
-          // Don't redirect - let page load, client will refresh token
-        }
-      } catch (error) {
-        console.error("[Middleware] Error parsing access token expiry:", error);
-      }
+    // At this point, either:
+    // 1. Refresh token is still valid (access token might be expired but that's OK)
+    // 2. We don't have expiration tracking cookies yet (first load after login)
+    //
+    // In both cases, let the request through. The AuthContext on the client
+    // will handle token refresh if needed. This is the key fix for the
+    // "next day" scenario where access token expired but refresh token is valid.
+
+    if (accessTokenExpiresAt && isExpired(accessTokenExpiresAt)) {
+      console.debug(
+        "[Middleware] Access token expired but refresh token is valid - allowing request (client will refresh)",
+      );
+    } else if (!accessTokenExpiresAt && accessToken) {
+      console.debug(
+        "[Middleware] Token exists but no expiration tracking - allowing request",
+      );
     }
   }
 

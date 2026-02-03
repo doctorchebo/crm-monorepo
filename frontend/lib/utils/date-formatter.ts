@@ -105,7 +105,7 @@ export interface DateTranslations {
  */
 export function formatDateBadge(
   date: Date,
-  options: DateFormatOptions = {}
+  options: DateFormatOptions = {},
 ): string {
   const { locale = "en-US", includeYear = true, capitalize = true } = options;
 
@@ -177,7 +177,7 @@ const DAY_KEYS: (keyof DateTranslations)[] = [
 export function formatDateBadgeWithTranslations(
   date: Date,
   translations: DateTranslations,
-  options: DateFormatOptions = {}
+  options: DateFormatOptions = {},
 ): string {
   const { locale = "en-US", includeYear = true } = options;
 
@@ -226,7 +226,7 @@ export function formatDateBadgeWithTranslations(
  */
 export function formatStickyDate(
   date: Date,
-  options: DateFormatOptions = {}
+  options: DateFormatOptions = {},
 ): string {
   const { locale = "en-US" } = options;
 
@@ -267,7 +267,7 @@ export function formatStickyDate(
 export function formatStickyDateWithTranslations(
   date: Date,
   translations: DateTranslations,
-  options: DateFormatOptions = {}
+  options: DateFormatOptions = {},
 ): string {
   const { locale = "en-US" } = options;
 
@@ -314,4 +314,58 @@ export function parseDate(input: string | Date): Date {
     return input;
   }
   return new Date(input);
+}
+
+// ============================================================
+// CHAT LIST TIME FORMATTING
+// ============================================================
+
+/**
+ * Translations interface for chat list relative time formatting
+ */
+export interface ChatListTimeTranslations {
+  now: string;
+  minutesAgo: (count: number) => string;
+  hoursAgo: (count: number) => string;
+  yesterday: string;
+  daysAgo: (count: number) => string;
+}
+
+/**
+ * Format a date for chat list timestamps (WhatsApp-style).
+ *
+ * Behavior:
+ * - Just now (< 1 min): "now" / translated
+ * - Minutes ago (< 1 hour): "Xm ago" / translated
+ * - Hours ago (< 24 hours): "Xh ago" / translated
+ * - Yesterday: "Yesterday" / translated
+ * - Within last week: "Xd ago" / translated
+ * - Older: Locale date (e.g., "Dec 15" or "Dec 15, 2024")
+ *
+ * @param date - The date to format
+ * @param translations - Translation functions for relative times
+ * @returns Formatted time string
+ */
+export function formatChatListTime(
+  date: Date,
+  translations: ChatListTimeTranslations,
+): string {
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  if (diffMins < 1) return translations.now;
+  if (diffMins < 60) return translations.minutesAgo(diffMins);
+  if (diffHours < 24) return translations.hoursAgo(diffHours);
+  if (diffDays === 1) return translations.yesterday;
+  if (diffDays < 7) return translations.daysAgo(diffDays);
+
+  // For older dates, use locale-aware date formatting
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: date.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
+  });
 }

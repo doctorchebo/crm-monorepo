@@ -11,11 +11,11 @@
  * │    └── Processes workflow nodes                                         │
  * │    └── Emits: workflow.action.send_message                              │
  * │    └── Emits: workflow.action.send_template                             │
- * │    └── Emits: workflow.action.add_tag, etc.                             │
+ * │    └── Emits: workflow.action.add_tag, workflow.action.remove_tag       │
  * ├─────────────────────────────────────────────────────────────────────────┤
  * │  WorkflowActionHandlerService (this service)                            │
  * │    └── Listens for events                                               │
- * │    └── Executes actual operations (send message, add tag, etc.)         │
+ * │    └── Executes actual operations (send message, add/remove label, etc.)│
  * │    └── Tracks what actions were performed for a given execution         │
  * └─────────────────────────────────────────────────────────────────────────┘
  */
@@ -64,12 +64,23 @@ export interface WorkflowActionResult {
   actionType:
     | 'send_message'
     | 'send_template'
-    | 'add_tag'
-    | 'remove_tag'
+    | 'add_label'
+    | 'remove_label'
     | 'other';
   success: boolean;
   messageSent?: boolean;
   error?: string;
+}
+
+/**
+ * Event for label (tag) actions from workflows
+ */
+export interface WorkflowLabelActionEvent {
+  chatId: string;
+  executionId: string;
+  tags?: string[];
+  tagName?: string;
+  target?: 'chat' | 'contact';
 }
 
 // ============================================================================
@@ -92,6 +103,21 @@ interface IWhatsAppService {
   ): Promise<{ messageId?: string } | null>;
 }
 
+// Labels service interface to avoid circular import
+interface ILabelsService {
+  applyLabelByName(
+    chatId: string,
+    labelName: string,
+    teamId: number,
+    workflowId?: string,
+  ): Promise<void>;
+  removeLabelByName(
+    chatId: string,
+    labelName: string,
+    teamId: number,
+  ): Promise<void>;
+}
+
 // ============================================================================
 // Service
 // ============================================================================
@@ -108,6 +134,7 @@ export class WorkflowActionHandlerService implements OnModuleInit {
 
   // Lazily resolved to avoid circular dependency
   private whatsappService: IWhatsAppService | null = null;
+  private labelsService: ILabelsService | null = null;
 
   constructor(
     private readonly moduleRef: ModuleRef,
@@ -130,6 +157,22 @@ export class WorkflowActionHandlerService implements OnModuleInit {
         `[WorkflowActionHandler] WhatsAppService not available: ${(error as Error).message}`,
       );
     }
+
+    // Lazily resolve LabelsService to avoid circular dependency
+    try {
+      const { LabelsService } = await import('@modules/labels/labels.service');
+      this.labelsService = this.moduleRef.get(LabelsService, {
+        strict: false,
+      });
+      this.logger.log(
+        `[WorkflowActionHandler] LabelsService: ${this.labelsService ? 'AVAILABLE' : 'NOT FOUND'}`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `[WorkflowActionHandler] LabelsService not available: ${(error as Error).message}`,
+      );
+    }
+
     this.logger.log('WorkflowActionHandlerService initialized');
   }
 
@@ -201,6 +244,151 @@ export class WorkflowActionHandlerService implements OnModuleInit {
       messageSent: false,
       error: 'Template messages not yet implemented',
     });
+  }
+
+  /**
+   * Handle workflow add label (tag) events
+   */
+  @OnEvent('workflow.action.add_tag', { async: true })
+  async handleAddLabelEvent(event: WorkflowLabelActionEvent): Promise<void> {
+    this.logger.log(
+      `[WorkflowAction] Received add_tag event for chat ${event.chatId}`,
+    );
+
+    if (!this.labelsService) {
+      this.logger.error(
+        `[WorkflowAction] Cannot add label - LabelsService not available`,
+      );
+      this.trackAction(event.executionId, event.chatId, {
+        executionId: event.executionId,
+        chatId: event.chatId,
+        actionType: 'add_label',
+        success: false,
+        error: 'LabelsService not available',
+      });
+      return;
+    }
+
+    try {
+      // Get chat info to find team ID
+      const chatInfo = await this.getChatInfo(event.chatId);
+      if (!chatInfo) {
+        throw new Error(`Could not find chat info for chatId: ${event.chatId}`);
+      }
+
+      // Get team ID from chat's sender
+      const teamId = await this.getTeamIdFromChat(event.chatId);
+      if (!teamId) {
+        throw new Error(
+          `Could not determine team ID for chat: ${event.chatId}`,
+        );
+      }
+
+      // Handle both single tagName and array of tags
+      const labelNames = event.tags || (event.tagName ? [event.tagName] : []);
+
+      for (const labelName of labelNames) {
+        await this.labelsService.applyLabelByName(
+          event.chatId,
+          labelName,
+          teamId,
+          event.executionId,
+        );
+      }
+
+      this.logger.log(
+        `[WorkflowAction] Applied labels [${labelNames.join(', ')}] to chat ${event.chatId}`,
+      );
+
+      this.trackAction(event.executionId, event.chatId, {
+        executionId: event.executionId,
+        chatId: event.chatId,
+        actionType: 'add_label',
+        success: true,
+      });
+    } catch (error) {
+      this.logger.error(
+        `[WorkflowAction] Failed to add label to chat ${event.chatId}: ${(error as Error).message}`,
+        (error as Error).stack,
+      );
+
+      this.trackAction(event.executionId, event.chatId, {
+        executionId: event.executionId,
+        chatId: event.chatId,
+        actionType: 'add_label',
+        success: false,
+        error: (error as Error).message,
+      });
+    }
+  }
+
+  /**
+   * Handle workflow remove label (tag) events
+   */
+  @OnEvent('workflow.action.remove_tag', { async: true })
+  async handleRemoveLabelEvent(event: WorkflowLabelActionEvent): Promise<void> {
+    this.logger.log(
+      `[WorkflowAction] Received remove_tag event for chat ${event.chatId}`,
+    );
+
+    if (!this.labelsService) {
+      this.logger.error(
+        `[WorkflowAction] Cannot remove label - LabelsService not available`,
+      );
+      this.trackAction(event.executionId, event.chatId, {
+        executionId: event.executionId,
+        chatId: event.chatId,
+        actionType: 'remove_label',
+        success: false,
+        error: 'LabelsService not available',
+      });
+      return;
+    }
+
+    try {
+      // Get team ID from chat
+      const teamId = await this.getTeamIdFromChat(event.chatId);
+      if (!teamId) {
+        throw new Error(
+          `Could not determine team ID for chat: ${event.chatId}`,
+        );
+      }
+
+      // Handle both single tagName and array of tags
+      const labelNames = event.tags || (event.tagName ? [event.tagName] : []);
+
+      for (const labelName of labelNames) {
+        await this.labelsService.removeLabelByName(
+          event.chatId,
+          labelName,
+          teamId,
+        );
+      }
+
+      this.logger.log(
+        `[WorkflowAction] Removed labels [${labelNames.join(', ')}] from chat ${event.chatId}`,
+      );
+
+      this.trackAction(event.executionId, event.chatId, {
+        executionId: event.executionId,
+        chatId: event.chatId,
+        actionType: 'remove_label',
+        success: true,
+      });
+    } catch (error) {
+      this.logger.error(
+        `[WorkflowAction] Failed to remove label from chat ${event.chatId}: ${(error as Error).message}`,
+        (error as Error).stack,
+      );
+
+      this.trackAction(event.executionId, event.chatId, {
+        executionId: event.executionId,
+        chatId: event.chatId,
+        actionType: 'remove_label',
+        success: false,
+        error: (error as Error).message,
+      });
+    }
   }
 
   /**
@@ -381,6 +569,40 @@ export class WorkflowActionHandlerService implements OnModuleInit {
     } catch (error) {
       this.logger.error(
         `[WorkflowAction] Error fetching chat info for ${chatId}: ${(error as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Get team ID from a chat
+   * Looks up the chat's team association
+   */
+  private async getTeamIdFromChat(chatId: string): Promise<number | null> {
+    try {
+      const chat = await db.query.chats.findFirst({
+        where: eq(chats.chatId, chatId),
+      });
+
+      if (!chat) {
+        this.logger.warn(`[WorkflowAction] Chat not found: ${chatId}`);
+        return null;
+      }
+
+      // Return team ID if available
+      if (chat.teamId) {
+        return chat.teamId;
+      }
+
+      // Fallback: try to get team from user
+      // This would require additional lookups - for now just return null
+      this.logger.warn(
+        `[WorkflowAction] Chat ${chatId} has no team ID assigned`,
+      );
+      return null;
+    } catch (error) {
+      this.logger.error(
+        `[WorkflowAction] Error fetching team ID for chat ${chatId}: ${(error as Error).message}`,
       );
       return null;
     }

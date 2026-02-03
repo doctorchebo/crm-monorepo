@@ -1,4 +1,5 @@
 import { KnowledgeBaseModule } from '@modules/knowledge-base/knowledge-base.module';
+import { LabelsModule } from '@modules/labels/labels.module';
 import { MediaCompressionModule } from '@modules/media-compression/media-compression.module';
 import { NotesModule } from '@modules/notes/notes.module';
 import { PinsModule } from '@modules/pins/pins.module';
@@ -52,6 +53,7 @@ import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
     ChatsModule,
     AutomationModule,
     KanbanModule,
+    LabelsModule,
     SettingsModule,
     BillingModule,
     ThumbnailModule,

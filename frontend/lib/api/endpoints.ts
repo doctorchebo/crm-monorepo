@@ -280,6 +280,78 @@ export interface MessageReactionsResponse {
  */
 export type PinDurationValue = 24 | 168 | 720;
 
+// ==================== Labels Types ====================
+
+/**
+ * Label response from API
+ */
+export interface LabelResponse {
+  id: string;
+  teamId: number;
+  name: string;
+  color: string;
+  emoji: string | null;
+  description: string | null;
+  isSystem: boolean;
+  sortOrder: number;
+  chatCount?: number;
+  createdBy: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * DTO for creating a label
+ */
+export interface CreateLabelDto {
+  name: string;
+  color?: string;
+  emoji?: string;
+  description?: string;
+}
+
+/**
+ * DTO for updating a label
+ */
+export interface UpdateLabelDto {
+  name?: string;
+  color?: string;
+  emoji?: string | null;
+  description?: string | null;
+}
+
+/**
+ * DTO for applying labels to chats
+ */
+export interface ApplyLabelsDto {
+  chatIds: string[];
+  labelIds: string[];
+}
+
+/**
+ * DTO for removing labels from chats
+ */
+export interface RemoveLabelsDto {
+  chatIds: string[];
+  labelIds: string[];
+}
+
+/**
+ * Response for chats with a specific label
+ */
+export interface ChatsWithLabelResponse {
+  label: LabelResponse;
+  chats: Array<{
+    chatId: string;
+    participantName: string | null;
+    participantPhone: string;
+    lastMessage: string | null;
+    lastMessageTime: string | null;
+    unreadCount: number;
+  }>;
+  total: number;
+}
+
 /**
  * Pinned message response from API
  */
@@ -2013,6 +2085,76 @@ export const backendApi = {
       rateLimitCurrentCount?: number;
       rateLimitMaxCount?: number;
     }> => apiClient.get(`/workflow/ai/status/${chatId}`),
+  },
+
+  // ==================== Labels API ====================
+  labels: {
+    /**
+     * Get all labels for the current team
+     */
+    list: (): Promise<LabelResponse[]> => apiClient.get("/labels"),
+
+    /**
+     * Get a specific label by ID
+     */
+    get: (labelId: string): Promise<LabelResponse> =>
+      apiClient.get(`/labels/${labelId}`),
+
+    /**
+     * Create a new label
+     */
+    create: (data: CreateLabelDto): Promise<LabelResponse> =>
+      apiClient.post("/labels", data),
+
+    /**
+     * Update a label
+     */
+    update: (labelId: string, data: UpdateLabelDto): Promise<LabelResponse> =>
+      apiClient.patch(`/labels/${labelId}`, data),
+
+    /**
+     * Delete a label
+     */
+    delete: (labelId: string): Promise<{ success: boolean; message: string }> =>
+      apiClient.delete(`/labels/${labelId}`),
+
+    /**
+     * Get all labels for a specific chat
+     */
+    getChatLabels: (chatId: string): Promise<LabelResponse[]> =>
+      apiClient.get(`/labels/chat/${chatId}`),
+
+    /**
+     * Apply labels to multiple chats
+     */
+    applyToChats: (
+      data: ApplyLabelsDto,
+    ): Promise<{ applied: number; skipped: number }> =>
+      apiClient.post("/labels/apply", data),
+
+    /**
+     * Remove labels from multiple chats
+     */
+    removeFromChats: (data: RemoveLabelsDto): Promise<{ removed: number }> =>
+      apiClient.post("/labels/remove", data),
+
+    /**
+     * Get all chats with a specific label
+     */
+    getChatsWithLabel: (
+      labelId: string,
+      options?: { skip?: number; take?: number },
+    ): Promise<ChatsWithLabelResponse> => {
+      const params = new URLSearchParams();
+      if (options?.skip !== undefined)
+        params.append("skip", String(options.skip));
+      if (options?.take !== undefined)
+        params.append("take", String(options.take));
+      const query = params.toString();
+      return apiClient.get(
+        `/labels/${labelId}/chats${query ? `?${query}` : ""}`,
+      );
+    },
   },
 
   // ==================== Public Endpoints ====================

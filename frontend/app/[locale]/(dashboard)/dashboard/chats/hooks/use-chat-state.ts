@@ -95,6 +95,7 @@ interface UseChatStateReturn {
   // Handlers
   handleSelectChat: (chatId: string) => void;
   handleScrollToBottom: () => void;
+  refetchChats: () => Promise<void>;
 }
 
 export function useChatState(): UseChatStateReturn {
@@ -1314,6 +1315,18 @@ export function useChatState(): UseChatStateReturn {
     fetchChats();
   }, []);
 
+  // Refetch chats (useful for updating label data, etc.)
+  const refetchChats = useCallback(async () => {
+    try {
+      const data = await backendApi.whatsapp.getChats(0, 50);
+      if (Array.isArray(data)) {
+        setChats(data);
+      }
+    } catch (err) {
+      console.error("Error refetching chats:", err);
+    }
+  }, []);
+
   // Fetch messages when chat changes
   // CRITICAL: This effect complements the Chat Switch effect:
   // - Chat Switch effect handles cache restoration and message swapping
@@ -1584,5 +1597,6 @@ export function useChatState(): UseChatStateReturn {
     isTransitioningRef,
     handleSelectChat,
     handleScrollToBottom,
+    refetchChats,
   };
 }

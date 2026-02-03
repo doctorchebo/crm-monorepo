@@ -7,6 +7,7 @@ export {
 } from "./use-date-separators";
 export { useDebouncedSearch } from "./use-debounced-search";
 export { useInputFocus } from "./use-input-focus";
+export { useLabelsIntegration } from "./use-labels-integration";
 export { useMediaHandlers } from "./use-media-handlers";
 export { useMessageHandlers } from "./use-message-handlers";
 export { useMessageSearch } from "./use-message-search";

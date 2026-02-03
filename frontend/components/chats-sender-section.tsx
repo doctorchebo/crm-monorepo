@@ -3,7 +3,7 @@
  * Collapsible section for chats grouped by sender number
  * Each sender has its own inbox with ability to expand/collapse
  * Shows unread message badges per chat item (WhatsApp-style)
- * Includes archive/delete actions via chevron menu on hover
+ * Includes archive/delete/label actions via chevron menu on hover
  */
 
 "use client";
@@ -12,9 +12,14 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import {
+  formatChatListTime,
+  type ChatListTimeTranslations,
+} from "@/lib/utils/date-formatter";
 import {
   Archive,
   ArchiveRestore,
@@ -25,11 +30,13 @@ import {
   Mic,
   MoreVertical,
   Sticker,
+  Tag,
   Trash2,
   Video,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
+import { LabelBadgeList, SelectionCheckbox } from "./labels";
 import { UserAvatar } from "./user-avatar";
 
 interface Chat {
@@ -53,6 +60,13 @@ interface Chat {
   assignedTo?: number | null;
   assigneeName?: string | null;
   assigneeProfilePictureUrl?: string | null;
+  // Labels
+  labels?: Array<{
+    id: string;
+    name: string;
+    color: string;
+    emoji?: string | null;
+  }>;
 }
 
 interface ChatsSenderSectionProps {
@@ -64,7 +78,12 @@ interface ChatsSenderSectionProps {
   onArchiveChat?: (chatId: string) => void;
   onUnarchiveChat?: (chatId: string) => void;
   onDeleteChat?: (chatId: string, participantName?: string) => void;
+  onLabelChat?: (chatId: string) => void;
   isArchivedView?: boolean;
+  // Selection mode support
+  selectionMode?: boolean;
+  selectedChatIds?: string[];
+  onToggleChatSelection?: (chatId: string) => void;
 }
 
 export function ChatsSenderSection({
@@ -76,10 +95,27 @@ export function ChatsSenderSection({
   onArchiveChat,
   onUnarchiveChat,
   onDeleteChat,
+  onLabelChat,
   isArchivedView = false,
+  selectionMode = false,
+  selectedChatIds = [],
+  onToggleChatSelection,
 }: ChatsSenderSectionProps) {
   const [isExpanded, setIsExpanded] = useState(true);
   const t = useTranslations("chats.chatList");
+  const tl = useTranslations("labels");
+
+  // Time formatting translations for the shared utility
+  const timeTranslations: ChatListTimeTranslations = useMemo(
+    () => ({
+      now: t("dates.now"),
+      minutesAgo: (count: number) => t("dates.minutesAgo", { count }),
+      hoursAgo: (count: number) => t("dates.hoursAgo", { count }),
+      yesterday: t("dates.yesterday"),
+      daysAgo: (count: number) => t("dates.daysAgo", { count }),
+    }),
+    [t],
+  );
 
   // Calculate total unread count for this sender section
   const totalUnreadCount = useMemo(() => {
@@ -148,8 +184,18 @@ export function ChatsSenderSection({
                       )
                   : undefined
               }
+              onLabel={onLabelChat ? () => onLabelChat(chat.chatId) : undefined}
               isArchivedView={isArchivedView}
               t={t}
+              tl={tl}
+              timeTranslations={timeTranslations}
+              selectionMode={selectionMode}
+              isSelectedForBulk={selectedChatIds.includes(chat.chatId)}
+              onToggleSelection={
+                onToggleChatSelection
+                  ? () => onToggleChatSelection(chat.chatId)
+                  : undefined
+              }
             />
           ))}
         </div>
@@ -168,8 +214,15 @@ interface ChatListItemProps {
   onArchive?: () => void;
   onUnarchive?: () => void;
   onDelete?: () => void;
+  onLabel?: () => void;
   isArchivedView?: boolean;
   t: ReturnType<typeof useTranslations>;
+  tl: ReturnType<typeof useTranslations>;
+  timeTranslations: ChatListTimeTranslations;
+  // Selection mode
+  selectionMode?: boolean;
+  isSelectedForBulk?: boolean;
+  onToggleSelection?: () => void;
 }
 
 /**
@@ -281,7 +334,7 @@ function useHoverWithMenu() {
 
 /**
  * Chat item actions menu component
- * Handles archive/unarchive/delete operations
+ * Handles archive/unarchive/delete/label operations
  */
 interface ChatActionsMenuProps {
   isOpen: boolean;
@@ -289,8 +342,10 @@ interface ChatActionsMenuProps {
   onArchive?: () => void;
   onUnarchive?: () => void;
   onDelete?: () => void;
+  onLabel?: () => void;
   isArchivedView?: boolean;
   t: ReturnType<typeof useTranslations>;
+  tl: ReturnType<typeof useTranslations>;
 }
 
 function ChatActionsMenu({
@@ -299,8 +354,10 @@ function ChatActionsMenu({
   onArchive,
   onUnarchive,
   onDelete,
+  onLabel,
   isArchivedView,
   t,
+  tl,
 }: ChatActionsMenuProps) {
   // Prevent hydration mismatch by only rendering dropdown after mount
   const [isMounted, setIsMounted] = useState(false);
@@ -309,7 +366,7 @@ function ChatActionsMenu({
     setIsMounted(true);
   }, []);
 
-  const hasAnyAction = onArchive || onUnarchive || onDelete;
+  const hasAnyAction = onArchive || onUnarchive || onDelete || onLabel;
   if (!hasAnyAction) return null;
 
   // Return a placeholder button during SSR to maintain consistent DOM structure
@@ -335,6 +392,21 @@ function ChatActionsMenu({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-40">
+        {onLabel && (
+          <>
+            <DropdownMenuItem
+              onClick={(e) => {
+                e.stopPropagation();
+                onLabel();
+              }}
+              className="gap-2"
+            >
+              <Tag className="h-4 w-4" />
+              {tl("labelChat")}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        )}
         {isArchivedView
           ? onUnarchive && (
               <DropdownMenuItem
@@ -389,8 +461,10 @@ interface ChatIndicatorsProps {
   onArchive?: () => void;
   onUnarchive?: () => void;
   onDelete?: () => void;
+  onLabel?: () => void;
   isArchivedView?: boolean;
   t: ReturnType<typeof useTranslations>;
+  tl: ReturnType<typeof useTranslations>;
 }
 
 function ChatIndicators({
@@ -401,11 +475,13 @@ function ChatIndicators({
   onArchive,
   onUnarchive,
   onDelete,
+  onLabel,
   isArchivedView,
   t,
+  tl,
 }: ChatIndicatorsProps) {
   const hasUnread = (chat.unreadCount || 0) > 0;
-  const hasMenu = !!(onArchive || onUnarchive || onDelete);
+  const hasMenu = !!(onArchive || onUnarchive || onDelete || onLabel);
   const hasAssignee = !!chat.assignedTo;
 
   return (
@@ -456,8 +532,10 @@ function ChatIndicators({
             onArchive={onArchive}
             onUnarchive={onUnarchive}
             onDelete={onDelete}
+            onLabel={onLabel}
             isArchivedView={isArchivedView}
             t={t}
+            tl={tl}
           />
         </div>
       )}
@@ -472,21 +550,38 @@ function ChatListItem({
   onArchive,
   onUnarchive,
   onDelete,
+  onLabel,
   isArchivedView,
   t,
+  tl,
+  timeTranslations,
+  selectionMode,
+  isSelectedForBulk,
+  onToggleSelection,
 }: ChatListItemProps) {
   const { showHoverState, isMenuOpen, handlers } = useHoverWithMenu();
   const hasUnread = (chat.unreadCount || 0) > 0;
+  const hasLabels = chat.labels && chat.labels.length > 0;
 
   // Get the appropriate preview based on last activity type
   const { text: previewText, icon } = getChatPreview(chat, t);
+
+  // In selection mode, clicking toggles selection instead of selecting chat
+  const handleClick = () => {
+    if (selectionMode && onToggleSelection) {
+      onToggleSelection();
+    } else {
+      onSelect();
+    }
+  };
 
   return (
     <div
       className={cn(
         "group w-full rounded-lg text-sm transition-colors hover:bg-muted",
-        isSelected && "bg-primary/10 font-medium",
-        hasUnread && !isSelected && "bg-muted/50",
+        isSelected && !selectionMode && "bg-primary/10 font-medium",
+        isSelectedForBulk && "bg-primary/20 ring-2 ring-primary/50",
+        hasUnread && !isSelected && !isSelectedForBulk && "bg-muted/50",
       )}
       onMouseEnter={handlers.onMouseEnter}
       onMouseLeave={handlers.onMouseLeave}
@@ -494,16 +589,26 @@ function ChatListItem({
       <div
         role="button"
         tabIndex={0}
-        onClick={onSelect}
+        onClick={handleClick}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            onSelect();
+            handleClick();
           }
         }}
         className="w-full px-3 py-2 text-left cursor-pointer"
       >
         <div className="flex items-start justify-between gap-2">
+          {/* Selection checkbox */}
+          {selectionMode && onToggleSelection && (
+            <div className="flex-shrink-0 pt-0.5">
+              <SelectionCheckbox
+                checked={!!isSelectedForBulk}
+                onChange={onToggleSelection}
+              />
+            </div>
+          )}
+
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <p
@@ -528,6 +633,16 @@ function ChatListItem({
                 <span className="truncate">{previewText}</span>
               </p>
             )}
+            {/* Labels display */}
+            {hasLabels && (
+              <div className="mt-1">
+                <LabelBadgeList
+                  labels={chat.labels!}
+                  size="sm"
+                  maxVisible={2}
+                />
+              </div>
+            )}
           </div>
 
           <div className="flex flex-col items-end gap-1 flex-shrink-0">
@@ -540,50 +655,31 @@ function ChatListItem({
                     : "text-muted-foreground",
                 )}
               >
-                {formatTime(new Date(chat.lastMessageTime), t)}
+                {formatChatListTime(
+                  new Date(chat.lastMessageTime),
+                  timeTranslations,
+                )}
               </span>
             )}
 
-            <ChatIndicators
-              chat={chat}
-              showHoverState={showHoverState}
-              isMenuOpen={isMenuOpen}
-              onMenuOpenChange={handlers.onMenuOpenChange}
-              onArchive={onArchive}
-              onUnarchive={onUnarchive}
-              onDelete={onDelete}
-              isArchivedView={isArchivedView}
-              t={t}
-            />
+            {!selectionMode && (
+              <ChatIndicators
+                chat={chat}
+                showHoverState={showHoverState}
+                isMenuOpen={isMenuOpen}
+                onMenuOpenChange={handlers.onMenuOpenChange}
+                onArchive={onArchive}
+                onUnarchive={onUnarchive}
+                onDelete={onDelete}
+                onLabel={onLabel}
+                isArchivedView={isArchivedView}
+                t={t}
+                tl={tl}
+              />
+            )}
           </div>
         </div>
       </div>
     </div>
   );
-}
-
-/**
- * Formats a date to a relative time string with translations
- * Uses short format for recent times (now, minutes, hours) and days for older
- * Falls back to formatted date for messages older than a week
- */
-function formatTime(date: Date, t: ReturnType<typeof useTranslations>): string {
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / (1000 * 60));
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-  if (diffMins < 1) return t("dates.now");
-  if (diffMins < 60) return t("dates.minutesAgo", { count: diffMins });
-  if (diffHours < 24) return t("dates.hoursAgo", { count: diffHours });
-  if (diffDays === 1) return t("dates.yesterday");
-  if (diffDays < 7) return t("dates.daysAgo", { count: diffDays });
-
-  // For older dates, use locale-aware date formatting
-  return date.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: date.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
-  });
 }

@@ -2,7 +2,7 @@ import { AudioUnlockInitializer } from "@/components/audio-unlock-initializer";
 import { NotificationContainer } from "@/components/notifications/notification-container";
 import { NotificationProvider } from "@/hooks/use-notification";
 import { defaultLocale, locales } from "@/i18n";
-import { TokenProvider } from "@/lib/auth/token-provider";
+import { AuthProvider } from "@/lib/auth/auth-context";
 import { ThemeProvider } from "@/lib/theme/theme-provider";
 import { ThemeScript } from "@/lib/theme/theme-script";
 import { routing } from "@/src/i18n/routing";
@@ -55,7 +55,7 @@ export default async function RootLayout({ children, params }: Props) {
       </head>
       <body className="min-h-[100dvh] bg-white dark:bg-gray-950 text-black dark:text-white">
         <AudioUnlockInitializer />
-        <TokenProvider>
+        <AuthProvider>
           <NotificationProvider>
             <NextIntlClientProvider locale={locale}>
               <ThemeProvider>
@@ -75,7 +75,7 @@ export default async function RootLayout({ children, params }: Props) {
               </ThemeProvider>
             </NextIntlClientProvider>
           </NotificationProvider>
-        </TokenProvider>
+        </AuthProvider>
       </body>
     </html>
   );

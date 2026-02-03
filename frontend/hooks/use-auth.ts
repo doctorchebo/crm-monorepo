@@ -1,59 +1,108 @@
 /**
- * Hook for managing authentication state and redirects in client components
- * Uses centralized TokenManager for token lifecycle management
+ * Authentication Hooks
+ *
+ * This module provides React hooks for managing authentication state
+ * in client components. It uses the centralized AuthContext for state
+ * management and TokenManager for token lifecycle operations.
+ *
+ * Key features:
+ * - Automatic token refresh when access token is expired but refresh token is valid
+ * - Protection for authenticated routes with automatic redirects
+ * - Non-blocking auth status checks for conditional rendering
  */
 
 "use client";
 
+import { useAuthContext, useIsAuthenticated } from "@/lib/auth/auth-context";
 import { TokenManager } from "@/lib/auth/token-manager";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 /**
- * Hook that redirects to login if user is not authenticated
- * Checks token validity and starts automatic token refresh
+ * Hook that protects a route and redirects to login if not authenticated.
+ *
+ * IMPORTANT: This hook properly handles the "next day" scenario where:
+ * - Access token has expired (1 hour lifetime)
+ * - Refresh token is still valid (7 day lifetime)
+ *
+ * In this case, it will:
+ * 1. Wait for the AuthContext to finish its initial check (which includes silent refresh)
+ * 2. Only redirect if authentication ultimately fails
+ *
+ * This prevents the flash redirect when returning the next day with a valid refresh token.
  */
 export function useAuthProtection() {
   const router = useRouter();
+  const { status, isLoading, isAuthenticated } = useAuthContext();
+  const hasRedirected = useRef(false);
 
   useEffect(() => {
-    const checkAuth = () => {
-      // Check if user has valid access token
-      if (!TokenManager.isAccessTokenValid()) {
-        console.log(
-          "[useAuthProtection] No valid access token, redirecting to login"
-        );
-        TokenManager.clearTokens();
-        router.push("/sign-in");
-        return;
-      }
+    // Don't do anything while loading - AuthContext is checking/refreshing tokens
+    if (isLoading || status === "loading") {
+      console.debug(
+        "[useAuthProtection] Waiting for auth check to complete...",
+      );
+      return;
+    }
 
-      // Start automatic refresh checking
+    // Only redirect once to prevent multiple redirects
+    if (!isAuthenticated && !hasRedirected.current) {
+      hasRedirected.current = true;
+      console.log(
+        "[useAuthProtection] User not authenticated after auth check, redirecting to login",
+      );
+      router.push("/sign-in");
+      return;
+    }
+
+    // User is authenticated - ensure auto-refresh is running
+    if (isAuthenticated) {
+      console.debug(
+        "[useAuthProtection] User authenticated, starting auto-refresh",
+      );
       TokenManager.startAutoRefreshCheck();
-    };
-
-    // Check auth on mount
-    checkAuth();
+    }
 
     return () => {
-      // Cleanup on unmount
-      TokenManager.stopAutoRefreshCheck();
+      // Don't stop auto-refresh on unmount - it should persist during the session
+      // This is handled by logout action
     };
-  }, [router]);
+  }, [status, isLoading, isAuthenticated, router]);
+
+  // Return loading state so components can show a loading indicator
+  return { isLoading: isLoading || status === "loading" };
 }
 
 /**
- * Alternative hook that returns auth status without redirecting
- * Useful for components that need to conditionally render
+ * Hook that returns auth status without redirecting.
+ * Useful for components that need to conditionally render based on auth state.
+ *
+ * This hook properly reflects the current authentication state including
+ * any pending refresh operations.
  */
 export function useAuth() {
-  const isAuthenticated = TokenManager.isAccessTokenValid();
-  const token = isAuthenticated ? TokenManager.getAccessToken() : null;
+  const { isLoading, isAuthenticated, refreshAuth, signOut } = useAuthContext();
 
   return {
+    /** Whether auth check is in progress (including silent refresh) */
+    isLoading,
+    /** Whether user is currently authenticated */
     isAuthenticated,
-    token,
+    /** Token getter (always null for HTTP-only cookies, but kept for API compatibility) */
+    token: null,
+    /** Whether refresh token is valid (can be used to show "session expired" vs "please login") */
     isRefreshTokenValid: TokenManager.isRefreshTokenValid(),
+    /** Remaining time on access token in seconds */
     getAccessTokenTimeRemaining: TokenManager.getAccessTokenTimeRemaining(),
+    /** Manually trigger a token refresh */
+    refreshAuth,
+    /** Sign out and clear all tokens */
+    signOut,
   };
 }
+
+/**
+ * Hook specifically for checking if user is authenticated.
+ * Lightweight version that only returns loading and authenticated states.
+ */
+export { useIsAuthenticated };

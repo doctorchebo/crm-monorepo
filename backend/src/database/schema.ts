@@ -982,7 +982,7 @@ export const activityLogsRelations = relations(activityLogs, ({ one }) => ({
   }),
 }));
 
-// Add relations to chats table for notes, team, and assignment
+// Add relations to chats table for notes, team, assignment, and labels
 export const chatsRelations = relations(chats, ({ one, many }) => ({
   notes: many(notes),
   team: one(teams, {
@@ -1003,6 +1003,7 @@ export const chatsRelations = relations(chats, ({ one, many }) => ({
     fields: [chats.chatId],
     references: [chatLocks.chatId],
   }),
+  chatLabels: many(chatLabels),
 }));
 
 // Add relations to messages table for notes
@@ -2623,6 +2624,105 @@ export const kanbanCardsRelations = relations(kanbanCards, ({ one }) => ({
   chat: one(chats, {
     fields: [kanbanCards.chatId],
     references: [chats.chatId],
+  }),
+}));
+
+// ==================== Labels (Chat Organization) ====================
+
+/**
+ * Labels table - team-scoped labels for organizing chats
+ * Each label has a color and optional emoji for visual identification
+ * System labels are auto-created from workflow templates and cannot be deleted
+ */
+export const labels = pgTable(
+  'labels',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    teamId: integer('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 100 }).notNull(),
+    color: varchar('color', { length: 20 }).notNull().default('#6366f1'),
+    emoji: varchar('emoji', { length: 50 }),
+    description: text('description'),
+    isSystem: boolean('is_system').default(false),
+    sortOrder: integer('sort_order').default(0),
+    createdBy: integer('created_by').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (table) => ({
+    teamIdIndex: index('idx_labels_team_id').on(table.teamId),
+    isSystemIndex: index('idx_labels_is_system').on(table.isSystem),
+    sortOrderIndex: index('idx_labels_sort_order').on(
+      table.teamId,
+      table.sortOrder,
+    ),
+    uniqueTeamName: unique('uq_labels_team_name').on(table.teamId, table.name),
+  }),
+);
+
+export type Label = typeof labels.$inferSelect;
+export type NewLabel = typeof labels.$inferInsert;
+
+/**
+ * Chat Labels junction table - links chats to labels (many-to-many)
+ * Tracks who/what applied the label for auditing
+ */
+export const chatLabels = pgTable(
+  'chat_labels',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    chatId: varchar('chat_id')
+      .notNull()
+      .references(() => chats.chatId, { onDelete: 'cascade' }),
+    labelId: uuid('label_id')
+      .notNull()
+      .references(() => labels.id, { onDelete: 'cascade' }),
+    appliedBy: integer('applied_by').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    appliedByWorkflowId: uuid('applied_by_workflow_id'),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (table) => ({
+    chatIdIndex: index('idx_chat_labels_chat_id').on(table.chatId),
+    labelIdIndex: index('idx_chat_labels_label_id').on(table.labelId),
+    appliedByIndex: index('idx_chat_labels_applied_by').on(table.appliedBy),
+    uniqueChatLabel: unique('uq_chat_labels').on(table.chatId, table.labelId),
+  }),
+);
+
+export type ChatLabel = typeof chatLabels.$inferSelect;
+export type NewChatLabel = typeof chatLabels.$inferInsert;
+
+// Labels relations
+export const labelsRelations = relations(labels, ({ one, many }) => ({
+  team: one(teams, {
+    fields: [labels.teamId],
+    references: [teams.id],
+  }),
+  creator: one(users, {
+    fields: [labels.createdBy],
+    references: [users.id],
+  }),
+  chatLabels: many(chatLabels),
+}));
+
+export const chatLabelsRelations = relations(chatLabels, ({ one }) => ({
+  chat: one(chats, {
+    fields: [chatLabels.chatId],
+    references: [chats.chatId],
+  }),
+  label: one(labels, {
+    fields: [chatLabels.labelId],
+    references: [labels.id],
+  }),
+  appliedByUser: one(users, {
+    fields: [chatLabels.appliedBy],
+    references: [users.id],
   }),
 }));
 

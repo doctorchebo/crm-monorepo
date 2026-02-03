@@ -6,6 +6,7 @@ import {
   Loader2,
   MessageSquare,
   Search,
+  Tag,
   X,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -25,6 +26,12 @@ import {
 } from "@/components/archived-chats-drawer";
 import { ChatsSenderSection } from "@/components/chats-sender-section";
 import { DeleteChatDialog } from "@/components/dialogs/delete-chat-dialog";
+import {
+  ChatSelectionBanner,
+  LabelFilterChips,
+  LabelSelectorModal,
+  LabelsManagementPanel,
+} from "@/components/labels";
 import { RateLimitBanner } from "@/components/rate-limit-banner";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,6 +40,12 @@ import {
   SidebarTab,
 } from "@/components/ui/chat-sidebar";
 import { Input } from "@/components/ui/input";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useAIEvents } from "@/hooks/use-ai-events";
 import { useAuthProtection } from "@/hooks/use-auth";
 import { useChatNotifications } from "@/hooks/use-chat-notifications";
@@ -70,6 +83,7 @@ import {
   useChatState,
   useContactHandlers,
   useInputFocus,
+  useLabelsIntegration,
   useMediaHandlers,
   useMessageHandlers,
   useMessageSearch,
@@ -334,6 +348,13 @@ export default function ChatsPage() {
       enableRegenerateBanner();
     }
   }, [chatState.selectedChatId, clearPendingReview, enableRegenerateBanner]);
+
+  // Labels integration hook - manages filtering, selection, and label management
+  const labelsIntegration = useLabelsIntegration({
+    chats: chatState.chats,
+    selectedChatId: chatState.selectedChatId,
+    onChatsRefetch: chatState.refetchChats,
+  });
 
   // Chat search hook - manages searching through chat list
   const chatSearch = useChatSearch({ debounceMs: 200, minChars: 1 });
@@ -842,6 +863,14 @@ export default function ChatsPage() {
       <div className="flex-1 flex overflow-hidden">
         {/* Left Panel: Chat List */}
         <div className="w-full lg:w-80 border-r flex flex-col bg-muted/30 relative">
+          {/* Bulk Selection Banner */}
+          {labelsIntegration.selectionMode && (
+            <ChatSelectionBanner
+              selectedCount={labelsIntegration.selectedChatIds.length}
+              onCancel={labelsIntegration.exitSelectionMode}
+              onLabel={labelsIntegration.openLabelModal}
+            />
+          )}
           {/* Search Input */}
           <div className="p-4 border-b">
             <div className="flex gap-2">
@@ -879,6 +908,37 @@ export default function ChatsPage() {
               >
                 <Archive className="h-4 w-4" />
               </Button>
+              {/* Labels Management Button */}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={labelsIntegration.openManagementPanel}
+                      className="flex-shrink-0"
+                    >
+                      <Tag className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    {t("chatList.manageLabels")}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+            {/* Label Filter */}
+            <div className="mt-2 flex items-center gap-2">
+              <LabelFilterChips
+                labels={labelsIntegration.labels}
+                selectedLabelId={labelsIntegration.selectedLabelFilter}
+                onSelectLabel={labelsIntegration.setSelectedLabelFilter}
+              />
+              {labelsIntegration.selectedLabelFilter && (
+                <span className="text-xs text-muted-foreground">
+                  {labelsIntegration.filteredChats.length} {t("chatList.chats")}
+                </span>
+              )}
             </div>
             {/* Search results count */}
             {chatSearch.isSearchMode && !chatSearch.isSearching && (
@@ -924,17 +984,39 @@ export default function ChatsPage() {
                   isLoading={chatSearch.isSearching}
                 />
               )
-            ) : chatState.chats.length === 0 ? (
+            ) : labelsIntegration.filteredChats.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full p-4 text-center">
-                <MessageSquare className="h-12 w-12 text-muted-foreground mb-3 opacity-40" />
-                <p className="text-muted-foreground">{t("noChats")}</p>
+                {labelsIntegration.selectedLabelFilter ? (
+                  <>
+                    <Tag className="h-12 w-12 text-muted-foreground mb-3 opacity-40" />
+                    <p className="text-muted-foreground">
+                      {t("chatList.noChatsWithLabel")}
+                    </p>
+                    <Button
+                      variant="link"
+                      size="sm"
+                      onClick={() =>
+                        labelsIntegration.setSelectedLabelFilter(null)
+                      }
+                      className="mt-2"
+                    >
+                      {t("chatList.clearFilter")}
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <MessageSquare className="h-12 w-12 text-muted-foreground mb-3 opacity-40" />
+                    <p className="text-muted-foreground">{t("noChats")}</p>
+                  </>
+                )}
               </div>
             ) : (
               /* Normal Chat List Mode */
               chatState.senders.map((sender) => {
-                const senderChats = chatState.chats.filter(
+                const senderChats = labelsIntegration.filteredChats.filter(
                   (c) => c.senderId === sender.id,
                 );
+                if (senderChats.length === 0) return null;
                 return (
                   <ChatsSenderSection
                     key={sender.id}
@@ -945,6 +1027,12 @@ export default function ChatsPage() {
                     onSelectChat={chatState.handleSelectChat}
                     onArchiveChat={handleArchiveChat}
                     onDeleteChat={handleDeleteChatClick}
+                    onLabelChat={labelsIntegration.enterSelectionMode}
+                    selectionMode={labelsIntegration.selectionMode}
+                    selectedChatIds={labelsIntegration.selectedChatIds}
+                    onToggleChatSelection={
+                      labelsIntegration.toggleChatSelection
+                    }
                   />
                 );
               })
@@ -961,6 +1049,26 @@ export default function ChatsPage() {
             selectedChatId={chatState.selectedChatId}
             deletedChatId={lastDeletedChatId}
             senders={chatState.senders}
+          />
+
+          {/* Labels Management Panel */}
+          <LabelsManagementPanel
+            isOpen={labelsIntegration.managementPanelOpen}
+            onClose={labelsIntegration.closeManagementPanel}
+            labels={labelsIntegration.labels}
+            isLoading={labelsIntegration.isLoadingLabels}
+            onCreateLabel={async (name, color, emoji) => {
+              await labelsIntegration.handleCreateLabel(name, color, emoji);
+            }}
+            onUpdateLabel={labelsIntegration.handleUpdateLabel}
+            onDeleteLabel={labelsIntegration.handleDeleteLabel}
+            chatsWithLabel={labelsIntegration.chatsWithViewingLabel}
+            isLoadingChats={labelsIntegration.isLoadingChatsWithLabel}
+            onViewLabelChats={labelsIntegration.handleViewLabelChats}
+            onAddLabelsToChats={labelsIntegration.handleAddLabelsToChats}
+            onRemoveLabelFromChats={
+              labelsIntegration.handleRemoveLabelFromChats
+            }
           />
         </div>
 
@@ -1400,6 +1508,22 @@ export default function ChatsPage() {
         }}
         onConfirm={handlePinReplace}
         oldestPinMessage={pins.pinnedMessages[0]?.message?.text || null}
+      />
+
+      {/* Label Selector Modal */}
+      <LabelSelectorModal
+        open={labelsIntegration.labelModalOpen}
+        onOpenChange={(open) => {
+          if (!open) labelsIntegration.closeLabelModal();
+        }}
+        labels={labelsIntegration.labels}
+        selectedLabelIds={labelsIntegration.selectedLabelsInModal}
+        isLoading={false}
+        onSelectionChange={labelsIntegration.handleLabelSelectionChange}
+        onCreateLabel={labelsIntegration.handleCreateLabel}
+        onConfirm={labelsIntegration.handleApplyLabels}
+        title={`Label ${labelsIntegration.labelModalChatIds.length} chat${labelsIntegration.labelModalChatIds.length !== 1 ? "s" : ""}`}
+        description="Selected labels will be added to all selected chats"
       />
     </div>
   );

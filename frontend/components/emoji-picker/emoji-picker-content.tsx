@@ -203,14 +203,14 @@ export function EmojiPickerContent({
       // Call parent handler
       onEmojiSelect(emoji);
     },
-    [onEmojiSelect, addRecentEmoji]
+    [onEmojiSelect, addRecentEmoji],
   );
 
   const handleSkinToneChange = useCallback(
     (skin: number) => {
       setSkinTone(skin as SkinTone);
     },
-    [setSkinTone]
+    [setSkinTone],
   );
 
   return (
@@ -218,8 +218,11 @@ export function EmojiPickerContent({
       className={cn(
         "emoji-picker-container",
         compact && "emoji-picker-compact",
-        className
+        className,
       )}
+      style={{ pointerEvents: "auto" }}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
     >
       <Picker
         data={data}
@@ -265,7 +268,14 @@ export function EmojiPickerContent({
  * These override emoji-mart's default styles to match WhatsApp's design
  */
 export const emojiPickerStyles = `
-  /* Base container styles */
+  /* Ensure emoji picker container captures all pointer events */
+  .emoji-picker-container {
+    pointer-events: auto !important;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Ensure the emoji-mart web component captures events */
   .emoji-picker-container em-emoji-picker {
     --em-rgb-background: var(--background);
     --em-rgb-input: var(--input);
@@ -275,6 +285,8 @@ export const emojiPickerStyles = `
     border: 1px solid hsl(var(--border));
     background: hsl(var(--popover));
     color: hsl(var(--popover-foreground));
+    pointer-events: auto !important;
+    display: block;
   }
 
   /* Search input */

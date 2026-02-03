@@ -20,7 +20,7 @@
 
 "use client";
 
-import { TokenManager } from "@/lib/auth/token-manager";
+import { useAuthContext } from "@/lib/auth/auth-context";
 import {
   createContext,
   ReactNode,
@@ -149,11 +149,12 @@ interface ChatNotificationsProviderProps {
 export function ChatNotificationsProvider({
   children,
 }: ChatNotificationsProviderProps) {
+  const { isAuthenticated, isLoading: isAuthLoading } = useAuthContext();
   const [unreadCounts, setUnreadCounts] = useState<Map<string, number>>(
-    new Map()
+    new Map(),
   );
   const [chatUpdates, setChatUpdates] = useState<Map<string, ChatUpdateEvent>>(
-    new Map()
+    new Map(),
   );
   const [isConnected, setIsConnected] = useState(false);
   const [activeChatId, setActiveChatIdState] = useState<string | null>(null);
@@ -421,12 +422,12 @@ export function ChatNotificationsProvider({
         } catch (error) {
           console.error(
             "[ChatNotifications] Error in chat deleted callback:",
-            error
+            error,
           );
         }
       });
     },
-    [removeUnreadCount, removeChatUpdate]
+    [removeUnreadCount, removeChatUpdate],
   );
 
   /**
@@ -440,7 +441,7 @@ export function ChatNotificationsProvider({
         chatDeletedCallbacksRef.current.delete(callback);
       };
     },
-    []
+    [],
   );
 
   // Store handlers in refs for the WebSocket effect
@@ -459,9 +460,12 @@ export function ChatNotificationsProvider({
   // This effect should only run once on mount and cleanup on unmount
   // Only connect if user is authenticated
   useEffect(() => {
-    // Check if user is authenticated before connecting
-    const isAuthenticated = TokenManager.isAccessTokenValid();
+    // Wait for auth state to be determined before connecting
+    if (isAuthLoading) {
+      return;
+    }
 
+    // Don't connect if user is not authenticated
     if (!isAuthenticated) {
       return;
     }
@@ -474,7 +478,7 @@ export function ChatNotificationsProvider({
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
         reconnectionAttempts: Infinity,
-      }
+      },
     );
 
     socketRef.current = newSocket;
@@ -516,7 +520,7 @@ export function ChatNotificationsProvider({
       socketRef.current = null;
       setSocket(null);
     };
-  }, []); // Empty deps - socket connection is stable
+  }, [isAuthenticated, isAuthLoading]); // Reconnect when auth state changes
 
   const contextValue = useMemo<ChatNotificationsContextValue>(
     () => ({
@@ -550,7 +554,7 @@ export function ChatNotificationsProvider({
       onNewChat,
       onChatDeleted,
       socket,
-    ]
+    ],
   );
 
   return (
@@ -568,7 +572,7 @@ export function useChatNotifications() {
   const context = useContext(ChatNotificationsContext);
   if (!context) {
     throw new Error(
-      "useChatNotifications must be used within a ChatNotificationsProvider"
+      "useChatNotifications must be used within a ChatNotificationsProvider",
     );
   }
   return context;

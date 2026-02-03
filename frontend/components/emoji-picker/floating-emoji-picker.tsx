@@ -167,10 +167,11 @@ export function FloatingEmojiPicker({
   useEffect(() => {
     if (isOpen) {
       setIsVisible(true);
-      // Small delay to trigger animation
-      requestAnimationFrame(() => {
+      // Use a small timeout to ensure the DOM is ready before animating
+      const timer = setTimeout(() => {
         setIsAnimating(true);
-      });
+      }, 20);
+      return () => clearTimeout(timer);
     } else {
       setIsAnimating(false);
       // Wait for animation to complete before hiding
@@ -228,38 +229,83 @@ export function FloatingEmojiPicker({
 
   const handleEmojiSelect = useCallback(
     (emoji: Emoji) => {
+      // Only call onEmojiSelect - let the parent component decide when to close
+      // This prevents race conditions where the close animation interferes
+      // with state updates in the parent component
       onEmojiSelect(emoji);
-      onClose();
     },
-    [onEmojiSelect, onClose]
+    [onEmojiSelect],
   );
 
   if (!isVisible || !isMounted) {
     return null;
   }
 
+  // Stop event propagation to prevent parent components from receiving events
+  // This is especially important when the picker is used inside dialogs
+  const handleContainerPointerDown = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+  };
+
+  const handleContainerClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+  };
+
+  // Handle backdrop click to close the picker
+  const handleBackdropClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    // Only close if clicking directly on backdrop, not on picker
+    if (e.target === e.currentTarget) {
+      onClose();
+    }
+  };
+
+  const handleBackdropPointerDown = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+  };
+
   const pickerContent = (
     <>
       {/* Inject styles */}
       <style>{emojiPickerStyles}</style>
 
-      {/* Picker container */}
+      {/* Invisible backdrop to capture all clicks and prevent pass-through */}
+      <div
+        className="fixed inset-0 z-[99]"
+        onClick={handleBackdropClick}
+        onPointerDown={handleBackdropPointerDown}
+        style={{ background: "transparent" }}
+        aria-hidden="true"
+      />
+
+      {/* Picker container - z-[100] to ensure it's above backdrop and dialog overlays */}
       <div
         ref={pickerRef}
+        data-emoji-picker="true"
+        onPointerDown={handleContainerPointerDown}
+        onPointerUp={(e) => e.stopPropagation()}
+        onClick={handleContainerClick}
+        onMouseDown={(e) => e.stopPropagation()}
+        onMouseUp={(e) => e.stopPropagation()}
         className={cn(
-          "fixed z-50 transition-all duration-150",
-          isAnimating
-            ? "opacity-100 scale-100"
-            : "opacity-0 scale-95 pointer-events-none",
-          className
+          "fixed z-[100] transition-all duration-150",
+          isAnimating ? "opacity-100 scale-100" : "opacity-0 scale-95",
+          className,
         )}
         style={{
           top: position.top,
           left: position.left,
           transformOrigin: position.transformOrigin,
+          pointerEvents: "auto",
         }}
       >
-        <div className="rounded-lg shadow-lg overflow-hidden border border-border bg-popover">
+        <div
+          className="rounded-lg shadow-lg overflow-hidden border border-border bg-popover"
+          style={{ pointerEvents: "auto" }}
+        >
           <EmojiPickerContent
             onEmojiSelect={handleEmojiSelect}
             autoFocus={isOpen}

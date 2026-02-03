@@ -47,6 +47,13 @@ export interface Chat {
   assigneeName?: string | null;
   assigneeEmail?: string | null;
   assigneeProfilePictureUrl?: string | null;
+  // Labels
+  labels?: Array<{
+    id: string;
+    name: string;
+    color: string;
+    emoji?: string | null;
+  }>;
 }
 
 export interface ReplyPreview {
