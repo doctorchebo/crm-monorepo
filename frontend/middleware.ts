@@ -109,13 +109,19 @@ export async function middleware(request: NextRequest) {
 
     // At this point, either:
     // 1. Refresh token is still valid (access token might be expired but that's OK)
-    // 2. We don't have expiration tracking cookies yet (first load after login)
+    // 2. We don't have expiration tracking cookies but we have HTTP-only cookies
+    // 3. Tracking cookies expired/missing but HTTP-only refresh token might still be valid
     //
-    // In both cases, let the request through. The AuthContext on the client
-    // will handle token refresh if needed. This is the key fix for the
-    // "next day" scenario where access token expired but refresh token is valid.
+    // In ALL cases, let the request through. The AuthContext on the client
+    // will attempt token refresh and handle authentication properly.
+    // This is the key fix for the "next day" scenario.
 
-    if (accessTokenExpiresAt && isExpired(accessTokenExpiresAt)) {
+    // Log what we're doing for debugging
+    if (refreshToken && !refreshTokenExpiresAt) {
+      console.debug(
+        "[Middleware] Refresh token cookie exists but tracking cookie is missing - allowing request (client will verify)",
+      );
+    } else if (accessTokenExpiresAt && isExpired(accessTokenExpiresAt)) {
       console.debug(
         "[Middleware] Access token expired but refresh token is valid - allowing request (client will refresh)",
       );
@@ -123,6 +129,8 @@ export async function middleware(request: NextRequest) {
       console.debug(
         "[Middleware] Token exists but no expiration tracking - allowing request",
       );
+    } else {
+      console.debug("[Middleware] Tokens appear valid - allowing request");
     }
   }
 

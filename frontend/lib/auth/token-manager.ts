@@ -16,6 +16,8 @@
  * - These timestamps let us know when to refresh without reading the actual token
  * - The /auth/refresh endpoint uses the HTTP-only refresh_token cookie automatically
  * - The response sets new HTTP-only cookies for us
+ * - IMPORTANT: Tracking cookies live as long as refresh token (7 days) to ensure
+ *   we can always determine token status even after access token expires
  */
 
 import { deleteCookie, getCookie, setCookie } from "@/lib/cookies";
@@ -28,13 +30,11 @@ const COOKIE_REFRESH_EXPIRY_TIME = "jwt_refresh_token_expires_at";
 // Refresh threshold: refresh token 5 minutes before expiration
 const REFRESH_THRESHOLD_SECONDS = 300;
 
-interface TokenPair {
-  access_token: string;
-  refresh_token: string;
-}
+// Cookie lifetime for tracking cookies (should match refresh token lifetime)
+const TRACKING_COOKIE_LIFETIME_SECONDS = 7 * 24 * 60 * 60; // 7 days
 
 export class TokenManager {
-  private static refreshPromise: Promise<void> | null = null;
+  private static refreshPromise: Promise<boolean> | null = null;
   private static refreshCheckInterval: NodeJS.Timeout | null = null;
 
   /**
@@ -44,18 +44,19 @@ export class TokenManager {
    */
   static storeTokenExpirationTime(
     accessTokenExpiresAt: Date,
-    refreshTokenExpiresAt: Date
+    refreshTokenExpiresAt: Date,
   ): void {
     // Store expiration timestamps in readable cookies so we can check when to refresh
+    // IMPORTANT: Use long lifetime so these cookies persist even after access token expires
     setCookie(
       COOKIE_ACCESS_EXPIRY_TIME,
       accessTokenExpiresAt.toISOString(),
-      3600
+      TRACKING_COOKIE_LIFETIME_SECONDS,
     );
     setCookie(
       COOKIE_REFRESH_EXPIRY_TIME,
       refreshTokenExpiresAt.toISOString(),
-      604800
+      TRACKING_COOKIE_LIFETIME_SECONDS,
     );
 
     console.debug("[TokenManager] Token expiration times stored", {
@@ -90,6 +91,7 @@ export class TokenManager {
 
   /**
    * Check if access token is still valid by checking expiration timestamp
+   * Returns true if the access token exists AND has not expired
    */
   static isAccessTokenValid(): boolean {
     const expiresAtStr = getCookie(COOKIE_ACCESS_EXPIRY_TIME);
@@ -108,6 +110,7 @@ export class TokenManager {
 
   /**
    * Check if refresh token is still valid by checking expiration timestamp
+   * Returns true if the refresh token exists AND has not expired
    */
   static isRefreshTokenValid(): boolean {
     const expiresAtStr = getCookie(COOKIE_REFRESH_EXPIRY_TIME);
@@ -119,6 +122,37 @@ export class TokenManager {
       const expiresAt = new Date(expiresAtStr);
       const now = new Date();
       return expiresAt > now;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Check if we have any tracking cookies at all
+   * This indicates the user has logged in before (even if tokens are expired)
+   */
+  static hasTrackingCookies(): boolean {
+    const accessExpiry = getCookie(COOKIE_ACCESS_EXPIRY_TIME);
+    const refreshExpiry = getCookie(COOKIE_REFRESH_EXPIRY_TIME);
+    return !!(accessExpiry || refreshExpiry);
+  }
+
+  /**
+   * Check if access token is expired (but we know it existed)
+   * This is different from isAccessTokenValid - it returns true when:
+   * - We have a tracking cookie (user logged in before)
+   * - The tracked expiration time has passed
+   */
+  static isAccessTokenExpired(): boolean {
+    const expiresAtStr = getCookie(COOKIE_ACCESS_EXPIRY_TIME);
+    if (!expiresAtStr) {
+      return false; // No tracking cookie, we don't know
+    }
+
+    try {
+      const expiresAt = new Date(expiresAtStr);
+      const now = new Date();
+      return expiresAt <= now;
     } catch {
       return false;
     }
@@ -146,20 +180,15 @@ export class TokenManager {
   /**
    * Refresh access token using the refresh token (which is sent as HTTP-only cookie)
    * This method ensures only one refresh request happens at a time
+   * Returns true if refresh succeeded, false otherwise
    */
-  static async refreshAccessToken(): Promise<void> {
+  static async refreshAccessToken(): Promise<boolean> {
     // If refresh is already in progress, wait for it
     if (this.refreshPromise) {
       console.debug(
-        "[TokenManager] Refresh already in progress, returning existing promise"
+        "[TokenManager] Refresh already in progress, returning existing promise",
       );
       return this.refreshPromise;
-    }
-
-    // Check if refresh token is still valid
-    if (!this.isRefreshTokenValid()) {
-      this.clearTokens();
-      throw new Error("Refresh token expired, please log in again");
     }
 
     // Create and store the refresh promise
@@ -182,36 +211,43 @@ export class TokenManager {
         });
 
         if (!response.ok) {
+          console.error(
+            "[TokenManager] Refresh failed with status:",
+            response.status,
+          );
           if (response.status === 401 || response.status === 403) {
-            // Refresh token is invalid or expired
+            // Refresh token is invalid or expired - clear everything
             this.clearTokens();
-            console.error(
-              "[TokenManager] Refresh token is invalid, clearing tokens and redirecting to login"
-            );
-            if (typeof window !== "undefined") {
-              window.location.href = "/sign-in";
-            }
-            throw new Error("Refresh token is invalid, please log in again");
           }
-          throw new Error(`Failed to refresh token: ${response.statusText}`);
+          return false;
         }
 
         const data = await response.json();
         const newAccessTokenExpiry = data.expiresAt;
 
         if (!newAccessTokenExpiry) {
-          throw new Error("No token expiry in refresh response");
+          console.error("[TokenManager] No token expiry in refresh response");
+          return false;
         }
 
         // Server sets the new access token as HTTP-only cookie
         // We just need to update our expiration tracking
         const expiresAt = new Date(newAccessTokenExpiry);
-        setCookie(COOKIE_ACCESS_EXPIRY_TIME, expiresAt.toISOString(), 3600);
+        // Keep the tracking cookie alive for the full refresh token lifetime
+        setCookie(
+          COOKIE_ACCESS_EXPIRY_TIME,
+          expiresAt.toISOString(),
+          TRACKING_COOKIE_LIFETIME_SECONDS,
+        );
 
-        console.debug("[TokenManager] Access token refreshed successfully");
+        console.debug("[TokenManager] Access token refreshed successfully", {
+          newExpiresAt: expiresAt.toISOString(),
+        });
+
+        return true;
       } catch (error) {
         console.error("[TokenManager] Token refresh failed:", error);
-        throw error;
+        return false;
       } finally {
         // Clear the refresh promise
         this.refreshPromise = null;
@@ -245,7 +281,7 @@ export class TokenManager {
     }
 
     // Check every 30 seconds if refresh is needed
-    this.refreshCheckInterval = setInterval(() => {
+    this.refreshCheckInterval = setInterval(async () => {
       const timeRemaining = this.getAccessTokenTimeRemaining();
 
       // If token expires in less than threshold, refresh it
@@ -255,28 +291,25 @@ export class TokenManager {
           {
             timeRemaining,
             threshold: REFRESH_THRESHOLD_SECONDS,
-          }
+          },
         );
 
-        this.refreshAccessToken().catch((error) => {
-          console.error("[TokenManager] Auto-refresh failed:", error);
-        });
+        const success = await this.refreshAccessToken();
+        if (!success) {
+          console.error("[TokenManager] Auto-refresh failed");
+        }
       }
 
-      // If token is already expired, attempt refresh or redirect
-      if (!this.isAccessTokenValid()) {
+      // If token is already expired but refresh token is valid, attempt refresh
+      if (this.isAccessTokenExpired() && this.isRefreshTokenValid()) {
         console.warn("[TokenManager] Access token expired, attempting refresh");
-        this.refreshAccessToken().catch((error) => {
+        const success = await this.refreshAccessToken();
+        if (!success) {
           console.error(
-            "[TokenManager] Could not refresh expired token:",
-            error
+            "[TokenManager] Could not refresh expired token - user may need to re-login",
           );
-          // Token is expired and refresh failed - clear everything and redirect
-          this.clearTokens();
-          if (typeof window !== "undefined") {
-            window.location.href = "/sign-in";
-          }
-        });
+          // Don't automatically redirect here - let the component handle it
+        }
       }
     }, 30000); // Check every 30 seconds
 

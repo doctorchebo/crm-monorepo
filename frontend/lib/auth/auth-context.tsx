@@ -75,24 +75,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshAuth = useCallback(async (): Promise<boolean> => {
     console.debug("[AuthContext] Attempting to refresh authentication");
 
-    // Check if refresh token is valid first
+    // Check if refresh token is valid first (based on tracking cookie)
     if (!TokenManager.isRefreshTokenValid()) {
-      console.debug("[AuthContext] Refresh token is not valid, cannot refresh");
-      return false;
+      console.debug(
+        "[AuthContext] Refresh token tracking indicates invalid/expired - cannot refresh",
+      );
+      // However, we should still attempt refresh in case tracking cookie is stale
+      // The HTTP-only cookie might still be valid
     }
 
     try {
-      await TokenManager.refreshAccessToken();
-      console.debug("[AuthContext] Token refresh successful");
+      const success = await TokenManager.refreshAccessToken();
 
-      setState({
-        status: "authenticated",
-        isLoading: false,
-        isAuthenticated: true,
-        error: null,
-      });
-
-      return true;
+      if (success) {
+        console.debug("[AuthContext] Token refresh successful");
+        setState({
+          status: "authenticated",
+          isLoading: false,
+          isAuthenticated: true,
+          error: null,
+        });
+        return true;
+      } else {
+        console.debug("[AuthContext] Token refresh returned false");
+        return false;
+      }
     } catch (error) {
       console.error("[AuthContext] Token refresh failed:", error);
       return false;
@@ -167,18 +174,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const checkAuth = async () => {
       console.debug("[AuthContext] Starting initial authentication check");
 
-      // First check if we have any expiration tracking cookies
-      // If not, we might need to sync from backend
-      const hasAccessExpiry = TokenManager.isAccessTokenValid();
-      const hasRefreshExpiry = TokenManager.isRefreshTokenValid();
+      // Check token status using tracking cookies
+      const isAccessValid = TokenManager.isAccessTokenValid();
+      const isRefreshValid = TokenManager.isRefreshTokenValid();
+      const hasTrackingCookies = TokenManager.hasTrackingCookies();
 
       console.debug("[AuthContext] Token status:", {
-        accessTokenValid: hasAccessExpiry,
-        refreshTokenValid: hasRefreshExpiry,
+        accessTokenValid: isAccessValid,
+        refreshTokenValid: isRefreshValid,
+        hasTrackingCookies,
       });
 
-      if (hasAccessExpiry) {
-        // Access token is valid
+      // Case 1: Access token is valid - user is authenticated
+      if (isAccessValid) {
+        console.debug(
+          "[AuthContext] Access token is valid, user is authenticated",
+        );
         if (mounted) {
           setState({
             status: "authenticated",
@@ -192,62 +203,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      if (hasRefreshExpiry) {
-        // Access token expired but refresh token is valid
-        // This is the "next day" scenario - attempt silent refresh
+      // Case 2: Access token expired but refresh token is valid - attempt silent refresh
+      // This is the "next day" scenario
+      if (isRefreshValid) {
         console.debug(
           "[AuthContext] Access token expired but refresh token valid - attempting silent refresh",
         );
 
-        try {
-          const baseUrl =
-            process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
-
-          const response = await fetch(`${baseUrl}/auth/refresh`, {
-            method: "POST",
-            credentials: "include",
-            headers: {
-              "Content-Type": "application/json",
-            },
+        const success = await attemptSilentRefresh();
+        if (success && mounted) {
+          setState({
+            status: "authenticated",
+            isLoading: false,
+            isAuthenticated: true,
+            error: null,
           });
-
-          if (response.ok) {
-            const data = await response.json();
-            if (data.expiresAt) {
-              const expiresAt = new Date(data.expiresAt);
-              // Store new expiration time
-              TokenManager.storeTokenExpirationTime(
-                expiresAt,
-                new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-              );
-
-              if (mounted) {
-                setState({
-                  status: "authenticated",
-                  isLoading: false,
-                  isAuthenticated: true,
-                  error: null,
-                });
-                // Start auto-refresh
-                TokenManager.startAutoRefreshCheck();
-              }
-              return;
-            }
-          }
-
-          // Refresh failed - user needs to log in again
-          console.debug(
-            "[AuthContext] Refresh failed with status:",
-            response.status,
-          );
-          TokenManager.clearTokens();
-        } catch (error) {
-          console.error("[AuthContext] Error during refresh:", error);
-          TokenManager.clearTokens();
+          TokenManager.startAutoRefreshCheck();
+          return;
         }
       }
 
-      // No valid tokens
+      // Case 3: No tracking cookies at all, but we might have HTTP-only cookies
+      // This happens if the tracking cookies were deleted but the actual tokens still exist
+      // Attempt a "blind" refresh to see if the server recognizes our HTTP-only refresh token
+      if (!hasTrackingCookies) {
+        console.debug(
+          "[AuthContext] No tracking cookies found - attempting blind refresh in case HTTP-only cookies exist",
+        );
+
+        const success = await attemptSilentRefresh();
+        if (success && mounted) {
+          setState({
+            status: "authenticated",
+            isLoading: false,
+            isAuthenticated: true,
+            error: null,
+          });
+          TokenManager.startAutoRefreshCheck();
+          return;
+        }
+      }
+
+      // Case 4: No valid tokens and refresh failed - user needs to log in
+      console.debug(
+        "[AuthContext] No valid tokens or refresh failed - user is unauthenticated",
+      );
       if (mounted) {
         setState({
           status: "unauthenticated",
@@ -255,6 +255,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           isAuthenticated: false,
           error: null,
         });
+      }
+    };
+
+    /**
+     * Attempt a silent refresh with the backend
+     * Returns true if successful, false otherwise
+     */
+    const attemptSilentRefresh = async (): Promise<boolean> => {
+      try {
+        console.debug("[AuthContext] Attempting silent refresh");
+        const success = await TokenManager.refreshAccessToken();
+
+        if (success) {
+          console.debug("[AuthContext] Silent refresh successful");
+          return true;
+        }
+
+        console.debug("[AuthContext] Silent refresh failed");
+        return false;
+      } catch (error) {
+        console.error("[AuthContext] Error during silent refresh:", error);
+        TokenManager.clearTokens();
+        return false;
       }
     };
 

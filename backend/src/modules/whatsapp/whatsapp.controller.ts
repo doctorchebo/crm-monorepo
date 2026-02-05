@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -20,6 +21,7 @@ import {
   EditMessageDto,
 } from './dto/message-edit-delete.dto';
 import { SaveNoteDto } from './dto/notes.dto';
+import { SendLocationDto } from './dto/send-location.dto';
 import { ConversationWindowService } from './services/conversation-window.service';
 import { WhatsAppService } from './whatsapp.service';
 
@@ -223,5 +225,40 @@ export class WhatsAppController {
     }
 
     return this.conversationWindowService.validateFreeFormMessage(chatId);
+  }
+
+  /**
+   * Send a location message
+   * POST /whatsapp/send-location
+   *
+   * Sends a location message with coordinates and optional name/address.
+   * Subject to 24-hour conversation window rules.
+   *
+   * Reference: https://developers.facebook.com/docs/whatsapp/cloud-api/messages/location-messages
+   */
+  @Post('send-location')
+  async sendLocation(@Body() dto: SendLocationDto, @Req() req: any) {
+    const userId = req.user?.userId;
+    this.logger.log(
+      `Send location to ${dto.to} from sender ${dto.senderId}, user ${userId}`,
+    );
+
+    // Require senderId - no default fallback for location messages
+    if (!dto.senderId) {
+      throw new BadRequestException(
+        'senderId is required for location messages',
+      );
+    }
+
+    return this.whatsAppService.sendLocation(
+      dto.senderId,
+      dto.to,
+      dto.latitude,
+      dto.longitude,
+      dto.name,
+      dto.address,
+      dto.replyToMessageId,
+      userId,
+    );
   }
 }

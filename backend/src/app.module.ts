@@ -1,3 +1,4 @@
+import { CatalogModule } from '@modules/catalog/catalog.module';
 import { KnowledgeBaseModule } from '@modules/knowledge-base/knowledge-base.module';
 import { LabelsModule } from '@modules/labels/labels.module';
 import { MediaCompressionModule } from '@modules/media-compression/media-compression.module';
@@ -66,6 +67,7 @@ import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
     ScheduledTasksModule,
     ImportJobsModule,
     ProfilePictureModule,
+    CatalogModule,
     DatabaseModule,
   ],
   controllers: [AppController],

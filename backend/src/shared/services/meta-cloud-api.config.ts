@@ -32,6 +32,13 @@ export class MetaCloudAPIConfigService {
   }
 
   /**
+   * Get the underlying ConfigService for accessing environment variables
+   */
+  getConfigService(): ConfigService {
+    return this.configService;
+  }
+
+  /**
    * Get the base URL for Meta Graph API
    */
   getBaseUrl(): string {
@@ -95,7 +102,8 @@ export class MetaCloudAPIConfigService {
     path: string,
     params?: Record<string, string | number>,
   ): string {
-    const url = this.buildEndpoint(path);
+    // Build base URL without any query params
+    const baseUrl = `${this.baseUrl}/${this.apiVersion}/${path}`;
 
     const queryParams = new URLSearchParams();
 
@@ -112,7 +120,7 @@ export class MetaCloudAPIConfigService {
     }
 
     const queryString = queryParams.toString();
-    return queryString ? `${url}?${queryString}` : url;
+    return queryString ? `${baseUrl}?${queryString}` : baseUrl;
   }
 
   /**
@@ -131,6 +139,12 @@ export class MetaCloudAPIConfigService {
    */
   getEndpoints() {
     return {
+      /**
+       * Get base URL for building custom endpoints
+       * Use buildEndpoint() for most cases, this is for special cases
+       */
+      baseUrl: `${this.baseUrl}/${this.apiVersion}`,
+
       /**
        * Get media URL for inbound media from WhatsApp
        * POST https://graph.facebook.com/v20.0/{MEDIA_ID}
@@ -206,6 +220,253 @@ export class MetaCloudAPIConfigService {
        */
       deleteMessage: (messageId: string) =>
         this.buildEndpointWithParams(messageId, {
+          access_token: this.accessToken,
+        }),
+
+      // ==================== Commerce Settings ====================
+
+      /**
+       * Get commerce settings for a phone number
+       * GET https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/whatsapp_commerce_settings
+       */
+      getCommerceSettings: (phoneNumberId: string) =>
+        this.buildEndpointWithParams(
+          `${phoneNumberId}/whatsapp_commerce_settings`,
+          {
+            access_token: this.accessToken,
+          },
+        ),
+
+      /**
+       * Update commerce settings for a phone number
+       * POST https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/whatsapp_commerce_settings
+       * Supports: is_cart_enabled, is_catalog_visible
+       */
+      updateCommerceSettings: (phoneNumberId: string) =>
+        this.buildEndpointWithParams(
+          `${phoneNumberId}/whatsapp_commerce_settings`,
+          {
+            access_token: this.accessToken,
+          },
+        ),
+
+      // ==================== WABA Catalog Connection ====================
+
+      /**
+       * Get product catalogs connected to WABA
+       * GET https://graph.facebook.com/v20.0/{WABA_ID}/product_catalogs
+       */
+      getWabaCatalogs: (wabaId: string) =>
+        this.buildEndpointWithParams(`${wabaId}/product_catalogs`, {
+          access_token: this.accessToken,
+        }),
+
+      /**
+       * Connect a catalog to WABA
+       * POST https://graph.facebook.com/v20.0/{WABA_ID}/product_catalogs?catalog_id=xxx
+       * This is required before enabling catalog visibility on phone numbers
+       */
+      connectCatalogToWaba: (wabaId: string) =>
+        this.buildEndpointWithParams(`${wabaId}/product_catalogs`, {
+          access_token: this.accessToken,
+        }),
+
+      /**
+       * Disconnect a catalog from WABA
+       * DELETE https://graph.facebook.com/v20.0/{WABA_ID}/product_catalogs?catalog_id=xxx
+       * This is required before deleting a catalog that's linked to WABA
+       */
+      disconnectCatalogFromWaba: (wabaId: string, catalogId: string) =>
+        this.buildEndpointWithParams(`${wabaId}/product_catalogs`, {
+          access_token: this.accessToken,
+          catalog_id: catalogId,
+        }),
+
+      // ==================== Catalog Management (Marketing API) ====================
+
+      /**
+       * Get all product catalogs owned by a business
+       * GET https://graph.facebook.com/v20.0/{BUSINESS_ID}/owned_product_catalogs
+       */
+      getBusinessCatalogs: (businessId: string) =>
+        this.buildEndpointWithParams(`${businessId}/owned_product_catalogs`, {
+          access_token: this.accessToken,
+          fields: 'id,name,vertical,product_count,feed_count',
+        }),
+
+      /**
+       * Create a new product catalog
+       * POST https://graph.facebook.com/v20.0/{BUSINESS_ID}/owned_product_catalogs
+       */
+      createCatalog: (businessId: string) =>
+        this.buildEndpointWithParams(`${businessId}/owned_product_catalogs`, {
+          access_token: this.accessToken,
+        }),
+
+      /**
+       * Get catalog details
+       * GET https://graph.facebook.com/v20.0/{CATALOG_ID}
+       */
+      getCatalog: (catalogId: string) =>
+        this.buildEndpointWithParams(catalogId, {
+          access_token: this.accessToken,
+          fields: 'id,name,vertical,product_count,feed_count,business',
+        }),
+
+      /**
+       * Update catalog
+       * POST https://graph.facebook.com/v20.0/{CATALOG_ID}
+       */
+      updateCatalog: (catalogId: string) =>
+        this.buildEndpointWithParams(catalogId, {
+          access_token: this.accessToken,
+        }),
+
+      /**
+       * Delete catalog
+       * DELETE https://graph.facebook.com/v20.0/{CATALOG_ID}
+       */
+      deleteCatalog: (catalogId: string) =>
+        this.buildEndpointWithParams(catalogId, {
+          access_token: this.accessToken,
+        }),
+
+      // ==================== Catalog Permission Management ====================
+
+      /**
+       * Get users assigned to a catalog with their permissions
+       * GET https://graph.facebook.com/v20.0/{CATALOG_ID}/assigned_users
+       *
+       * Query parameters:
+       * - business: The business ID to filter by
+       *
+       * Returns: List of users with their tasks (MANAGE, ADVERTISE)
+       */
+      getCatalogAssignedUsers: (catalogId: string, businessId: string) =>
+        this.buildEndpointWithParams(`${catalogId}/assigned_users`, {
+          access_token: this.accessToken,
+          business: businessId,
+        }),
+
+      /**
+       * Assign a user to a catalog with specific tasks
+       * POST https://graph.facebook.com/v20.0/{CATALOG_ID}/assigned_users
+       *
+       * Body parameters (form-encoded):
+       * - user: BUSINESS_SCOPED_USER_ID
+       * - business: BUSINESS_ID
+       * - tasks: ['ADVERTISE', 'MANAGE']
+       *
+       * Required permission: catalog_management
+       */
+      assignCatalogUser: (catalogId: string) =>
+        this.buildEndpointWithParams(`${catalogId}/assigned_users`, {
+          access_token: this.accessToken,
+        }),
+
+      /**
+       * Remove a user from a catalog
+       * DELETE https://graph.facebook.com/v20.0/{CATALOG_ID}/assigned_users
+       *
+       * Body parameters (form-encoded):
+       * - user: BUSINESS_SCOPED_USER_ID
+       * - business: BUSINESS_ID
+       */
+      removeCatalogUser: (catalogId: string) =>
+        this.buildEndpointWithParams(`${catalogId}/assigned_users`, {
+          access_token: this.accessToken,
+        }),
+
+      /**
+       * Get user info (for retrieving current user ID)
+       * GET https://graph.facebook.com/v20.0/me
+       *
+       * Returns the ID of the user or system user associated with the access token
+       */
+      getCurrentUser: () =>
+        this.buildEndpointWithParams('me', {
+          access_token: this.accessToken,
+          fields: 'id,name',
+        }),
+
+      /**
+       * Get business users for a business
+       * GET https://graph.facebook.com/v20.0/{BUSINESS_ID}/business_users
+       *
+       * Returns list of users who are members of the business
+       */
+      getBusinessUsers: (businessId: string) =>
+        this.buildEndpointWithParams(`${businessId}/business_users`, {
+          access_token: this.accessToken,
+          fields: 'id,name,email,role',
+        }),
+
+      /**
+       * Get system users for a business
+       * GET https://graph.facebook.com/v20.0/{BUSINESS_ID}/system_users
+       *
+       * Returns list of system users in the business
+       */
+      getBusinessSystemUsers: (businessId: string) =>
+        this.buildEndpointWithParams(`${businessId}/system_users`, {
+          access_token: this.accessToken,
+          fields: 'id,name,role',
+        }),
+
+      /**
+       * Get products in a catalog
+       * GET https://graph.facebook.com/v20.0/{CATALOG_ID}/products
+       */
+      getCatalogProducts: (catalogId: string) =>
+        this.buildEndpointWithParams(`${catalogId}/products`, {
+          access_token: this.accessToken,
+          fields:
+            'id,retailer_id,name,description,price,currency,availability,condition,image_url,url',
+        }),
+
+      /**
+       * Batch create/update/delete products in a catalog
+       * POST https://graph.facebook.com/v20.0/{CATALOG_ID}/items_batch
+       */
+      catalogItemsBatch: (catalogId: string) =>
+        this.buildEndpointWithParams(`${catalogId}/items_batch`, {
+          access_token: this.accessToken,
+        }),
+
+      /**
+       * Get product sets in a catalog
+       * GET https://graph.facebook.com/v20.0/{CATALOG_ID}/product_sets
+       */
+      getCatalogProductSets: (catalogId: string) =>
+        this.buildEndpointWithParams(`${catalogId}/product_sets`, {
+          access_token: this.accessToken,
+          fields: 'id,name,filter,product_count',
+        }),
+
+      /**
+       * Create product set in a catalog
+       * POST https://graph.facebook.com/v20.0/{CATALOG_ID}/product_sets
+       */
+      createProductSet: (catalogId: string) =>
+        this.buildEndpointWithParams(`${catalogId}/product_sets`, {
+          access_token: this.accessToken,
+        }),
+
+      /**
+       * Update product set
+       * POST https://graph.facebook.com/v20.0/{PRODUCT_SET_ID}
+       */
+      updateProductSet: (productSetId: string) =>
+        this.buildEndpointWithParams(productSetId, {
+          access_token: this.accessToken,
+        }),
+
+      /**
+       * Delete product set
+       * DELETE https://graph.facebook.com/v20.0/{PRODUCT_SET_ID}
+       */
+      deleteProductSet: (productSetId: string) =>
+        this.buildEndpointWithParams(productSetId, {
           access_token: this.accessToken,
         }),
     };

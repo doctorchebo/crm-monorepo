@@ -86,13 +86,35 @@ export interface CloudAPIInteractiveMessage {
 }
 
 /**
+ * Location message request to Cloud API
+ *
+ * Reference: https://developers.facebook.com/docs/whatsapp/cloud-api/messages/location-messages
+ */
+export interface CloudAPILocationMessage {
+  messaging_product: 'whatsapp';
+  recipient_type?: 'individual';
+  to: string;
+  type: 'location';
+  location: {
+    latitude: string; // Latitude in decimal degrees (as string per Meta API spec)
+    longitude: string; // Longitude in decimal degrees (as string per Meta API spec)
+    name?: string; // Location name (e.g., "Philz Coffee")
+    address?: string; // Full address string
+  };
+  context?: {
+    message_id: string; // For reply messages
+  };
+}
+
+/**
  * Union type for all Cloud API messages
  */
 export type CloudAPIMessage =
   | CloudAPITextMessage
   | CloudAPIMediaMessage
   | CloudAPITemplateMessage
-  | CloudAPIInteractiveMessage;
+  | CloudAPIInteractiveMessage
+  | CloudAPILocationMessage;
 
 // ============================================================
 // WEBHOOK EVENT TYPES
@@ -456,7 +478,8 @@ export interface NormalizedCloudAPIMessage {
       | 'document'
       | 'contacts'
       | 'sticker'
-      | 'gif';
+      | 'gif'
+      | 'location';
     text?: string;
     media?: {
       url?: string;
@@ -465,5 +488,13 @@ export interface NormalizedCloudAPIMessage {
       fileName?: string;
     };
     unavailable?: boolean;
+  };
+  // Location data for location messages
+  locationData?: {
+    latitude: number;
+    longitude: number;
+    name?: string;
+    address?: string;
+    url?: string;
   };
 }

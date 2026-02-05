@@ -27,13 +27,16 @@ interface MessageInputAreaProps {
   onSendVoiceNote: (
     blob: Blob,
     duration: number,
-    waveformData: number[]
+    waveformData: number[],
   ) => void;
   onTemplateUsed: () => void;
   onCancelReply: () => void;
   onFilesSelected: (files: File[], type: AttachmentType) => void;
   onContactsClick: () => void;
   onCameraClick: () => void;
+  onCatalogClick?: () => void;
+  /** Called when location option is selected - opens location picker modal */
+  onLocationClick?: () => void;
   /**
    * Conversation window status - determines if free-form messaging is allowed
    * When outside the window, UI should guide users to use approved templates
@@ -57,6 +60,8 @@ export function MessageInputArea({
   onFilesSelected,
   onContactsClick,
   onCameraClick,
+  onCatalogClick,
+  onLocationClick,
   conversationWindow,
 }: MessageInputAreaProps) {
   // Determine if free-form messaging is blocked
@@ -135,7 +140,7 @@ export function MessageInputArea({
                     "Last customer message"}
                   :{" "}
                   {new Date(
-                    conversationWindow.lastInboundMessageTime
+                    conversationWindow.lastInboundMessageTime,
                   ).toLocaleString()}
                 </p>
               )}
@@ -173,7 +178,7 @@ export function MessageInputArea({
               // Block file uploads when outside conversation window
               if (isOutsideConversationWindow) {
                 console.warn(
-                  "Cannot upload files outside 24-hour conversation window"
+                  "Cannot upload files outside 24-hour conversation window",
                 );
                 e.target.value = "";
                 return;
@@ -206,6 +211,8 @@ export function MessageInputArea({
               onFilesSelected={onFilesSelected}
               onContactsClick={onContactsClick}
               onCameraClick={onCameraClick}
+              onCatalogClick={onCatalogClick}
+              onLocationClick={onLocationClick}
               disabled={isUploading || isOutsideConversationWindow}
             />
           }

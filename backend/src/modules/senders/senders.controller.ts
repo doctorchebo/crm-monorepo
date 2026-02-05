@@ -12,10 +12,11 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/auth.guard';
+import { TeamService } from '../team/team.service';
+import { UpdateCommerceSettingsDto } from './dto/commerce-settings.dto';
 import { CreateSenderDto } from './dto/create-sender.dto';
 import { UpdateSenderDto } from './dto/update-sender.dto';
 import { SendersService } from './senders.service';
-import { TeamService } from '../team/team.service';
 
 /**
  * Senders Controller
@@ -197,5 +198,105 @@ export class SendersController {
     const userId = req.user?.userId;
     this.logger.log(`Refresh sender from Meta: ${senderId}`);
     return this.sendersService.refreshFromMeta(userId, senderId);
+  }
+
+  // ==================== COMMERCE SETTINGS ====================
+
+  /**
+   * Get commerce settings for a sender
+   * Returns catalog visibility, cart status, and linked catalog info
+   *
+   * GET /senders/:id/commerce-settings
+   */
+  @Get(':id/commerce-settings')
+  async getCommerceSettings(
+    @Param('id', ParseIntPipe) senderId: number,
+    @Req() req: any,
+  ) {
+    const userId = req.user?.userId;
+    const targetUserId = await this.resolveTargetUserId(userId);
+    this.logger.log(`Get commerce settings for sender: ${senderId}`);
+    return this.sendersService.getCommerceSettings(targetUserId, senderId);
+  }
+
+  /**
+   * Sync commerce settings from Meta
+   * Fetches latest settings from Meta API and updates local database
+   *
+   * POST /senders/:id/commerce-settings/sync
+   */
+  @Post(':id/commerce-settings/sync')
+  async syncCommerceSettings(
+    @Param('id', ParseIntPipe) senderId: number,
+    @Req() req: any,
+  ) {
+    const userId = req.user?.userId;
+    const targetUserId = await this.resolveTargetUserId(userId);
+    this.logger.log(`Sync commerce settings for sender: ${senderId}`);
+    return this.sendersService.syncCommerceSettings(targetUserId, senderId);
+  }
+
+  /**
+   * Update commerce settings for a sender
+   * Updates settings on Meta API and local database
+   *
+   * PATCH /senders/:id/commerce-settings
+   */
+  @Patch(':id/commerce-settings')
+  async updateCommerceSettings(
+    @Param('id', ParseIntPipe) senderId: number,
+    @Body() updateDto: UpdateCommerceSettingsDto,
+    @Req() req: any,
+  ) {
+    const userId = req.user?.userId;
+    const targetUserId = await this.resolveTargetUserId(userId);
+    this.logger.log(
+      `Update commerce settings for sender: ${senderId}`,
+      updateDto,
+    );
+    return this.sendersService.updateCommerceSettings(
+      targetUserId,
+      senderId,
+      updateDto,
+    );
+  }
+
+  /**
+   * Link a Meta catalog to a sender
+   * Connects a catalog to the phone number's commerce settings
+   *
+   * POST /senders/:id/catalog/link
+   */
+  @Post(':id/catalog/link')
+  async linkCatalogToSender(
+    @Param('id', ParseIntPipe) senderId: number,
+    @Body() body: { catalogId: string },
+    @Req() req: any,
+  ) {
+    const userId = req.user?.userId;
+    const targetUserId = await this.resolveTargetUserId(userId);
+    this.logger.log(`Link catalog ${body.catalogId} to sender: ${senderId}`);
+    return this.sendersService.linkCatalogToSender(
+      targetUserId,
+      senderId,
+      body.catalogId,
+    );
+  }
+
+  /**
+   * Unlink catalog from a sender
+   * Disconnects the catalog from the phone number's commerce settings
+   *
+   * DELETE /senders/:id/catalog/link
+   */
+  @Delete(':id/catalog/link')
+  async unlinkCatalogFromSender(
+    @Param('id', ParseIntPipe) senderId: number,
+    @Req() req: any,
+  ) {
+    const userId = req.user?.userId;
+    const targetUserId = await this.resolveTargetUserId(userId);
+    this.logger.log(`Unlink catalog from sender: ${senderId}`);
+    return this.sendersService.unlinkCatalogFromSender(targetUserId, senderId);
   }
 }

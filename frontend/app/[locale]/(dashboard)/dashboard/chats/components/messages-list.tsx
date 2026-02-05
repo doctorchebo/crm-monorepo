@@ -1,16 +1,15 @@
 "use client";
 
-import { MessageListItem } from "./message-list-item";
+import { AITypingIndicator } from "@/components/ai-typing-indicator";
+import { CatalogMessageItem } from "@/components/catalog";
 import { Attachment } from "@/lib/media/types";
 import { ReceivedContact } from "@/lib/types/contact-message.types";
 import { getDateKey } from "@/lib/utils/date-formatter";
 import { Loader } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { Chat, Message, MessageReaction } from "../types";
-import { DateSeparator } from "./date-separator";
+import { MessageListItem } from "./message-list-item";
 import { StickyDateHeader } from "./sticky-date-header";
-import { Checkbox } from "@/components/ui/checkbox";
-import { AITypingIndicator } from "@/components/ai-typing-indicator";
 
 // ============================================================
 // CONFIGURATION
@@ -63,7 +62,7 @@ function shouldAutoPlayGifs(
   message: Message,
   allMessages: Message[],
   chatId: string | undefined,
-  previousChatIdRef: React.MutableRefObject<string | undefined>
+  previousChatIdRef: React.MutableRefObject<string | undefined>,
 ): boolean {
   // Only auto-play when switching to a new chat
   const isNewChat = chatId !== previousChatIdRef.current;
@@ -74,7 +73,7 @@ function shouldAutoPlayGifs(
 
   // Check if message is among the most recent N messages
   const messageIndex = allMessages.findIndex(
-    (m) => m.messageId === message.messageId
+    (m) => m.messageId === message.messageId,
   );
   const isAmongRecent =
     messageIndex >= 0 &&
@@ -94,7 +93,7 @@ function shouldAutoPlayGifs(
  */
 function shouldShowDateSeparator(
   currentMessage: Message,
-  previousMessage: Message | null
+  previousMessage: Message | null,
 ): Date | null {
   const currentDate = new Date(currentMessage.timestamp);
   const currentDateKey = getDateKey(currentDate);
@@ -142,12 +141,12 @@ interface MessagesListProps {
   handleImageClick: (
     messageId: string,
     attachments: Attachment[],
-    index: number
+    index: number,
   ) => void;
   handleShowDownloadMenu: (
     messageId: string,
     attachments: Attachment[],
-    position: { x: number; y: number }
+    position: { x: number; y: number },
   ) => void;
   handleVideoPlay: (videoId: string, url: string) => void;
   highlightedMessageId?: string | null;
@@ -189,6 +188,9 @@ interface MessagesListProps {
   selectedMessageIds?: Set<string>;
   onToggleSelection?: (messageId: string) => void;
   isAITyping?: boolean;
+  // Catalog
+  handleViewCatalogItem?: (item: CatalogMessageItem) => void;
+  handleViewAllCatalogItems?: (items: CatalogMessageItem[]) => void;
 }
 
 export function MessagesList({
@@ -225,6 +227,8 @@ export function MessagesList({
   selectedMessageIds,
   onToggleSelection,
   isAITyping,
+  handleViewCatalogItem,
+  handleViewAllCatalogItems,
 }: MessagesListProps) {
   // Determine if reactions should be disabled (outside 24-hour window)
   // This logic is now moved into the map function for each message
@@ -298,7 +302,7 @@ export function MessagesList({
     if (selectedChat?.chatId !== previousChatIdRef.current) {
       // Chat changed - reset the known message set with current messages
       knownMessageIdsRef.current = new Set(
-        messages.map((m) => m.messageId).filter(Boolean) as string[]
+        messages.map((m) => m.messageId).filter(Boolean) as string[],
       );
       // Clear any pending auto-play from previous chat
       setNewlyArrivedGifMessageIds(new Set());
@@ -326,7 +330,7 @@ export function MessagesList({
           message,
           messages,
           selectedChat.chatId,
-          previousChatIdRef
+          previousChatIdRef,
         )
       ) {
         ids.add(message.messageId);
@@ -403,7 +407,7 @@ export function MessagesList({
             const previousMessage = index > 0 ? messages[index - 1] : null;
             const showDateSeparator = shouldShowDateSeparator(
               message,
-              previousMessage
+              previousMessage,
             );
             const separatorDate = showDateSeparator
               ? new Date(message.timestamp)
@@ -425,19 +429,19 @@ export function MessagesList({
               {
                 hour: "2-digit",
                 minute: "2-digit",
-              }
+              },
             );
 
             // Reactions logic
-            const messageReactions =
-              reactionsMap[message.messageId!] || [];
+            const messageReactions = reactionsMap[message.messageId!] || [];
             const userReaction = messageReactions.find(
-              (r) => r.userId === currentUserId
+              (r) => r.userId === currentUserId,
             );
             const customerReaction =
               customerReactionsMap[message.messageId!] || undefined;
-            const reactionAnimating =
-              animatingReactionIds.has(message.messageId!);
+            const reactionAnimating = animatingReactionIds.has(
+              message.messageId!,
+            );
             const isPinned = pinnedMessageIds.has(message.messageId!);
 
             // Check if reactions are disabled (outside window)
@@ -496,6 +500,8 @@ export function MessagesList({
                 onReactionSelect={handleReactionSelect}
                 onPin={handlePinMessage}
                 onUnpin={handleUnpinMessage}
+                onViewCatalogItem={handleViewCatalogItem}
+                onViewAllCatalogItems={handleViewAllCatalogItems}
                 parseContactsFromMessage={parseContactsFromMessage}
                 t={t}
               />
@@ -508,8 +514,8 @@ export function MessagesList({
             </div>
           )}
           <div ref={messagesEndRef} />
-        </div >
+        </div>
       )}
-    </div >
+    </div>
   );
 }

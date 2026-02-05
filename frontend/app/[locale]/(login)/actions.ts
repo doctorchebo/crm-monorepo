@@ -23,7 +23,6 @@ import {
 import { createCheckoutSession } from "@/lib/payments/stripe";
 import { and, eq, sql } from "drizzle-orm";
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
 import { z } from "zod";
 
 async function logActivity(
@@ -184,14 +183,17 @@ export const signIn = validatedAction(signInSchema, async (data, formData) => {
     console.log("[SignIn] jwt_refresh_token cookie set");
   }
 
-  // Only store tracking cookies for client-side expiration awareness
-  // The actual JWT tokens are handled by HTTP-only cookies from the backend
+  // IMPORTANT: Store tracking cookies with LONGER expiration than the tokens themselves
+  // This ensures we can always check token validity client-side, even after tokens expire
+  // The tracking cookie should live as long as the refresh token (7 days)
+  const trackingCookieExpiry = refreshTokenExpiry;
+
   cookieJar.set("jwt_token_expires_at", accessTokenExpiry.toISOString(), {
     httpOnly: false, // Client needs to read this
     secure: isProduction,
     sameSite: "lax",
     path: "/",
-    expires: accessTokenExpiry,
+    expires: trackingCookieExpiry, // Keep tracking cookie alive for 7 days
   });
 
   cookieJar.set(
@@ -202,7 +204,7 @@ export const signIn = validatedAction(signInSchema, async (data, formData) => {
       secure: isProduction,
       sameSite: "lax",
       path: "/",
-      expires: refreshTokenExpiry,
+      expires: trackingCookieExpiry, // Keep tracking cookie alive for 7 days
     },
   );
 

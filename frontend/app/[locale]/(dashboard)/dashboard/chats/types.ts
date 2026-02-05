@@ -68,7 +68,8 @@ export interface ReplyPreview {
     | "document"
     | "contacts"
     | "sticker"
-    | "gif";
+    | "gif"
+    | "location";
   text?: string;
   media?: {
     url?: string;
@@ -163,16 +164,44 @@ export interface Message {
   aiModel?: string;
   aiProvider?: string;
   wasManuallyOverridden?: boolean;
-  /** Interactive message metadata (buttons, lists) */
+  /** Interactive message metadata (buttons, lists, catalogs) */
   metadata?: MessageMetadata | null;
 }
 
-/** Metadata for interactive messages (buttons, lists) */
+/** Catalog item data embedded in messages */
+export interface CatalogMessageItem {
+  id: string;
+  name: string;
+  description?: string | null;
+  price: number;
+  salePrice?: number | null;
+  currency: string;
+  link?: string | null;
+  retailerId?: string | null;
+  status: string;
+  mainImageUrl?: string | null;
+  mainThumbnailUrl?: string | null;
+}
+
+/** Location data for location messages */
+export interface LocationData {
+  latitude: number;
+  longitude: number;
+  name?: string | null;
+  address?: string | null;
+  url?: string | null;
+}
+
+/** Metadata for interactive messages (buttons, lists, catalogs, locations) */
 export interface MessageMetadata {
   /** Type of interactive message */
   interactiveType?: "button" | "list";
   /** Interactive message data */
   interactiveData?: InteractiveMessageData;
+  /** Catalog items for product messages */
+  catalogItems?: CatalogMessageItem[];
+  /** Location data for location messages */
+  location?: LocationData;
 }
 
 /** Interactive message button */

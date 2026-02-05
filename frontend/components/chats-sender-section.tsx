@@ -27,6 +27,7 @@ import {
   ChevronRight,
   FileIcon,
   ImageIcon,
+  MapPin,
   Mic,
   MoreVertical,
   Sticker,
@@ -247,6 +248,8 @@ function getMessageTypeIcon(type: string | null | undefined) {
       return <Mic className="mr-1 h-3 w-3 flex-shrink-0" />;
     case "document":
       return <FileIcon className="mr-1 h-3 w-3 flex-shrink-0" />;
+    case "location":
+      return <MapPin className="mr-1 h-3 w-3 flex-shrink-0" />;
     default:
       return null;
   }
@@ -280,6 +283,8 @@ function getMessageTypePreview(
       return t("mediaTypes.voiceMessage");
     case "document":
       return t("mediaTypes.document");
+    case "location":
+      return t("mediaTypes.location");
     default:
       return "";
   }

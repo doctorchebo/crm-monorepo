@@ -24,6 +24,10 @@ import {
   ArchivedChat,
   ArchivedChatsDrawer,
 } from "@/components/archived-chats-drawer";
+import {
+  CatalogSelectorModal,
+  type CatalogMessageItem,
+} from "@/components/catalog";
 import { ChatsSenderSection } from "@/components/chats-sender-section";
 import { DeleteChatDialog } from "@/components/dialogs/delete-chat-dialog";
 import {
@@ -58,6 +62,7 @@ import { PendingUpload } from "@/lib/media/types";
 // Local imports
 import { AiRegenerateBanner } from "@/components/chat/AiRegenerateBanner";
 import { AiReplyPreviewPanel } from "@/components/chat/AiReplyPreviewPanel";
+import { LocationPickerModal } from "@/components/location";
 import type { RateLimitInfo } from "@/hooks/use-ai-events";
 import { useChatPersistence } from "@/hooks/use-chat-persistence";
 import { useHandoff } from "@/hooks/use-handoff";
@@ -96,6 +101,7 @@ import { calculateConversationWindow } from "./utils";
 
 export default function ChatsPage() {
   const t = useTranslations("chats");
+  const tCatalog = useTranslations("catalog");
   const router = useRouter();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -129,6 +135,16 @@ export default function ChatsPage() {
   const [lastDeletedChatId, setLastDeletedChatId] = useState<string | null>(
     null,
   );
+
+  // Catalog selector state
+  const [catalogSelectorOpen, setCatalogSelectorOpen] = useState(false);
+
+  // Location picker state
+  const [locationPickerOpen, setLocationPickerOpen] = useState(false);
+
+  // Catalog item detail view state (for sidebar panel)
+  const [viewingCatalogItem, setViewingCatalogItem] =
+    useState<CatalogMessageItem | null>(null);
 
   // Sync automation enabled state with backend - MOVED DOWN
 
@@ -840,6 +856,151 @@ export default function ChatsPage() {
     document.addEventListener("mouseup", handleMouseUp);
   };
 
+  // Catalog send handler
+  const handleCatalogClick = useCallback(() => {
+    setCatalogSelectorOpen(true);
+  }, []);
+
+  // Location send handler
+  const handleLocationClick = useCallback(() => {
+    setLocationPickerOpen(true);
+  }, []);
+
+  // Handle location send
+  const handleLocationSend = useCallback(
+    async (locationData: {
+      latitude: number;
+      longitude: number;
+      name?: string;
+      address?: string;
+    }) => {
+      if (!chatState.selectedChatId || !effectiveSelectedChat) return;
+
+      try {
+        await backendApi.whatsapp.sendLocation({
+          to: effectiveSelectedChat.participantPhone,
+          latitude: locationData.latitude,
+          longitude: locationData.longitude,
+          name: locationData.name,
+          address: locationData.address,
+          senderId: effectiveSelectedChat.senderId,
+          replyToMessageId: messageHandlers.replyingToMessage?.messageId,
+        });
+
+        // Close the location picker modal
+        setLocationPickerOpen(false);
+
+        // Clear reply state after sending
+        messageHandlers.handleCancelReply();
+
+        addNotification(
+          t("location.sentSuccessfully") || "Location sent successfully",
+          "success",
+        );
+      } catch (error) {
+        console.error("Failed to send location:", error);
+        addNotification(
+          t("location.sendFailed") || "Failed to send location",
+          "error",
+        );
+      }
+    },
+    [
+      chatState.selectedChatId,
+      effectiveSelectedChat,
+      messageHandlers.replyingToMessage?.messageId,
+      messageHandlers.handleCancelReply,
+      addNotification,
+      t,
+    ],
+  );
+
+  // Handle viewing a catalog item from message bubble (opens in sidebar)
+  const handleViewCatalogItem = useCallback((item: CatalogMessageItem) => {
+    setViewingCatalogItem(item);
+  }, []);
+
+  // Handle viewing all catalog items (opens first item)
+  const handleViewAllCatalogItems = useCallback(
+    (items: CatalogMessageItem[]) => {
+      if (items.length > 0) {
+        setViewingCatalogItem(items[0]);
+      }
+    },
+    [],
+  );
+
+  // Handle closing catalog item view
+  const handleCloseCatalogView = useCallback(() => {
+    setViewingCatalogItem(null);
+  }, []);
+
+  // Handle sending catalog item to chat from sidebar panel
+  const handleCatalogSendFromSidebar = useCallback(
+    async (item: CatalogMessageItem) => {
+      if (!chatState.selectedChatId) return;
+
+      try {
+        const result = await backendApi.catalog.sendToChat(
+          chatState.selectedChatId,
+          [item.id],
+        );
+
+        if (result.success) {
+          addNotification(
+            t("catalog.send.sentSuccessfully") || "Product sent successfully",
+            "success",
+          );
+          // Close the sidebar panel after sending
+          setViewingCatalogItem(null);
+        }
+      } catch (error) {
+        console.error("Failed to send catalog item:", error);
+        addNotification(
+          tCatalog("send.sendFailed") || "Failed to send product",
+          "error",
+        );
+      }
+    },
+    [chatState.selectedChatId, addNotification, tCatalog],
+  );
+
+  // Handle catalog items selection and send
+  const handleCatalogItemsSelected = useCallback(
+    async (items: Array<{ id: string; name: string }>) => {
+      if (!chatState.selectedChatId || items.length === 0) return;
+
+      try {
+        const result = await backendApi.catalog.sendToChat(
+          chatState.selectedChatId,
+          items.map((item) => item.id),
+        );
+
+        if (result.success) {
+          addNotification(
+            items.length === 1
+              ? tCatalog("send.sentSuccessfully") || "Product sent successfully"
+              : tCatalog("send.sentMultiple") ||
+                  `${items.length} products sent successfully`,
+            "success",
+          );
+        }
+      } catch (error) {
+        console.error("Failed to send catalog items:", error);
+        addNotification(
+          tCatalog("send.sendFailed") || "Failed to send products",
+          "error",
+        );
+      }
+    },
+    [chatState.selectedChatId, addNotification, tCatalog],
+  );
+
+  // Clear viewing catalog item when chat changes
+  useEffect(() => {
+    setViewingCatalogItem(null);
+  }, [chatState.selectedChatId]);
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header with Controls */}
@@ -1160,6 +1321,8 @@ export default function ChatsPage() {
                       selectedMessageIds={messageHandlers.selectedMessageIds}
                       onToggleSelection={messageHandlers.handleToggleSelection}
                       isAITyping={isAITyping}
+                      handleViewCatalogItem={handleViewCatalogItem}
+                      handleViewAllCatalogItems={handleViewAllCatalogItems}
                     />
 
                     {/* Scroll to Bottom Button - shows when viewing old messages or when there are new messages */}
@@ -1265,6 +1428,8 @@ export default function ChatsPage() {
                         onFilesSelected={mediaHandlers.handleFilesSelected}
                         onContactsClick={contactHandlers.handleContactsClick}
                         onCameraClick={mediaHandlers.handleCameraClick}
+                        onCatalogClick={handleCatalogClick}
+                        onLocationClick={handleLocationClick}
                         conversationWindow={conversationWindow}
                       />
                     )
@@ -1423,7 +1588,7 @@ export default function ChatsPage() {
                         onSelectMessage={handleSearchSelectMessage}
                       />
                     ) : (
-                      // Notes/Profile Panel
+                      // Notes/Profile/Catalog Panel
                       chatState.selectedChatId &&
                       currentUserId && (
                         <ChatSidebar
@@ -1441,6 +1606,9 @@ export default function ChatsPage() {
                           onContactCreated={handleContactResolved}
                           initialTab={chatPersistence.persistedTab || "profile"}
                           onTabChange={handleSidebarTabChange}
+                          catalogItem={viewingCatalogItem}
+                          onCatalogClose={handleCloseCatalogView}
+                          onCatalogSendToChat={handleCatalogSendFromSidebar}
                         />
                       )
                     )}
@@ -1524,6 +1692,21 @@ export default function ChatsPage() {
         onConfirm={labelsIntegration.handleApplyLabels}
         title={`Label ${labelsIntegration.labelModalChatIds.length} chat${labelsIntegration.labelModalChatIds.length !== 1 ? "s" : ""}`}
         description="Selected labels will be added to all selected chats"
+      />
+
+      {/* Catalog Selector Modal */}
+      <CatalogSelectorModal
+        open={catalogSelectorOpen}
+        onOpenChange={setCatalogSelectorOpen}
+        onSelect={handleCatalogItemsSelected}
+        maxSelection={10}
+      />
+
+      {/* Location Picker Modal */}
+      <LocationPickerModal
+        isOpen={locationPickerOpen}
+        onClose={() => setLocationPickerOpen(false)}
+        onSend={handleLocationSend}
       />
     </div>
   );

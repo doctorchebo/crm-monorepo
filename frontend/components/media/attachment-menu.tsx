@@ -12,7 +12,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ALLOWED_FILE_TYPES } from "@/lib/media/types";
-import { Camera, Contact, FileText, Image, Paperclip } from "lucide-react";
+import {
+  Camera,
+  Contact,
+  FileText,
+  Image,
+  MapPin,
+  Package,
+  Paperclip,
+} from "lucide-react";
 import React, { useRef } from "react";
 
 export type AttachmentType =
@@ -20,13 +28,18 @@ export type AttachmentType =
   | "document"
   | "camera"
   | "contact"
-  | "location";
+  | "location"
+  | "catalog";
 
 interface AttachmentMenuProps {
   onFilesSelected: (files: File[], type: AttachmentType) => void;
   onContactsClick?: () => void;
   /** Called when camera option is selected - opens camera capture panel */
   onCameraClick?: () => void;
+  /** Called when catalog option is selected - opens catalog selector */
+  onCatalogClick?: () => void;
+  /** Called when location option is selected - opens location picker modal */
+  onLocationClick?: () => void;
   disabled?: boolean;
 }
 
@@ -34,6 +47,8 @@ export function AttachmentMenu({
   onFilesSelected,
   onContactsClick,
   onCameraClick,
+  onCatalogClick,
+  onLocationClick,
   disabled = false,
 }: AttachmentMenuProps) {
   const photoVideoInputRef = useRef<HTMLInputElement>(null);
@@ -51,7 +66,7 @@ export function AttachmentMenu({
 
   const handleFileChange = (
     event: React.ChangeEvent<HTMLInputElement>,
-    type: AttachmentType
+    type: AttachmentType,
   ) => {
     const files = Array.from(event.target.files || []);
     if (files.length > 0) {
@@ -81,9 +96,17 @@ export function AttachmentMenu({
           onContactsClick();
         }
         break;
+      case "catalog":
+        // Catalog item selection
+        if (onCatalogClick) {
+          onCatalogClick();
+        }
+        break;
       case "location":
-        // Location sharing - not supported in WhatsApp Cloud API
-        console.log("Location sharing not supported");
+        // Location sharing - opens location picker modal
+        if (onLocationClick) {
+          onLocationClick();
+        }
         break;
     }
   };
@@ -157,6 +180,22 @@ export function AttachmentMenu({
           >
             <Contact className="h-5 w-5 text-foreground dark:text-white" />
             <span>Contact</span>
+          </DropdownMenuItem>
+
+          <DropdownMenuItem
+            onClick={() => handleMenuItemClick("location")}
+            className="cursor-pointer gap-3 py-2.5"
+          >
+            <MapPin className="h-5 w-5 text-foreground dark:text-white" />
+            <span>Location</span>
+          </DropdownMenuItem>
+
+          <DropdownMenuItem
+            onClick={() => handleMenuItemClick("catalog")}
+            className="cursor-pointer gap-3 py-2.5"
+          >
+            <Package className="h-5 w-5 text-foreground dark:text-white" />
+            <span>Catalog</span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

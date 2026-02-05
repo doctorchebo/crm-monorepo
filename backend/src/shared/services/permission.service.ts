@@ -1,13 +1,13 @@
-import { Injectable, ForbiddenException, Logger } from '@nestjs/common';
-import { eq, and } from 'drizzle-orm';
+import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import { and, eq } from 'drizzle-orm';
 import { db } from '../../database/db.connection';
 import {
-  teamMembers,
-  teams,
   chats,
-  roles,
   permissions as permissionsTable,
   rolePermissions,
+  roles,
+  teamMembers,
+  teams,
 } from '../../database/schema';
 
 /**
@@ -224,6 +224,58 @@ export class PermissionService {
       teamId: m.teamId,
       role: m.roleName || 'Unknown',
     }));
+  }
+
+  /**
+   * Get the primary team ID for a user
+   * Returns the first active team membership for the user
+   * Throws ForbiddenException if user has no team memberships
+   *
+   * @param userId - The user's ID
+   * @param errorMessage - Optional custom error message
+   * @returns The team ID
+   * @throws ForbiddenException if user has no active team membership
+   */
+  async getUserTeamId(
+    userId: number,
+    errorMessage = 'You must be part of a team to perform this action',
+  ): Promise<number> {
+    const membership = await db.query.teamMembers.findFirst({
+      where: and(
+        eq(teamMembers.userId, userId),
+        eq(teamMembers.isActive, true),
+      ),
+      columns: {
+        teamId: true,
+      },
+    });
+
+    if (!membership) {
+      throw new ForbiddenException(errorMessage);
+    }
+
+    return membership.teamId;
+  }
+
+  /**
+   * Get the team ID for a user, or null if not a member of any team
+   * Use this when you need to handle missing team gracefully
+   *
+   * @param userId - The user's ID
+   * @returns The team ID or null
+   */
+  async getUserTeamIdOrNull(userId: number): Promise<number | null> {
+    const membership = await db.query.teamMembers.findFirst({
+      where: and(
+        eq(teamMembers.userId, userId),
+        eq(teamMembers.isActive, true),
+      ),
+      columns: {
+        teamId: true,
+      },
+    });
+
+    return membership?.teamId ?? null;
   }
 
   /**

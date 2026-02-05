@@ -2,13 +2,14 @@
 
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
-import { Input } from "@/components/ui/input";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { SearchInput } from "@/components/ui/search-input";
 import { WhatsAppStatusIcon } from "@/components/whatsapp-status-icon";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { backendApi } from "@/lib/api/endpoints";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
@@ -25,8 +26,6 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { SearchInput } from "@/components/ui/search-input";
-import { useDebouncedValue } from "@/hooks/use-debounced-value";
 
 // Types
 interface MessageSearchResult {
@@ -61,8 +60,6 @@ interface MessageSearchPanelProps {
   onClose: () => void;
   onSelectMessage: (messageId: string) => void;
 }
-
-
 
 // Media type icon component
 function MediaTypeIcon({ type }: { type: string }) {
@@ -159,7 +156,7 @@ function HighlightedText({
   const beforeMatch = displayText.slice(0, adjustedMatchIndex);
   const match = displayText.slice(
     adjustedMatchIndex,
-    adjustedMatchIndex + query.length
+    adjustedMatchIndex + query.length,
   );
   const afterMatch = displayText.slice(adjustedMatchIndex + query.length);
 
@@ -247,7 +244,7 @@ export function MessageSearchPanel({
   onSelectMessage,
 }: MessageSearchPanelProps) {
   const t = useTranslations("chats.search");
-  
+
   const {
     value: searchQuery,
     debouncedValue: debouncedQuery,
@@ -289,7 +286,7 @@ export function MessageSearchPanel({
         setIsJumpingToDate(false);
       }
     },
-    [chatId, onSelectMessage]
+    [chatId, onSelectMessage],
   );
 
   // Perform search
@@ -342,7 +339,7 @@ export function MessageSearchPanel({
         setIsLoading(false);
       }
     },
-    [chatId, results.length]
+    [chatId, results.length],
   );
 
   // Effect to trigger search on debounced query change
@@ -365,7 +362,7 @@ export function MessageSearchPanel({
     setTotal(0);
     setHasMore(false);
     setError(null);
-  }, [chatId]);
+  }, [chatId]); // Intentionally excluding setSearchQuery - it's stable from useCallback
 
   // Handle load more
   const handleLoadMore = () => {
@@ -383,7 +380,7 @@ export function MessageSearchPanel({
         handleLoadMore();
       }
     },
-    [handleLoadMore]
+    [handleLoadMore],
   );
 
   // Handle message selection
@@ -397,7 +394,7 @@ export function MessageSearchPanel({
     <div
       className={cn(
         "flex flex-col h-full bg-background border-l",
-        "animate-in slide-in-from-right duration-300"
+        "animate-in slide-in-from-right duration-300",
       )}
     >
       {/* Header */}
