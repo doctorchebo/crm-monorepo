@@ -9,9 +9,10 @@ import {
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, count, desc, eq, ilike, inArray, or } from 'drizzle-orm';
 import {
   CreateTemplateDto,
   CreateTemplateLocaleDto,
@@ -27,11 +28,26 @@ import { TemplateValidatorService } from './template-validator.service';
 import { VersionStatus } from './template-version.service';
 
 /**
+ * Paginated response for templates list
+ */
+export interface PaginatedTemplatesResponse {
+  data: any[];
+  pagination: {
+    page: number;
+    limit: number;
+    totalItems: number;
+    totalPages: number;
+  };
+}
+
+/**
  * Templates service
  * Handles CRUD operations and business logic for template management
  */
 @Injectable()
 export class TemplatesService {
+  private readonly logger = new Logger(TemplatesService.name);
+
   constructor(
     private parserService: TemplateParserService,
     private validatorService: TemplateValidatorService,
@@ -98,7 +114,7 @@ export class TemplatesService {
   }
 
   /**
-   * List all templates for a user
+   * List all templates for a user (non-paginated - kept for backward compatibility)
    */
   async listTemplates(userId: number, onlyVisible = false) {
     const where = onlyVisible
@@ -117,6 +133,113 @@ export class TemplatesService {
       },
       orderBy: (templates, { desc }) => [desc(templates.createdAt)],
     });
+  }
+
+  /**
+   * List all templates for a user with pagination and optional search
+   *
+   * @param userId - User ID to filter templates
+   * @param page - Page number (1-indexed)
+   * @param limit - Items per page
+   * @param search - Optional search query for name, displayName, or description
+   * @param onlyVisible - Whether to only include visible templates
+   */
+  async listTemplatesPaginated(
+    userId: number,
+    page: number = 1,
+    limit: number = 12,
+    search?: string,
+    onlyVisible = false,
+  ): Promise<PaginatedTemplatesResponse> {
+    try {
+      // Build base conditions
+      const conditions: any[] = [
+        eq(templates.ownerId, userId),
+        eq(templates.isActive, true),
+      ];
+
+      if (onlyVisible) {
+        conditions.push(eq(templates.isVisible, true));
+      }
+
+      // Add search filter if provided
+      if (search && search.trim()) {
+        const searchTerm = `%${search.trim()}%`;
+        conditions.push(
+          or(
+            ilike(templates.name, searchTerm),
+            ilike(templates.displayName, searchTerm),
+            ilike(templates.description, searchTerm),
+          )!,
+        );
+      }
+
+      // Get total count for pagination
+      const [countResult] = await db
+        .select({ count: count() })
+        .from(templates)
+        .where(and(...conditions));
+
+      const totalItems = countResult?.count || 0;
+      const totalPages = Math.ceil(totalItems / limit);
+      const offset = (page - 1) * limit;
+
+      // Fetch paginated results with relations
+      const result = await db.query.templates.findMany({
+        where: and(...conditions),
+        with: {
+          locales: true,
+          platforms: true,
+        },
+        orderBy: [desc(templates.updatedAt), desc(templates.createdAt)],
+        limit,
+        offset,
+      });
+
+      return {
+        data: result,
+        pagination: {
+          page,
+          limit,
+          totalItems,
+          totalPages,
+        },
+      };
+    } catch (error) {
+      this.logger.error(`Error fetching templates: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Bulk delete multiple templates (soft delete)
+   * @param templateIds - Array of template IDs to delete
+   * @returns Number of templates deleted
+   */
+  async bulkDelete(templateIds: string[]): Promise<number> {
+    if (!templateIds || templateIds.length === 0) {
+      return 0;
+    }
+
+    try {
+      const result = await db
+        .update(templates)
+        .set({
+          isActive: false,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(inArray(templates.id, templateIds), eq(templates.isActive, true)),
+        )
+        .returning();
+
+      const deletedCount = result.length;
+      this.logger.log(`Bulk deleted ${deletedCount} templates`);
+      return deletedCount;
+    } catch (error) {
+      this.logger.error(`Error bulk deleting templates: ${error.message}`);
+      throw error;
+    }
   }
 
   /**

@@ -19,6 +19,7 @@ import {
 } from '@nestjs/common';
 import { asc, eq } from 'drizzle-orm';
 import { JwtAuthGuard } from '../auth/auth.guard';
+import { TeamService } from '../team/team.service';
 import {
   CreateTemplateDto,
   CreateTemplateLocaleDto,
@@ -34,7 +35,6 @@ import {
 } from './services/template-version.service';
 import { TemplatesService } from './services/templates.service';
 import { VariableResolutionService } from './services/variable-resolution.service';
-import { TeamService } from '../team/team.service';
 
 @Controller('templates')
 @UseGuards(JwtAuthGuard)
@@ -117,16 +117,51 @@ export class TemplatesController {
   }
 
   /**
-   * GET /templates - List all templates for user
+   * GET /templates - List all templates for user with optional pagination
+   * Supports both paginated and non-paginated modes for backward compatibility.
+   *
+   * @param page - Page number (1-indexed). If provided, returns paginated response.
+   * @param limit - Items per page (default: 12)
+   * @param search - Optional search query
+   * @param visible - Filter by visibility
    */
   @Get()
-  async listTemplates(@Request() req: any, @Query('visible') visible?: string) {
+  async listTemplates(
+    @Request() req: any,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+    @Query('search') search?: string,
+    @Query('visible') visible?: string,
+  ) {
     const userId = req.user?.userId;
     const teams = await this.teamService.getUserTeams(userId);
     const targetId = teams[0]?.ownerId || userId;
-
     const onlyVisible = visible === 'true';
+
+    // If page is provided, use paginated method
+    if (page !== undefined) {
+      return await this.templatesService.listTemplatesPaginated(
+        targetId,
+        Number(page) || 1,
+        Number(limit) || 12,
+        search,
+        onlyVisible,
+      );
+    }
+
+    // Backward compatible: return all templates without pagination
     return await this.templatesService.listTemplates(targetId, onlyVisible);
+  }
+
+  /**
+   * POST /templates/bulk-delete - Bulk delete multiple templates
+   * Body: { templateIds: string[] }
+   */
+  @Post('bulk-delete')
+  async bulkDelete(@Body() body: { templateIds: string[] }) {
+    const { templateIds } = body;
+    const deletedCount = await this.templatesService.bulkDelete(templateIds);
+    return { success: true, deletedCount };
   }
 
   // ==================== Bulk Sync Endpoints (must be before :id routes) ====================

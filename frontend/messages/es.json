@@ -1152,6 +1152,7 @@
   "templates": {
     "title": "Plantillas",
     "subtitle": "Gestiona tus plantillas de mensajes",
+    "totalTemplates": "{count, plural, =0 {Sin plantillas} =1 {# plantilla} other {# plantillas}}",
     "searchPlaceholder": "Buscar plantillas...",
     "noTemplates": "Sin plantillas aún",
     "noResults": "Sin plantillas encontradas",
@@ -1161,6 +1162,20 @@
     "createNewDescription": "Crea una nueva plantilla de mensaje con variables y soporte multilingüe",
     "edit": "Editar Plantilla",
     "editDescription": "Actualiza tu plantilla de mensaje",
+    "selectAll": "Seleccionar todo",
+    "selectedCount": "{count} seleccionados",
+    "bulkDeleteTitle": "Eliminar Plantillas",
+    "bulkDeleteDescription": "¿Estás seguro de que quieres eliminar {count, plural, =1 {# plantilla} other {# plantillas}}? Esta acción no se puede deshacer.",
+    "bulkDeleteSuccess": "{count, plural, =1 {# plantilla eliminada} other {# plantillas eliminadas}} exitosamente",
+    "bulkDeleteFailed": "Error al eliminar plantillas",
+    "pagination": {
+      "page": "Página {current} de {total}",
+      "previous": "Anterior",
+      "next": "Siguiente",
+      "first": "Primera página",
+      "last": "Última página",
+      "rowsPerPage": "Filas por página"
+    },
     "viewTemplate": "Ver Plantilla",
     "viewOnlyDescription": "Esta versión está bloqueada. Crea un nuevo borrador para hacer cambios.",
     "basicInfo": "Información Básica",
@@ -2099,6 +2114,53 @@
         "variables": "Variables",
         "noVariables": "Sin variables definidas",
         "workflowSettings": "Configuración del Flujo"
+      }
+    },
+    "versionHistory": {
+      "title": "Historial de Versiones",
+      "description": "Ver y restaurar versiones anteriores de este flujo de trabajo",
+      "versionLabel": "Versión {version}",
+      "current": "Actual",
+      "publishedBy": "Usuario #{userId}",
+      "nodesCount": "{count, plural, =0 {Sin nodos} =1 {1 nodo} other {# nodos}}",
+      "connectionsCount": "{count, plural, =0 {Sin conexiones} =1 {1 conexión} other {# conexiones}}",
+      "restore": "Restaurar",
+      "restoring": "Restaurando...",
+      "retry": "Reintentar",
+      "empty": {
+        "title": "Sin historial de versiones",
+        "description": "Publica tu flujo de trabajo para comenzar a rastrear versiones"
+      },
+      "errors": {
+        "loadFailed": "Error al cargar el historial de versiones",
+        "restoreFailed": "Error al restaurar la versión"
+      },
+      "notifications": {
+        "restored": "Flujo de trabajo restaurado",
+        "restoredMessage": "Restaurado a la versión {version}"
+      }
+    },
+    "templates": {
+      "title": "Plantillas de Flujos de Trabajo",
+      "description": "Comienza con una plantilla prediseñada para ahorrar tiempo",
+      "searchPlaceholder": "Buscar plantillas...",
+      "useTemplate": "Usar Plantilla",
+      "preview": "Vista Previa",
+      "featured": "Destacados",
+      "allCategories": "Todas las Categorías",
+      "noResults": "No se encontraron plantillas",
+      "noResultsDescription": "Intenta ajustar tu búsqueda o filtro",
+      "empty": {
+        "title": "No hay plantillas disponibles",
+        "description": "Vuelve más tarde para nuevas plantillas"
+      },
+      "errors": {
+        "loadFailed": "Error al cargar las plantillas",
+        "useFailed": "Error al crear flujo de trabajo desde la plantilla"
+      },
+      "notifications": {
+        "created": "Flujo de trabajo creado",
+        "createdMessage": "Creado desde la plantilla: {name}"
       }
     }
   },

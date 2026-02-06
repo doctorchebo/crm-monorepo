@@ -1965,8 +1965,50 @@ export const backendApi = {
 
   // Templates endpoints
   templates: {
+    /**
+     * List templates (non-paginated, for backward compatibility)
+     */
     list: (visible?: boolean) =>
       apiClient.get(`/templates${visible ? "?visible=true" : ""}`),
+
+    /**
+     * List templates with pagination
+     */
+    listPaginated: (params: {
+      page: number;
+      limit: number;
+      search?: string;
+      visible?: boolean;
+    }): Promise<{
+      data: any[];
+      pagination: {
+        page: number;
+        limit: number;
+        totalItems: number;
+        totalPages: number;
+      };
+    }> => {
+      const searchParams = new URLSearchParams({
+        page: String(params.page),
+        limit: String(params.limit),
+      });
+      if (params.search) {
+        searchParams.set("search", params.search);
+      }
+      if (params.visible) {
+        searchParams.set("visible", "true");
+      }
+      return apiClient.get(`/templates?${searchParams.toString()}`);
+    },
+
+    /**
+     * Bulk delete multiple templates
+     */
+    bulkDelete: (
+      templateIds: string[],
+    ): Promise<{ success: boolean; deletedCount: number }> =>
+      apiClient.post("/templates/bulk-delete", { templateIds }),
+
     get: (templateId: string) => apiClient.get(`/templates/${templateId}`),
     create: (data: any) => apiClient.post("/templates", data),
     update: (templateId: string, data: any) =>

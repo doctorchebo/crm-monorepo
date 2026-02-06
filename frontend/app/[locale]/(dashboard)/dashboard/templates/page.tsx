@@ -7,8 +7,10 @@ import {
   type TemplateLocaleData,
 } from "@/components/templates/template-card";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { PageLayout } from "@/components/ui/page-layout";
-import { Input } from "@/components/ui/input";
+import { Pagination } from "@/components/ui/pagination";
+import { SearchInput } from "@/components/ui/search-input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Tooltip,
@@ -17,7 +19,9 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useAuthProtection } from "@/hooks/use-auth";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useNotification } from "@/hooks/use-notification";
+import { usePaginatedData } from "@/hooks/use-paginated-data";
 import {
   mapWebhookStatusToInternal,
   useTemplateStatusSocket,
@@ -28,13 +32,10 @@ import {
   BulkSyncResult,
   TemplateSyncResult,
 } from "@/lib/api/endpoints";
-import { Loader2, Plus, RefreshCw } from "lucide-react";
+import { Loader2, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
-import useSWR from "swr";
-import { SearchInput } from "@/components/ui/search-input";
-import { useDebouncedValue } from "@/hooks/use-debounced-value";
 
 /**
  * Template interface matching the API response
@@ -42,6 +43,10 @@ import { useDebouncedValue } from "@/hooks/use-debounced-value";
 interface Template extends TemplateCardData {
   createdAt: string;
   updatedAt: string;
+}
+
+interface TemplateFilters {
+  search: string;
 }
 
 export default function TemplatesPage() {
@@ -53,35 +58,68 @@ export default function TemplatesPage() {
   // Protect this route - redirect to login if token is missing or expired
   useAuthProtection();
 
+  // Search with debounce
   const {
     value: searchQuery,
     debouncedValue: debouncedSearch,
     setValue: setSearchQuery,
   } = useDebouncedValue("", { delay: 300 });
 
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  // Memoize filters
+  const filters = useMemo<TemplateFilters>(
+    () => ({ search: debouncedSearch }),
+    [debouncedSearch],
+  );
+
+  // Dialog state
+  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
+  const [singleDeleteDialogOpen, setSingleDeleteDialogOpen] = useState(false);
   const [templateToDelete, setTemplateToDelete] = useState<Template | null>(
-    null
+    null,
   );
   const [isDeleting, setIsDeleting] = useState(false);
 
   // Sync-related state
   const [isSyncingAll, setIsSyncingAll] = useState(false);
   const [syncingTemplateId, setSyncingTemplateId] = useState<string | null>(
-    null
+    null,
   );
 
+  // Use the paginated data hook for robust pagination and selection management
   const {
-    data: templates = [],
+    items: templates,
+    total,
     isLoading,
-    mutate,
-  } = useSWR("templates", async () => {
-    try {
-      return await backendApi.templates.list();
-    } catch (error) {
-      console.error("Failed to fetch templates:", error);
-      return [];
-    }
+    page,
+    pageSize,
+    totalPages,
+    setPage,
+    setPageSize,
+    selectedIds,
+    selectedCount,
+    isAllSelected,
+    toggleSelect,
+    toggleSelectAll,
+    clearSelection,
+    refreshAfterDelete,
+    swrResponse: { mutate },
+  } = usePaginatedData<Template, TemplateFilters>({
+    cacheKeyPrefix: "templates",
+    initialPageSize: 12,
+    pageSizeOptions: [12, 24, 48],
+    filters,
+    fetcher: async ({ page, pageSize, filters }) => {
+      const result = await backendApi.templates.listPaginated({
+        page,
+        limit: pageSize,
+        search: filters.search || undefined,
+      });
+      return {
+        items: result.data as Template[],
+        total: result.pagination.totalItems,
+      };
+    },
+    getItemId: (template) => template.id,
   });
 
   // Handle real-time template status updates via WebSocket
@@ -104,21 +142,21 @@ export default function TemplatesPage() {
         newStatus === "approved"
           ? "success"
           : newStatus === "rejected"
-          ? "error"
-          : "info";
+            ? "error"
+            : "info";
 
       addNotification(
         `${t("templateStatusChanged") || "Template status changed"}: "${
           update.templateName
         }" → ${statusLabel}`,
         notificationType as "success" | "error" | "info",
-        5000
+        5000,
       );
 
       // Refresh the templates list to show updated status
       mutate();
     },
-    [t, addNotification, mutate]
+    [t, addNotification, mutate],
   );
 
   // Connect to WebSocket for real-time template status updates
@@ -132,31 +170,10 @@ export default function TemplatesPage() {
     },
   });
 
-  // Filter and sort templates
-  const filteredTemplates = useMemo(() => {
-    return (templates as Template[])
-      .filter((template) => {
-        const searchLower = debouncedSearch.toLowerCase();
-        const nameToSearch = (
-          template.displayName || template.name
-        ).toLowerCase();
-        return (
-          nameToSearch.includes(searchLower) ||
-          template.description?.toLowerCase().includes(searchLower) ||
-          template.locales?.some((locale) =>
-            locale.body.toLowerCase().includes(searchLower)
-          )
-        );
-      })
-      .sort((a, b) => {
-        const dateA = new Date(a.updatedAt).getTime();
-        const dateB = new Date(b.updatedAt).getTime();
-        return dateB - dateA;
-      });
-  }, [templates, debouncedSearch]);
-
-  // Delete template handler
-  const handleDelete = async () => {
+  /**
+   * Single template delete handler
+   */
+  const handleSingleDelete = async () => {
     if (!templateToDelete) return;
 
     setIsDeleting(true);
@@ -165,20 +182,50 @@ export default function TemplatesPage() {
       addNotification(
         t("templateDeleted") || "Template deleted successfully",
         "success",
-        3000
+        3000,
       );
-      mutate();
+      await refreshAfterDelete(1);
     } catch (error) {
       console.error("Failed to delete template:", error);
       addNotification(
         t("templateDeleteFailed") || "Failed to delete template",
         "error",
-        3000
+        3000,
       );
     } finally {
       setIsDeleting(false);
-      setDeleteDialogOpen(false);
+      setSingleDeleteDialogOpen(false);
       setTemplateToDelete(null);
+    }
+  };
+
+  /**
+   * Bulk delete handler
+   */
+  const handleBulkDelete = async () => {
+    if (selectedCount === 0) return;
+
+    setIsDeleting(true);
+    try {
+      const result = await backendApi.templates.bulkDelete(
+        Array.from(selectedIds),
+      );
+      addNotification(
+        t("bulkDeleteSuccess", { count: result.deletedCount }) ||
+          `${result.deletedCount} template(s) deleted successfully`,
+        "success",
+      );
+      setBulkDeleteDialogOpen(false);
+      // Use refreshAfterDelete for automatic page adjustment when last page becomes empty
+      await refreshAfterDelete(result.deletedCount);
+    } catch (error) {
+      console.error("Failed to bulk delete templates:", error);
+      addNotification(
+        t("bulkDeleteFailed") || "Failed to delete templates",
+        "error",
+      );
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -192,9 +239,18 @@ export default function TemplatesPage() {
     router.push(url);
   };
 
+  /**
+   * Handle delete click - shows single delete dialog or toggles selection
+   */
   const handleDeleteClick = (template: Template) => {
-    setTemplateToDelete(template);
-    setDeleteDialogOpen(true);
+    if (selectedCount > 0) {
+      // If already in selection mode, just toggle this item
+      toggleSelect(template.id);
+    } else {
+      // Show single delete dialog
+      setTemplateToDelete(template);
+      setSingleDeleteDialogOpen(true);
+    }
   };
 
   /**
@@ -220,7 +276,7 @@ export default function TemplatesPage() {
         addNotification(
           t("noTemplatesNeedSync") || "No templates need syncing",
           "info",
-          3000
+          3000,
         );
       } else if (result.statusChangedCount > 0) {
         addNotification(
@@ -232,7 +288,7 @@ export default function TemplatesPage() {
               result.statusChangedCount
             } status${result.statusChangedCount !== 1 ? "es" : ""} changed.`,
           "success",
-          5000
+          5000,
         );
         mutate();
       } else {
@@ -240,7 +296,7 @@ export default function TemplatesPage() {
           t("syncCompleteNoChanges", { total: result.totalProcessed }) ||
             `Synced ${result.totalProcessed} templates. No status changes detected.`,
           "info",
-          3000
+          3000,
         );
       }
     } catch (error) {
@@ -248,7 +304,7 @@ export default function TemplatesPage() {
       addNotification(
         t("syncFailed") || "Failed to sync template statuses",
         "error",
-        3000
+        3000,
       );
     } finally {
       setIsSyncingAll(false);
@@ -260,7 +316,7 @@ export default function TemplatesPage() {
    */
   const handleSyncSingleTemplate = async (
     template: Template,
-    locale: TemplateLocaleData
+    locale: TemplateLocaleData,
   ) => {
     if (syncingTemplateId === template.id) return;
 
@@ -268,7 +324,7 @@ export default function TemplatesPage() {
     try {
       const result: TemplateSyncResult = await backendApi.templates.syncStatus(
         template.id,
-        { locale: locale.locale }
+        { locale: locale.locale },
       );
 
       if (result.error) {
@@ -277,7 +333,7 @@ export default function TemplatesPage() {
             name: template.displayName || template.name,
           }) || `Failed to sync "${template.displayName || template.name}"`,
           "error",
-          3000
+          3000,
         );
       } else if (result.statusChanged) {
         const statusLabels: Record<string, string> = {
@@ -299,7 +355,7 @@ export default function TemplatesPage() {
               template.displayName || template.name
             }" status updated to ${newStatusLabel}`,
           result.newStatus === "approved" ? "success" : "info",
-          4000
+          4000,
         );
         mutate();
       } else {
@@ -308,7 +364,7 @@ export default function TemplatesPage() {
             name: template.displayName || template.name,
           }) || `"${template.displayName || template.name}" is up to date`,
           "info",
-          3000
+          3000,
         );
       }
     } catch (error) {
@@ -318,7 +374,7 @@ export default function TemplatesPage() {
           name: template.displayName || template.name,
         }) || `Failed to sync "${template.displayName || template.name}"`,
         "error",
-        3000
+        3000,
       );
     } finally {
       setSyncingTemplateId(null);
@@ -326,12 +382,13 @@ export default function TemplatesPage() {
   };
 
   /**
-   * Count of templates that have pending status (across any locale)
+   * Count of templates that have pending status (across any locale) - from current page
    */
   const pendingTemplatesCount = useMemo(() => {
-    return (templates as Template[]).filter((template) => {
+    return templates.filter((template) => {
       return template.locales?.some(
-        (locale) => locale.approvalStatus === "pending" && locale.metaTemplateId
+        (locale) =>
+          locale.approvalStatus === "pending" && locale.metaTemplateId,
       );
     }).length;
   }, [templates]);
@@ -339,7 +396,10 @@ export default function TemplatesPage() {
   return (
     <PageLayout
       title={t("title") || "Templates"}
-      description={t("subtitle") || "Create and manage message templates for all your platforms"}
+      description={
+        t("totalTemplates", { count: total }) ||
+        `${total} template${total !== 1 ? "s" : ""}`
+      }
       headerActions={
         <div className="flex items-center gap-2">
           {/* Sync All Pending Button */}
@@ -384,12 +444,66 @@ export default function TemplatesPage() {
       }
       className="space-y-6"
     >
-      {/* Search */}
-      <SearchInput
-        placeholder={t("searchPlaceholder") || "Search templates..."}
-        value={searchQuery}
-        onChange={setSearchQuery}
-      />
+      {/* Search and Pagination Controls */}
+      <div className="flex flex-col sm:flex-row gap-4 justify-between items-end sm:items-center">
+        <div className="relative w-full sm:w-auto sm:min-w-[300px]">
+          <SearchInput
+            placeholder={t("searchPlaceholder") || "Search templates..."}
+            value={searchQuery}
+            onChange={setSearchQuery}
+          />
+        </div>
+
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          onPageChange={setPage}
+          pageSize={pageSize}
+          onPageSizeChange={setPageSize}
+          pageSizeOptions={[12, 24, 48]}
+          translations={{
+            page: t("pagination.page", {
+              current: page,
+              total: totalPages,
+            }),
+            previous: t("pagination.previous"),
+            next: t("pagination.next"),
+            first: t("pagination.first"),
+            last: t("pagination.last"),
+            rowsPerPage: t("pagination.rowsPerPage"),
+          }}
+          compact
+        />
+      </div>
+
+      {/* Bulk Actions Bar */}
+      {selectedCount > 0 && (
+        <div className="flex items-center justify-between p-2 bg-muted/50 rounded-lg border animate-in fade-in slide-in-from-top-1">
+          <div className="flex items-center gap-4 px-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={clearSelection}
+              className="h-8 w-8 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+            <span className="text-sm font-medium">
+              {t("selectedCount", { count: selectedCount }) ||
+                `${selectedCount} selected`}
+            </span>
+          </div>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setBulkDeleteDialogOpen(true)}
+            className="h-8"
+          >
+            <Trash2 className="h-4 w-4 mr-2" />
+            {tCommon("delete")}
+          </Button>
+        </div>
+      )}
 
       {/* Templates Grid */}
       <div>
@@ -399,7 +513,7 @@ export default function TemplatesPage() {
               <Skeleton key={i} className="h-64 w-full rounded-lg" />
             ))}
           </div>
-        ) : filteredTemplates.length === 0 ? (
+        ) : templates.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-center">
             <p className="text-gray-600 mb-4">
               {searchQuery
@@ -416,40 +530,91 @@ export default function TemplatesPage() {
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredTemplates.map((template) => (
-              <TemplateCard
-                key={template.id}
-                template={template}
-                onClick={() => handleEdit(template.id)}
-                onLocaleClick={(locale) =>
-                  handleEdit(template.id, locale.locale)
-                }
-                onDelete={() => handleDeleteClick(template)}
-                onSyncStatus={(locale) =>
-                  handleSyncSingleTemplate(template, locale)
-                }
-                isSyncing={syncingTemplateId === template.id}
-                canSyncStatus={canSyncStatus}
-              />
-            ))}
-          </div>
+          <>
+            {/* Select All Header - visible in selection mode */}
+            {selectedCount > 0 && (
+              <div className="flex items-center gap-3 px-3 py-2 border-b mb-4">
+                <Checkbox
+                  checked={isAllSelected}
+                  onCheckedChange={toggleSelectAll}
+                  aria-label={t("selectAll") || "Select all templates"}
+                />
+                <span className="text-sm text-muted-foreground">
+                  {t("selectAll") || "Select all"}
+                </span>
+              </div>
+            )}
+
+            {/* Templates Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {templates.map((template) => (
+                <div key={template.id} className="relative group">
+                  {/* Selection Checkbox - visible in selection mode */}
+                  {selectedCount > 0 && (
+                    <div
+                      className="absolute top-2 left-2 z-10"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Checkbox
+                        checked={selectedIds.has(template.id)}
+                        onCheckedChange={() => toggleSelect(template.id)}
+                        aria-label={`Select ${template.displayName || template.name}`}
+                        className="bg-background"
+                      />
+                    </div>
+                  )}
+                  <TemplateCard
+                    template={template}
+                    onClick={() => handleEdit(template.id)}
+                    onLocaleClick={(locale) =>
+                      handleEdit(template.id, locale.locale)
+                    }
+                    onDelete={() => handleDeleteClick(template)}
+                    onSyncStatus={(locale) =>
+                      handleSyncSingleTemplate(template, locale)
+                    }
+                    isSyncing={syncingTemplateId === template.id}
+                    canSyncStatus={canSyncStatus}
+                  />
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </div>
 
-      {/* Delete Confirmation Dialog */}
+      {/* Single Delete Confirmation Dialog */}
       <DeleteConfirmationDialog
-        isOpen={deleteDialogOpen}
+        isOpen={singleDeleteDialogOpen}
         onCancel={() => {
-          setDeleteDialogOpen(false);
+          setSingleDeleteDialogOpen(false);
           setTemplateToDelete(null);
         }}
         title={t("deleteTitle") || "Delete Template"}
         description={
-          t("deleteDescription") ||
-          `Are you sure you want to delete "${templateToDelete?.name}"? This action cannot be undone.`
+          t("deleteDescription", {
+            name: templateToDelete?.displayName || templateToDelete?.name,
+          }) ||
+          `Are you sure you want to delete "${
+            templateToDelete?.displayName || templateToDelete?.name
+          }"? This action cannot be undone.`
         }
-        onConfirm={handleDelete}
+        onConfirm={handleSingleDelete}
+        isLoading={isDeleting}
+      />
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <DeleteConfirmationDialog
+        isOpen={bulkDeleteDialogOpen}
+        title={t("bulkDeleteTitle") || "Delete Templates"}
+        description={
+          t("bulkDeleteDescription", { count: selectedCount }) ||
+          `Are you sure you want to delete ${selectedCount} template${
+            selectedCount !== 1 ? "s" : ""
+          }? This action cannot be undone.`
+        }
+        onConfirm={handleBulkDelete}
+        onCancel={() => setBulkDeleteDialogOpen(false)}
         isLoading={isDeleting}
       />
     </PageLayout>
