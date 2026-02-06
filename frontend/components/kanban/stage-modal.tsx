@@ -14,12 +14,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useNotification } from "@/hooks/use-notification";
-import type { CreateStageDto, WorkflowStage } from "@/lib/api/endpoints";
+import type {
+  CreateStageDto,
+  UpdateStageDto,
+  WorkflowStage,
+} from "@/lib/api/endpoints";
 import { backendApi } from "@/lib/api/endpoints";
 import { cn } from "@/lib/utils";
 import { Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 
 // Predefined color palette for stages
 const STAGE_COLORS = [
@@ -35,37 +39,46 @@ const STAGE_COLORS = [
   { name: "Gray", value: "#6b7280" },
 ];
 
-interface CreateStageModalProps {
+interface StageModalProps {
   /** Whether the modal is open */
   open: boolean;
   /** Callback when modal should close */
   onOpenChange: (open: boolean) => void;
-  /** Position where the new stage should be inserted (sortOrder) */
-  insertAtPosition: number;
+  /** Mode: 'create' for new stage, 'edit' for existing stage */
+  mode: "create" | "edit";
+  /** Existing stage data (required for edit mode) */
+  stage?: WorkflowStage;
+  /** Position where the new stage should be inserted (for create mode) */
+  insertAtPosition?: number;
   /** Callback when a stage is successfully created */
-  onStageCreated: (stage: WorkflowStage) => void;
-  /** Whether this will be the only/first stage (for default selection) */
+  onStageCreated?: (stage: WorkflowStage) => void;
+  /** Callback when a stage is successfully updated */
+  onStageUpdated?: (stage: WorkflowStage) => void;
+  /** Whether this will be the only/first stage (for default selection in create mode) */
   isFirstStage?: boolean;
 }
 
 /**
- * Create Stage Modal
+ * Stage Modal - Unified component for creating and editing pipeline stages
  *
- * Allows users to create new pipeline stages with:
+ * Allows users to configure:
  * - Name (required)
  * - Description (optional)
  * - Color selection
  * - Default stage toggle
  * - Final stage toggle
- * - AI settings
+ * - AI settings (auto-reply, handoff required)
  */
-export const CreateStageModal = memo(function CreateStageModal({
+export const StageModal = memo(function StageModal({
   open,
   onOpenChange,
-  insertAtPosition,
+  mode,
+  stage,
+  insertAtPosition = 0,
   onStageCreated,
+  onStageUpdated,
   isFirstStage = false,
-}: CreateStageModalProps) {
+}: StageModalProps) {
   const t = useTranslations("kanban");
   const { addNotification } = useNotification();
 
@@ -73,56 +86,94 @@ export const CreateStageModal = memo(function CreateStageModal({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [color, setColor] = useState(STAGE_COLORS[0].value);
-  const [isDefault, setIsDefault] = useState(isFirstStage);
+  const [isDefault, setIsDefault] = useState(false);
   const [isFinal, setIsFinal] = useState(false);
   const [aiAutoReply, setAiAutoReply] = useState(true);
   const [aiHandoffRequired, setAiHandoffRequired] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
-  // Reset form
-  const resetForm = useCallback(() => {
-    setName("");
-    setDescription("");
-    setColor(STAGE_COLORS[0].value);
-    setIsDefault(isFirstStage);
-    setIsFinal(false);
-    setAiAutoReply(true);
-    setAiHandoffRequired(false);
-  }, [isFirstStage]);
+  // Initialize form with stage data when in edit mode
+  useEffect(() => {
+    if (open) {
+      if (mode === "edit" && stage) {
+        setName(stage.name);
+        setDescription(stage.description || "");
+        setColor(stage.color || STAGE_COLORS[0].value);
+        setIsDefault(stage.isDefault);
+        setIsFinal(stage.isFinal);
+        setAiAutoReply(stage.aiAutoReply);
+        setAiHandoffRequired(stage.aiHandoffRequired);
+      } else if (mode === "create") {
+        // Reset to defaults for create mode
+        setName("");
+        setDescription("");
+        setColor(STAGE_COLORS[0].value);
+        setIsDefault(isFirstStage);
+        setIsFinal(false);
+        setAiAutoReply(true);
+        setAiHandoffRequired(false);
+      }
+    }
+  }, [open, mode, stage, isFirstStage]);
 
-  // Handle create
-  const handleCreate = useCallback(async () => {
+  // Handle save (create or update)
+  const handleSave = useCallback(async () => {
     if (!name.trim()) {
       addNotification(t("stageNameRequired"), "error");
       return;
     }
 
-    setIsCreating(true);
+    setIsSaving(true);
 
     try {
-      const stageData: CreateStageDto = {
-        name: name.trim(),
-        description: description.trim() || undefined,
-        color,
-        sortOrder: insertAtPosition,
-        isDefault,
-        isFinal,
-        aiAutoReply,
-        aiHandoffRequired,
-      };
+      if (mode === "create") {
+        const stageData: CreateStageDto = {
+          name: name.trim(),
+          description: description.trim() || undefined,
+          color,
+          sortOrder: insertAtPosition,
+          isDefault,
+          isFinal,
+          aiAutoReply,
+          aiHandoffRequired,
+        };
 
-      const newStage = await backendApi.stages.createStage(stageData);
+        const newStage = await backendApi.stages.createStage(stageData);
+        addNotification(t("stageCreated", { name: newStage.name }), "success");
+        onStageCreated?.(newStage);
+      } else if (mode === "edit" && stage) {
+        const updateData: UpdateStageDto = {
+          name: name.trim(),
+          description: description.trim() || undefined,
+          color,
+          isDefault,
+          isFinal,
+          aiAutoReply,
+          aiHandoffRequired,
+        };
 
-      addNotification(t("stageCreated", { name: newStage.name }), "success");
-      onStageCreated(newStage);
-      resetForm();
+        const updatedStage = await backendApi.stages.updateStage(
+          stage.id,
+          updateData,
+        );
+        addNotification(
+          t("stageUpdated", { name: updatedStage.name }),
+          "success",
+        );
+        onStageUpdated?.(updatedStage);
+      }
+
       onOpenChange(false);
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : t("stageCreateFailed");
+        err instanceof Error
+          ? err.message
+          : mode === "create"
+            ? t("stageCreateFailed")
+            : t("stageUpdateFailed");
       addNotification(message, "error");
     } finally {
-      setIsCreating(false);
+      setIsSaving(false);
     }
   }, [
     name,
@@ -133,30 +184,28 @@ export const CreateStageModal = memo(function CreateStageModal({
     isFinal,
     aiAutoReply,
     aiHandoffRequired,
+    mode,
+    stage,
     onStageCreated,
+    onStageUpdated,
     onOpenChange,
-    resetForm,
     addNotification,
     t,
   ]);
 
-  // Handle close
-  const handleClose = useCallback(
-    (open: boolean) => {
-      if (!open) {
-        resetForm();
-      }
-      onOpenChange(open);
-    },
-    [onOpenChange, resetForm],
-  );
+  const isEditMode = mode === "edit";
+  const dialogTitle = isEditMode ? t("editStage") : t("createStage");
+  const dialogDescription = isEditMode
+    ? t("editStageDescription")
+    : t("createStageDescription");
+  const saveButtonText = isEditMode ? t("save") : t("create");
 
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>{t("createStage")}</DialogTitle>
-          <DialogDescription>{t("createStageDescription")}</DialogDescription>
+          <DialogTitle>{dialogTitle}</DialogTitle>
+          <DialogDescription>{dialogDescription}</DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 py-4">
@@ -171,8 +220,8 @@ export const CreateStageModal = memo(function CreateStageModal({
               onChange={(e) => setName(e.target.value)}
               placeholder={t("stageNamePlaceholder")}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !isCreating) {
-                  handleCreate();
+                if (e.key === "Enter" && !isSaving) {
+                  handleSave();
                 }
               }}
             />
@@ -312,14 +361,14 @@ export const CreateStageModal = memo(function CreateStageModal({
         <DialogFooter>
           <Button
             variant="outline"
-            onClick={() => handleClose(false)}
-            disabled={isCreating}
+            onClick={() => onOpenChange(false)}
+            disabled={isSaving}
           >
             {t("cancel")}
           </Button>
-          <Button onClick={handleCreate} disabled={isCreating || !name.trim()}>
-            {isCreating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            {t("create")}
+          <Button onClick={handleSave} disabled={isSaving || !name.trim()}>
+            {isSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+            {saveButtonText}
           </Button>
         </DialogFooter>
       </DialogContent>

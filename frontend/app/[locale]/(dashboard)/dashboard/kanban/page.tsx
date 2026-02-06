@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { AddStageDivider } from "@/components/kanban/add-stage-button";
-import { CreateStageModal } from "@/components/kanban/create-stage-modal";
+import { StageModal } from "@/components/kanban/stage-modal";
 import { ActivityHistorySheet } from "@/components/ui/activity-history-sheet";
 import {
   AlertDialog,
@@ -16,7 +16,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Tooltip,
@@ -32,7 +31,6 @@ import { cn } from "@/lib/utils";
 import {
   AlertCircle,
   Bot,
-  Check,
   Clock,
   GripVertical,
   History,
@@ -43,18 +41,12 @@ import {
   Star,
   Trash2,
   Users,
-  X,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const MIN_STAGES_COUNT = 3;
-
-type EditableStage = WorkflowStage & {
-  isEditing?: boolean;
-  editName?: string;
-};
 
 function formatRelativeTime(
   time: string | null | undefined,
@@ -218,11 +210,8 @@ function KanbanColumnComponent({
   onCardClick,
   isDragOver,
   editMode,
-  onStartEdit,
-  onCancelEdit,
-  onSaveEdit,
+  onEdit,
   onDelete,
-  onEditNameChange,
   canDelete,
   onStageDragStart,
   onStageDragOver,
@@ -231,7 +220,7 @@ function KanbanColumnComponent({
   onSetDefault,
   t,
 }: {
-  stage: EditableStage;
+  stage: WorkflowStage;
   cards: ChatStageAssignment[];
   onDragStart: (
     e: React.DragEvent<HTMLDivElement>,
@@ -246,11 +235,8 @@ function KanbanColumnComponent({
   onCardClick: (chatId: string) => void;
   isDragOver: boolean;
   editMode: boolean;
-  onStartEdit: (stageId: string) => void;
-  onCancelEdit: (stageId: string) => void;
-  onSaveEdit: (stageId: string) => void;
+  onEdit: (stage: WorkflowStage) => void;
   onDelete: (stageId: string) => void;
-  onEditNameChange: (stageId: string, name: string) => void;
   canDelete: boolean;
   onStageDragStart: (
     e: React.DragEvent<HTMLDivElement>,
@@ -262,14 +248,6 @@ function KanbanColumnComponent({
   onSetDefault: (stageId: string) => void;
   t: ReturnType<typeof useTranslations<"kanban">>;
 }) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (stage.isEditing && inputRef.current) {
-      inputRef.current.focus();
-      inputRef.current.select();
-    }
-  }, [stage.isEditing]);
-
   return (
     <div
       className={`flex-shrink-0 w-80 flex flex-col transition-opacity ${
@@ -301,89 +279,52 @@ function KanbanColumnComponent({
             <GripVertical className="h-4 w-4 text-muted-foreground" />
           </div>
         )}
-        {stage.isEditing ? (
-          <div className="flex items-center gap-2 flex-1">
-            <div
-              className="h-3 w-3 rounded-full shrink-0"
-              style={{ backgroundColor: stage.color }}
-            />
-            <Input
-              ref={inputRef}
-              value={stage.editName ?? stage.name}
-              onChange={(e) => onEditNameChange(stage.id, e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") onSaveEdit(stage.id);
-                if (e.key === "Escape") onCancelEdit(stage.id);
-              }}
-              className="h-7 text-sm"
-            />
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-7 w-7"
-              onClick={() => onSaveEdit(stage.id)}
-            >
-              <Check className="h-4 w-4 text-green-600" />
-            </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-7 w-7"
-              onClick={() => onCancelEdit(stage.id)}
-            >
-              <X className="h-4 w-4 text-destructive" />
-            </Button>
-          </div>
-        ) : (
-          <>
-            <div className="flex items-center gap-2 flex-1 min-w-0">
-              <div
-                className="h-3 w-3 rounded-full shrink-0"
-                style={{ backgroundColor: stage.color }}
-              />
-              <h2 className="font-semibold text-sm truncate">{stage.name}</h2>
-            </div>
-            <div className="flex items-center gap-1">
-              <Badge variant="secondary" className="text-xs">
-                {cards.length}
-              </Badge>
-              {editMode && (
-                <>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-7 w-7"
-                    onClick={() => onStartEdit(stage.id)}
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-7 w-7"
-                    onClick={() => onDelete(stage.id)}
-                    disabled={!canDelete}
-                    title={
-                      canDelete
-                        ? t("deleteStage")
-                        : t("cannotDeleteMinStages", {
-                            minStages: MIN_STAGES_COUNT,
-                          })
-                    }
-                  >
-                    <Trash2
-                      className={`h-3.5 w-3.5 ${
-                        canDelete
-                          ? "text-destructive"
-                          : "text-muted-foreground opacity-50"
-                      }`}
-                    />
-                  </Button>
-                </>
-              )}
-            </div>
-          </>
-        )}
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <div
+            className="h-3 w-3 rounded-full shrink-0"
+            style={{ backgroundColor: stage.color }}
+          />
+          <h2 className="font-semibold text-sm truncate">{stage.name}</h2>
+        </div>
+        <div className="flex items-center gap-1">
+          <Badge variant="secondary" className="text-xs">
+            {cards.length}
+          </Badge>
+          {editMode && (
+            <>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7"
+                onClick={() => onEdit(stage)}
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7"
+                onClick={() => onDelete(stage.id)}
+                disabled={!canDelete}
+                title={
+                  canDelete
+                    ? t("deleteStage")
+                    : t("cannotDeleteMinStages", {
+                        minStages: MIN_STAGES_COUNT,
+                      })
+                }
+              >
+                <Trash2
+                  className={`h-3.5 w-3.5 ${
+                    canDelete
+                      ? "text-destructive"
+                      : "text-muted-foreground opacity-50"
+                  }`}
+                />
+              </Button>
+            </>
+          )}
+        </div>
       </div>
       {stage.description && !editMode && (
         <p className="text-xs text-muted-foreground mb-3 line-clamp-2">
@@ -493,14 +434,14 @@ export default function KanbanPage() {
   const router = useRouter();
   const { addNotification } = useNotification();
 
-  const [stages, setStages] = useState<EditableStage[]>([]);
+  const [stages, setStages] = useState<WorkflowStage[]>([]);
   const [chatsByStage, setChatsByStage] = useState<
     Map<string, ChatStageAssignment[]>
   >(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
-  const [stageToDelete, setStageToDelete] = useState<EditableStage | null>(
+  const [stageToDelete, setStageToDelete] = useState<WorkflowStage | null>(
     null,
   );
   const [draggedStageId, setDraggedStageId] = useState<string | null>(null);
@@ -678,51 +619,21 @@ export default function KanbanPage() {
     if (!editMode) router.push(`/dashboard/chats?selectedChatId=${chatId}`);
   };
 
-  const handleStartEdit = (stageId: string) => {
+  // Edit stage modal state
+  const [editStageModalOpen, setEditStageModalOpen] = useState(false);
+  const [stageToEdit, setStageToEdit] = useState<WorkflowStage | null>(null);
+
+  const handleOpenEditStageModal = (stage: WorkflowStage) => {
+    setStageToEdit(stage);
+    setEditStageModalOpen(true);
+  };
+
+  const handleStageUpdated = (updatedStage: WorkflowStage) => {
     setStages((prev) =>
-      prev.map((s) =>
-        s.id === stageId ? { ...s, isEditing: true, editName: s.name } : s,
-      ),
+      prev.map((s) => (s.id === updatedStage.id ? updatedStage : s)),
     );
   };
-  const handleCancelEdit = (stageId: string) => {
-    setStages((prev) =>
-      prev.map((s) =>
-        s.id === stageId ? { ...s, isEditing: false, editName: undefined } : s,
-      ),
-    );
-  };
-  const handleEditNameChange = (stageId: string, name: string) => {
-    setStages((prev) =>
-      prev.map((s) => (s.id === stageId ? { ...s, editName: name } : s)),
-    );
-  };
-  const handleSaveEdit = async (stageId: string) => {
-    const stage = stages.find((s) => s.id === stageId);
-    if (!stage || !stage.editName || stage.editName.trim() === "") {
-      handleCancelEdit(stageId);
-      return;
-    }
-    const newName = stage.editName.trim();
-    if (newName === stage.name) {
-      handleCancelEdit(stageId);
-      return;
-    }
-    try {
-      await backendApi.stages.updateStage(stageId, { name: newName });
-      setStages((prev) =>
-        prev.map((s) =>
-          s.id === stageId
-            ? { ...s, name: newName, isEditing: false, editName: undefined }
-            : s,
-        ),
-      );
-      addNotification(t("stageRenamed", { name: newName }), "success");
-    } catch {
-      addNotification(t("stageRenameFailed"), "error");
-      handleCancelEdit(stageId);
-    }
-  };
+
   const handleDeleteStage = async () => {
     if (!stageToDelete) return;
     try {
@@ -1100,13 +1011,10 @@ export default function KanbanPage() {
                     onDragEnter={() => setDragOverStageId(stage.id)}
                     onDragLeave={() => setDragOverStageId(null)}
                     editMode={editMode}
-                    onStartEdit={handleStartEdit}
-                    onCancelEdit={handleCancelEdit}
-                    onSaveEdit={handleSaveEdit}
+                    onEdit={handleOpenEditStageModal}
                     onDelete={(id) =>
                       setStageToDelete(stages.find((s) => s.id === id) || null)
                     }
-                    onEditNameChange={handleEditNameChange}
                     canDelete={canDeleteStage}
                     onStageDragStart={handleStageDragStart}
                     onStageDragOver={handleStageDragOver}
@@ -1170,12 +1078,22 @@ export default function KanbanPage() {
         </AlertDialog>
 
         {/* Create Stage Modal */}
-        <CreateStageModal
+        <StageModal
           open={createStageModalOpen}
           onOpenChange={setCreateStageModalOpen}
+          mode="create"
           insertAtPosition={createStagePosition}
           onStageCreated={handleStageCreated}
           isFirstStage={stages.length === 0}
+        />
+
+        {/* Edit Stage Modal */}
+        <StageModal
+          open={editStageModalOpen}
+          onOpenChange={setEditStageModalOpen}
+          mode="edit"
+          stage={stageToEdit ?? undefined}
+          onStageUpdated={handleStageUpdated}
         />
 
         {/* Activity History Sheet */}
