@@ -21,6 +21,7 @@ import {
   Package,
   Paperclip,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import React, { useRef } from "react";
 
 export type AttachmentType =
@@ -51,6 +52,7 @@ export function AttachmentMenu({
   onLocationClick,
   disabled = false,
 }: AttachmentMenuProps) {
+  const t = useTranslations("chats.attachmentMenu");
   const photoVideoInputRef = useRef<HTMLInputElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
 
@@ -139,7 +141,7 @@ export function AttachmentMenu({
             type="button"
             disabled={disabled}
             className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Attach"
+            title={t("attach")}
           >
             <Paperclip className="h-5 w-5" />
           </button>
@@ -155,7 +157,7 @@ export function AttachmentMenu({
             className="cursor-pointer gap-3 py-2.5"
           >
             <Image className="h-5 w-5 text-foreground dark:text-white" />
-            <span>Photos & Videos</span>
+            <span>{t("photosVideos")}</span>
           </DropdownMenuItem>
 
           <DropdownMenuItem
@@ -163,7 +165,7 @@ export function AttachmentMenu({
             className="cursor-pointer gap-3 py-2.5"
           >
             <Camera className="h-5 w-5 text-foreground dark:text-white" />
-            <span>Camera</span>
+            <span>{t("camera")}</span>
           </DropdownMenuItem>
 
           <DropdownMenuItem
@@ -171,7 +173,7 @@ export function AttachmentMenu({
             className="cursor-pointer gap-3 py-2.5"
           >
             <FileText className="h-5 w-5 text-foreground dark:text-white" />
-            <span>Document</span>
+            <span>{t("document")}</span>
           </DropdownMenuItem>
 
           <DropdownMenuItem
@@ -179,7 +181,7 @@ export function AttachmentMenu({
             className="cursor-pointer gap-3 py-2.5"
           >
             <Contact className="h-5 w-5 text-foreground dark:text-white" />
-            <span>Contact</span>
+            <span>{t("contact")}</span>
           </DropdownMenuItem>
 
           <DropdownMenuItem
@@ -187,7 +189,7 @@ export function AttachmentMenu({
             className="cursor-pointer gap-3 py-2.5"
           >
             <MapPin className="h-5 w-5 text-foreground dark:text-white" />
-            <span>Location</span>
+            <span>{t("location")}</span>
           </DropdownMenuItem>
 
           <DropdownMenuItem
@@ -195,7 +197,7 @@ export function AttachmentMenu({
             className="cursor-pointer gap-3 py-2.5"
           >
             <Package className="h-5 w-5 text-foreground dark:text-white" />
-            <span>Catalog</span>
+            <span>{t("catalog")}</span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

@@ -97,6 +97,15 @@
       "react": "Reaccionar"
     },
     "approvedOnly": "Solo aprobadas",
+    "attachmentMenu": {
+      "attach": "Adjuntar",
+      "photosVideos": "Fotos y Videos",
+      "camera": "Cámara",
+      "document": "Documento",
+      "contact": "Contacto",
+      "location": "Ubicación",
+      "catalog": "Catálogo"
+    },
     "editMessage": "Editar",
     "deleteMessage": "Eliminar",
     "downloadMessage": "Descargar",
@@ -160,6 +169,46 @@
     "audioMessage": "Mensaje de audio",
     "document": "Documento",
     "contact": "Contacto",
+    "location": {
+      "sentSuccessfully": "Ubicación enviada exitosamente",
+      "sendFailed": "Error al enviar ubicación",
+      "title": "Enviar Ubicación",
+      "description": "Busca un lugar, haz clic en el mapa o usa tu ubicación actual",
+      "currentLocation": "Ubicación Actual",
+      "gettingLocation": "Obteniendo tu ubicación...",
+      "locationError": "No se pudo obtener tu ubicación",
+      "selectOnMap": "Haz clic en el mapa para seleccionar una ubicación",
+      "name": "Nombre del Lugar (opcional)",
+      "namePlaceholder": "ej., Oficina, Casa, Restaurante",
+      "address": "Dirección (opcional)",
+      "addressPlaceholder": "ej., Calle Principal 123, Ciudad",
+      "send": "Enviar Ubicación",
+      "sending": "Enviando...",
+      "cancel": "Cancelar",
+      "openInMaps": "Abrir en Mapas",
+      "viewMap": "Ver Mapa",
+      "directions": "Direcciones",
+      "getDirections": "Obtener Direcciones",
+      "sharedLocation": "Ubicación Compartida",
+      "openInGoogleMaps": "Abrir en Google Maps",
+      "search": {
+        "placeholder": "Buscar una dirección o lugar...",
+        "searching": "Buscando...",
+        "noResults": "No se encontraron resultados",
+        "error": "Búsqueda fallida. Por favor intenta de nuevo."
+      },
+      "myLocation": "Mi Ubicación",
+      "selected": "Seleccionado",
+      "tapToSelect": "Toca el mapa para seleccionar",
+      "errors": {
+        "geolocationNotSupported": "La geolocalización no es compatible con tu navegador",
+        "permissionDenied": "Permiso de ubicación denegado",
+        "positionUnavailable": "Información de ubicación no disponible",
+        "timeout": "Tiempo de espera agotado para obtener ubicación",
+        "failed": "Error al obtener ubicación",
+        "pleaseSelect": "Por favor selecciona una ubicación en el mapa"
+      }
+    },
     "replyingTo": "Respondiendo a",
     "dates": {
       "today": "Hoy",

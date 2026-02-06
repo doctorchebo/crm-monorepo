@@ -14,6 +14,7 @@
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ExternalLink, MapPin, Navigation } from "lucide-react";
+import { useTranslations } from "next-intl";
 import dynamic from "next/dynamic";
 import { memo, useCallback, useMemo } from "react";
 
@@ -82,14 +83,28 @@ export const LocationMessageBubble = memo(function LocationMessageBubble({
   onReply,
   onDelete,
 }: LocationMessageBubbleProps) {
-  // Build Google Maps URL for opening externally
+  const t = useTranslations("chats.location");
+
+  /**
+   * Build Google Maps URL for opening externally
+   *
+   * Google Maps URL formats:
+   * 1. Search with pin: https://www.google.com/maps/search/?api=1&query=lat,lng
+   *    - Always shows a pin at the exact coordinates
+   *
+   * 2. Place search: https://www.google.com/maps/search/?api=1&query=place+name
+   *    - Searches for the name, may not show exact pin
+   *
+   * We ALWAYS use coordinates to ensure the exact location is pinned,
+   * regardless of whether a name/address was provided.
+   */
   const googleMapsUrl = useMemo(() => {
-    const query = name ? encodeURIComponent(name) : `${latitude},${longitude}`;
-    return `https://www.google.com/maps/search/?api=1&query=${query}&query_place_id=${latitude},${longitude}`;
-  }, [name, latitude, longitude]);
+    // Always use coordinates to ensure exact pin placement
+    return `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
+  }, [latitude, longitude]);
 
   // Formatted display text
-  const displayName = name || "Shared Location";
+  const displayName = name || t("sharedLocation");
   const displayAddress =
     address || `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
 
@@ -124,7 +139,7 @@ export const LocationMessageBubble = memo(function LocationMessageBubble({
         <button
           onClick={handleOpenInMaps}
           className="absolute inset-0 bg-transparent hover:bg-black/10 transition-colors cursor-pointer"
-          aria-label="Open in Google Maps"
+          aria-label={t("openInGoogleMaps")}
         />
       </div>
 
@@ -168,7 +183,7 @@ export const LocationMessageBubble = memo(function LocationMessageBubble({
             onClick={handleOpenInMaps}
           >
             <ExternalLink className="h-3 w-3 mr-1" />
-            View Map
+            {t("viewMap")}
           </Button>
           <Button
             variant={isOutbound ? "secondary" : "outline"}
@@ -177,7 +192,7 @@ export const LocationMessageBubble = memo(function LocationMessageBubble({
             onClick={handleGetDirections}
           >
             <Navigation className="h-3 w-3 mr-1" />
-            Directions
+            {t("directions")}
           </Button>
         </div>
 

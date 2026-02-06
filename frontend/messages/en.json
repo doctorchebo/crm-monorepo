@@ -111,6 +111,15 @@
       "react": "React"
     },
     "approvedOnly": "Approved only",
+    "attachmentMenu": {
+      "attach": "Attach",
+      "photosVideos": "Photos & Videos",
+      "camera": "Camera",
+      "document": "Document",
+      "contact": "Contact",
+      "location": "Location",
+      "catalog": "Catalog"
+    },
     "editMessage": "Edit",
     "deleteMessage": "Delete",
     "downloadMessage": "Download",
@@ -179,19 +188,41 @@
       "sentSuccessfully": "Location sent successfully",
       "sendFailed": "Failed to send location",
       "title": "Send Location",
-      "description": "Share a location on the map",
+      "description": "Search for a place, click on the map, or use your current location",
       "currentLocation": "Current Location",
       "gettingLocation": "Getting your location...",
       "locationError": "Unable to get your location",
       "selectOnMap": "Click on the map to select a location",
-      "name": "Location Name",
-      "namePlaceholder": "Enter a name (optional)",
-      "address": "Address",
-      "addressPlaceholder": "Enter an address (optional)",
+      "name": "Location Name (optional)",
+      "namePlaceholder": "e.g., Office, Home, Restaurant",
+      "address": "Address (optional)",
+      "addressPlaceholder": "e.g., 123 Main Street, City",
       "send": "Send Location",
+      "sending": "Sending...",
       "cancel": "Cancel",
       "openInMaps": "Open in Maps",
-      "getDirections": "Get Directions"
+      "viewMap": "View Map",
+      "directions": "Directions",
+      "getDirections": "Get Directions",
+      "sharedLocation": "Shared Location",
+      "openInGoogleMaps": "Open in Google Maps",
+      "search": {
+        "placeholder": "Search for an address or place...",
+        "searching": "Searching...",
+        "noResults": "No results found",
+        "error": "Search failed. Please try again."
+      },
+      "myLocation": "My Location",
+      "selected": "Selected",
+      "tapToSelect": "Tap map to select",
+      "errors": {
+        "geolocationNotSupported": "Geolocation is not supported by your browser",
+        "permissionDenied": "Location permission denied",
+        "positionUnavailable": "Location information unavailable",
+        "timeout": "Location request timed out",
+        "failed": "Failed to get location",
+        "pleaseSelect": "Please select a location on the map"
+      }
     },
     "replyingTo": "Replying to",
     "dates": {
