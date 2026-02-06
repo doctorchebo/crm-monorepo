@@ -12,12 +12,22 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { and, count, desc, eq, ilike, inArray, or } from 'drizzle-orm';
+import {
+  and,
+  count,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNotNull,
+  or,
+} from 'drizzle-orm';
 import {
   CreateTemplateDto,
   CreateTemplateLocaleDto,
   UpdateTemplateDto,
 } from '../dto';
+import { MetaCloudApiProvider } from '../providers/meta-cloud-api.provider';
 import {
   toMetaTemplateName,
   validateMetaTemplateName,
@@ -52,6 +62,7 @@ export class TemplatesService {
     private parserService: TemplateParserService,
     private validatorService: TemplateValidatorService,
     private renderService: TemplateRenderService,
+    private metaProvider: MetaCloudApiProvider,
   ) {}
 
   /**
@@ -213,6 +224,7 @@ export class TemplatesService {
 
   /**
    * Bulk delete multiple templates (soft delete)
+   * Also notifies Meta API for templates that have been submitted
    * @param templateIds - Array of template IDs to delete
    * @returns Number of templates deleted
    */
@@ -222,6 +234,65 @@ export class TemplatesService {
     }
 
     try {
+      // Step 1: Fetch templates with their locales to get metaTemplateId and template name
+      const templatesToDelete = await db.query.templates.findMany({
+        where: and(
+          inArray(templates.id, templateIds),
+          eq(templates.isActive, true),
+        ),
+        with: {
+          locales: {
+            where: isNotNull(templateLocales.metaTemplateId),
+          },
+        },
+      });
+
+      // Step 2: Delete from Meta API for each template that has been submitted
+      // Meta deletes by template name, which removes all locales/languages of that template
+      const metaDeletionPromises: Promise<void>[] = [];
+      const processedTemplateNames = new Set<string>();
+
+      for (const template of templatesToDelete) {
+        // Only delete from Meta if template has any locale with metaTemplateId
+        const hasMetaLocales = template.locales?.some((l) => l.metaTemplateId);
+        if (hasMetaLocales && !processedTemplateNames.has(template.name)) {
+          processedTemplateNames.add(template.name);
+
+          // Get any metaTemplateId for the delete call
+          const metaTemplateId = template.locales?.find(
+            (l) => l.metaTemplateId,
+          )?.metaTemplateId;
+
+          if (metaTemplateId) {
+            metaDeletionPromises.push(
+              this.metaProvider
+                .deleteTemplate(metaTemplateId, template.name)
+                .then((result) => {
+                  if (result.success) {
+                    this.logger.log(
+                      `Deleted template "${template.name}" from Meta API`,
+                    );
+                  } else {
+                    // Log but don't fail - template might already be deleted from Meta
+                    this.logger.warn(
+                      `Failed to delete template "${template.name}" from Meta: ${result.error}`,
+                    );
+                  }
+                })
+                .catch((error) => {
+                  this.logger.warn(
+                    `Error deleting template "${template.name}" from Meta: ${error.message}`,
+                  );
+                }),
+            );
+          }
+        }
+      }
+
+      // Wait for all Meta deletions to complete (don't fail on Meta errors)
+      await Promise.allSettled(metaDeletionPromises);
+
+      // Step 3: Soft delete in database
       const result = await db
         .update(templates)
         .set({
@@ -234,7 +305,9 @@ export class TemplatesService {
         .returning();
 
       const deletedCount = result.length;
-      this.logger.log(`Bulk deleted ${deletedCount} templates`);
+      this.logger.log(
+        `Bulk deleted ${deletedCount} templates (${processedTemplateNames.size} notified to Meta)`,
+      );
       return deletedCount;
     } catch (error) {
       this.logger.error(`Error bulk deleting templates: ${error.message}`);
@@ -286,9 +359,32 @@ export class TemplatesService {
 
   /**
    * Delete template (soft delete via isActive flag)
+   * Also notifies Meta API for templates that have been submitted
    */
   async deleteTemplate(templateId: string) {
-    await this.getTemplate(templateId); // Verify exists
+    const template = await this.getTemplate(templateId); // Verify exists
+
+    // Check if template has any locale submitted to Meta
+    const localesWithMeta = template.locales?.filter((l) => l.metaTemplateId);
+
+    // Delete from Meta API if any locale was submitted
+    if (localesWithMeta && localesWithMeta.length > 0) {
+      const metaTemplateId = localesWithMeta[0].metaTemplateId;
+      if (metaTemplateId) {
+        const result = await this.metaProvider.deleteTemplate(
+          metaTemplateId,
+          template.name,
+        );
+        if (result.success) {
+          this.logger.log(`Deleted template "${template.name}" from Meta API`);
+        } else {
+          // Log but don't fail - template might already be deleted from Meta
+          this.logger.warn(
+            `Failed to delete template "${template.name}" from Meta: ${result.error}`,
+          );
+        }
+      }
+    }
 
     await db
       .update(templates)

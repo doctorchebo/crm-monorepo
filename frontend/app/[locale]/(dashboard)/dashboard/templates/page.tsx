@@ -73,10 +73,6 @@ export default function TemplatesPage() {
 
   // Dialog state
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
-  const [singleDeleteDialogOpen, setSingleDeleteDialogOpen] = useState(false);
-  const [templateToDelete, setTemplateToDelete] = useState<Template | null>(
-    null,
-  );
   const [isDeleting, setIsDeleting] = useState(false);
 
   // Sync-related state
@@ -101,6 +97,7 @@ export default function TemplatesPage() {
     toggleSelect,
     toggleSelectAll,
     clearSelection,
+    selectOne,
     refreshAfterDelete,
     swrResponse: { mutate },
   } = usePaginatedData<Template, TemplateFilters>({
@@ -171,36 +168,7 @@ export default function TemplatesPage() {
   });
 
   /**
-   * Single template delete handler
-   */
-  const handleSingleDelete = async () => {
-    if (!templateToDelete) return;
-
-    setIsDeleting(true);
-    try {
-      await backendApi.templates.delete(templateToDelete.id);
-      addNotification(
-        t("templateDeleted") || "Template deleted successfully",
-        "success",
-        3000,
-      );
-      await refreshAfterDelete(1);
-    } catch (error) {
-      console.error("Failed to delete template:", error);
-      addNotification(
-        t("templateDeleteFailed") || "Failed to delete template",
-        "error",
-        3000,
-      );
-    } finally {
-      setIsDeleting(false);
-      setSingleDeleteDialogOpen(false);
-      setTemplateToDelete(null);
-    }
-  };
-
-  /**
-   * Bulk delete handler
+   * Bulk delete handler - deletes all selected templates including their locales from Meta
    */
   const handleBulkDelete = async () => {
     if (selectedCount === 0) return;
@@ -240,17 +208,11 @@ export default function TemplatesPage() {
   };
 
   /**
-   * Handle delete click - shows single delete dialog or toggles selection
+   * Handle delete click - enters selection mode with this template selected
+   * (Same pattern as contacts page)
    */
   const handleDeleteClick = (template: Template) => {
-    if (selectedCount > 0) {
-      // If already in selection mode, just toggle this item
-      toggleSelect(template.id);
-    } else {
-      // Show single delete dialog
-      setTemplateToDelete(template);
-      setSingleDeleteDialogOpen(true);
-    }
+    selectOne(template.id);
   };
 
   /**
@@ -582,26 +544,6 @@ export default function TemplatesPage() {
           </>
         )}
       </div>
-
-      {/* Single Delete Confirmation Dialog */}
-      <DeleteConfirmationDialog
-        isOpen={singleDeleteDialogOpen}
-        onCancel={() => {
-          setSingleDeleteDialogOpen(false);
-          setTemplateToDelete(null);
-        }}
-        title={t("deleteTitle") || "Delete Template"}
-        description={
-          t("deleteDescription", {
-            name: templateToDelete?.displayName || templateToDelete?.name,
-          }) ||
-          `Are you sure you want to delete "${
-            templateToDelete?.displayName || templateToDelete?.name
-          }"? This action cannot be undone.`
-        }
-        onConfirm={handleSingleDelete}
-        isLoading={isDeleting}
-      />
 
       {/* Bulk Delete Confirmation Dialog */}
       <DeleteConfirmationDialog
