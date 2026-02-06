@@ -67,6 +67,7 @@ import type { RateLimitInfo } from "@/hooks/use-ai-events";
 import { useChatPersistence } from "@/hooks/use-chat-persistence";
 import { useHandoff } from "@/hooks/use-handoff";
 import type { SupportedLanguage } from "@/lib/api/endpoints";
+import { CHAT_SIDEBAR } from "@/lib/constants/sidebar";
 import {
   ChatDetailSkeleton,
   ChatEmptyStateSkeleton,
@@ -155,7 +156,9 @@ export default function ChatsPage() {
   );
 
   // Sidebar state
-  const [notesPanelWidth, setNotesPanelWidth] = useState(320);
+  const [notesPanelWidth, setNotesPanelWidth] = useState<number>(
+    CHAT_SIDEBAR.DEFAULT_WIDTH,
+  );
   const [selectedContactId, setSelectedContactId] = useState<string | null>(
     null,
   );
@@ -825,7 +828,7 @@ export default function ChatsPage() {
     e.preventDefault();
     const startX = e.clientX;
     const startWidth = notesPanelWidth;
-    let currentWidth = startWidth;
+    let currentWidth: number = startWidth;
 
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
@@ -833,9 +836,12 @@ export default function ChatsPage() {
     const handleMouseMove = (moveEvent: MouseEvent) => {
       const deltaX = moveEvent.clientX - startX;
       const maxWidth = containerRef.current
-        ? containerRef.current.clientWidth * 0.6
-        : 800;
-      currentWidth = Math.max(250, Math.min(startWidth - deltaX, maxWidth));
+        ? containerRef.current.clientWidth * CHAT_SIDEBAR.MAX_WIDTH_RATIO
+        : CHAT_SIDEBAR.FALLBACK_MAX_WIDTH;
+      currentWidth = Math.max(
+        CHAT_SIDEBAR.MIN_WIDTH,
+        Math.min(startWidth - deltaX, maxWidth),
+      );
 
       if (notesPanelRef.current) {
         notesPanelRef.current.style.width = `${currentWidth}px`;

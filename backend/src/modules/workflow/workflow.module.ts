@@ -59,6 +59,7 @@ import { ProfilePictureUrlService } from '@shared/services/profile-picture-url.s
 import { WorkflowAITestingController } from './controllers/workflow-ai-testing.controller';
 import { WorkflowBuilderController } from './controllers/workflow-builder.controller';
 import {
+  ActivityLogService,
   AiActionLoggerService,
   AiConfigurationService,
   AiResponseGenerator,
@@ -108,6 +109,7 @@ import { WorkflowController } from './workflow.controller';
   ],
   providers: [
     // Core services
+    ActivityLogService,
     LLMService,
     StageService,
     RuleEngineService,
@@ -157,6 +159,7 @@ import { WorkflowController } from './workflow.controller';
   ],
   exports: [
     // Export services for use in other modules
+    ActivityLogService,
     WorkflowEngineService,
     StageService,
     RuleEngineService,

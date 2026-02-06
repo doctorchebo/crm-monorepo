@@ -46,6 +46,7 @@ import {
   UpdateStageDto,
 } from './dto';
 import {
+  ActivityLogService,
   AiActionLoggerService,
   AiConfigurationService,
   AntiBanSafeguardService,
@@ -80,6 +81,7 @@ export class WorkflowController {
     private readonly usageThrottle: UsageThrottleService,
     private readonly aiConfigService: AiConfigurationService,
     private readonly whatsAppService: WhatsAppService,
+    private readonly activityLogService: ActivityLogService,
   ) {}
 
   // ==========================================================================
@@ -245,6 +247,60 @@ export class WorkflowController {
   @Get('chat/:chatId/history')
   async getChatStageHistory(@Param('chatId') chatId: string) {
     return this.stageService.getStageHistory(chatId);
+  }
+
+  @Get('chat/:chatId/history/enriched')
+  async getEnrichedChatStageHistory(
+    @Param('chatId') chatId: string,
+    @Query('limit') limit?: number,
+  ) {
+    return this.stageService.getEnrichedStageHistory(chatId, limit || 50);
+  }
+
+  @Get('history/global')
+  async getGlobalStageHistory(@Req() req: any, @Query('limit') limit?: number) {
+    const userId = req.user.userId;
+    return this.stageService.getGlobalStageHistory(userId, limit || 50);
+  }
+
+  /**
+   * Get paginated activity logs with optional date range filtering
+   * Supports efficient pagination for large activity feeds
+   */
+  @Get('activity-logs')
+  async getActivityLogs(
+    @Req() req: any,
+    @Query('page') page?: number,
+    @Query('pageSize') pageSize?: number,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('activityTypes') activityTypes?: string,
+    @Query('entityType') entityType?: string,
+    @Query('chatId') chatId?: string,
+  ) {
+    const userId = req.user.userId;
+
+    // Parse activity types if provided (comma-separated)
+    const parsedActivityTypes = activityTypes
+      ? (activityTypes.split(',') as any[])
+      : undefined;
+
+    // Parse dates if provided
+    const parsedStartDate = startDate ? new Date(startDate) : undefined;
+    const parsedEndDate = endDate ? new Date(endDate) : undefined;
+
+    return this.activityLogService.getActivityLogs(
+      userId,
+      page || 1,
+      pageSize || 20,
+      {
+        activityTypes: parsedActivityTypes,
+        entityType,
+        chatId,
+        startDate: parsedStartDate,
+        endDate: parsedEndDate,
+      },
+    );
   }
 
   // ==========================================================================

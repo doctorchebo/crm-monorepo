@@ -7,7 +7,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { ContactProfilePanel } from "@/components/ui/contact-profile-panel";
 import { NotesPanel, NotesPanelHandle } from "@/components/ui/notes-panel";
-import { FileText, Package, User } from "lucide-react";
+import { PaginatedActivityPanel } from "@/components/ui/paginated-activity-panel";
+import { PipelinePanel } from "@/components/ui/pipeline-panel";
+import { FileText, GitBranch, History, Package, User } from "lucide-react";
 import { useTranslations } from "next-intl";
 import {
   forwardRef,
@@ -19,7 +21,12 @@ import {
   useState,
 } from "react";
 
-export type SidebarTab = "profile" | "notes" | "catalog";
+export type SidebarTab =
+  | "profile"
+  | "notes"
+  | "pipeline"
+  | "activity"
+  | "catalog";
 
 interface ChatSidebarProps {
   chatId: string;
@@ -125,6 +132,7 @@ export const ChatSidebar = memo(
   ) {
     const t = useTranslations("notes");
     const tCatalog = useTranslations("catalog");
+    const tPipeline = useTranslations("pipeline");
     const [activeTab, setActiveTab] = useState<SidebarTab>(initialTab);
     const [internalCatalogItem, setInternalCatalogItem] =
       useState<CatalogMessageItem | null>(null);
@@ -198,6 +206,18 @@ export const ChatSidebar = memo(
       onTabChange?.("notes");
     }, [onTabChange]);
 
+    // Switch to pipeline tab
+    const handlePipelineClick = useCallback(() => {
+      setActiveTab("pipeline");
+      onTabChange?.("pipeline");
+    }, [onTabChange]);
+
+    // Switch to activity tab
+    const handleActivityClick = useCallback(() => {
+      setActiveTab("activity");
+      onTabChange?.("activity");
+    }, [onTabChange]);
+
     // Switch to catalog tab (only visible when there's an item)
     const handleCatalogClick = useCallback(() => {
       if (activeCatalogItem) {
@@ -223,7 +243,7 @@ export const ChatSidebar = memo(
       <div className="flex flex-col h-full border-l bg-background">
         {/* Tab Header */}
         <div className="border-b px-2 py-1">
-          <div className="flex rounded-lg bg-muted p-1">
+          <div className="flex rounded-lg bg-muted p-1 gap-0.5">
             <TabButton
               active={activeTab === "profile"}
               disabled={!canShowProfile}
@@ -236,6 +256,18 @@ export const ChatSidebar = memo(
               onClick={handleNotesClick}
               icon={FileText}
               label={t("title")}
+            />
+            <TabButton
+              active={activeTab === "pipeline"}
+              onClick={handlePipelineClick}
+              icon={GitBranch}
+              label={tPipeline("title")}
+            />
+            <TabButton
+              active={activeTab === "activity"}
+              onClick={handleActivityClick}
+              icon={History}
+              label={tPipeline("activity")}
             />
             {/* Catalog tab - only visible when there's a catalog item to view */}
             {activeCatalogItem && (
@@ -265,6 +297,19 @@ export const ChatSidebar = memo(
               participantName={participantName}
               onContactResolved={handleContactResolved}
               onProfileUpdate={onProfileUpdate}
+            />
+          ) : activeTab === "pipeline" ? (
+            <PipelinePanel chatId={chatId} />
+          ) : activeTab === "activity" ? (
+            <PaginatedActivityPanel
+              hookOptions={{
+                initialFilters: { chatId },
+                initialPageSize: 20,
+              }}
+              showDateFilter
+              showEntityNames={false}
+              maxHeight="calc(100vh - 200px)"
+              asCard={false}
             />
           ) : (
             <NotesPanel

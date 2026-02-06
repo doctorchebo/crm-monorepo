@@ -1,5 +1,8 @@
 ﻿"use client";
 
+import { AddStageDivider } from "@/components/kanban/add-stage-button";
+import { CreateStageModal } from "@/components/kanban/create-stage-modal";
+import { ActivityHistorySheet } from "@/components/ui/activity-history-sheet";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -11,31 +14,40 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { UserAvatar } from "@/components/user-avatar";
 import { useNotification } from "@/hooks/use-notification";
 import type { ChatStageAssignment, WorkflowStage } from "@/lib/api/endpoints";
 import { backendApi } from "@/lib/api/endpoints";
+import { cn } from "@/lib/utils";
 import {
   AlertCircle,
   Bot,
   Check,
   Clock,
   GripVertical,
+  History,
   MessageSquare,
   Pause,
   Pencil,
   RefreshCw,
+  Star,
   Trash2,
   Users,
   X,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const MIN_STAGES_COUNT = 3;
 
@@ -44,35 +56,46 @@ type EditableStage = WorkflowStage & {
   editName?: string;
 };
 
-function formatRelativeTime(time: string | null | undefined): string {
-  if (!time) return "";
+function formatRelativeTime(
+  time: string | null | undefined,
+): { key: string; count: number } | null {
+  if (!time) return null;
   const date = new Date(time);
   const now = new Date();
   const diff = now.getTime() - date.getTime();
   const minutes = Math.floor(diff / 60000);
   const hours = Math.floor(diff / 3600000);
   const days = Math.floor(diff / 86400000);
-  if (minutes < 60) return `${minutes}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  return `${days}d ago`;
+  if (minutes < 60) return { key: "minutesAgo", count: minutes };
+  if (hours < 24) return { key: "hoursAgo", count: hours };
+  return { key: "daysAgo", count: days };
 }
 
-function formatStageDuration(assignedAt: string | null | undefined): string {
-  if (!assignedAt) return "";
+type TranslationTimeResult = {
+  key: "daysInStage" | "hoursInStage" | "justEntered";
+  count: number;
+};
+
+function formatStageDuration(
+  assignedAt: string | null | undefined,
+): TranslationTimeResult | null {
+  if (!assignedAt) return null;
   const date = new Date(assignedAt);
   const now = new Date();
   const diff = now.getTime() - date.getTime();
   const hours = Math.floor(diff / 3600000);
   const days = Math.floor(diff / 86400000);
-  if (days > 0) return `${days}d in stage`;
-  if (hours > 0) return `${hours}h in stage`;
-  return "Just entered";
+  if (days > 0) return { key: "daysInStage", count: days };
+  if (hours > 0) return { key: "hoursInStage", count: hours };
+  return { key: "justEntered", count: 0 };
 }
 
 function KanbanCardComponent({
   card,
   onDragStart,
+  onDragEnd,
   onClick,
+  t,
 }: {
   card: ChatStageAssignment;
   onDragStart: (
@@ -80,12 +103,15 @@ function KanbanCardComponent({
     chatId: string,
     fromStageId: string,
   ) => void;
+  onDragEnd: () => void;
   onClick: (chatId: string) => void;
+  t: ReturnType<typeof useTranslations<"kanban">>;
 }) {
   return (
     <div
       draggable
       onDragStart={(e) => onDragStart(e, card.chatId, card.stageId || "")}
+      onDragEnd={onDragEnd}
       onClick={() => onClick(card.chatId)}
       className="group p-3 rounded-lg border bg-card hover:shadow-md transition-all cursor-pointer active:opacity-50 select-none"
     >
@@ -127,7 +153,7 @@ function KanbanCardComponent({
             className="text-xs bg-orange-50 text-orange-700 border-orange-200"
           >
             <Users className="h-3 w-3 mr-1" />
-            Handoff
+            {t("cardHandoff")}
           </Badge>
         )}
         {(card.aiPaused || card.aiOverrideEnabled === false) && (
@@ -136,7 +162,9 @@ function KanbanCardComponent({
             className="text-xs bg-red-50 text-red-700 border-red-200"
           >
             <Pause className="h-3 w-3 mr-1" />
-            {card.aiOverrideEnabled === false ? "AI Disabled" : "AI Paused"}
+            {card.aiOverrideEnabled === false
+              ? t("cardAiDisabled")
+              : t("cardAiPaused")}
           </Badge>
         )}
         {!card.aiPaused &&
@@ -147,23 +175,33 @@ function KanbanCardComponent({
               className="text-xs bg-green-50 text-green-700 border-green-200"
             >
               <Bot className="h-3 w-3 mr-1" />
-              AI Active
+              {t("cardAiActive")}
             </Badge>
           )}
-        {card.lastMessageTime && (
-          <span className="text-xs text-muted-foreground flex items-center gap-1">
-            <Clock className="h-3 w-3" />
-            {formatRelativeTime(card.lastMessageTime)}
-          </span>
-        )}
+        {card.lastMessageTime &&
+          (() => {
+            const relTime = formatRelativeTime(card.lastMessageTime);
+            return relTime ? (
+              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                {t(relTime.key as "minutesAgo" | "hoursAgo" | "daysAgo", {
+                  count: relTime.count,
+                })}
+              </span>
+            ) : null;
+          })()}
       </div>
-      {card.assignedAt && (
-        <div className="mt-2 pt-2 border-t">
-          <span className="text-xs text-muted-foreground">
-            {formatStageDuration(card.assignedAt)}
-          </span>
-        </div>
-      )}
+      {(() => {
+        const stageDuration = formatStageDuration(card.assignedAt);
+        if (!stageDuration) return null;
+        return (
+          <div className="mt-2 pt-2 border-t">
+            <span className="text-xs text-muted-foreground">
+              {t(stageDuration.key, { count: stageDuration.count })}
+            </span>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -172,8 +210,11 @@ function KanbanColumnComponent({
   stage,
   cards,
   onDragStart,
+  onDragEnd,
   onDragOver,
   onDrop,
+  onDragEnter,
+  onDragLeave,
   onCardClick,
   isDragOver,
   editMode,
@@ -187,6 +228,8 @@ function KanbanColumnComponent({
   onStageDragOver,
   onStageDrop,
   isStageDragging,
+  onSetDefault,
+  t,
 }: {
   stage: EditableStage;
   cards: ChatStageAssignment[];
@@ -195,8 +238,11 @@ function KanbanColumnComponent({
     chatId: string,
     fromStageId: string,
   ) => void;
+  onDragEnd: () => void;
   onDragOver: (e: React.DragEvent<HTMLDivElement>) => void;
   onDrop: (e: React.DragEvent<HTMLDivElement>, stageId: string) => void;
+  onDragEnter: () => void;
+  onDragLeave: () => void;
   onCardClick: (chatId: string) => void;
   isDragOver: boolean;
   editMode: boolean;
@@ -213,6 +259,8 @@ function KanbanColumnComponent({
   onStageDragOver: (e: React.DragEvent<HTMLDivElement>) => void;
   onStageDrop: (e: React.DragEvent<HTMLDivElement>, stageId: string) => void;
   isStageDragging: boolean;
+  onSetDefault: (stageId: string) => void;
+  t: ReturnType<typeof useTranslations<"kanban">>;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -283,7 +331,7 @@ function KanbanColumnComponent({
               className="h-7 w-7"
               onClick={() => onCancelEdit(stage.id)}
             >
-              <X className="h-4 w-4 text-red-600" />
+              <X className="h-4 w-4 text-destructive" />
             </Button>
           </div>
         ) : (
@@ -317,14 +365,16 @@ function KanbanColumnComponent({
                     disabled={!canDelete}
                     title={
                       canDelete
-                        ? "Delete stage"
-                        : `Cannot delete: minimum ${MIN_STAGES_COUNT} stages required`
+                        ? t("deleteStage")
+                        : t("cannotDeleteMinStages", {
+                            minStages: MIN_STAGES_COUNT,
+                          })
                     }
                   >
                     <Trash2
                       className={`h-3.5 w-3.5 ${
                         canDelete
-                          ? "text-red-600"
+                          ? "text-destructive"
                           : "text-muted-foreground opacity-50"
                       }`}
                     />
@@ -343,13 +393,17 @@ function KanbanColumnComponent({
       {!editMode && (
         <div className="mb-3 flex gap-1.5 flex-wrap">
           {stage.isDefault && (
-            <Badge variant="outline" className="text-xs">
-              Default
+            <Badge
+              variant="outline"
+              className="text-xs bg-primary/10 text-primary border-primary/30"
+            >
+              <Star className="h-3 w-3 mr-1 fill-primary" />
+              {t("defaultBadge")}
             </Badge>
           )}
           {stage.isFinal && (
             <Badge variant="outline" className="text-xs">
-              Final
+              {t("finalBadge")}
             </Badge>
           )}
           {stage.aiAutoReply && (
@@ -357,7 +411,7 @@ function KanbanColumnComponent({
               variant="outline"
               className="text-xs bg-green-50 text-green-700 border-green-200"
             >
-              AI Reply
+              {t("aiReplyBadge")}
             </Badge>
           )}
           {stage.aiHandoffRequired && (
@@ -365,14 +419,47 @@ function KanbanColumnComponent({
               variant="outline"
               className="text-xs bg-orange-50 text-orange-700 border-orange-200"
             >
-              Handoff
+              {t("handoffBadge")}
             </Badge>
           )}
+        </div>
+      )}
+      {editMode && (
+        <div className="mb-3 flex gap-1.5 flex-wrap">
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "text-xs cursor-pointer transition-all",
+                    stage.isDefault
+                      ? "bg-primary/10 text-primary border-primary/30"
+                      : "hover:bg-primary/5 hover:border-primary/20",
+                  )}
+                  onClick={() => !stage.isDefault && onSetDefault(stage.id)}
+                >
+                  <Star
+                    className={cn(
+                      "h-3 w-3 mr-1",
+                      stage.isDefault ? "fill-primary" : "",
+                    )}
+                  />
+                  {stage.isDefault ? t("defaultBadge") : t("setAsDefault")}
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent>
+                {stage.isDefault ? t("isDefaultStage") : t("clickToSetDefault")}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
       )}
       <div
         onDragOver={editMode ? undefined : onDragOver}
         onDrop={editMode ? undefined : (e) => onDrop(e, stage.id)}
+        onDragEnter={editMode ? undefined : onDragEnter}
+        onDragLeave={editMode ? undefined : onDragLeave}
         className={`flex-1 rounded-lg p-3 space-y-3 min-h-[400px] transition-colors ${
           isDragOver
             ? "bg-primary/10 border-2 border-dashed border-primary"
@@ -385,13 +472,15 @@ function KanbanColumnComponent({
               key={card.chatId}
               card={card}
               onDragStart={onDragStart}
+              onDragEnd={onDragEnd}
               onClick={onCardClick}
+              t={t}
             />
           ))
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <MessageSquare className="h-8 w-8 text-muted-foreground/50 mb-2" />
-            <p className="text-xs text-muted-foreground">No chats yet</p>
+            <p className="text-xs text-muted-foreground">{t("noChatsYet")}</p>
           </div>
         )}
       </div>
@@ -419,13 +508,20 @@ export default function KanbanPage() {
     chatId: string;
     fromStageId: string;
   } | null>(null);
+
+  // Ref to track dragged chat immediately (state updates are async)
+  const draggedChatRef = useRef<{
+    chatId: string;
+    fromStageId: string;
+  } | null>(null);
+
+  // Create stage modal state
+  const [createStageModalOpen, setCreateStageModalOpen] = useState(false);
+  const [createStagePosition, setCreateStagePosition] = useState(0);
   const [dragOverStageId, setDragOverStageId] = useState<string | null>(null);
+  const [showActivity, setShowActivity] = useState(true);
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -447,14 +543,15 @@ export default function KanbanPage() {
       const message =
         err instanceof Error ? err.message : "Failed to load data";
       setError(message);
-      addNotification(
-        "Failed to load workflow stages. Please try again.",
-        "error",
-      );
+      addNotification(t("loadFailed"), "error");
     } finally {
       setLoading(false);
     }
-  };
+  }, [addNotification]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const handleDragStart = (
     e: React.DragEvent<HTMLDivElement>,
@@ -462,8 +559,19 @@ export default function KanbanPage() {
     fromStageId: string,
   ) => {
     if (editMode) return;
-    setDraggedChat({ chatId, fromStageId });
+    const dragData = { chatId, fromStageId };
+    draggedChatRef.current = dragData;
+    setDraggedChat(dragData);
     e.dataTransfer.effectAllowed = "move";
+    // Store data in dataTransfer as backup
+    e.dataTransfer.setData("application/json", JSON.stringify(dragData));
+  };
+
+  const handleDragEnd = () => {
+    // Clean up drag state when drag operation ends (cancelled or completed)
+    draggedChatRef.current = null;
+    setDraggedChat(null);
+    setDragOverStageId(null);
   };
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
@@ -476,37 +584,92 @@ export default function KanbanPage() {
     toStageId: string,
   ) => {
     e.preventDefault();
+    e.stopPropagation(); // Prevent event bubbling to parent drop zones
     setDragOverStageId(null);
-    if (!draggedChat || editMode) return;
-    const { chatId, fromStageId } = draggedChat;
-    if (fromStageId === toStageId) {
-      setDraggedChat(null);
-      return;
+
+    if (editMode) return;
+
+    // Use ref for immediate access (state updates are async and may be stale)
+    const dragData = draggedChatRef.current;
+
+    // If ref is null, try to get data from dataTransfer as fallback
+    let chatId: string;
+    let fromStageId: string;
+
+    if (dragData) {
+      chatId = dragData.chatId;
+      fromStageId = dragData.fromStageId;
+    } else {
+      // Try to recover from dataTransfer
+      try {
+        const transferData = e.dataTransfer.getData("application/json");
+        if (!transferData) return;
+        const parsed = JSON.parse(transferData);
+        chatId = parsed.chatId;
+        fromStageId = parsed.fromStageId;
+        if (!chatId || !fromStageId) return;
+      } catch {
+        return;
+      }
     }
-    const newChatsMap = new Map(chatsByStage);
-    const fromChats = newChatsMap.get(fromStageId) || [];
-    const toChats = newChatsMap.get(toStageId) || [];
-    const chatIndex = fromChats.findIndex((chat) => chat.chatId === chatId);
-    if (chatIndex === -1) {
-      setDraggedChat(null);
-      return;
-    }
-    const [chat] = fromChats.splice(chatIndex, 1);
-    toChats.push({ ...chat, stageId: toStageId });
-    newChatsMap.set(fromStageId, fromChats);
-    newChatsMap.set(toStageId, toChats);
-    setChatsByStage(newChatsMap);
+
+    // Clear ref and state immediately to prevent double processing
+    draggedChatRef.current = null;
     setDraggedChat(null);
+
+    // Don't do anything if dropping on the same stage
+    if (fromStageId === toStageId) {
+      return;
+    }
+
+    // Use functional update to ensure we're working with latest state
+    setChatsByStage((currentChatsMap) => {
+      const originalFromChats = currentChatsMap.get(fromStageId) || [];
+      const originalToChats = currentChatsMap.get(toStageId) || [];
+
+      // Find the chat to move
+      const chatIndex = originalFromChats.findIndex(
+        (chat) => chat.chatId === chatId,
+      );
+      if (chatIndex === -1) {
+        // Chat not found, return current state unchanged
+        return currentChatsMap;
+      }
+
+      // Get the chat being moved
+      const chatToMove = originalFromChats[chatIndex];
+
+      // Create NEW arrays (immutable update pattern)
+      const newFromChats = [
+        ...originalFromChats.slice(0, chatIndex),
+        ...originalFromChats.slice(chatIndex + 1),
+      ];
+      const newToChats = [
+        ...originalToChats,
+        { ...chatToMove, stageId: toStageId },
+      ];
+
+      // Create a new Map with the updated arrays
+      const newChatsMap = new Map(currentChatsMap);
+      newChatsMap.set(fromStageId, newFromChats);
+      newChatsMap.set(toStageId, newToChats);
+
+      return newChatsMap;
+    });
+
+    // Call API to persist the change
     try {
       const toStage = stages.find((s) => s.id === toStageId);
+      const stageName = toStage?.name ?? "stage";
       await backendApi.stages.transitionChat({
         chatId,
         toStageId,
-        reason: `Moved to ${toStage?.name || "stage"} via kanban board`,
+        reason: t("chatMovedReason", { stageName }),
       });
-      addNotification(`Successfully moved chat to ${toStage?.name}`, "success");
+      addNotification(t("chatMoved", { stageName }), "success");
     } catch {
-      addNotification("Failed to move chat. Please try again.", "error");
+      addNotification(t("chatMoveFailed"), "error");
+      // Reload data to restore correct state on failure
       loadData();
     }
   };
@@ -554,9 +717,9 @@ export default function KanbanPage() {
             : s,
         ),
       );
-      addNotification(`Stage renamed to "${newName}"`, "success");
+      addNotification(t("stageRenamed", { name: newName }), "success");
     } catch {
-      addNotification("Failed to rename stage. Please try again.", "error");
+      addNotification(t("stageRenameFailed"), "error");
       handleCancelEdit(stageId);
     }
   };
@@ -570,12 +733,13 @@ export default function KanbanPage() {
         newMap.delete(stageToDelete.id);
         return newMap;
       });
-      addNotification(`Stage "${stageToDelete.name}" deleted`, "success");
+      addNotification(
+        t("stageDeleted", { name: stageToDelete.name }),
+        "success",
+      );
     } catch (err: unknown) {
       const message =
-        err instanceof Error
-          ? err.message
-          : "Failed to delete stage. Please try again.";
+        err instanceof Error ? err.message : t("stageDeleteFailed");
       addNotification(message, "error");
     } finally {
       setStageToDelete(null);
@@ -619,9 +783,9 @@ export default function KanbanPage() {
           backendApi.stages.updateStage(s.id, { sortOrder: s.sortOrder }),
         ),
       );
-      addNotification("Stage order updated", "success");
+      addNotification(t("stageOrderUpdated"), "success");
     } catch {
-      addNotification("Failed to save stage order. Please refresh.", "error");
+      addNotification(t("stageOrderFailed"), "error");
       loadData();
     }
   };
@@ -629,14 +793,63 @@ export default function KanbanPage() {
   const handleInitializeDefaults = async () => {
     try {
       await backendApi.stages.initializeDefaults();
-      addNotification("Default workflow stages created", "success");
+      addNotification(t("defaultStagesCreated"), "success");
       loadData();
     } catch (err: unknown) {
       const message =
-        err instanceof Error ? err.message : "Failed to initialize stages";
+        err instanceof Error ? err.message : t("initializeFailed");
       addNotification(message, "error");
     }
   };
+
+  // Open create stage modal at a specific position
+  const handleOpenCreateStageModal = useCallback((position: number) => {
+    setCreateStagePosition(position);
+    setCreateStageModalOpen(true);
+  }, []);
+
+  // Handle stage created - add to stages list and refresh sort orders
+  const handleStageCreated = useCallback(
+    async (newStage: WorkflowStage) => {
+      // Reload data to get correct sort orders
+      await loadData();
+    },
+    [loadData],
+  );
+
+  // Set a stage as default
+  const handleSetDefault = useCallback(
+    async (stageId: string) => {
+      const stage = stages.find((s) => s.id === stageId);
+      if (!stage || stage.isDefault) return;
+
+      try {
+        await backendApi.stages.updateStage(stageId, { isDefault: true });
+        // Update local state - unset previous default, set new one
+        setStages((prev) =>
+          prev.map((s) => ({
+            ...s,
+            isDefault: s.id === stageId,
+          })),
+        );
+        addNotification(
+          t("defaultStageChanged", { name: stage.name }),
+          "success",
+        );
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : t("defaultStageChangeFailed");
+        addNotification(message, "error");
+      }
+    },
+    [stages, addNotification, t],
+  );
+
+  // Get the default stage name for the delete dialog
+  const getDefaultStageName = useCallback(() => {
+    const defaultStage = stages.find((s) => s.isDefault);
+    return defaultStage?.name || stages[0]?.name || "default";
+  }, [stages]);
 
   const canDeleteStage = stages.length > MIN_STAGES_COUNT;
 
@@ -670,13 +883,12 @@ export default function KanbanPage() {
           <div className="flex flex-col items-center justify-center text-center gap-4">
             <AlertCircle className="h-12 w-12 text-muted-foreground" />
             <div>
-              <h3 className="font-medium mb-2">No Workflow Stages Found</h3>
+              <h3 className="font-medium mb-2">{t("noStagesTitle")}</h3>
               <p className="text-sm text-muted-foreground mb-4">
-                Get started by creating default workflow stages for your
-                pipeline.
+                {t("noStagesDescription")}
               </p>
               <Button onClick={handleInitializeDefaults}>
-                Initialize Default Stages
+                {t("initializeDefaults")}
               </Button>
             </div>
           </div>
@@ -686,174 +898,229 @@ export default function KanbanPage() {
   }
 
   return (
-    <div className="flex flex-col gap-4 p-4 lg:p-8 h-full overflow-auto">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg lg:text-2xl font-medium">{t("title")}</h1>
-          <p className="text-sm text-muted-foreground">{t("description")}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant={editMode ? "default" : "outline"}
-            size="sm"
-            onClick={() => setEditMode(!editMode)}
-          >
-            <Pencil className="h-4 w-4 mr-2" />
-            {editMode ? "Done Editing" : "Edit Mode"}
-          </Button>
-          <Button variant="outline" size="sm" onClick={loadData}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
-          </Button>
-        </div>
-      </div>
-
-      {editMode && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 flex items-center gap-2">
-          <Pencil className="h-4 w-4 text-yellow-600" />
-          <span className="text-sm text-yellow-800">
-            Edit Mode: Click stage names to rename, drag columns to reorder,
-            click trash to delete. Minimum {MIN_STAGES_COUNT} stages required.
-          </span>
-        </div>
-      )}
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Total Stages
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold">{stages.length}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Total Chats
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold">
-              {Array.from(chatsByStage.values()).reduce(
-                (sum, chats) => sum + chats.length,
-                0,
-              )}
+    <div className="flex h-full overflow-hidden">
+      {/* Main Kanban Content */}
+      <div className="flex-1 flex flex-col gap-4 p-4 lg:p-8 min-w-0 overflow-hidden">
+        {/* Header Section - no horizontal scroll */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shrink-0">
+          <div className="min-w-0">
+            <h1 className="text-lg lg:text-2xl font-medium truncate">
+              {t("title")}
+            </h1>
+            <p className="text-sm text-muted-foreground truncate">
+              {t("description")}
             </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Handoffs Pending
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold">
-              {Array.from(chatsByStage.values()).reduce(
-                (sum, chats) =>
-                  sum + chats.filter((c) => c.awaitingHandoff).length,
-                0,
-              )}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              AI Paused
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold">
-              {Array.from(chatsByStage.values()).reduce(
-                (sum, chats) =>
-                  sum +
-                  chats.filter(
-                    (c) => c.aiPaused || c.aiOverrideEnabled === false,
-                  ).length,
-                0,
-              )}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="flex gap-4 overflow-x-auto pb-4">
-        {stages.map((stage) => (
-          <div
-            key={stage.id}
-            onDragOver={editMode ? undefined : handleDragOver}
-            onDrop={editMode ? undefined : (e) => handleDrop(e, stage.id)}
-            onDragEnter={
-              editMode ? undefined : () => setDragOverStageId(stage.id)
-            }
-            onDragLeave={
-              editMode
-                ? undefined
-                : (e) => {
-                    if (e.currentTarget === e.target) setDragOverStageId(null);
-                  }
-            }
-          >
-            <KanbanColumnComponent
-              stage={stage}
-              cards={chatsByStage.get(stage.id) || []}
-              onDragStart={handleDragStart}
-              onDragOver={handleDragOver}
-              onDrop={handleDrop}
-              onCardClick={handleCardClick}
-              isDragOver={dragOverStageId === stage.id}
-              editMode={editMode}
-              onStartEdit={handleStartEdit}
-              onCancelEdit={handleCancelEdit}
-              onSaveEdit={handleSaveEdit}
-              onDelete={(id) =>
-                setStageToDelete(stages.find((s) => s.id === id) || null)
-              }
-              onEditNameChange={handleEditNameChange}
-              canDelete={canDeleteStage}
-              onStageDragStart={handleStageDragStart}
-              onStageDragOver={handleStageDragOver}
-              onStageDrop={handleStageDrop}
-              isStageDragging={draggedStageId === stage.id}
-            />
           </div>
-        ))}
-      </div>
-
-      <AlertDialog
-        open={!!stageToDelete}
-        onOpenChange={(open) => !open && setStageToDelete(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Stage</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete the stage &quot;
-              {stageToDelete?.name}&quot;?
-              {(chatsByStage.get(stageToDelete?.id || "")?.length || 0) > 0 && (
-                <span className="block mt-2 text-red-600">
-                  Warning: This stage contains{" "}
-                  {chatsByStage.get(stageToDelete?.id || "")?.length} chat(s).
-                  They will need to be reassigned.
-                </span>
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDeleteStage}
-              className="bg-red-600 hover:bg-red-700"
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowActivity(true)}
             >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+              <History className="h-4 w-4 mr-2" />
+              {t("history")}
+            </Button>
+            <Button
+              variant={editMode ? "default" : "outline"}
+              size="sm"
+              onClick={() => setEditMode(!editMode)}
+            >
+              <Pencil className="h-4 w-4 mr-2" />
+              {editMode ? t("doneEditing") : t("editMode")}
+            </Button>
+            <Button variant="outline" size="sm" onClick={loadData}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              {t("refresh")}
+            </Button>
+          </div>
+        </div>
+
+        {editMode && (
+          <div className="bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3 flex items-center gap-2 shrink-0">
+            <Pencil className="h-4 w-4 text-yellow-600 dark:text-yellow-400 shrink-0" />
+            <span className="text-sm text-yellow-800 dark:text-yellow-200">
+              {t("editModeInstructions", { minStages: MIN_STAGES_COUNT })}
+            </span>
+          </div>
+        )}
+
+        {/* Stats Cards - no horizontal scroll */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 shrink-0">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                {t("statTotalStages")}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-2xl font-bold">{stages.length}</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                {t("statTotalChats")}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-2xl font-bold">
+                {Array.from(chatsByStage.values()).reduce(
+                  (sum, chats) => sum + chats.length,
+                  0,
+                )}
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                {t("statHandoffsPending")}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-2xl font-bold">
+                {Array.from(chatsByStage.values()).reduce(
+                  (sum, chats) =>
+                    sum + chats.filter((c) => c.awaitingHandoff).length,
+                  0,
+                )}
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                {t("statAiPaused")}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-2xl font-bold">
+                {Array.from(chatsByStage.values()).reduce(
+                  (sum, chats) =>
+                    sum +
+                    chats.filter(
+                      (c) => c.aiPaused || c.aiOverrideEnabled === false,
+                    ).length,
+                  0,
+                )}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Stages Container - horizontal scroll allowed here only */}
+        <div className="flex-1 min-h-0 relative">
+          <div className="absolute inset-0 overflow-x-auto overflow-y-hidden">
+            <div className="flex gap-2 pb-4 items-stretch h-full">
+              {/* Add stage button at the start (in edit mode) */}
+              {editMode && (
+                <AddStageDivider
+                  onClick={() => handleOpenCreateStageModal(0)}
+                  isEditMode={editMode}
+                />
+              )}
+
+              {stages.map((stage, index) => (
+                <div key={stage.id} className="flex items-stretch">
+                  <KanbanColumnComponent
+                    stage={stage}
+                    cards={chatsByStage.get(stage.id) || []}
+                    onDragStart={handleDragStart}
+                    onDragEnd={handleDragEnd}
+                    onDragOver={handleDragOver}
+                    onDrop={handleDrop}
+                    onCardClick={handleCardClick}
+                    isDragOver={dragOverStageId === stage.id}
+                    onDragEnter={() => setDragOverStageId(stage.id)}
+                    onDragLeave={() => setDragOverStageId(null)}
+                    editMode={editMode}
+                    onStartEdit={handleStartEdit}
+                    onCancelEdit={handleCancelEdit}
+                    onSaveEdit={handleSaveEdit}
+                    onDelete={(id) =>
+                      setStageToDelete(stages.find((s) => s.id === id) || null)
+                    }
+                    onEditNameChange={handleEditNameChange}
+                    canDelete={canDeleteStage}
+                    onStageDragStart={handleStageDragStart}
+                    onStageDragOver={handleStageDragOver}
+                    onStageDrop={handleStageDrop}
+                    isStageDragging={draggedStageId === stage.id}
+                    onSetDefault={handleSetDefault}
+                    t={t}
+                  />
+
+                  {/* Add stage divider between columns (in edit mode) */}
+                  {editMode && (
+                    <AddStageDivider
+                      onClick={() => handleOpenCreateStageModal(index + 1)}
+                      isEditMode={editMode}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <AlertDialog
+          open={!!stageToDelete}
+          onOpenChange={(open) => !open && setStageToDelete(null)}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("deleteStage")}</AlertDialogTitle>
+              <AlertDialogDescription asChild>
+                <div className="space-y-2">
+                  <p>
+                    {t("deleteStageConfirm", {
+                      name: stageToDelete?.name ?? "",
+                    })}
+                  </p>
+                  {(chatsByStage.get(stageToDelete?.id || "")?.length || 0) >
+                    0 && (
+                    <p className="text-destructive font-medium">
+                      {t("deleteStageWarning", {
+                        count:
+                          chatsByStage.get(stageToDelete?.id || "")?.length ??
+                          0,
+                        defaultStage: getDefaultStageName(),
+                      })}
+                    </p>
+                  )}
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDeleteStage}
+                className={buttonVariants({ variant: "destructive" })}
+              >
+                {t("delete")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Create Stage Modal */}
+        <CreateStageModal
+          open={createStageModalOpen}
+          onOpenChange={setCreateStageModalOpen}
+          insertAtPosition={createStagePosition}
+          onStageCreated={handleStageCreated}
+          isFirstStage={stages.length === 0}
+        />
+
+        {/* Activity History Sheet */}
+        <ActivityHistorySheet
+          open={showActivity}
+          onOpenChange={setShowActivity}
+          onChatClick={(chatId) =>
+            router.push(`/dashboard/chats?selectedChatId=${chatId}`)
+          }
+        />
+      </div>
     </div>
   );
 }

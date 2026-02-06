@@ -28,6 +28,7 @@ import {
   UpdateStageRequest,
   WorkflowStageConfig,
 } from '../types';
+import { ActivityLogService } from './activity-log.service';
 import { AiConfigurationService } from './ai-configuration.service';
 
 @Injectable()
@@ -38,6 +39,7 @@ export class StageService {
     private readonly chatVisibilityService: ChatVisibilityService,
     @Inject(forwardRef(() => AiConfigurationService))
     private readonly aiConfigService: AiConfigurationService,
+    private readonly activityLogService: ActivityLogService,
   ) {}
 
   /**
@@ -205,6 +207,30 @@ export class StageService {
   }
 
   /**
+   * Helper to get user info for activity logging
+   */
+  private async getUserInfo(
+    userId: number,
+  ): Promise<{ name: string | null; teamId: string | null }> {
+    const membership = await db.query.teamMembers.findFirst({
+      where: and(
+        eq(teamMembers.userId, userId),
+        eq(teamMembers.isActive, true),
+      ),
+      with: {
+        user: {
+          columns: { name: true },
+        },
+      },
+    });
+
+    return {
+      name: membership?.user?.name ?? null,
+      teamId: membership?.teamId ?? null,
+    };
+  }
+
+  /**
    * Create a new stage
    */
   async createStage(
@@ -212,6 +238,7 @@ export class StageService {
     request: CreateStageRequest,
   ): Promise<WorkflowStageConfig> {
     const ownerId = await this.resolveStageOwnerId(userId);
+    const userInfo = await this.getUserInfo(userId);
 
     // If this is set as default, unset other defaults
     if (request.isDefault) {
@@ -244,6 +271,25 @@ export class StageService {
 
     this.logger.log(`Created stage "${request.name}" for user ${userId}`);
 
+    // Log activity for history tracking
+    await this.activityLogService.logStageCreated(
+      userId,
+      userInfo.name || 'Unknown User',
+      stage.id,
+      stage.name,
+      {
+        name: stage.name,
+        description: stage.description,
+        color: stage.color,
+        sortOrder: stage.sortOrder,
+        isDefault: stage.isDefault,
+        isFinal: stage.isFinal,
+        aiAutoReply: stage.aiAutoReply,
+        aiHandoffRequired: stage.aiHandoffRequired,
+      },
+      userInfo.teamId ?? undefined,
+    );
+
     return {
       id: stage.id,
       name: stage.name,
@@ -267,6 +313,29 @@ export class StageService {
     request: UpdateStageRequest,
   ): Promise<WorkflowStageConfig | null> {
     const ownerId = await this.resolveStageOwnerId(userId);
+    const userInfo = await this.getUserInfo(userId);
+
+    // Get previous state for activity logging
+    const [previousStage] = await db
+      .select()
+      .from(workflowStages)
+      .where(
+        and(eq(workflowStages.id, stageId), eq(workflowStages.userId, ownerId)),
+      )
+      .limit(1);
+
+    if (!previousStage) return null;
+
+    const previousState = {
+      name: previousStage.name,
+      description: previousStage.description,
+      color: previousStage.color,
+      sortOrder: previousStage.sortOrder,
+      isDefault: previousStage.isDefault,
+      isFinal: previousStage.isFinal,
+      aiAutoReply: previousStage.aiAutoReply,
+      aiHandoffRequired: previousStage.aiHandoffRequired,
+    };
 
     // If setting as default, unset other defaults
     if (request.isDefault) {
@@ -291,6 +360,28 @@ export class StageService {
 
     this.logger.log(`Updated stage ${stageId} for user ${userId}`);
 
+    // Log activity for history tracking
+    const newState = {
+      name: stage.name,
+      description: stage.description,
+      color: stage.color,
+      sortOrder: stage.sortOrder,
+      isDefault: stage.isDefault,
+      isFinal: stage.isFinal,
+      aiAutoReply: stage.aiAutoReply,
+      aiHandoffRequired: stage.aiHandoffRequired,
+    };
+
+    await this.activityLogService.logStageUpdated(
+      userId,
+      userInfo.name || 'Unknown User',
+      stage.id,
+      stage.name,
+      previousState,
+      newState,
+      userInfo.teamId ?? undefined,
+    );
+
     return {
       id: stage.id,
       name: stage.name,
@@ -314,6 +405,18 @@ export class StageService {
     moveToStageId?: string,
   ): Promise<boolean> {
     const ownerId = await this.resolveStageOwnerId(userId);
+    const userInfo = await this.getUserInfo(userId);
+
+    // Get stage info before deletion for activity logging
+    const [stageToDelete] = await db
+      .select()
+      .from(workflowStages)
+      .where(
+        and(eq(workflowStages.id, stageId), eq(workflowStages.userId, ownerId)),
+      )
+      .limit(1);
+
+    if (!stageToDelete) return false;
 
     // Get chats assigned to this stage
     const assignments = await db
@@ -321,6 +424,7 @@ export class StageService {
       .from(chatStageAssignments)
       .where(eq(chatStageAssignments.stageId, stageId));
 
+    let targetStageName: string | undefined;
     if (assignments.length > 0) {
       // Move chats to another stage
       const targetStageId =
@@ -332,6 +436,14 @@ export class StageService {
           'Cannot delete stage: no target stage for existing chats',
         );
       }
+
+      // Get target stage name for logging
+      const [targetStage] = await db
+        .select({ name: workflowStages.name })
+        .from(workflowStages)
+        .where(eq(workflowStages.id, targetStageId))
+        .limit(1);
+      targetStageName = targetStage?.name;
 
       await db
         .update(chatStageAssignments)
@@ -354,6 +466,27 @@ export class StageService {
       )
       .returning({ id: workflowStages.id });
 
+    if (result.length > 0) {
+      // Log activity for history tracking
+      await this.activityLogService.logStageDeleted(
+        userId,
+        userInfo.name || 'Unknown User',
+        stageId,
+        stageToDelete.name,
+        {
+          name: stageToDelete.name,
+          description: stageToDelete.description,
+          color: stageToDelete.color,
+          sortOrder: stageToDelete.sortOrder,
+          isDefault: stageToDelete.isDefault,
+          isFinal: stageToDelete.isFinal,
+        },
+        assignments.length,
+        targetStageName,
+        userInfo.teamId ?? undefined,
+      );
+    }
+
     return result.length > 0;
   }
 
@@ -365,6 +498,7 @@ export class StageService {
     stageOrder: string[],
   ): Promise<WorkflowStageConfig[]> {
     const ownerId = await this.resolveStageOwnerId(userId);
+    const userInfo = await this.getUserInfo(userId);
 
     // Update sort order for each stage
     for (let i = 0; i < stageOrder.length; i++) {
@@ -381,6 +515,14 @@ export class StageService {
           ),
         );
     }
+
+    // Log activity for history tracking
+    await this.activityLogService.logStagesReordered(
+      userId,
+      userInfo.name || 'Unknown User',
+      stageOrder,
+      userInfo.teamId ?? undefined,
+    );
 
     return this.getStages(userId);
   }
@@ -563,7 +705,7 @@ export class StageService {
   }
 
   /**
-   * Get stage history for a chat
+   * Get stage history for a chat (raw data)
    */
   async getStageHistory(
     chatId: string,
@@ -573,6 +715,175 @@ export class StageService {
       .from(chatStageHistory)
       .where(eq(chatStageHistory.chatId, chatId))
       .orderBy(desc(chatStageHistory.createdAt));
+  }
+
+  /**
+   * Get enriched stage history for a chat with stage names and user info
+   * Returns human-readable history entries for the Activity tab
+   */
+  async getEnrichedStageHistory(
+    chatId: string,
+    limit: number = 50,
+  ): Promise<
+    Array<{
+      id: string;
+      chatId: string;
+      fromStageId: string | null;
+      toStageId: string | null;
+      fromStageName: string | null;
+      fromStageColor: string | null;
+      toStageName: string | null;
+      toStageColor: string | null;
+      triggerType: string;
+      triggeredBy: number | null;
+      triggeredByName: string | null;
+      reason: string | null;
+      metadata: unknown;
+      createdAt: Date | null;
+    }>
+  > {
+    // Alias tables for from/to stage joins
+    const fromStageAlias = db
+      .select({
+        id: workflowStages.id,
+        name: workflowStages.name,
+        color: workflowStages.color,
+      })
+      .from(workflowStages)
+      .as('from_stage');
+
+    const toStageAlias = db
+      .select({
+        id: workflowStages.id,
+        name: workflowStages.name,
+        color: workflowStages.color,
+      })
+      .from(workflowStages)
+      .as('to_stage');
+
+    const results = await db
+      .select({
+        id: chatStageHistory.id,
+        chatId: chatStageHistory.chatId,
+        fromStageId: chatStageHistory.fromStageId,
+        toStageId: chatStageHistory.toStageId,
+        fromStageName: fromStageAlias.name,
+        fromStageColor: fromStageAlias.color,
+        toStageName: toStageAlias.name,
+        toStageColor: toStageAlias.color,
+        triggerType: chatStageHistory.triggerType,
+        triggeredBy: chatStageHistory.triggeredBy,
+        triggeredByName: users.name,
+        reason: chatStageHistory.reason,
+        metadata: chatStageHistory.metadata,
+        createdAt: chatStageHistory.createdAt,
+      })
+      .from(chatStageHistory)
+      .leftJoin(
+        fromStageAlias,
+        eq(chatStageHistory.fromStageId, fromStageAlias.id),
+      )
+      .leftJoin(toStageAlias, eq(chatStageHistory.toStageId, toStageAlias.id))
+      .leftJoin(users, eq(chatStageHistory.triggeredBy, users.id))
+      .where(eq(chatStageHistory.chatId, chatId))
+      .orderBy(desc(chatStageHistory.createdAt))
+      .limit(limit);
+
+    return results;
+  }
+
+  /**
+   * Get global stage history for the kanban page (all chats)
+   * Returns recent stage transitions across all chats visible to the user
+   */
+  async getGlobalStageHistory(
+    userId: number,
+    limit: number = 50,
+  ): Promise<
+    Array<{
+      id: string;
+      chatId: string;
+      participantName: string | null;
+      participantPhone: string | null;
+      fromStageId: string | null;
+      toStageId: string | null;
+      fromStageName: string | null;
+      fromStageColor: string | null;
+      toStageName: string | null;
+      toStageColor: string | null;
+      triggerType: string;
+      triggeredBy: number | null;
+      triggeredByName: string | null;
+      reason: string | null;
+      createdAt: Date | null;
+    }>
+  > {
+    // Get user's team for filtering
+    const userMembership = await db.query.teamMembers.findFirst({
+      where: and(
+        eq(teamMembers.userId, userId),
+        eq(teamMembers.isActive, true),
+      ),
+    });
+
+    const teamId = userMembership?.teamId;
+
+    // Alias tables for from/to stage joins
+    const fromStageAlias = db
+      .select({
+        id: workflowStages.id,
+        name: workflowStages.name,
+        color: workflowStages.color,
+      })
+      .from(workflowStages)
+      .as('from_stage');
+
+    const toStageAlias = db
+      .select({
+        id: workflowStages.id,
+        name: workflowStages.name,
+        color: workflowStages.color,
+      })
+      .from(workflowStages)
+      .as('to_stage');
+
+    // Build where conditions
+    const whereConditions = [];
+    if (teamId) {
+      whereConditions.push(eq(chats.teamId, teamId));
+    }
+
+    const results = await db
+      .select({
+        id: chatStageHistory.id,
+        chatId: chatStageHistory.chatId,
+        participantName: chats.participantName,
+        participantPhone: chats.participantPhone,
+        fromStageId: chatStageHistory.fromStageId,
+        toStageId: chatStageHistory.toStageId,
+        fromStageName: fromStageAlias.name,
+        fromStageColor: fromStageAlias.color,
+        toStageName: toStageAlias.name,
+        toStageColor: toStageAlias.color,
+        triggerType: chatStageHistory.triggerType,
+        triggeredBy: chatStageHistory.triggeredBy,
+        triggeredByName: users.name,
+        reason: chatStageHistory.reason,
+        createdAt: chatStageHistory.createdAt,
+      })
+      .from(chatStageHistory)
+      .innerJoin(chats, eq(chatStageHistory.chatId, chats.chatId))
+      .leftJoin(
+        fromStageAlias,
+        eq(chatStageHistory.fromStageId, fromStageAlias.id),
+      )
+      .leftJoin(toStageAlias, eq(chatStageHistory.toStageId, toStageAlias.id))
+      .leftJoin(users, eq(chatStageHistory.triggeredBy, users.id))
+      .where(whereConditions.length > 0 ? and(...whereConditions) : undefined)
+      .orderBy(desc(chatStageHistory.createdAt))
+      .limit(limit);
+
+    return results;
   }
 
   /**

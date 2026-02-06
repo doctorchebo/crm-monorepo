@@ -2667,9 +2667,55 @@ export const backendApi = {
     getChatStatus: (chatId: string): Promise<ChatWorkflowStatus> =>
       apiClient.get(`/workflow/chat/${chatId}/status`),
 
-    // Get stage history for chat
+    // Get stage history for chat (raw)
     getStageHistory: (chatId: string): Promise<StageHistoryEntry[]> =>
       apiClient.get(`/workflow/chat/${chatId}/history`),
+
+    // Get enriched stage history for chat (with stage names and user info)
+    getEnrichedStageHistory: (
+      chatId: string,
+      limit?: number,
+    ): Promise<EnrichedStageHistoryEntry[]> => {
+      const params = limit ? `?limit=${limit}` : "";
+      return apiClient.get(
+        `/workflow/chat/${chatId}/history/enriched${params}`,
+      );
+    },
+
+    // Get global stage history (for kanban page activity)
+    getGlobalStageHistory: (
+      limit?: number,
+    ): Promise<GlobalStageHistoryEntry[]> => {
+      const params = limit ? `?limit=${limit}` : "";
+      return apiClient.get(`/workflow/history/global${params}`);
+    },
+
+    // Get paginated activity logs with date range filtering
+    getActivityLogs: (params: {
+      page?: number;
+      pageSize?: number;
+      startDate?: string;
+      endDate?: string;
+      activityTypes?: string[];
+      entityType?: string;
+      chatId?: string;
+    }): Promise<PaginatedActivityResponse> => {
+      const searchParams = new URLSearchParams();
+      if (params.page) searchParams.append("page", params.page.toString());
+      if (params.pageSize)
+        searchParams.append("pageSize", params.pageSize.toString());
+      if (params.startDate) searchParams.append("startDate", params.startDate);
+      if (params.endDate) searchParams.append("endDate", params.endDate);
+      if (params.activityTypes && params.activityTypes.length > 0)
+        searchParams.append("activityTypes", params.activityTypes.join(","));
+      if (params.entityType)
+        searchParams.append("entityType", params.entityType);
+      if (params.chatId) searchParams.append("chatId", params.chatId);
+      const queryString = searchParams.toString();
+      return apiClient.get(
+        `/workflow/activity-logs${queryString ? `?${queryString}` : ""}`,
+      );
+    },
 
     // Get workflow summary
     getWorkflowSummary: (senderId?: number): Promise<WorkflowSummary> => {
@@ -2995,6 +3041,111 @@ export interface StageHistoryEntry {
   triggeredBy: number | null;
   reason: string | null;
   createdAt: string;
+}
+
+/**
+ * Enriched stage history entry for the Pipeline Activity tab
+ * Includes stage colors and triggered by user name
+ */
+export interface EnrichedStageHistoryEntry {
+  id: string;
+  chatId: string;
+  fromStageId: string | null;
+  toStageId: string | null;
+  fromStageName: string | null;
+  fromStageColor: string | null;
+  toStageName: string | null;
+  toStageColor: string | null;
+  triggerType: "ai" | "human" | "system" | "rule";
+  triggeredBy: number | null;
+  triggeredByName: string | null;
+  reason: string | null;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+/**
+ * Global stage history entry for the Kanban Activity panel
+ * Includes chat participant info for identification
+ */
+export interface GlobalStageHistoryEntry {
+  id: string;
+  chatId: string;
+  participantName: string | null;
+  participantPhone: string | null;
+  fromStageId: string | null;
+  toStageId: string | null;
+  fromStageName: string | null;
+  fromStageColor: string | null;
+  toStageName: string | null;
+  toStageColor: string | null;
+  triggerType: "ai" | "human" | "system" | "rule";
+  triggeredBy: number | null;
+  triggeredByName: string | null;
+  reason: string | null;
+  createdAt: string;
+}
+
+/**
+ * Activity log types for unified activity tracking
+ */
+export type ActivityType =
+  | "stage_created"
+  | "stage_updated"
+  | "stage_deleted"
+  | "stage_reordered"
+  | "stage_default_changed"
+  | "chat_transitioned"
+  | "handoff_requested"
+  | "handoff_resolved"
+  | "ai_paused"
+  | "ai_resumed";
+
+/**
+ * Unified activity log entry that includes:
+ * - Stage CRUD operations
+ * - Chat stage transitions
+ */
+export interface ActivityLogEntry {
+  id: string;
+  activityType: ActivityType;
+  entityType: string;
+  entityId: string;
+  entityName: string | null;
+  chatId: string | null;
+  // Chat transition fields
+  participantName: string | null;
+  participantPhone: string | null;
+  fromStageId: string | null;
+  fromStageName: string | null;
+  fromStageColor: string | null;
+  toStageId: string | null;
+  toStageName: string | null;
+  toStageColor: string | null;
+  triggerType: string | null;
+  // User info
+  userId: number | null;
+  userName: string | null;
+  // Details
+  description: string | null;
+  reason: string | null;
+  metadata: Record<string, unknown> | null;
+  previousState: Record<string, unknown> | null;
+  newState: Record<string, unknown> | null;
+  // Timestamp
+  createdAt: string;
+}
+
+/**
+ * Paginated activity response
+ */
+export interface PaginatedActivityResponse {
+  items: ActivityLogEntry[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  hasMore: boolean;
 }
 
 export interface WorkflowSummary {

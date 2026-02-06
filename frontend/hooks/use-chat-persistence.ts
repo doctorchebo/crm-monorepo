@@ -17,7 +17,12 @@ const STORAGE_KEY_CHAT = "chats-page:selectedChatId";
 const STORAGE_KEY_TAB = "chats-page:sidebarTab";
 const SAVE_DEBOUNCE_MS = 300;
 
-export type SidebarTab = "profile" | "notes" | "catalog";
+export type SidebarTab =
+  | "profile"
+  | "notes"
+  | "pipeline"
+  | "activity"
+  | "catalog";
 
 interface UseChatPersistenceOptions {
   /** Called when a persisted chat ID is found on mount */

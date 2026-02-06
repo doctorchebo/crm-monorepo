@@ -1547,6 +1547,89 @@ export type ChatStageHistory = typeof chatStageHistory.$inferSelect;
 export type NewChatStageHistory = typeof chatStageHistory.$inferInsert;
 
 /**
+ * Workflow Activity Log Types
+ */
+export const workflowActivityTypes = [
+  'stage_created',
+  'stage_updated',
+  'stage_deleted',
+  'stage_reordered',
+  'stage_default_changed',
+  'chat_transitioned',
+  'handoff_requested',
+  'handoff_resolved',
+  'ai_paused',
+  'ai_resumed',
+] as const;
+
+export type WorkflowActivityType = (typeof workflowActivityTypes)[number];
+
+/**
+ * Workflow Activity Logs table - unified audit log for pipeline/workflow activities
+ * Tracks user actions for history/timeline displays
+ * Designed for efficient pagination and date range filtering
+ */
+export const workflowActivityLogs = pgTable(
+  'workflow_activity_logs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    // Team context for multi-tenant filtering
+    teamId: integer('team_id').references(() => teams.id, {
+      onDelete: 'cascade',
+    }),
+    // Who performed the action
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id),
+    userName: varchar('user_name', { length: 255 }), // Denormalized for performance
+    // What type of activity
+    activityType: varchar('activity_type', { length: 50 })
+      .$type<WorkflowActivityType>()
+      .notNull(),
+    // Entity references (polymorphic - depends on activityType)
+    entityType: varchar('entity_type', { length: 50 }).notNull(), // 'stage', 'chat', 'rule', etc.
+    entityId: varchar('entity_id', { length: 255 }).notNull(),
+    entityName: varchar('entity_name', { length: 255 }), // Denormalized for display
+    // Chat context (if activity is chat-related)
+    chatId: varchar('chat_id').references(() => chats.chatId, {
+      onDelete: 'set null',
+    }),
+    // Description for UI display
+    description: text('description'),
+    // Additional structured data
+    metadata: jsonb('metadata').default({}),
+    // Previous/new state for change tracking
+    previousState: jsonb('previous_state'),
+    newState: jsonb('new_state'),
+    // Timestamps
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    teamIdIndex: index('idx_workflow_activity_logs_team_id').on(table.teamId),
+    userIdIndex: index('idx_workflow_activity_logs_user_id').on(table.userId),
+    activityTypeIndex: index('idx_workflow_activity_logs_activity_type').on(
+      table.activityType,
+    ),
+    entityIndex: index('idx_workflow_activity_logs_entity').on(
+      table.entityType,
+      table.entityId,
+    ),
+    chatIdIndex: index('idx_workflow_activity_logs_chat_id').on(table.chatId),
+    createdAtIndex: index('idx_workflow_activity_logs_created_at').on(
+      table.createdAt,
+    ),
+    // Composite index for efficient team + date range queries
+    teamCreatedAtIndex: index('idx_workflow_activity_logs_team_created_at').on(
+      table.teamId,
+      table.createdAt,
+    ),
+  }),
+);
+
+export type WorkflowActivityLog = typeof workflowActivityLogs.$inferSelect;
+export type NewWorkflowActivityLog = typeof workflowActivityLogs.$inferInsert;
+
+/**
  * LLM Usage Logs table - tracks all LLM API calls for billing and monitoring
  * Provider-agnostic: tracks usage across all providers
  */
@@ -2021,6 +2104,24 @@ export const chatStageHistoryRelations = relations(
     rule: one(workflowRules, {
       fields: [chatStageHistory.ruleId],
       references: [workflowRules.id],
+    }),
+  }),
+);
+
+export const workflowActivityLogsRelations = relations(
+  workflowActivityLogs,
+  ({ one }) => ({
+    team: one(teams, {
+      fields: [workflowActivityLogs.teamId],
+      references: [teams.id],
+    }),
+    user: one(users, {
+      fields: [workflowActivityLogs.userId],
+      references: [users.id],
+    }),
+    chat: one(chats, {
+      fields: [workflowActivityLogs.chatId],
+      references: [chats.chatId],
     }),
   }),
 );
