@@ -519,7 +519,7 @@ export default function KanbanPage() {
   const [createStageModalOpen, setCreateStageModalOpen] = useState(false);
   const [createStagePosition, setCreateStagePosition] = useState(0);
   const [dragOverStageId, setDragOverStageId] = useState<string | null>(null);
-  const [showActivity, setShowActivity] = useState(true);
+  const [showActivity, setShowActivity] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -855,18 +855,84 @@ export default function KanbanPage() {
 
   if (loading) {
     return (
-      <div className="flex flex-col gap-4 p-4 lg:p-8 h-full overflow-auto">
-        <div>
-          <Skeleton className="h-8 w-64 mb-2" />
-          <Skeleton className="h-4 w-96" />
-        </div>
-        <div className="flex gap-4 overflow-x-auto pb-4">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="flex-shrink-0 w-80">
-              <Skeleton className="h-6 w-32 mb-3" />
-              <Skeleton className="h-96 w-full" />
+      <div className="flex h-full overflow-hidden">
+        <div className="flex-1 flex flex-col gap-4 p-4 lg:p-8 min-w-0 overflow-hidden">
+          {/* Header Section Skeleton */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shrink-0">
+            <div className="min-w-0">
+              <Skeleton className="h-7 lg:h-8 w-40 mb-2" />
+              <Skeleton className="h-4 w-64" />
             </div>
-          ))}
+            <div className="flex items-center gap-2 shrink-0">
+              <Skeleton className="h-8 w-24" />
+              <Skeleton className="h-8 w-28" />
+              <Skeleton className="h-8 w-24" />
+            </div>
+          </div>
+
+          {/* Stats Cards Skeleton */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 shrink-0">
+            {[1, 2, 3, 4].map((i) => (
+              <Card key={i}>
+                <CardHeader className="pb-2">
+                  <Skeleton className="h-4 w-24" />
+                </CardHeader>
+                <CardContent>
+                  <Skeleton className="h-8 w-12" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {/* Kanban Columns Skeleton */}
+          <div className="flex-1 min-h-0 relative">
+            <div className="absolute inset-0 overflow-x-auto overflow-y-hidden">
+              <div className="flex gap-2 pb-4 items-stretch h-full">
+                {[1, 2, 3, 4, 5].map((i) => {
+                  // Deterministic card count pattern to avoid hydration mismatch
+                  const cardCounts = [2, 3, 1, 2, 1];
+                  return (
+                    <div
+                      key={i}
+                      className="flex-shrink-0 w-72 lg:w-80 rounded-lg border bg-muted/30 p-3 flex flex-col"
+                    >
+                      {/* Column Header */}
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <Skeleton className="h-3 w-3 rounded-full" />
+                          <Skeleton className="h-5 w-24" />
+                          <Skeleton className="h-5 w-6 rounded-full" />
+                        </div>
+                      </div>
+                      {/* Column Cards */}
+                      <div className="flex-1 space-y-2">
+                        {Array.from({ length: cardCounts[i - 1] }).map(
+                          (_, j) => (
+                            <div
+                              key={j}
+                              className="p-3 rounded-lg border bg-card"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <Skeleton className="h-4 w-32 mb-1" />
+                                  <Skeleton className="h-3 w-24" />
+                                </div>
+                                <Skeleton className="h-6 w-6 rounded-full shrink-0" />
+                              </div>
+                              <div className="mt-2 flex items-center gap-2">
+                                <Skeleton className="h-5 w-16 rounded-full" />
+                                <Skeleton className="h-3 w-12" />
+                              </div>
+                            </div>
+                          ),
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     );
