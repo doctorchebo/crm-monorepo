@@ -7,6 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { and, desc, eq, inArray, isNotNull } from 'drizzle-orm';
+import { TemplateComponentsDto } from '../dto';
 import {
   MessagingProviderFactory,
   TemplateApprovalStatus,
@@ -17,6 +18,7 @@ import {
   TemplateStatusUpdateEvent,
   templateWebhookGatewayInstance,
 } from '../template.webhook.gateway';
+import { ComponentsValidatorService } from '../validators';
 import {
   TemplateValidatorService,
   ValidationError,
@@ -91,6 +93,7 @@ export class TemplateApprovalService {
 
   constructor(
     private validatorService: TemplateValidatorService,
+    private componentsValidator: ComponentsValidatorService,
     private providerFactory: MessagingProviderFactory,
   ) {}
 
@@ -237,11 +240,51 @@ export class TemplateApprovalService {
       `Submitting template '${template.name}' (locale: ${locale}) to ${providerName} with category: ${category}`,
     );
 
-    const result = await provider.submitTemplate(
-      template.name,
-      localeData,
-      category,
-    );
+    // Determine if this is an enhanced template (has components) or legacy
+    const components = localeData.components as TemplateComponentsDto | null;
+    const isEnhancedTemplate = !!components;
+
+    let result;
+
+    if (isEnhancedTemplate) {
+      // Enhanced template submission with full components support
+      this.logger.log(
+        `Using enhanced template submission for '${template.name}'`,
+      );
+
+      // Validate components before submission
+      const componentValidation = this.componentsValidator.validate(components);
+      if (!componentValidation.isValid) {
+        return {
+          success: false,
+          status: TemplateApprovalStatus.DRAFT,
+          message: 'Component validation failed',
+          validationErrors: componentValidation.errors.map((err) => ({
+            field: err.field,
+            message: err.message,
+            code: err.code,
+            severity: err.severity,
+          })),
+        };
+      }
+
+      result = await provider.submitEnhancedTemplate({
+        templateName: template.name,
+        locale: localeData.locale,
+        category,
+        components,
+      });
+    } else {
+      // Legacy template submission (backward compatible)
+      this.logger.log(
+        `Using legacy template submission for '${template.name}'`,
+      );
+      result = await provider.submitTemplate(
+        template.name,
+        localeData,
+        category,
+      );
+    }
 
     // Update template locale with submission result
     await db

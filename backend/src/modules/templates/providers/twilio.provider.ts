@@ -9,6 +9,7 @@ import { Twilio } from 'twilio';
 import { TemplateParserService } from '../services/template-parser.service';
 import {
   ConvertedTemplate,
+  EnhancedTemplateSubmissionRequest,
   IMessagingProvider,
   TemplateApprovalStatus,
   TemplateCategory,
@@ -150,6 +151,40 @@ export class TwilioProviderAdapter implements IMessagingProvider {
         error: error.message,
       };
     }
+  }
+
+  /**
+   * Submit enhanced template to Twilio for approval
+   *
+   * Note: Twilio's Content API has different capabilities than Meta's.
+   * This is a stub implementation - would need proper mapping to Twilio's API.
+   */
+  async submitEnhancedTemplate(
+    request: EnhancedTemplateSubmissionRequest,
+  ): Promise<TemplateSubmissionResult> {
+    this.logger.warn(
+      `Enhanced templates not fully supported by Twilio provider. Using legacy submission for template '${request.templateName}'`,
+    );
+
+    // For now, fall back to a basic submission
+    // Twilio's Content API works differently and would need its own transformer
+    const mockLocale = {
+      id: 'enhanced-temp',
+      templateId: 'enhanced-temp',
+      locale: request.locale,
+      body: request.components.body.text,
+      header:
+        request.components.header?.format === 'TEXT'
+          ? request.components.header.text
+          : null,
+      footer: request.components.footer?.text || null,
+    } as any;
+
+    return this.submitTemplate(
+      request.templateName,
+      mockLocale,
+      request.category,
+    );
   }
 
   /**

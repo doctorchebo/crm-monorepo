@@ -28,6 +28,7 @@ import {
   UpdateTemplateDto,
 } from './dto';
 import { MessagingProviderFactory, TemplateApprovalStatus } from './providers';
+import { MediaUploadService } from './services/media-upload.service';
 import { TemplateApprovalService } from './services/template-approval.service';
 import {
   TemplateVersionService,
@@ -43,7 +44,7 @@ export class TemplatesController {
     private templatesService: TemplatesService,
     private variableResolutionService: VariableResolutionService,
     private approvalService: TemplateApprovalService,
-
+    private mediaUploadService: MediaUploadService,
     private versionService: TemplateVersionService,
     private providerFactory: MessagingProviderFactory,
     private teamService: TeamService,
@@ -638,5 +639,116 @@ export class TemplatesController {
         chatId: body.chatId,
       },
     );
+  }
+
+  // ==================== Media Upload Endpoints ====================
+
+  /**
+   * POST /templates/:id/locales/:localeId/media/upload
+   * Upload media file for template header (image, video, or document)
+   *
+   * The file should be sent as base64 in the request body
+   * Returns the asset handle that can be used in template components
+   */
+  @Post(':id/locales/:localeId/media/upload')
+  async uploadTemplateMedia(
+    @Param('id') templateId: string,
+    @Param('localeId') localeId: string,
+    @Body()
+    body: {
+      componentType: 'HEADER' | 'CAROUSEL_CARD';
+      filename: string;
+      mimeType: string;
+      base64Data: string;
+      cardIndex?: number; // For carousel cards
+    },
+  ) {
+    // Verify template and locale exist
+    const template = await this.templatesService.getTemplate(templateId);
+    const locale = template.locales?.find((l) => l.id === localeId);
+
+    if (!locale) {
+      throw new BadRequestException(`Locale ${localeId} not found`);
+    }
+
+    // Decode base64 data
+    const buffer = Buffer.from(body.base64Data, 'base64');
+
+    // Upload to Meta using the MediaUploadService
+    const result = await this.mediaUploadService.uploadMedia(
+      localeId,
+      body.componentType,
+      {
+        buffer,
+        filename: body.filename,
+        mimeType: body.mimeType,
+        fileSize: buffer.length,
+      },
+    );
+
+    if (!result.success) {
+      throw new BadRequestException(result.error || 'Failed to upload media');
+    }
+
+    return {
+      success: true,
+      assetHandle: result.assetHandle,
+      mediaId: result.mediaId,
+      componentType: body.componentType,
+      filename: body.filename,
+      mimeType: body.mimeType,
+      fileSize: buffer.length,
+    };
+  }
+
+  /**
+   * GET /templates/:id/locales/:localeId/media
+   * Get all media files associated with a template locale
+   */
+  @Get(':id/locales/:localeId/media')
+  async getTemplateMedia(
+    @Param('id') templateId: string,
+    @Param('localeId') localeId: string,
+  ) {
+    // Verify template and locale exist
+    const template = await this.templatesService.getTemplate(templateId);
+    const locale = template.locales?.find((l) => l.id === localeId);
+
+    if (!locale) {
+      throw new BadRequestException(`Locale ${localeId} not found`);
+    }
+
+    const media = await this.mediaUploadService.getMediaForLocale(localeId);
+
+    return {
+      media,
+      count: media.length,
+    };
+  }
+
+  /**
+   * DELETE /templates/:id/locales/:localeId/media/:mediaId
+   * Delete a media file from a template locale
+   */
+  @Delete(':id/locales/:localeId/media/:mediaId')
+  async deleteTemplateMedia(
+    @Param('id') templateId: string,
+    @Param('localeId') localeId: string,
+    @Param('mediaId') mediaId: string,
+  ) {
+    // Verify template and locale exist
+    const template = await this.templatesService.getTemplate(templateId);
+    const locale = template.locales?.find((l) => l.id === localeId);
+
+    if (!locale) {
+      throw new BadRequestException(`Locale ${localeId} not found`);
+    }
+
+    await this.mediaUploadService.deleteMedia(mediaId);
+
+    return {
+      success: true,
+      message: 'Media deleted successfully',
+    };
   }
 }

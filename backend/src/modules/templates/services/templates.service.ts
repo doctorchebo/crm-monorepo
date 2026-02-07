@@ -25,6 +25,7 @@ import {
 import {
   CreateTemplateDto,
   CreateTemplateLocaleDto,
+  TemplateComponentsDto,
   UpdateTemplateDto,
 } from '../dto';
 import { MetaCloudApiProvider } from '../providers/meta-cloud-api.provider';
@@ -53,6 +54,10 @@ export interface PaginatedTemplatesResponse {
 /**
  * Templates service
  * Handles CRUD operations and business logic for template management
+ *
+ * Supports both legacy text-only templates and enhanced templates with:
+ * - Media headers, buttons, carousels
+ * - Full Meta Cloud API component support
  */
 @Injectable()
 export class TemplatesService {
@@ -399,16 +404,39 @@ export class TemplatesService {
 
   /**
    * Add locale content to template
-   * IMPORTANT: This method now auto-creates version 1 when adding a new locale
+   *
+   * Supports two modes:
+   * 1. Legacy mode: Using header/body/footer strings (backward compatible)
+   * 2. Enhanced mode: Using components object (new full-featured mode)
+   *
+   * IMPORTANT: This method auto-creates version 1 when adding a new locale
    */
   async addLocale(templateId: string, dto: CreateTemplateLocaleDto) {
     await this.getTemplate(templateId); // Verify template exists
 
-    // Validate template content
+    // Determine if using enhanced mode (components) or legacy mode
+    const isEnhancedMode = !!dto.components;
+
+    // Extract body text for validation and variable extraction
+    const bodyText = isEnhancedMode
+      ? dto.components!.body.text
+      : (dto.body ?? '');
+
+    const headerText = isEnhancedMode
+      ? dto.components!.header?.format === 'TEXT'
+        ? dto.components!.header.text
+        : undefined
+      : dto.header;
+
+    const footerText = isEnhancedMode
+      ? dto.components!.footer?.text
+      : dto.footer;
+
+    // Validate template content using legacy validator for basic validation
     const validationErrors = this.validatorService.validate(
-      dto.body,
-      dto.header,
-      dto.footer,
+      bodyText,
+      headerText,
+      footerText,
     );
 
     if (this.validatorService.hasCriticalErrors(validationErrors)) {
@@ -420,6 +448,19 @@ export class TemplatesService {
 
     const localeId = crypto.randomUUID();
 
+    // Determine header format for enhanced mode
+    const headerFormat = isEnhancedMode
+      ? dto.components!.header?.format
+      : undefined;
+
+    // Build the locale insert values
+    const localeValues = this.buildLocaleValues(
+      localeId,
+      templateId,
+      dto,
+      isEnhancedMode,
+    );
+
     // Check if locale already exists
     const existing = await db.query.templateLocales.findFirst({
       where: and(
@@ -429,97 +470,19 @@ export class TemplatesService {
     });
 
     if (existing) {
-      // For existing locales, we need to check if there's an editable version
-      // If there's a draft, update the draft version content
-      // If approved/pending, this should fail (user must create new version)
-      const versions = await db.query.templateVersions.findMany({
-        where: and(
-          eq(templateVersions.templateId, templateId),
-          eq(templateVersions.localeId, existing.id),
-        ),
-        orderBy: (templateVersions, { desc }) => [
-          desc(templateVersions.versionNumber),
-        ],
-      });
-
-      if (versions.length > 0) {
-        const latestVersion = versions[0];
-        const status = latestVersion.status as VersionStatus;
-
-        // Only allow editing draft or rejected versions
-        if (
-          status === VersionStatus.DRAFT ||
-          status === VersionStatus.REJECTED
-        ) {
-          // Update the version content
-          await db
-            .update(templateVersions)
-            .set({
-              content: {
-                header: dto.header,
-                body: dto.body,
-                footer: dto.footer,
-                exampleVars: dto.exampleVars || {},
-                category: dto.category || 'utility',
-              },
-              updatedAt: new Date(),
-            })
-            .where(eq(templateVersions.id, latestVersion.id));
-
-          // Also update locale for legacy compatibility / caching
-          await db
-            .update(templateLocales)
-            .set({
-              type: dto.type || 'text',
-              header: dto.header,
-              body: dto.body,
-              footer: dto.footer,
-              exampleVars: dto.exampleVars || {},
-              updatedAt: new Date(),
-            })
-            .where(eq(templateLocales.id, existing.id));
-
-          return this.getLocale(existing.id);
-        } else {
-          // Version is immutable - cannot edit directly
-          throw new BadRequestException({
-            message: `Cannot edit locale directly. The current version (v${latestVersion.versionNumber}) has status "${status}". Create a new draft version to make changes.`,
-            code: 'VERSION_IMMUTABLE',
-            currentVersion: latestVersion.versionNumber,
-            currentStatus: status,
-          });
-        }
-      }
-
-      // No versions exist for this locale - this shouldn't happen but handle gracefully
-      // Create v1
-      await this.createInitialVersion(templateId, existing.id, {
-        header: dto.header,
-        body: dto.body,
-        footer: dto.footer,
-        exampleVars: dto.exampleVars || {},
-        category: dto.category || 'utility',
-      });
-
-      return this.getLocale(existing.id);
+      return this.updateExistingLocale(
+        templateId,
+        existing.id,
+        dto,
+        isEnhancedMode,
+      );
     }
 
     // Create new locale with initial version v1
-    await db.insert(templateLocales).values({
-      id: localeId,
-      templateId,
-      locale: dto.locale,
-      type: dto.type || 'text',
-      header: dto.header,
-      body: dto.body,
-      footer: dto.footer,
-      exampleVars: dto.exampleVars || {},
-      activeVersion: 1,
-      approvalStatus: 'draft',
-    });
+    await db.insert(templateLocales).values(localeValues as any);
 
     // Extract and create variables
-    const variables = this.parserService.extractVariables(dto.body);
+    const variables = this.parserService.extractVariables(bodyText);
     for (const varName of variables) {
       await db.insert(templateVariables).values({
         id: crypto.randomUUID(),
@@ -532,11 +495,193 @@ export class TemplatesService {
 
     // Create initial version v1 for this locale
     await this.createInitialVersion(templateId, localeId, {
+      header: headerText,
+      body: bodyText,
+      footer: footerText,
+      exampleVars: dto.exampleVars || {},
+      category: dto.category || 'utility',
+      components: dto.components,
+    });
+
+    return this.getLocale(localeId);
+  }
+
+  /**
+   * Build locale values for insert/update
+   */
+  private buildLocaleValues(
+    localeId: string,
+    templateId: string,
+    dto: CreateTemplateLocaleDto,
+    isEnhancedMode: boolean,
+  ) {
+    if (isEnhancedMode && dto.components) {
+      const bodyText = dto.components.body.text;
+      const headerText =
+        dto.components.header?.format === 'TEXT'
+          ? dto.components.header.text
+          : undefined;
+      const footerText = dto.components.footer?.text;
+
+      return {
+        id: localeId,
+        templateId,
+        locale: dto.locale,
+        type: dto.components.header?.format?.toLowerCase() || 'text',
+        header: headerText,
+        body: bodyText,
+        footer: footerText,
+        exampleVars: dto.exampleVars || {},
+        activeVersion: 1,
+        approvalStatus: 'draft',
+        category: dto.category || 'utility',
+        // Enhanced fields
+        components: dto.components,
+        headerFormat: dto.components.header?.format,
+        buttons: dto.components.buttons || [],
+        limitedTimeOffer: dto.components.limitedTimeOffer,
+        authenticationConfig: dto.components.authentication,
+        carouselCards: dto.components.carousel,
+        parameterFormat: 'named',
+      };
+    }
+
+    // Legacy mode
+    return {
+      id: localeId,
+      templateId,
+      locale: dto.locale,
+      type: dto.type || 'text',
       header: dto.header,
       body: dto.body,
       footer: dto.footer,
       exampleVars: dto.exampleVars || {},
+      activeVersion: 1,
+      approvalStatus: 'draft',
       category: dto.category || 'utility',
+    };
+  }
+
+  /**
+   * Update an existing locale
+   */
+  private async updateExistingLocale(
+    templateId: string,
+    localeId: string,
+    dto: CreateTemplateLocaleDto,
+    isEnhancedMode: boolean,
+  ) {
+    // Check if there's an editable version
+    const versions = await db.query.templateVersions.findMany({
+      where: and(
+        eq(templateVersions.templateId, templateId),
+        eq(templateVersions.localeId, localeId),
+      ),
+      orderBy: (templateVersions, { desc }) => [
+        desc(templateVersions.versionNumber),
+      ],
+    });
+
+    if (versions.length > 0) {
+      const latestVersion = versions[0];
+      const status = latestVersion.status as VersionStatus;
+
+      // Only allow editing draft or rejected versions
+      if (status === VersionStatus.DRAFT || status === VersionStatus.REJECTED) {
+        // Extract content based on mode
+        const bodyText = isEnhancedMode
+          ? dto.components!.body.text
+          : (dto.body ?? '');
+        const headerText = isEnhancedMode
+          ? dto.components!.header?.format === 'TEXT'
+            ? dto.components!.header.text
+            : undefined
+          : dto.header;
+        const footerText = isEnhancedMode
+          ? dto.components!.footer?.text
+          : dto.footer;
+
+        // Update the version content
+        await db
+          .update(templateVersions)
+          .set({
+            content: {
+              header: headerText,
+              body: bodyText,
+              footer: footerText,
+              exampleVars: dto.exampleVars || {},
+              category: dto.category || 'utility',
+              components: dto.components,
+            },
+            updatedAt: new Date(),
+          })
+          .where(eq(templateVersions.id, latestVersion.id));
+
+        // Build update values based on mode
+        const updateValues = isEnhancedMode
+          ? {
+              type: dto.components!.header?.format?.toLowerCase() || 'text',
+              header: headerText,
+              body: bodyText,
+              footer: footerText,
+              exampleVars: dto.exampleVars || {},
+              components: dto.components,
+              headerFormat: dto.components!.header?.format,
+              buttons: dto.components!.buttons || [],
+              limitedTimeOffer: dto.components!.limitedTimeOffer,
+              authenticationConfig: dto.components!.authentication,
+              carouselCards: dto.components!.carousel,
+              parameterFormat: 'named',
+              updatedAt: new Date(),
+            }
+          : {
+              type: dto.type || 'text',
+              header: dto.header,
+              body: dto.body,
+              footer: dto.footer,
+              exampleVars: dto.exampleVars || {},
+              updatedAt: new Date(),
+            };
+
+        await db
+          .update(templateLocales)
+          .set(updateValues as any)
+          .where(eq(templateLocales.id, localeId));
+
+        return this.getLocale(localeId);
+      } else {
+        // Version is immutable - cannot edit directly
+        throw new BadRequestException({
+          message: `Cannot edit locale directly. The current version (v${latestVersion.versionNumber}) has status "${status}". Create a new draft version to make changes.`,
+          code: 'VERSION_IMMUTABLE',
+          currentVersion: latestVersion.versionNumber,
+          currentStatus: status,
+        });
+      }
+    }
+
+    // No versions exist for this locale - this shouldn't happen but handle gracefully
+    // Extract content based on mode
+    const bodyText = isEnhancedMode
+      ? dto.components!.body.text
+      : (dto.body ?? '');
+    const headerText = isEnhancedMode
+      ? dto.components!.header?.format === 'TEXT'
+        ? dto.components!.header.text
+        : undefined
+      : dto.header;
+    const footerText = isEnhancedMode
+      ? dto.components!.footer?.text
+      : dto.footer;
+
+    // Create v1
+    await this.createInitialVersion(templateId, localeId, {
+      header: headerText,
+      body: bodyText,
+      footer: footerText,
+      exampleVars: dto.exampleVars || {},
+      category: dto.category || 'utility',
+      components: dto.components,
     });
 
     return this.getLocale(localeId);
@@ -545,6 +690,8 @@ export class TemplatesService {
   /**
    * Create initial version (v1) for a locale
    * This is called automatically when adding a new locale
+   *
+   * Supports both legacy content and enhanced components
    */
   private async createInitialVersion(
     templateId: string,
@@ -555,6 +702,7 @@ export class TemplatesService {
       footer?: string;
       exampleVars?: Record<string, any>;
       category?: string;
+      components?: TemplateComponentsDto;
     },
   ) {
     const versionId = crypto.randomUUID();
@@ -570,6 +718,8 @@ export class TemplatesService {
         footer: content.footer || null,
         exampleVars: content.exampleVars || {},
         category: content.category || 'utility',
+        // Include components if provided (enhanced mode)
+        ...(content.components && { components: content.components }),
       },
       status: VersionStatus.DRAFT,
       providerName: 'meta',

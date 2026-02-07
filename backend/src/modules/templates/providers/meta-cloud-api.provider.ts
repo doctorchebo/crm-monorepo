@@ -1,9 +1,12 @@
 import { TemplateLocale } from '@database/schema';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { ComponentTransformerService } from '../services/component-transformer.service';
 import { TemplateParserService } from '../services/template-parser.service';
+import { TemplateCategory as InternalCategory } from '../types';
 import {
   ConvertedTemplate,
+  EnhancedTemplateSubmissionRequest,
   IMessagingProvider,
   TemplateApprovalStatus,
   TemplateCategory,
@@ -74,6 +77,14 @@ const META_QUALITY_MAP: Record<string, TemplateQualityRating> = {
 /**
  * Meta Cloud API Provider
  * Implements WhatsApp Business Cloud API for template management and messaging
+ *
+ * Supports both legacy text-only templates and enhanced templates with:
+ * - Media headers (image, video, document)
+ * - Location headers
+ * - Multiple button types (URL, phone, quick reply, copy code, OTP, flow)
+ * - Carousel cards
+ * - Limited time offers
+ * - Authentication templates
  */
 @Injectable()
 export class MetaCloudApiProvider implements IMessagingProvider {
@@ -85,6 +96,7 @@ export class MetaCloudApiProvider implements IMessagingProvider {
   constructor(
     private configService: ConfigService,
     private parserService: TemplateParserService,
+    private componentTransformer: ComponentTransformerService,
   ) {}
 
   /**
@@ -313,6 +325,122 @@ export class MetaCloudApiProvider implements IMessagingProvider {
         error: error.message,
       };
     }
+  }
+
+  /**
+   * Submit an enhanced template with full component support
+   * Uses ComponentTransformerService to convert to Meta API format
+   */
+  async submitEnhancedTemplate(
+    request: EnhancedTemplateSubmissionRequest,
+  ): Promise<TemplateSubmissionResult> {
+    try {
+      // Map provider category to internal category for transformer
+      const internalCategory = request.category as unknown as InternalCategory;
+
+      // Transform components to Meta API format
+      const transformed = this.componentTransformer.transform(
+        request.templateName,
+        request.locale,
+        request.components,
+        internalCategory,
+      );
+
+      const wabaId = this.getWabaId();
+      const accessToken = this.getAccessToken();
+
+      const url = `${this.baseUrl}/${this.apiVersion}/${wabaId}/message_templates`;
+
+      this.logger.log(
+        `Submitting enhanced template '${request.templateName}' to Meta Cloud API`,
+      );
+      this.logger.debug(
+        `Payload: ${JSON.stringify(transformed.providerPayload)}`,
+      );
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(transformed.providerPayload),
+      });
+
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        this.logger.error(`Meta API error: ${JSON.stringify(responseData)}`);
+
+        // Parse Meta error for better user feedback
+        const errorMessage = this.parseMetaError(responseData);
+
+        return {
+          success: false,
+          status: TemplateApprovalStatus.DRAFT,
+          error: errorMessage,
+          providerResponse: responseData,
+        };
+      }
+
+      this.logger.log(
+        `Enhanced template submitted successfully. ID: ${responseData.id}`,
+      );
+
+      return {
+        success: true,
+        providerId: responseData.id,
+        status: TemplateApprovalStatus.PENDING,
+        message: 'Template submitted for review',
+        providerResponse: responseData,
+      };
+    } catch (error) {
+      this.logger.error(`Failed to submit enhanced template: ${error.message}`);
+      return {
+        success: false,
+        status: TemplateApprovalStatus.DRAFT,
+        error: error.message,
+      };
+    }
+  }
+
+  /**
+   * Parse Meta API error response into user-friendly message
+   */
+  private parseMetaError(responseData: any): string {
+    const error = responseData.error;
+    if (!error) {
+      return 'Failed to submit template';
+    }
+
+    // Common Meta error codes
+    const errorCode = error.code;
+    const errorSubcode = error.error_subcode;
+    const errorMessage = error.message;
+
+    // Provide specific guidance for common errors
+    if (errorCode === 100) {
+      if (errorMessage?.includes('name')) {
+        return 'Template name is invalid. Use only lowercase letters, numbers, and underscores. Must start with a letter.';
+      }
+      if (errorMessage?.includes('category')) {
+        return 'Invalid template category. Must be authentication, marketing, or utility.';
+      }
+    }
+
+    if (errorCode === 190) {
+      return 'Authentication failed. Please check your Meta API access token.';
+    }
+
+    if (errorCode === 368) {
+      return 'Template with this name already exists. Use a different name or update the existing template.';
+    }
+
+    if (errorSubcode === 2388049) {
+      return 'Template content violates WhatsApp commerce policy. Review the template content guidelines.';
+    }
+
+    return errorMessage || 'Failed to submit template';
   }
 
   /**

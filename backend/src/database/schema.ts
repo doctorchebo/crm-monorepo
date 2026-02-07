@@ -1,5 +1,6 @@
 import { relations } from 'drizzle-orm';
 import {
+  bigint,
   boolean,
   customType,
   index,
@@ -673,6 +674,16 @@ export const templateLocales = pgTable(
     submittedAt: timestamp('submitted_at'), // When submitted for approval
     reviewedAt: timestamp('reviewed_at'), // When Meta reviewed
     metaResponse: jsonb('meta_response'), // Full Meta API response
+    // Enhanced template components (Phase 1)
+    components: jsonb('components'), // Full component structure: { header, body, footer, buttons, carousel, etc. }
+    headerFormat: varchar('header_format', { length: 20 }), // 'TEXT', 'IMAGE', 'VIDEO', 'DOCUMENT', 'LOCATION'
+    buttons: jsonb('buttons').default([]), // Buttons array (denormalized for query performance)
+    limitedTimeOffer: jsonb('limited_time_offer'), // LTO config for marketing templates
+    authenticationConfig: jsonb('authentication_config'), // Auth config for authentication templates
+    carouselCards: jsonb('carousel_cards'), // Carousel cards for marketing templates
+    parameterFormat: varchar('parameter_format', { length: 20 }).default(
+      'named',
+    ), // 'named' or 'positional'
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
   },
@@ -681,6 +692,7 @@ export const templateLocales = pgTable(
     templateLocaleUnique: unique().on(table.templateId, table.locale),
     approvalStatusIndex: index().on(table.approvalStatus),
     metaTemplateIdIndex: index().on(table.metaTemplateId),
+    headerFormatIndex: index().on(table.headerFormat),
   }),
 );
 
@@ -816,6 +828,37 @@ export const templatePlatforms = pgTable(
 export type TemplatePlatform = typeof templatePlatforms.$inferSelect;
 export type NewTemplatePlatform = typeof templatePlatforms.$inferInsert;
 
+// Template Media - tracking uploaded media assets for template headers and carousel cards
+export const templateMedia = pgTable(
+  'template_media',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    localeId: uuid('locale_id')
+      .notNull()
+      .references(() => templateLocales.id, { onDelete: 'cascade' }),
+    componentType: varchar('component_type', { length: 20 }).notNull(), // 'header', 'carousel_0', 'carousel_1', etc.
+    mediaType: varchar('media_type', { length: 20 }).notNull(), // 'image', 'video', 'document'
+    originalFilename: varchar('original_filename', { length: 255 }),
+    fileSizeBytes: bigint('file_size_bytes', { mode: 'number' }),
+    mimeType: varchar('mime_type', { length: 100 }),
+    assetHandle: varchar('asset_handle', { length: 500 }), // Meta's asset handle from Resumable Upload API
+    assetHandleExpiresAt: timestamp('asset_handle_expires_at'), // Asset handles expire after 30 days
+    cdnUrl: text('cdn_url'), // Our CDN URL for the file
+    uploadStatus: varchar('upload_status', { length: 20 }).default('pending'), // 'pending', 'uploading', 'completed', 'failed'
+    errorMessage: text('error_message'),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (table) => ({
+    localeIdIndex: index().on(table.localeId),
+    assetHandleIndex: index().on(table.assetHandle),
+    uploadStatusIndex: index().on(table.uploadStatus),
+  }),
+);
+
+export type TemplateMedia = typeof templateMedia.$inferSelect;
+export type NewTemplateMedia = typeof templateMedia.$inferInsert;
+
 // Relations for Drizzle ORM
 export const templatesRelations = relations(templates, ({ many }) => ({
   locales: many(templateLocales),
@@ -832,6 +875,7 @@ export const templateLocalesRelations = relations(
     }),
     variables: many(templateVariables),
     versions: many(templateVersions),
+    media: many(templateMedia),
   }),
 );
 
@@ -876,6 +920,13 @@ export const templatePlatformsRelations = relations(
     }),
   }),
 );
+
+export const templateMediaRelations = relations(templateMedia, ({ one }) => ({
+  locale: one(templateLocales, {
+    fields: [templateMedia.localeId],
+    references: [templateLocales.id],
+  }),
+}));
 
 // Notes relations
 export const notesRelations = relations(notes, ({ one }) => ({

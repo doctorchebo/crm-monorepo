@@ -1,29 +1,36 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { TeamModule } from '../team/team.module';
 import {
   MessagingProviderFactory,
   MetaCloudApiProvider,
   TwilioProviderAdapter,
 } from './providers';
 import {
+  ComponentTransformerService,
+  MediaUploadService,
   TemplateApprovalService,
   TemplateParserService,
   TemplateRenderService,
   TemplatesService,
   TemplateValidatorService,
+  TemplateVersionService,
   VariableResolutionService,
 } from './services';
-import { TemplateVersionService } from './services/template-version.service';
 import { TemplateWebhookController } from './template.webhook.controller';
 import { TemplateWebhookGateway } from './template.webhook.gateway';
 import { TemplatesController } from './templates.controller';
-import { TeamModule } from '../team/team.module';
+import {
+  ButtonValidatorService,
+  ComponentsValidatorService,
+  HeaderValidatorService,
+} from './validators';
 
 @Module({
   imports: [ConfigModule, TeamModule],
   controllers: [TemplatesController, TemplateWebhookController],
   providers: [
-    // Services
+    // Core Services
     TemplatesService,
     TemplateParserService,
     TemplateValidatorService,
@@ -31,10 +38,21 @@ import { TeamModule } from '../team/team.module';
     VariableResolutionService,
     TemplateApprovalService,
     TemplateVersionService,
+
+    // Enhanced Template Services
+    ComponentTransformerService,
+    MediaUploadService,
+
+    // Component Validators
+    HeaderValidatorService,
+    ButtonValidatorService,
+    ComponentsValidatorService,
+
     // Providers (for different messaging platforms)
     MetaCloudApiProvider,
     TwilioProviderAdapter,
     MessagingProviderFactory,
+
     // WebSocket Gateway
     TemplateWebhookGateway,
   ],
@@ -45,6 +63,10 @@ import { TeamModule } from '../team/team.module';
     TemplateVersionService,
     MessagingProviderFactory,
     TemplateWebhookGateway,
+    // Enhanced Template Services
+    ComponentTransformerService,
+    MediaUploadService,
+    ComponentsValidatorService,
   ],
 })
 export class TemplatesModule {}
