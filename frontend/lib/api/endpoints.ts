@@ -796,13 +796,30 @@ export type TemplateVersionStatus =
 
 /**
  * Content stored in a template version
+ *
+ * Supports two modes:
+ * 1. Legacy mode: Using header/body/footer strings (backward compatible)
+ * 2. Enhanced mode: Using components object (new full-featured mode)
+ *
+ * When components is present, it takes precedence but legacy fields are
+ * maintained for backward compatibility.
  */
 export interface VersionContent {
+  /** Legacy text header (for backward compatibility) */
   header?: string | null;
+  /** Body text (required) */
   body: string;
+  /** Legacy footer text (for backward compatibility) */
   footer?: string | null;
+  /** Example variable values */
   exampleVars?: Record<string, string>;
+  /** Template category */
   category?: string;
+  /**
+   * Enhanced template components (full Meta API support)
+   * When present, this is the source of truth for template structure
+   */
+  components?: Record<string, unknown>;
 }
 
 /**
@@ -2216,6 +2233,85 @@ export const backendApi = {
       apiClient.post(
         `/templates/${templateId}/versions/${versionId}/set-active`,
         {},
+      ),
+
+    // ==================== Media Upload Endpoints ====================
+
+    /**
+     * Upload media file directly to Meta and S3 without requiring an existing template/locale
+     * Used when creating new templates - the asset handle can be included in template data when saving
+     * Returns the asset handle for Meta API and a URL for display
+     */
+    uploadMediaTemporary: (data: {
+      filename: string;
+      mimeType: string;
+      base64Data: string;
+    }): Promise<{
+      success: boolean;
+      assetHandle?: string;
+      /** Public URL for displaying the media */
+      url?: string;
+      filename: string;
+      mimeType: string;
+      fileSize: number;
+      error?: string;
+    }> => apiClient.post(`/templates/media/upload-temporary`, data),
+
+    /**
+     * Upload media file for template header or carousel card
+     * Returns the asset handle for Meta API and a URL for display
+     */
+    uploadMedia: (
+      templateId: string,
+      localeId: string,
+      data: {
+        componentType: "HEADER" | "CAROUSEL_CARD";
+        filename: string;
+        mimeType: string;
+        base64Data: string;
+        cardIndex?: number;
+      },
+    ): Promise<{
+      success: boolean;
+      assetHandle?: string;
+      mediaId?: string;
+      url?: string;
+      error?: string;
+    }> =>
+      apiClient.post(
+        `/templates/${templateId}/locales/${localeId}/media/upload`,
+        data,
+      ),
+
+    /**
+     * Get all media files for a template locale
+     */
+    getMedia: (
+      templateId: string,
+      localeId: string,
+    ): Promise<{
+      media: Array<{
+        id: string;
+        componentType: string;
+        mediaType: string;
+        originalFilename: string;
+        assetHandle?: string;
+        uploadStatus: string;
+        createdAt: string;
+      }>;
+      count: number;
+    }> => apiClient.get(`/templates/${templateId}/locales/${localeId}/media`),
+
+    /**
+     * Delete a media file from a template locale
+     */
+    deleteMedia: (
+      templateId: string,
+      localeId: string,
+      mediaId: string,
+    ): Promise<{ success: boolean }> =>
+      apiClient.delete(
+        `/templates/${templateId}/locales/${localeId}/media/${mediaId}`,
       ),
   },
 

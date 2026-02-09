@@ -1,28 +1,36 @@
 import { NestFactory } from '@nestjs/core';
+import * as bodyParser from 'body-parser';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { closeDbPool } from './database/db.connection';
 declare const module: any;
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    // Disable built-in body parser to use custom configuration
+    bodyParser: false,
+  });
 
   // Parse incoming cookies so they're available in req.cookies
-
   app.use(cookieParser());
 
-  // Set request size limits for file uploads
-  app.use((req, res, next) => {
-    if (req.method === 'POST' && req.url.includes('/whatsapp/media/upload')) {
-      req.headers['content-length'] = Math.min(
-        50 * 1024 * 1024,
-        req.headers['content-length']
-          ? parseInt(req.headers['content-length'])
-          : 0,
-      ).toString();
-    }
-    next();
-  });
+  // Custom body parser with route-specific limits
+  // IMPORTANT: Route-specific parsers must be applied BEFORE the default parser
+  // because Express middleware runs in order and the first matching parser wins
+
+  // Large limit for template media upload endpoints (10MB for base64 encoded images)
+  app.use('/templates/media', bodyParser.json({ limit: '10mb' }));
+  app.use(
+    '/templates/:id/locales/:localeId/media',
+    bodyParser.json({ limit: '10mb' }),
+  );
+
+  // Large limit for WhatsApp media uploads
+  app.use('/whatsapp/media', bodyParser.json({ limit: '50mb' }));
+
+  // Default limit for all other routes (1MB is reasonable for most requests)
+  app.use(bodyParser.json({ limit: '1mb' }));
+  app.use(bodyParser.urlencoded({ extended: true, limit: '1mb' }));
 
   app.enableCors({
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',

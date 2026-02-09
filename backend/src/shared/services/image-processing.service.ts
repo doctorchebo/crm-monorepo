@@ -360,4 +360,90 @@ export class ImageProcessingService {
       return { buffer, wasResized: false };
     }
   }
+
+  /**
+   * Generate a thumbnail for UI preview display.
+   *
+   * Creates a small, optimized preview image suitable for display in the
+   * template editor and other UI contexts. Designed for quick loading
+   * and minimal storage footprint.
+   *
+   * @param buffer - Input image buffer
+   * @param options - Thumbnail options
+   * @returns Thumbnail buffer and metadata
+   */
+  async generateThumbnail(
+    buffer: Buffer,
+    options: {
+      /** Maximum width (default: 400px) */
+      maxWidth?: number;
+      /** Maximum height (default: 400px) */
+      maxHeight?: number;
+      /** JPEG quality (default: 80) */
+      quality?: number;
+    } = {},
+  ): Promise<{
+    buffer: Buffer;
+    mimeType: string;
+    width: number;
+    height: number;
+    originalSize: number;
+    thumbnailSize: number;
+  }> {
+    const { maxWidth = 400, maxHeight = 400, quality = 80 } = options;
+    const originalSize = buffer.length;
+
+    try {
+      const metadata = await sharp(buffer).metadata();
+
+      this.logger.debug(
+        `[Image Processing] Generating thumbnail: ${metadata.width}x${metadata.height} -> max ${maxWidth}x${maxHeight}`,
+      );
+
+      // Generate thumbnail with optimized settings for web display
+      const thumbnailBuffer = await sharp(buffer)
+        // Remove problematic ICC profiles
+        .withMetadata({ icc: undefined })
+        // Convert to sRGB for web compatibility
+        .toColorspace('srgb')
+        // Flatten alpha channel with white background
+        .flatten({ background: { r: 255, g: 255, b: 255 } })
+        // Resize to fit within max dimensions
+        .resize(maxWidth, maxHeight, {
+          fit: 'inside',
+          withoutEnlargement: true,
+        })
+        // Encode as optimized JPEG
+        .jpeg({
+          quality,
+          mozjpeg: true,
+          chromaSubsampling: '4:2:0',
+        })
+        .toBuffer();
+
+      // Get output dimensions
+      const outputMetadata = await sharp(thumbnailBuffer).metadata();
+
+      this.logger.log(
+        `[Image Processing] Thumbnail generated: ${originalSize} -> ${thumbnailBuffer.length} bytes ` +
+          `(${((1 - thumbnailBuffer.length / originalSize) * 100).toFixed(1)}% smaller), ` +
+          `${outputMetadata.width}x${outputMetadata.height}`,
+      );
+
+      return {
+        buffer: thumbnailBuffer,
+        mimeType: 'image/jpeg',
+        width: outputMetadata.width || maxWidth,
+        height: outputMetadata.height || maxHeight,
+        originalSize,
+        thumbnailSize: thumbnailBuffer.length,
+      };
+    } catch (error) {
+      this.logger.error(
+        `[Image Processing] Thumbnail generation failed: ${error.message}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
 }

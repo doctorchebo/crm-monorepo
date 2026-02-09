@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ImageProcessingService } from '@shared/services/image-processing.service';
+import { S3Service } from '@shared/services/s3.service';
 import { TeamModule } from '../team/team.module';
 import {
   MessagingProviderFactory,
@@ -30,6 +32,10 @@ import {
   imports: [ConfigModule, TeamModule],
   controllers: [TemplatesController, TemplateWebhookController],
   providers: [
+    // Shared Services
+    S3Service,
+    ImageProcessingService,
+
     // Core Services
     TemplatesService,
     TemplateParserService,

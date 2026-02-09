@@ -644,6 +644,48 @@ export class TemplatesController {
   // ==================== Media Upload Endpoints ====================
 
   /**
+   * POST /templates/media/upload-temporary
+   * Upload media file directly to Meta without requiring an existing template/locale
+   * Used when creating new templates - the asset handle is returned and can be
+   * included in the template data when saving
+   *
+   * Returns the asset handle that can be used in template components
+   */
+  @Post('media/upload-temporary')
+  async uploadTemporaryMedia(
+    @Body()
+    body: {
+      filename: string;
+      mimeType: string;
+      base64Data: string;
+    },
+  ) {
+    // Decode base64 data
+    const buffer = Buffer.from(body.base64Data, 'base64');
+
+    // Upload to Meta using the MediaUploadService (no DB record)
+    const result = await this.mediaUploadService.uploadMediaTemporary({
+      buffer,
+      filename: body.filename,
+      mimeType: body.mimeType,
+      fileSize: buffer.length,
+    });
+
+    if (!result.success) {
+      throw new BadRequestException(result.error || 'Failed to upload media');
+    }
+
+    return {
+      success: true,
+      assetHandle: result.assetHandle,
+      url: result.url, // Public URL for display
+      filename: body.filename,
+      mimeType: body.mimeType,
+      fileSize: buffer.length,
+    };
+  }
+
+  /**
    * POST /templates/:id/locales/:localeId/media/upload
    * Upload media file for template header (image, video, or document)
    *
@@ -694,6 +736,7 @@ export class TemplatesController {
       success: true,
       assetHandle: result.assetHandle,
       mediaId: result.mediaId,
+      url: result.url, // Public URL for display in edit mode
       componentType: body.componentType,
       filename: body.filename,
       mimeType: body.mimeType,

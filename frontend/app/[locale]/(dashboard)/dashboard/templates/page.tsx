@@ -537,6 +537,7 @@ export default function TemplatesPage() {
                     }
                     isSyncing={syncingTemplateId === template.id}
                     canSyncStatus={canSyncStatus}
+                    isSelectable={selectedCount > 0}
                   />
                 </div>
               ))}

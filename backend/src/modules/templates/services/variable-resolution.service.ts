@@ -140,62 +140,48 @@ export class VariableResolutionService {
   }
 
   /**
-   * Validate variable name follows naming convention
+   * Validate variable name follows flexible naming convention.
+   *
+   * FLEXIBLE APPROACH: Accept any prefix.field format for custom business variables.
+   * Known prefixes are resolved from system data, unknown prefixes from contact attributes.
    */
   validateVariableName(varName: string): {
     isValid: boolean;
     error?: string;
+    isCustomPrefix?: boolean;
   } {
     const parsed = this.parseVariable(varName);
 
     if (!parsed) {
       return {
         isValid: false,
-        error: `Invalid variable format: "${varName}". Use prefix.field format (e.g., customer.first_name)`,
+        error: `Invalid variable format: "${varName}". Use prefix.field format (e.g., customer.first_name, promotion.end_date)`,
       };
     }
 
+    const { prefix, field } = parsed;
+
+    // Validate prefix format (lowercase letters and underscores, starting with letter)
+    if (!/^[a-z][a-z_]*$/.test(prefix)) {
+      return {
+        isValid: false,
+        error: `Invalid prefix format "${prefix}". Use lowercase letters starting with a letter`,
+      };
+    }
+
+    // Validate field format (lowercase letters, numbers, underscores, starting with letter)
+    if (!/^[a-z][a-z0-9_]*$/.test(field)) {
+      return {
+        isValid: false,
+        error: `Invalid field name "${field}". Use lowercase letters, numbers, and underscores (must start with a letter)`,
+      };
+    }
+
+    // Check if this is a known prefix or a custom one
     const validPrefixes = Object.values(VARIABLE_PREFIXES);
-    if (!validPrefixes.includes(parsed.prefix as any)) {
-      return {
-        isValid: false,
-        error: `Invalid prefix "${parsed.prefix}". Allowed: ${validPrefixes.join(', ')}`,
-      };
-    }
+    const isCustomPrefix = !validPrefixes.includes(prefix as any);
 
-    // Validate customer fields
-    if (
-      parsed.prefix === VARIABLE_PREFIXES.CUSTOMER &&
-      !CUSTOMER_FIELDS.includes(parsed.field as any)
-    ) {
-      return {
-        isValid: false,
-        error: `Invalid customer field "${parsed.field}". Allowed: ${CUSTOMER_FIELDS.join(', ')}`,
-      };
-    }
-
-    // Validate system fields
-    if (
-      parsed.prefix === VARIABLE_PREFIXES.SYSTEM &&
-      !SYSTEM_FIELDS.includes(parsed.field as any)
-    ) {
-      return {
-        isValid: false,
-        error: `Invalid system field "${parsed.field}". Allowed: ${SYSTEM_FIELDS.join(', ')}`,
-      };
-    }
-
-    // Custom fields can be any alphanumeric with underscores
-    if (parsed.prefix === VARIABLE_PREFIXES.CUSTOM) {
-      if (!/^[a-z][a-z0-9_]*$/.test(parsed.field)) {
-        return {
-          isValid: false,
-          error: `Invalid custom field name "${parsed.field}". Use lowercase letters, numbers, and underscores`,
-        };
-      }
-    }
-
-    return { isValid: true };
+    return { isValid: true, isCustomPrefix };
   }
 
   /**
@@ -325,7 +311,14 @@ export class VariableResolutionService {
   }
 
   /**
-   * Resolve a single variable from available data sources
+   * Resolve a single variable from available data sources.
+   *
+   * Resolution priority:
+   * 1. Explicit overrides (manual input at send time)
+   * 2. Known prefixes resolve from their respective data sources
+   * 3. Unknown/custom prefixes resolve from contact custom attributes
+   *    - Uses "prefix.field" as the attribute key (e.g., "promotion.end_date")
+   *    - Falls back to just "field" for compatibility
    */
   resolveVariable(
     varName: string,
@@ -348,48 +341,69 @@ export class VariableResolutionService {
       return { value: null, source: 'invalid' };
     }
 
-    // Priority 2: Customer data (custom attributes)
-    if (parsed.prefix === VARIABLE_PREFIXES.CUSTOM) {
-      const value = customerData.custom[parsed.field];
+    const { prefix, field } = parsed;
+    const validPrefixes = Object.values(VARIABLE_PREFIXES);
+
+    // Priority 2: Customer data (custom.* prefix)
+    if (prefix === VARIABLE_PREFIXES.CUSTOM) {
+      const value = customerData.custom[field];
       return { value: value ?? null, source: 'custom_attribute' };
     }
 
-    // Priority 3: Customer fields
-    if (parsed.prefix === VARIABLE_PREFIXES.CUSTOMER) {
-      const value = customerData.customer[parsed.field];
+    // Priority 3: Customer fields (customer.* prefix)
+    if (prefix === VARIABLE_PREFIXES.CUSTOMER) {
+      const value = customerData.customer[field];
       return { value: value ?? null, source: 'contact' };
     }
 
-    // Priority 4: Chat fields
-    if (parsed.prefix === VARIABLE_PREFIXES.CHAT) {
-      const value = chatData[parsed.field];
+    // Priority 4: Chat fields (chat.* prefix)
+    if (prefix === VARIABLE_PREFIXES.CHAT) {
+      const value = chatData[field];
       return { value: value ?? null, source: 'chat' };
     }
 
-    // Priority 5: Sender fields
-    if (parsed.prefix === VARIABLE_PREFIXES.SENDER) {
-      const value = senderData[parsed.field];
+    // Priority 5: Sender fields (sender.* prefix)
+    if (prefix === VARIABLE_PREFIXES.SENDER) {
+      const value = senderData[field];
       return { value: value ?? null, source: 'sender' };
     }
 
-    // Priority 6: System fields
-    if (parsed.prefix === VARIABLE_PREFIXES.SYSTEM) {
-      const value = systemData[parsed.field];
+    // Priority 6: System fields (system.* prefix)
+    if (prefix === VARIABLE_PREFIXES.SYSTEM) {
+      const value = systemData[field];
       return { value: value ?? null, source: 'system' };
     }
 
-    // Priority 7: Order fields - resolve from custom attributes as fallback
-    // (since there's no orders table, users can store order data as custom attributes)
-    if (parsed.prefix === VARIABLE_PREFIXES.ORDER) {
-      const value = customerData.custom[parsed.field];
+    // Priority 7: Order fields - resolve from custom attributes
+    if (prefix === VARIABLE_PREFIXES.ORDER) {
+      const value = customerData.custom[field];
       return { value: value ?? null, source: 'custom_attribute' };
     }
 
-    // Priority 8: Property fields - resolve from custom attributes as fallback
-    // (since there's no properties table, users can store property data as custom attributes)
-    if (parsed.prefix === VARIABLE_PREFIXES.PROPERTY) {
-      const value = customerData.custom[parsed.field];
+    // Priority 8: Property fields - resolve from custom attributes
+    if (prefix === VARIABLE_PREFIXES.PROPERTY) {
+      const value = customerData.custom[field];
       return { value: value ?? null, source: 'custom_attribute' };
+    }
+
+    // Priority 9: Unknown/Custom prefixes - resolve from contact custom attributes
+    // This enables flexible variables like "promotion.end_date", "campaign.name", etc.
+    // Users can define these as contact attributes with the full "prefix.field" key
+    // or just the "field" name for convenience
+    if (!validPrefixes.includes(prefix as any)) {
+      // First try the full variable name as attribute key (e.g., "promotion.end_date")
+      let value = customerData.custom[varName];
+      if (value !== undefined && value !== null) {
+        return { value, source: 'custom_attribute' };
+      }
+
+      // Fall back to just the field name (e.g., "end_date")
+      value = customerData.custom[field];
+      if (value !== undefined && value !== null) {
+        return { value, source: 'custom_attribute' };
+      }
+
+      return { value: null, source: 'custom_attribute_missing' };
     }
 
     return { value: null, source: 'unknown' };

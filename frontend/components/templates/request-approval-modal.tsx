@@ -1,6 +1,12 @@
 "use client";
 
+import { EnhancedTemplatePreview } from "@/components/templates/enhanced";
 import { Button } from "@/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   Dialog,
   DialogContent,
@@ -12,18 +18,24 @@ import {
 import type {
   TemplateApprovalResult,
   TemplateValidationResult,
+  TemplateVersionInfo,
   ValidationError,
 } from "@/lib/api/endpoints";
 import { backendApi } from "@/lib/api/endpoints";
+import type { TemplateComponents } from "@/lib/types/template-components.types";
+import { componentsFromLegacy } from "@/lib/types/template-components.types";
 import {
   AlertCircle,
   AlertTriangle,
   CheckCircle,
+  ChevronDown,
+  ChevronUp,
+  Eye,
   Loader2,
   Send,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 interface RequestApprovalModalProps {
   open: boolean;
@@ -57,18 +69,62 @@ export function RequestApprovalModal({
     useState<TemplateApprovalResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Preview state
+  const [previewComponents, setPreviewComponents] =
+    useState<TemplateComponents | null>(null);
+  const [exampleVars, setExampleVars] = useState<Record<string, string>>({});
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+
+  // Fetch template content for preview
+  const fetchPreviewData = useCallback(async () => {
+    if (!templateId || !locale) return;
+
+    setIsLoadingPreview(true);
+    try {
+      const versionInfo: TemplateVersionInfo =
+        await backendApi.templates.getVersionInfo(templateId, locale);
+
+      // Get the draft version (what we're submitting) or active version
+      const version = versionInfo.draftVersion || versionInfo.activeVersion;
+
+      if (version?.content) {
+        // Build components from version content
+        const components = version.content.components
+          ? (version.content.components as unknown as TemplateComponents)
+          : componentsFromLegacy(
+              version.content.header || undefined,
+              version.content.body,
+              version.content.footer || undefined,
+            );
+
+        setPreviewComponents(components);
+        setExampleVars(version.content.exampleVars || {});
+      }
+    } catch (err) {
+      console.error("Failed to fetch preview data:", err);
+      // Non-critical error - preview is optional
+    } finally {
+      setIsLoadingPreview(false);
+    }
+  }, [templateId, locale]);
+
   // Run validation when modal opens
   useEffect(() => {
     if (open) {
       runValidation();
+      fetchPreviewData();
     } else {
       // Reset state when modal closes
       setStep("validating");
       setValidationResult(null);
       setApprovalResult(null);
       setError(null);
+      setPreviewComponents(null);
+      setExampleVars({});
+      setIsPreviewOpen(false);
     }
-  }, [open, templateId, locale]);
+  }, [open, templateId, locale, fetchPreviewData]);
 
   const runValidation = async () => {
     setStep("validating");
@@ -79,7 +135,7 @@ export function RequestApprovalModal({
         templateId,
         {
           locale,
-        }
+        },
       );
       setValidationResult(result);
 
@@ -202,6 +258,45 @@ export function RequestApprovalModal({
         </div>
       </div>
 
+      {/* Template Preview Section */}
+      {(previewComponents || isLoadingPreview) && (
+        <Collapsible open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
+          <CollapsibleTrigger asChild>
+            <Button
+              variant="outline"
+              className="w-full flex items-center justify-between"
+              type="button"
+            >
+              <span className="flex items-center gap-2">
+                <Eye className="h-4 w-4" />
+                {t("previewTemplate") || "Preview Template"}
+              </span>
+              {isPreviewOpen ? (
+                <ChevronUp className="h-4 w-4" />
+              ) : (
+                <ChevronDown className="h-4 w-4" />
+              )}
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-3">
+            {isLoadingPreview ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : previewComponents ? (
+              <div className="flex justify-center">
+                <EnhancedTemplatePreview
+                  components={previewComponents}
+                  exampleVars={exampleVars}
+                  showPhoneFrame={true}
+                  templateName={templateName}
+                />
+              </div>
+            ) : null}
+          </CollapsibleContent>
+        </Collapsible>
+      )}
+
       {validationResult?.warnings && validationResult.warnings.length > 0 && (
         <ValidationErrorsList
           errors={[]}
@@ -261,10 +356,10 @@ export function RequestApprovalModal({
         approvalResult.validationErrors.length > 0 && (
           <ValidationErrorsList
             errors={approvalResult.validationErrors.filter(
-              (e) => e.severity === "error"
+              (e) => e.severity === "error",
             )}
             warnings={approvalResult.validationErrors.filter(
-              (e) => e.severity === "warning"
+              (e) => e.severity === "warning",
             )}
             t={t}
           />
@@ -328,7 +423,7 @@ export function RequestApprovalModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="sm:max-w-[600px]">
         <DialogHeader>
           <DialogTitle>{t("title")}</DialogTitle>
           <DialogDescription>
@@ -336,7 +431,7 @@ export function RequestApprovalModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="max-h-[60vh] overflow-y-auto">{renderContent()}</div>
+        <div className="max-h-[70vh] overflow-y-auto">{renderContent()}</div>
 
         {renderFooter()}
       </DialogContent>

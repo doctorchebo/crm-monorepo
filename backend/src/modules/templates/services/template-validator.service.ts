@@ -1,14 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { TemplateParserService } from './template-parser.service';
-import {
-  CHAT_FIELDS,
-  CUSTOMER_FIELDS,
-  ORDER_FIELDS,
-  PROPERTY_FIELDS,
-  SENDER_FIELDS,
-  SYSTEM_FIELDS,
-  VARIABLE_PREFIXES,
-} from './variable-resolution.service';
+import { VARIABLE_PREFIXES } from './variable-resolution.service';
 
 export interface ValidationError {
   field: string;
@@ -264,14 +256,20 @@ export class TemplateValidatorService {
   }
 
   /**
-   * Validate variable names follow the structured naming convention:
-   * - customer.first_name, customer.email, etc.
-   * - chat.participant_name, chat.participant_phone, etc.
-   * - sender.business_name, sender.business_phone
-   * - order.order_id, order.delivery_date, etc.
-   * - property.property_address, property.bedrooms, etc.
-   * - system.current_date, system.greeting, etc.
-   * - custom.<any_key> for user-defined variables
+   * Validate variable names follow a flexible naming convention.
+   *
+   * FLEXIBLE APPROACH: Users can define any variable in "prefix.field" format.
+   * This allows custom business variables like "promotion.end_date", "order.discount", etc.
+   *
+   * Validation rules:
+   * - Must follow prefix.field format (two parts separated by a dot)
+   * - Prefix must be lowercase letters and underscores, starting with a letter
+   * - Field must be lowercase letters, numbers, and underscores, starting with a letter
+   *
+   * Variable resolution happens at SEND TIME, where:
+   * - Known prefixes (customer, chat, sender, system) resolve from system data
+   * - Unknown prefixes resolve from contact custom attributes
+   * - Users are warned about unresolved variables but can still send
    */
   private validateVariableNames(variables: string[]): ValidationError[] {
     const errors: ValidationError[] = [];
@@ -284,7 +282,7 @@ export class TemplateValidatorService {
       if (parts.length !== 2) {
         errors.push({
           field: 'body',
-          message: `Invalid variable format "${varName}". Use prefix.field format (e.g., customer.first_name, order.order_id)`,
+          message: `Invalid variable format "${varName}". Use prefix.field format (e.g., customer.first_name, promotion.end_date)`,
           severity: 'error',
         });
         continue;
@@ -292,88 +290,34 @@ export class TemplateValidatorService {
 
       const [prefix, field] = parts;
 
-      // Validate prefix
-      if (!validPrefixes.includes(prefix as any)) {
+      // Validate prefix format (lowercase letters and underscores, starting with letter)
+      if (!/^[a-z][a-z_]*$/.test(prefix)) {
         errors.push({
           field: 'body',
-          message: `Invalid variable prefix "${prefix}" in "${varName}". Allowed: ${validPrefixes.join(', ')}`,
+          message: `Invalid variable prefix format "${prefix}" in "${varName}". Prefix must be lowercase letters starting with a letter (e.g., customer, order, promotion)`,
           severity: 'error',
         });
         continue;
       }
 
-      // Validate fields based on prefix
-      switch (prefix) {
-        case VARIABLE_PREFIXES.CUSTOMER:
-          if (!CUSTOMER_FIELDS.includes(field as any)) {
-            errors.push({
-              field: 'body',
-              message: `Invalid customer field "${field}" in "${varName}". Allowed: ${CUSTOMER_FIELDS.join(', ')}`,
-              severity: 'error',
-            });
-          }
-          break;
+      // Validate field format (lowercase letters, numbers, underscores, starting with letter)
+      if (!/^[a-z][a-z0-9_]*$/.test(field)) {
+        errors.push({
+          field: 'body',
+          message: `Invalid field name "${field}" in "${varName}". Use lowercase letters, numbers, and underscores (must start with a letter)`,
+          severity: 'error',
+        });
+        continue;
+      }
 
-        case VARIABLE_PREFIXES.CHAT:
-          if (!CHAT_FIELDS.includes(field as any)) {
-            errors.push({
-              field: 'body',
-              message: `Invalid chat field "${field}" in "${varName}". Allowed: ${CHAT_FIELDS.join(', ')}`,
-              severity: 'error',
-            });
-          }
-          break;
-
-        case VARIABLE_PREFIXES.SENDER:
-          if (!SENDER_FIELDS.includes(field as any)) {
-            errors.push({
-              field: 'body',
-              message: `Invalid sender field "${field}" in "${varName}". Allowed: ${SENDER_FIELDS.join(', ')}`,
-              severity: 'error',
-            });
-          }
-          break;
-
-        case VARIABLE_PREFIXES.ORDER:
-          if (!ORDER_FIELDS.includes(field as any)) {
-            errors.push({
-              field: 'body',
-              message: `Invalid order field "${field}" in "${varName}". Allowed: ${ORDER_FIELDS.join(', ')}`,
-              severity: 'error',
-            });
-          }
-          break;
-
-        case VARIABLE_PREFIXES.PROPERTY:
-          if (!PROPERTY_FIELDS.includes(field as any)) {
-            errors.push({
-              field: 'body',
-              message: `Invalid property field "${field}" in "${varName}". Allowed: ${PROPERTY_FIELDS.join(', ')}`,
-              severity: 'error',
-            });
-          }
-          break;
-
-        case VARIABLE_PREFIXES.SYSTEM:
-          if (!SYSTEM_FIELDS.includes(field as any)) {
-            errors.push({
-              field: 'body',
-              message: `Invalid system field "${field}" in "${varName}". Allowed: ${SYSTEM_FIELDS.join(', ')}`,
-              severity: 'error',
-            });
-          }
-          break;
-
-        case VARIABLE_PREFIXES.CUSTOM:
-          // Validate custom field naming (alphanumeric with underscores, starting with letter)
-          if (!/^[a-z][a-z0-9_]*$/.test(field)) {
-            errors.push({
-              field: 'body',
-              message: `Invalid custom field name "${field}" in "${varName}". Use lowercase letters, numbers, and underscores (must start with a letter)`,
-              severity: 'error',
-            });
-          }
-          break;
+      // Provide helpful warnings for unknown prefixes (not errors!)
+      // This helps users understand that their variable will resolve from custom attributes
+      if (!validPrefixes.includes(prefix as any)) {
+        errors.push({
+          field: 'body',
+          message: `Custom variable "${varName}" will be resolved from contact attributes. Make sure to set a "${varName}" attribute on contacts before sending.`,
+          severity: 'warning',
+        });
       }
     }
 

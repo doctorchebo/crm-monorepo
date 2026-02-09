@@ -35,7 +35,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 /**
  * Locale data structure for template cards
@@ -89,6 +89,8 @@ interface TemplateCardProps {
   isSyncing?: boolean;
   /** Whether to check if sync is available for a locale */
   canSyncStatus?: (locale: TemplateLocaleData) => boolean;
+  /** Whether the card is in selectable mode (shows space for selection checkbox) */
+  isSelectable?: boolean;
 }
 
 /**
@@ -132,7 +134,7 @@ function truncateText(text: string, maxLength: number = 80): string {
  * Get platform badges for display
  */
 function getPlatformBadges(
-  platforms?: Array<{ platformName: string; isEnabled: boolean }>
+  platforms?: Array<{ platformName: string; isEnabled: boolean }>,
 ): string[] {
   if (!platforms) return ["WhatsApp"];
   return platforms.filter((p) => p.isEnabled).map((p) => p.platformName);
@@ -182,7 +184,7 @@ function LocaleSlide({
                     "flex items-center gap-1 px-1.5 py-0.5 rounded text-xs",
                     isVisible
                       ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                      : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
+                      : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
                   )}
                 >
                   {isVisible ? (
@@ -220,8 +222,8 @@ function LocaleSlide({
               locale.category === "marketing"
                 ? "bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-300"
                 : locale.category === "authentication"
-                ? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300"
-                : "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-300"
+                  ? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300"
+                  : "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-300",
             )}
           >
             {t(`categories.${locale.category}`) || locale.category}
@@ -246,6 +248,7 @@ export function TemplateCard({
   onSyncStatus,
   isSyncing,
   canSyncStatus,
+  isSelectable = false,
 }: TemplateCardProps) {
   const t = useTranslations("templates");
   const tCommon = useTranslations("common");
@@ -265,7 +268,7 @@ export function TemplateCard({
   // Handle click on a locale slide
   const handleLocaleClick = (
     e: React.MouseEvent,
-    locale: TemplateLocaleData
+    locale: TemplateLocaleData,
   ) => {
     e.stopPropagation();
     if (onLocaleClick) {
@@ -282,7 +285,12 @@ export function TemplateCard({
     >
       {/* Template Header */}
       <div className="mb-3">
-        <div className="flex items-start justify-between mb-2 pr-8">
+        <div
+          className={cn(
+            "flex items-start justify-between mb-2 pr-8",
+            isSelectable && "pl-6",
+          )}
+        >
           <div className="flex-1 min-w-0">
             <h3 className="font-semibold text-lg truncate">
               {template.displayName || template.name}
@@ -367,7 +375,7 @@ export function TemplateCard({
                 {t("syncSingleStatus") || "Refresh Status"}
                 {/* Show locale name in tooltip or label to be clear */}
                 <span className="ml-2 text-xs text-muted-foreground uppercase bg-muted px-1 rounded">
-                   {activeLocale.locale}
+                  {activeLocale.locale}
                 </span>
               </DropdownMenuItem>
             )}

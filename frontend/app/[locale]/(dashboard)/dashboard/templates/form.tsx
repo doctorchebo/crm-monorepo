@@ -1,6 +1,15 @@
 "use client";
 
-import { VariableAutocomplete } from "@/components/templates/variable-autocomplete";
+import {
+  componentsFromLegacy,
+  componentsToDto,
+  componentsToLegacy,
+  createEmptyComponents,
+  dtoToComponents,
+  EnhancedTemplateEditor,
+  hasAdvancedFeatures,
+  TemplateComponents,
+} from "@/components/templates/enhanced";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -23,10 +32,10 @@ import {
   SUPPORTED_LANGUAGES,
 } from "@/lib/api/endpoints";
 import { toMetaTemplateName } from "@/lib/utils/template-name";
-import { AlertCircle, Eye, Globe, Loader, X } from "lucide-react";
+import { AlertCircle, Globe, Loader } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import useSWR, { mutate as globalMutate } from "swr";
 
 // Map SUPPORTED_LANGUAGES to locale format used in template UI
@@ -88,6 +97,8 @@ interface FormData {
   exampleVars: Record<string, string>;
   enabledPlatforms: string[];
   isVisible: boolean;
+  /** Enhanced template components (for advanced mode) */
+  components?: TemplateComponents;
 }
 
 /** Version content data from the versioning system */
@@ -100,6 +111,8 @@ interface VersionData {
     footer?: string | null;
     exampleVars?: Record<string, string>;
     category?: string;
+    /** Enhanced template components (full Meta API support) */
+    components?: Record<string, unknown>;
   };
   status: string;
   canEdit: boolean;
@@ -150,7 +163,51 @@ export function TemplateForm({
     exampleVars: {},
     enabledPlatforms: ["whatsapp"],
     isVisible: true,
+    components: createEmptyComponents(),
   });
+
+  // @ts-ignore - SWR conditional fetcher type mismatch
+  const { data: existingTemplate }: { data: Template | null | undefined } =
+    useSWR(
+      templateId ? `template-${templateId}` : null,
+      !templateId
+        ? null
+        : async () => await backendApi.templates.get(templateId),
+    );
+
+  // Get locale ID for media uploads
+  const currentLocaleId = useMemo(() => {
+    if (!templateId) return undefined;
+    // Find the locale ID from existing template data
+    const localeData = existingTemplate?.locales?.find(
+      (l) => l.locale === formData.selectedLocale,
+    );
+    return localeData?.id;
+  }, [templateId, existingTemplate, formData.selectedLocale]);
+
+  // Handle enhanced components change
+  const handleComponentsChange = useCallback(
+    (components: TemplateComponents) => {
+      setFormData((prev) => ({
+        ...prev,
+        components,
+      }));
+    },
+    [],
+  );
+
+  // Handle legacy data change from enhanced editor (for backward compatibility)
+  const handleLegacyChange = useCallback(
+    (legacy: { header?: string; body: string; footer?: string }) => {
+      setFormData((prev) => ({
+        ...prev,
+        header: legacy.header || "",
+        body: legacy.body,
+        footer: legacy.footer || "",
+      }));
+    },
+    [],
+  );
 
   // Sync with controlled locale from parent
   useEffect(() => {
@@ -162,26 +219,13 @@ export function TemplateForm({
   // Auto-generated Meta-compliant template name
   const generatedName = useMemo(
     () => toMetaTemplateName(formData.displayName),
-    [formData.displayName]
+    [formData.displayName],
   );
 
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>(
-    []
+    [],
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const [testOpen, setTestOpen] = useState(false);
-  const [testPhone, setTestPhone] = useState("");
-  const [isSendingTest, setIsSendingTest] = useState(false);
-
-  // @ts-ignore - SWR conditional fetcher type mismatch
-  const { data: existingTemplate }: { data: Template | null | undefined } =
-    useSWR(
-      templateId ? `template-${templateId}` : null,
-      !templateId
-        ? null
-        : async () => await backendApi.templates.get(templateId)
-    );
 
   // Load existing template data (global fields like name, description)
   useEffect(() => {
@@ -204,10 +248,21 @@ export function TemplateForm({
         const targetLocale =
           controlledLocale || existingTemplate.locales?.[0]?.locale || "en";
         const localeData = existingTemplate.locales?.find(
-          (l) => l.locale === targetLocale
+          (l) => l.locale === targetLocale,
         );
 
         if (localeData) {
+          // Convert components from DTO format if available, otherwise create from legacy format
+          const components = (localeData as any).components
+            ? dtoToComponents(
+                (localeData as any).components as Record<string, unknown>,
+              )
+            : componentsFromLegacy(
+                localeData.header,
+                localeData.body,
+                localeData.footer,
+              );
+
           setFormData((prev) => ({
             ...prev,
             selectedLocale: localeData.locale,
@@ -216,6 +271,7 @@ export function TemplateForm({
             body: localeData.body || "",
             footer: localeData.footer || "",
             exampleVars: localeData.exampleVars || {},
+            components,
           }));
         } else {
           // New locale - reset content fields but keep selected locale
@@ -227,6 +283,7 @@ export function TemplateForm({
             body: "",
             footer: "",
             exampleVars: {},
+            components: createEmptyComponents(),
           }));
         }
       }
@@ -236,15 +293,41 @@ export function TemplateForm({
   // Load version data when provided (takes precedence over locale data)
   useEffect(() => {
     if (versionData) {
-      setFormData((prev) => ({
-        ...prev,
-        selectedLocale: controlledLocale || prev.selectedLocale,
-        category: versionData.content.category || "utility",
-        header: versionData.content.header || "",
-        body: versionData.content.body || "",
-        footer: versionData.content.footer || "",
-        exampleVars: versionData.content.exampleVars || {},
-      }));
+      try {
+        // Convert components from DTO format if available, otherwise create from legacy format
+        const components = versionData.content.components
+          ? dtoToComponents(
+              versionData.content.components as Record<string, unknown>,
+            )
+          : componentsFromLegacy(
+              versionData.content.header || undefined,
+              versionData.content.body,
+              versionData.content.footer || undefined,
+            );
+
+        setFormData((prev) => ({
+          ...prev,
+          selectedLocale: controlledLocale || prev.selectedLocale,
+          category: versionData.content.category || "utility",
+          header: versionData.content.header || "",
+          body: versionData.content.body || "",
+          footer: versionData.content.footer || "",
+          exampleVars: versionData.content.exampleVars || {},
+          components,
+        }));
+      } catch (error) {
+        console.error("Error loading version data:", error);
+        // Still try to set the basic fields even if component conversion fails
+        setFormData((prev) => ({
+          ...prev,
+          selectedLocale: controlledLocale || prev.selectedLocale,
+          category: versionData.content.category || "utility",
+          header: versionData.content.header || "",
+          body: versionData.content.body || "",
+          footer: versionData.content.footer || "",
+          exampleVars: versionData.content.exampleVars || {},
+        }));
+      }
     }
   }, [versionData, controlledLocale]);
 
@@ -320,7 +403,7 @@ export function TemplateForm({
       if (templateId) {
         // Check if the selected locale already exists for this template
         const localeExists = existingTemplate?.locales?.some(
-          (loc) => loc.locale === formData.selectedLocale
+          (loc) => loc.locale === formData.selectedLocale,
         );
 
         if (localeExists) {
@@ -358,21 +441,6 @@ export function TemplateForm({
     }
   };
 
-  // Render template preview
-  const renderPreview = () => {
-    let rendered = formData.body;
-
-    extractedVariables.forEach((varName) => {
-      const value = formData.exampleVars[varName] || `[${varName}]`;
-      rendered = rendered.replace(
-        new RegExp(`\\{\\{${varName}\\}\\}`, "g"),
-        value
-      );
-    });
-
-    return rendered;
-  };
-
   // Submit template
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -382,13 +450,41 @@ export function TemplateForm({
       addNotification(
         t("pleaseFixErrors") || "Please fix the errors below",
         "error",
-        3000
+        3000,
       );
       return;
     }
 
     setIsSubmitting(true);
     try {
+      // Determine if we're using enhanced mode (has components with advanced features)
+      const useEnhancedMode =
+        formData.components && hasAdvancedFeatures(formData.components);
+
+      // Build the content payload
+      const buildContentPayload = () => {
+        // Get legacy values from components for backward compatibility
+        const legacy = componentsToLegacy(
+          formData.components || createEmptyComponents(),
+        );
+
+        // Base payload with legacy fields
+        const payload: Record<string, unknown> = {
+          header: legacy.header || formData.header || null,
+          body: legacy.body || formData.body,
+          footer: legacy.footer || formData.footer || null,
+          exampleVars: formData.exampleVars,
+          category: formData.category,
+        };
+
+        // Include components if using enhanced mode
+        if (useEnhancedMode && formData.components) {
+          payload.components = componentsToDto(formData.components);
+        }
+
+        return payload;
+      };
+
       if (templateId) {
         // Update existing template global fields
         await backendApi.templates.update(templateId, {
@@ -403,30 +499,20 @@ export function TemplateForm({
           await backendApi.templates.updateVersionContent(
             templateId,
             versionData.id,
-            {
-              header: formData.header || null,
-              body: formData.body,
-              footer: formData.footer || null,
-              exampleVars: formData.exampleVars,
-              category: formData.category,
-            }
+            buildContentPayload(),
           );
         } else if (!versionData) {
           // Legacy mode: save directly to locale (for non-versioned templates)
           await backendApi.templates.addLocale(templateId, {
             locale: formData.selectedLocale,
-            category: formData.category,
-            body: formData.body,
-            header: formData.header,
-            footer: formData.footer,
-            exampleVars: formData.exampleVars,
+            ...buildContentPayload(),
           });
         }
 
         addNotification(
           t("templateUpdated") || "Template updated successfully",
           "success",
-          3000
+          3000,
         );
 
         // Refresh template data
@@ -446,20 +532,16 @@ export function TemplateForm({
           platforms: formData.enabledPlatforms,
         })) as Template;
 
-        // Add locale
+        // Add locale with content
         await backendApi.templates.addLocale(templateRes.id, {
           locale: formData.selectedLocale,
-          category: formData.category,
-          body: formData.body,
-          header: formData.header,
-          footer: formData.footer,
-          exampleVars: formData.exampleVars,
+          ...buildContentPayload(),
         });
 
         addNotification(
           t("templateCreated") || "Template created successfully",
           "success",
-          3000
+          3000,
         );
 
         router.push(`/${locale}/dashboard/templates`);
@@ -492,7 +574,7 @@ export function TemplateForm({
         addNotification(
           errorMessage || t("saveFailed") || "Failed to save template",
           "error",
-          3000
+          3000,
         );
       }
     } finally {
@@ -685,7 +767,7 @@ export function TemplateForm({
               disabled={readOnly}
             >
               <SelectTrigger>
-                <SelectValue />
+                <SelectValue placeholder="Select a category" />
               </SelectTrigger>
               <SelectContent>
                 {TEMPLATE_CATEGORIES.map((cat) => (
@@ -708,65 +790,26 @@ export function TemplateForm({
               </div>
             )}
           </div>
-
-          {/* Template Fields */}
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="header">
-                {t("header") || "Header (Optional)"}
-              </Label>
-              <Input
-                id="header"
-                value={formData.header}
-                onChange={(e) =>
-                  setFormData({ ...formData, header: e.target.value })
-                }
-                placeholder={
-                  t("headerPlaceholder") ||
-                  "e.g., 📋 Order Details or a media URL"
-                }
-                disabled={readOnly}
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="body">
-                {t("messageBody") || "Message Body"}
-                <span className="text-xs text-gray-500 ml-2">
-                  {t("useVariablesHint") || "Type {{ to insert variables"}
-                </span>
-              </Label>
-              <VariableAutocomplete
-                id="body"
-                value={formData.body}
-                onChange={(value) => setFormData({ ...formData, body: value })}
-                placeholder={
-                  t("bodyPlaceholder") ||
-                  "Hello {{customer.first_name}}, your order {{order.order_id}} is ready!"
-                }
-                rows={6}
-                disabled={readOnly}
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="footer">
-                {t("footer") || "Footer (Optional)"}
-              </Label>
-              <Input
-                id="footer"
-                value={formData.footer}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  setFormData({ ...formData, footer: e.target.value })
-                }
-                placeholder={
-                  t("footerPlaceholder") || "e.g., Thank you for your business"
-                }
-                disabled={readOnly}
-              />
-            </div>
-          </div>
         </Card>
+
+        {/* Enhanced Template Editor - handles header, body, footer, buttons, carousel */}
+        <EnhancedTemplateEditor
+          templateId={templateId}
+          localeId={currentLocaleId}
+          initialComponents={formData.components}
+          legacyData={{
+            header: formData.header,
+            body: formData.body,
+            footer: formData.footer,
+          }}
+          category={
+            formData.category as "utility" | "marketing" | "authentication"
+          }
+          disabled={readOnly}
+          onChange={handleComponentsChange}
+          onLegacyChange={handleLegacyChange}
+          exampleVars={formData.exampleVars}
+        />
 
         {/* Variables - Locale-specific */}
         {extractedVariables.length > 0 && (
@@ -874,15 +917,6 @@ export function TemplateForm({
               : tCommon("cancel") || "Cancel"}
           </Button>
 
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setPreviewOpen(!previewOpen)}
-          >
-            <Eye className="h-4 w-4 mr-2" />
-            {t("preview") || "Preview"}
-          </Button>
-
           {!readOnly && (
             <Button type="submit" disabled={isSubmitting}>
               {isSubmitting && <Loader className="h-4 w-4 mr-2 animate-spin" />}
@@ -893,48 +927,6 @@ export function TemplateForm({
           )}
         </div>
       </form>
-
-      {/* Preview Modal */}
-      {previewOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-2xl bg-white dark:bg-gray-900">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
-              <h3 className="font-semibold text-lg text-gray-900 dark:text-white">
-                {t("preview") || "Preview"}
-              </h3>
-              <button
-                onClick={() => setPreviewOpen(false)}
-                className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
-                title="Close preview"
-              >
-                <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
-              </button>
-            </div>
-
-            {/* Modal Content */}
-            <div className="p-4">
-              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700 space-y-3">
-                {formData.header && (
-                  <div className="text-sm font-semibold text-blue-900 dark:text-blue-300">
-                    {formData.header}
-                  </div>
-                )}
-
-                <div className="text-sm whitespace-pre-wrap text-gray-900 dark:text-gray-100">
-                  {renderPreview()}
-                </div>
-
-                {formData.footer && (
-                  <div className="text-xs text-gray-600 dark:text-gray-400 border-t dark:border-gray-700 pt-3">
-                    {formData.footer}
-                  </div>
-                )}
-              </div>
-            </div>
-          </Card>
-        </div>
-      )}
     </div>
   );
 }

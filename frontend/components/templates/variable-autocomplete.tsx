@@ -73,7 +73,7 @@ export function VariableAutocomplete({
   const { data: variableData } = useSWR(
     "variable-definitions",
     () => backendApi.templates.getVariableDefinitions(),
-    { revalidateOnFocus: false }
+    { revalidateOnFocus: false },
   );
 
   const categories = variableData?.categories || [];
@@ -82,7 +82,7 @@ export function VariableAutocomplete({
   // Get filtered categories
   const getFilteredCategories = useCallback((): string[] => {
     return categories.filter((cat) =>
-      cat.toLowerCase().includes(searchQuery.toLowerCase())
+      cat.toLowerCase().includes(searchQuery.toLowerCase()),
     );
   }, [categories, searchQuery]);
 
@@ -93,7 +93,7 @@ export function VariableAutocomplete({
     return defs.filter(
       (def) =>
         def.property.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        def.displayName.toLowerCase().includes(searchQuery.toLowerCase())
+        def.displayName.toLowerCase().includes(searchQuery.toLowerCase()),
     );
   }, [selectedCategory, searchQuery, groupedDefinitions]);
 
@@ -132,7 +132,7 @@ export function VariableAutocomplete({
     setDropdownPosition({
       top: Math.min(
         mirrorHeight - scrollTop + lineHeight,
-        textarea.clientHeight
+        textarea.clientHeight,
       ),
       left: 0,
     });
@@ -153,7 +153,7 @@ export function VariableAutocomplete({
       if (lastTriggerIndex > lastCloseIndex) {
         // We're inside a variable
         const textAfterTrigger = textBeforeCursor.substring(
-          lastTriggerIndex + 2
+          lastTriggerIndex + 2,
         );
 
         // Check if there's a dot (category.property pattern)
@@ -188,7 +188,7 @@ export function VariableAutocomplete({
         setSearchQuery("");
       }
     },
-    [onChange, categories, calculateDropdownPosition]
+    [onChange, categories, calculateDropdownPosition],
   );
 
   // Insert variable at cursor
@@ -235,7 +235,7 @@ export function VariableAutocomplete({
         }
       }, 0);
     },
-    [value, onChange, triggerStart]
+    [value, onChange, triggerStart],
   );
 
   // Handle keyboard navigation
@@ -269,7 +269,7 @@ export function VariableAutocomplete({
               // Select property
               insertVariable(
                 selectedCategory,
-                filteredProperties[highlightedIndex].property
+                filteredProperties[highlightedIndex].property,
               );
             }
           }
@@ -296,7 +296,7 @@ export function VariableAutocomplete({
       selectedCategory,
       insertVariable,
       searchQuery,
-    ]
+    ],
   );
 
   // Close dropdown when clicking outside
@@ -320,7 +320,7 @@ export function VariableAutocomplete({
   useEffect(() => {
     if (showDropdown && dropdownRef.current) {
       const highlighted = dropdownRef.current.querySelector(
-        "[data-highlighted=true]"
+        "[data-highlighted=true]",
       );
       highlighted?.scrollIntoView({ block: "nearest" });
     }
@@ -345,7 +345,7 @@ export function VariableAutocomplete({
         disabled={disabled}
         className={cn(
           "flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
-          className
+          className,
         )}
       />
 
@@ -395,7 +395,7 @@ export function VariableAutocomplete({
                     "flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded-sm cursor-pointer",
                     index === highlightedIndex
                       ? "bg-accent text-accent-foreground"
-                      : "hover:bg-accent hover:text-accent-foreground"
+                      : "hover:bg-accent hover:text-accent-foreground",
                   )}
                   onClick={() => insertVariable(category)}
                   onMouseEnter={() => setHighlightedIndex(index)}
@@ -417,7 +417,7 @@ export function VariableAutocomplete({
                     "flex flex-col items-start w-full px-2 py-1.5 text-sm rounded-sm cursor-pointer",
                     index === highlightedIndex
                       ? "bg-accent text-accent-foreground"
-                      : "hover:bg-accent hover:text-accent-foreground"
+                      : "hover:bg-accent hover:text-accent-foreground",
                   )}
                   onClick={() => insertVariable(selectedCategory, def.property)}
                   onMouseEnter={() => setHighlightedIndex(index)}
@@ -434,17 +434,41 @@ export function VariableAutocomplete({
                 </button>
               ))}
 
-          {!hasItems && (
+          {!hasItems && searchQuery && (
+            <div className="px-2 py-4 text-sm text-center">
+              <p className="text-muted-foreground">
+                No matching variables found
+              </p>
+              <p className="text-xs text-muted-foreground mt-2">
+                💡 You can use custom variables like{" "}
+                <code className="bg-muted px-1 rounded">{`{{${searchQuery || "custom"}.your_field}}`}</code>
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Set matching contact attributes to resolve them at send time.
+              </p>
+            </div>
+          )}
+
+          {!hasItems && !searchQuery && (
             <div className="px-2 py-4 text-sm text-muted-foreground text-center">
-              No matching variables found
+              Start typing a category name
             </div>
           )}
 
           {/* Help text */}
-          <div className="px-2 py-1.5 text-xs text-muted-foreground border-t mt-1">
-            <kbd className="px-1 bg-muted rounded">↑↓</kbd> navigate{" "}
-            <kbd className="px-1 bg-muted rounded">Tab</kbd> select{" "}
-            <kbd className="px-1 bg-muted rounded">Esc</kbd> close
+          <div className="px-2 py-1.5 text-xs text-muted-foreground border-t mt-1 space-y-1">
+            <div>
+              <kbd className="px-1 bg-muted rounded">↑↓</kbd> navigate{" "}
+              <kbd className="px-1 bg-muted rounded">Tab</kbd> select{" "}
+              <kbd className="px-1 bg-muted rounded">Esc</kbd> close
+            </div>
+            <div className="text-[10px]">
+              💡 Custom variables allowed (e.g.,{" "}
+              <code className="bg-muted px-0.5 rounded">
+                promotion.end_date
+              </code>
+              )
+            </div>
           </div>
         </div>
       )}

@@ -44,13 +44,30 @@ export const EDITABLE_STATUSES: VersionStatus[] = [
 
 /**
  * Version content structure - stores the template content at a point in time
+ *
+ * Supports two modes:
+ * 1. Legacy mode: Using header/body/footer strings (backward compatible)
+ * 2. Enhanced mode: Using components object (new full-featured mode)
+ *
+ * When components is present, it takes precedence but legacy fields are
+ * maintained for backward compatibility and simpler queries.
  */
 export interface VersionContent {
+  /** Legacy text header (for backward compatibility) */
   header?: string | null;
+  /** Body text (required) */
   body: string;
+  /** Legacy footer text (for backward compatibility) */
   footer?: string | null;
+  /** Example variable values */
   exampleVars?: Record<string, string>;
+  /** Template category */
   category?: string;
+  /**
+   * Enhanced template components (full Meta API support)
+   * When present, this is the source of truth for template structure
+   */
+  components?: Record<string, unknown>;
 }
 
 /**
@@ -357,6 +374,10 @@ export class TemplateVersionService {
         footer: localeData.footer,
         exampleVars: (localeData.exampleVars as Record<string, string>) || {},
         category: localeData.category || 'utility',
+        // Include components if present in locale data
+        components: localeData.components as
+          | Record<string, unknown>
+          | undefined,
       };
     } else {
       // Fallback: No active version but has history (e.g., all rejected)
@@ -521,7 +542,9 @@ export class TemplateVersionService {
     if (versionData) {
       // Update locale status based on new version status
       if (newStatus === VersionStatus.APPROVED) {
-        // Approved: set activeVersion and approvalStatus
+        // Approved: set activeVersion, approvalStatus, and sync content to locale
+        const versionContent = versionData.content as VersionContent;
+
         await db
           .update(templateLocales)
           .set({
@@ -529,6 +552,13 @@ export class TemplateVersionService {
             approvalStatus: 'approved',
             reviewedAt: new Date(),
             updatedAt: new Date(),
+            // Sync content from approved version to locale for query convenience
+            header: versionContent.header,
+            body: versionContent.body,
+            footer: versionContent.footer,
+            exampleVars: versionContent.exampleVars,
+            category: versionContent.category,
+            components: versionContent.components,
           })
           .where(eq(templateLocales.id, versionData.localeId));
       } else if (newStatus === VersionStatus.REJECTED) {
