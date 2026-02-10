@@ -175,7 +175,11 @@ export interface ThumbnailJobMessage {
    * Context for the thumbnail job
    * Helps identify the source of the request
    */
-  context: "kb-media" | "message-attachment" | "profile-picture";
+  context:
+    | "kb-media"
+    | "message-attachment"
+    | "profile-picture"
+    | "template-media";
 
   /**
    * Related entity IDs for database updates
@@ -191,6 +195,10 @@ export interface ThumbnailJobMessage {
     chatId?: string;
     /** User ID for profile picture updates */
     userId?: string;
+    /** Locale ID for template media */
+    localeId?: string;
+    /** Original S3 key for cleanup after thumbnail generation */
+    originalS3Key?: string;
   };
 
   /**
@@ -358,7 +366,11 @@ export interface ThumbnailResult {
   /**
    * Context info passed through from job
    */
-  context?: "kb-media" | "message-attachment" | "profile-picture";
+  context?:
+    | "kb-media"
+    | "message-attachment"
+    | "profile-picture"
+    | "template-media";
 
   /**
    * Entity IDs passed through from job
@@ -369,6 +381,8 @@ export interface ThumbnailResult {
     messageId?: string;
     chatId?: string;
     userId?: string;
+    localeId?: string;
+    originalS3Key?: string;
   };
 
   /**
@@ -463,7 +477,8 @@ export interface FfmpegPreset {
 export type ThumbnailContext =
   | "kb-media"
   | "message-attachment"
-  | "profile-picture";
+  | "profile-picture"
+  | "template-media";
 
 /**
  * Configuration for thumbnail generation
@@ -566,6 +581,22 @@ export const THUMBNAIL_PRESETS: Record<ThumbnailContext, ThumbnailConfig> = {
     processingTimeoutMs: 15000, // Faster timeout for simpler images
     pdfViewportWidth: 200, // Not used for profile pictures
     pdfViewportHeight: 200, // Not used for profile pictures
+  },
+
+  /**
+   * Template media thumbnails
+   * Used for WhatsApp template header previews in the template editor
+   * Medium resolution sufficient for preview display
+   * Supports video first frames and PDF previews
+   */
+  "template-media": {
+    maxWidth: 400,
+    maxHeight: 400,
+    quality: 80,
+    videoFramePosition: "00:00:01",
+    processingTimeoutMs: 30000,
+    pdfViewportWidth: 800,
+    pdfViewportHeight: 1100,
   },
 } as const;
 

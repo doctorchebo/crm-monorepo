@@ -18,15 +18,26 @@ async function bootstrap() {
   // IMPORTANT: Route-specific parsers must be applied BEFORE the default parser
   // because Express middleware runs in order and the first matching parser wins
 
-  // Large limit for template media upload endpoints (10MB for base64 encoded images)
-  app.use('/templates/media', bodyParser.json({ limit: '10mb' }));
+  // WhatsApp Media Limits (https://developers.facebook.com/docs/whatsapp/cloud-api/reference/media):
+  // - Images: 5 MB
+  // - Videos: 16 MB (but we accept 100MB for compression)
+  // - Audio: 16 MB
+  // - Documents: 100 MB
+  // Base64 encoding adds ~33% overhead, so we need: 100MB * 1.33 ≈ 133MB
+  // Using 150MB limit to provide buffer for JSON wrapper overhead
+
+  // Large limit for template media upload endpoints (supports documents up to 100MB)
+  app.use('/templates/media', bodyParser.json({ limit: '150mb' }));
   app.use(
     '/templates/:id/locales/:localeId/media',
-    bodyParser.json({ limit: '10mb' }),
+    bodyParser.json({ limit: '150mb' }),
   );
 
-  // Large limit for WhatsApp media uploads
-  app.use('/whatsapp/media', bodyParser.json({ limit: '50mb' }));
+  // Large limit for WhatsApp media uploads (same limits apply)
+  app.use('/whatsapp/media', bodyParser.json({ limit: '150mb' }));
+
+  // Knowledge Base media uploads (supports documents up to 100MB)
+  app.use('/knowledge-base/media', bodyParser.json({ limit: '150mb' }));
 
   // Default limit for all other routes (1MB is reasonable for most requests)
   app.use(bodyParser.json({ limit: '1mb' }));

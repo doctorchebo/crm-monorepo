@@ -592,6 +592,31 @@ export class WhatsAppGateway
   }
 
   /**
+   * Emit template media thumbnail ready event to all connected clients
+   * Called when Lambda thumbnail generation completes for template headers
+   *
+   * @param event - Template media thumbnail ready event data
+   */
+  emitTemplateMediaThumbnailReady(event: {
+    tempId: string;
+    originalS3Key: string;
+    thumbnailS3Key: string;
+    thumbnailUrl: string;
+    width?: number;
+    height?: number;
+  }): void {
+    if (this.connectedClients.size === 0) {
+      return; // No clients connected
+    }
+
+    console.log(
+      `📡 Emitting template-media:thumbnail-ready for tempId ${event.tempId} to ${this.connectedClients.size} clients`,
+    );
+
+    this.server.emit('template-media:thumbnail-ready', event);
+  }
+
+  /**
    * Generic method to emit any event to all connected clients
    * Used by services that need to broadcast custom events
    *

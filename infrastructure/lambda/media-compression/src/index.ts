@@ -118,9 +118,12 @@ function validateMessage(message: unknown): MediaJobMessage {
     }
     if (
       !thumbMsg.context ||
-      !["kb-media", "message-attachment", "profile-picture"].includes(
-        thumbMsg.context,
-      )
+      ![
+        "kb-media",
+        "message-attachment",
+        "profile-picture",
+        "template-media",
+      ].includes(thumbMsg.context)
     ) {
       throw new Error("Invalid thumbnail message: missing or invalid context");
     }

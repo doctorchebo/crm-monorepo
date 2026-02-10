@@ -1,10 +1,10 @@
 "use client";
 
 /**
- * Location Picker Modal Component
+ * Location Editor Modal Component
  *
- * A modal dialog for selecting and sending a location via WhatsApp.
- * Uses the LocationPicker component for the actual location selection.
+ * A modal dialog for selecting a location to use in templates or other contexts.
+ * Similar to LocationPickerModal but designed for editing/saving rather than sending.
  *
  * Features:
  * - Interactive map for picking locations by clicking
@@ -12,7 +12,7 @@
  * - Address/place search using OpenStreetMap Nominatim (free)
  * - Auto-fill address from selected coordinates
  * - Optional name and address fields
- * - Responsive design
+ * - Pre-populated with existing location data for editing
  */
 
 import { Button } from "@/components/ui/button";
@@ -24,38 +24,62 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Loader2, MapPin, Send } from "lucide-react";
+import { Check, MapPin } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { LocationData } from "./location-picker";
 import { LocationPicker } from "./location-picker";
 
-export interface LocationPickerResult {
+export interface LocationEditorResult {
   latitude: number;
   longitude: number;
   name?: string;
   address?: string;
 }
 
-interface LocationPickerModalProps {
+interface LocationEditorModalProps {
+  /** Whether the modal is open */
   isOpen: boolean;
+  /** Callback when modal should close */
   onClose: () => void;
-  onSend: (location: LocationPickerResult) => void;
-  isSending?: boolean;
+  /** Callback when location is saved */
+  onSave: (location: LocationEditorResult) => void;
+  /** Initial location data for editing */
+  initialLocation?: LocationEditorResult;
+  /** Title override for the modal */
+  title?: string;
+  /** Description override for the modal */
+  description?: string;
 }
 
-export function LocationPickerModal({
+export function LocationEditorModal({
   isOpen,
   onClose,
-  onSend,
-  isSending = false,
-}: LocationPickerModalProps) {
+  onSave,
+  initialLocation,
+  title,
+  description,
+}: LocationEditorModalProps) {
   const t = useTranslations("chats.location");
 
   // Current location state
   const [location, setLocation] = useState<LocationData | null>(null);
   const [hasSelectedLocation, setHasSelectedLocation] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
+
+  // Initialize with existing location when modal opens or initialLocation changes
+  useEffect(() => {
+    if (isOpen && initialLocation) {
+      setLocation({
+        latitude: initialLocation.latitude,
+        longitude: initialLocation.longitude,
+        name: initialLocation.name,
+        address: initialLocation.address,
+      });
+      setHasSelectedLocation(true);
+      setLocationError(null);
+    }
+  }, [isOpen, initialLocation]);
 
   // Handle location change from picker
   const handleLocationChange = useCallback((newLocation: LocationData) => {
@@ -64,20 +88,23 @@ export function LocationPickerModal({
     setLocationError(null);
   }, []);
 
-  // Handle send
-  const handleSend = useCallback(() => {
+  // Handle save
+  const handleSave = useCallback(() => {
     if (!hasSelectedLocation || !location) {
       setLocationError(t("errors.pleaseSelect"));
       return;
     }
 
-    onSend({
+    onSave({
       latitude: location.latitude,
       longitude: location.longitude,
       name: location.name,
       address: location.address,
     });
-  }, [location, hasSelectedLocation, onSend, t]);
+
+    // Close modal after successful save
+    onClose();
+  }, [location, hasSelectedLocation, onSave, onClose, t]);
 
   // Reset state when modal closes
   const handleClose = useCallback(() => {
@@ -93,9 +120,11 @@ export function LocationPickerModal({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <MapPin className="h-5 w-5 text-primary" />
-            {t("title")}
+            {title || t("title")}
           </DialogTitle>
-          <DialogDescription>{t("description")}</DialogDescription>
+          <DialogDescription>
+            {description || t("description")}
+          </DialogDescription>
         </DialogHeader>
 
         <LocationPicker
@@ -114,24 +143,12 @@ export function LocationPickerModal({
         )}
 
         <DialogFooter className="gap-2 sm:gap-0">
-          <Button variant="outline" onClick={handleClose} disabled={isSending}>
+          <Button variant="outline" onClick={handleClose}>
             {t("cancel")}
           </Button>
-          <Button
-            onClick={handleSend}
-            disabled={!hasSelectedLocation || isSending}
-          >
-            {isSending ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                {t("sending")}
-              </>
-            ) : (
-              <>
-                <Send className="h-4 w-4 mr-2" />
-                {t("send")}
-              </>
-            )}
+          <Button onClick={handleSave} disabled={!hasSelectedLocation}>
+            <Check className="h-4 w-4 mr-2" />
+            {t("save") || "Save Location"}
           </Button>
         </DialogFooter>
       </DialogContent>

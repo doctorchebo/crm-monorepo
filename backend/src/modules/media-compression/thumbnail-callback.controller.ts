@@ -21,7 +21,7 @@
 
 import { db } from '@database/db.connection';
 import { kbObjectMedia } from '@database/knowledge-base.schema';
-import { messages, stagedMedia } from '@database/schema';
+import { messages, stagedMedia, templateMedia } from '@database/schema';
 import { Body, Controller, HttpCode, Logger, Post } from '@nestjs/common';
 import { S3Service } from '@shared/services/s3.service';
 import { eq } from 'drizzle-orm';
@@ -45,12 +45,14 @@ interface ThumbnailCallbackPayload {
     bucket: string;
     key: string;
   };
-  context?: 'kb-media' | 'message-attachment';
+  context?: 'kb-media' | 'message-attachment' | 'template-media';
   entityIds?: {
     mediaId?: string;
     attachmentId?: string;
     messageId?: string;
     chatId?: string;
+    localeId?: string;
+    originalS3Key?: string;
   };
 }
 
@@ -111,6 +113,9 @@ export class ThumbnailCallbackController {
         case 'message-attachment':
           await this.handleMessageThumbnail(payload);
           break;
+        case 'template-media':
+          await this.handleTemplateMediaThumbnail(payload);
+          break;
         default:
           this.logger.warn(
             `[Thumbnail Callback] Unknown context: ${payload.context}`,
@@ -163,6 +168,123 @@ export class ThumbnailCallbackController {
       // Log error but don't fail - thumbnail is optional
       this.logger.warn(
         `[Thumbnail Callback] Thumbnail generation failed for KB media ${mediaId}: ${payload.error}`,
+      );
+    }
+  }
+
+  /**
+   * Handle thumbnail callback for template media (videos/documents)
+   *
+   * When thumbnail is successfully generated:
+   * 1. Update template_media record with thumbnail S3 key
+   * 2. Delete the original file from S3 (since Meta has the original)
+   *
+   * For temporary uploads (mediaId starting with "temp-"):
+   * - No database record exists, so we skip the DB update
+   * - Still delete the original file after thumbnail is generated
+   * - The thumbnail will remain in S3 for display
+   */
+  private async handleTemplateMediaThumbnail(
+    payload: ThumbnailCallbackPayload,
+  ): Promise<void> {
+    const mediaId = payload.entityIds?.mediaId;
+    const originalS3Key = payload.entityIds?.originalS3Key;
+
+    if (!mediaId) {
+      this.logger.warn(
+        `[Thumbnail Callback] No mediaId in template media callback for job ${payload.jobId}`,
+      );
+      return;
+    }
+
+    // Handle temporary uploads (no database record exists)
+    // For temp uploads: emit WebSocket event so frontend can update, then delete original
+    if (mediaId.startsWith('temp-')) {
+      if (payload.success && payload.thumbnailKey) {
+        // Extract tempId from mediaId (format: "temp-{tempId}")
+        const tempId = mediaId.substring(5);
+
+        // Generate presigned URL for the thumbnail
+        const { url: thumbnailUrl } =
+          await this.s3Service.generatePresignedDownloadUrl(
+            payload.thumbnailKey,
+            { expiresIn: 3600 }, // 1 hour expiry
+          );
+
+        this.logger.log(
+          `[Thumbnail Callback] Generated thumbnail for temp media (job ${payload.jobId}): ` +
+            `${payload.thumbnailKey} (${payload.width}x${payload.height}, time: ${payload.processingTimeMs}ms)`,
+        );
+
+        // Emit WebSocket event so frontend can update the preview
+        whatsAppGatewayInstance?.emitTemplateMediaThumbnailReady({
+          tempId,
+          originalS3Key: originalS3Key || '',
+          thumbnailS3Key: payload.thumbnailKey,
+          thumbnailUrl,
+          width: payload.width,
+          height: payload.height,
+        });
+
+        // Delete the original file from S3 (thumbnail is now ready for display)
+        if (originalS3Key) {
+          try {
+            await this.s3Service.deleteFile(originalS3Key);
+            this.logger.log(
+              `[Thumbnail Callback] Deleted temp original file from S3: ${originalS3Key}`,
+            );
+          } catch (deleteError) {
+            this.logger.warn(
+              `[Thumbnail Callback] Failed to delete temp original file ${originalS3Key}: ${deleteError.message}`,
+            );
+          }
+        }
+      } else {
+        this.logger.warn(
+          `[Thumbnail Callback] Temp thumbnail generation failed for ${originalS3Key}: ${payload.error}`,
+        );
+        // On failure, keep original file so UI still works
+      }
+      return;
+    }
+
+    if (payload.success && payload.thumbnailKey) {
+      // Update template media record with thumbnail S3 key
+      // The s3Key column now points to the thumbnail instead of the original
+      await db
+        .update(templateMedia)
+        .set({
+          s3Key: payload.thumbnailKey,
+          // Clear the old cdnUrl - it will be regenerated via presigned URL
+          cdnUrl: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(templateMedia.id, mediaId));
+
+      this.logger.log(
+        `[Thumbnail Callback] Updated template media ${mediaId} with thumbnail: ` +
+          `${payload.thumbnailKey} (${payload.width}x${payload.height}, time: ${payload.processingTimeMs}ms)`,
+      );
+
+      // Delete the original file from S3 (Meta has it, we only need the thumbnail)
+      if (originalS3Key) {
+        try {
+          await this.s3Service.deleteFile(originalS3Key);
+          this.logger.log(
+            `[Thumbnail Callback] Deleted original file from S3: ${originalS3Key}`,
+          );
+        } catch (deleteError) {
+          // Don't fail if cleanup fails - it's not critical
+          this.logger.warn(
+            `[Thumbnail Callback] Failed to delete original file ${originalS3Key}: ${deleteError.message}`,
+          );
+        }
+      }
+    } else if (payload.error) {
+      // Log error - for template media, we'll keep the original file as fallback
+      this.logger.warn(
+        `[Thumbnail Callback] Thumbnail generation failed for template media ${mediaId}: ${payload.error}. ` +
+          `Original file will be kept as fallback.`,
       );
     }
   }

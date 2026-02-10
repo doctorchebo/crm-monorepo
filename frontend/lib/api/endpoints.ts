@@ -2255,6 +2255,8 @@ export const backendApi = {
       mimeType: string;
       fileSize: number;
       error?: string;
+      /** Temporary ID for matching WebSocket thumbnail events (videos/documents only) */
+      tempId?: string;
     }> => apiClient.post(`/templates/media/upload-temporary`, data),
 
     /**

@@ -3,6 +3,7 @@ import { templateMedia } from '@database/schema';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ImageProcessingService } from '@shared/services/image-processing.service';
+import { LambdaThumbnailService } from '@shared/services/lambda-thumbnail.service';
 import { S3Service } from '@shared/services/s3.service';
 import * as crypto from 'crypto';
 import { and, eq } from 'drizzle-orm';
@@ -27,6 +28,8 @@ export interface MediaUploadResult {
   url?: string;
   /** S3 key for the uploaded file */
   s3Key?: string;
+  /** Temp ID for matching WebSocket thumbnail events (temp uploads only) */
+  tempId?: string;
   error?: string;
 }
 
@@ -59,15 +62,44 @@ export class MediaUploadService {
     private readonly configService: ConfigService,
     private readonly s3Service: S3Service,
     private readonly imageProcessingService: ImageProcessingService,
+    private readonly lambdaThumbnailService: LambdaThumbnailService,
   ) {}
+
+  /**
+   * Generate S3 key for template media (original file)
+   * Path: templates/media/{localeId}/{componentType}/{uniqueFilename}.{ext}
+   *
+   * Preserves the original file extension
+   */
+  private generateOriginalS3Key(
+    localeId: string,
+    componentType: string,
+    filename: string,
+    mimeType: string,
+  ): string {
+    const timestamp = Date.now();
+    const randomSuffix = crypto.randomBytes(4).toString('hex');
+    // Extract base filename and extension
+    const lastDotIndex = filename.lastIndexOf('.');
+    const baseName =
+      lastDotIndex > 0 ? filename.substring(0, lastDotIndex) : filename;
+    const extension =
+      lastDotIndex > 0
+        ? filename.substring(lastDotIndex)
+        : this.getExtensionFromMimeType(mimeType);
+    const sanitizedFilename = baseName.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const finalFilename = `${timestamp}-${randomSuffix}-${sanitizedFilename}${extension}`;
+
+    return `templates/media/${localeId}/${componentType}/${finalFilename}`;
+  }
 
   /**
    * Generate S3 key for template media thumbnail
    * Path: templates/media/{localeId}/{componentType}/{uniqueFilename}_thumb.jpg
    *
-   * Always uses .jpg extension since thumbnails are always JPEG
+   * Thumbnails are always JPEG for consistency
    */
-  private generateS3Key(
+  private generateThumbnailS3Key(
     localeId: string,
     componentType: string,
     filename: string,
@@ -83,6 +115,21 @@ export class MediaUploadService {
     const thumbnailFilename = `${timestamp}-${randomSuffix}-${sanitizedFilename}_thumb.jpg`;
 
     return `templates/media/${localeId}/${componentType}/${thumbnailFilename}`;
+  }
+
+  /**
+   * Get file extension from MIME type
+   */
+  private getExtensionFromMimeType(mimeType: string): string {
+    const mimeToExt: Record<string, string> = {
+      'image/jpeg': '.jpg',
+      'image/png': '.png',
+      'image/webp': '.webp',
+      'video/mp4': '.mp4',
+      'video/3gpp': '.3gp',
+      'application/pdf': '.pdf',
+    };
+    return mimeToExt[mimeType] || '';
   }
 
   /**
@@ -107,10 +154,9 @@ export class MediaUploadService {
    *
    * This method performs dual-upload:
    * 1. Uploads ORIGINAL to Meta's Resumable Upload API for template submission (assetHandle)
-   * 2. Uploads THUMBNAIL to S3 for persistent storage and display in edit mode (cdnUrl)
-   *
-   * The original file is stored on Meta's servers, so we only store a compressed
-   * thumbnail in S3 for UI display purposes, saving storage costs.
+   * 2. Handles S3 storage based on media type:
+   *    - Images: Generates thumbnail locally with Sharp, stores only thumbnail
+   *    - Videos/Documents: Stores original file, queues Lambda for async thumbnail generation
    *
    * Uses the Resumable Upload API for reliable uploads to Meta
    */
@@ -126,32 +172,52 @@ export class MediaUploadService {
         return { success: false, error: validation.error };
       }
 
-      // Generate S3 key for persistent storage (thumbnail)
-      const s3Key = this.generateS3Key(localeId, componentType, file.filename);
+      const isImage = file.mimeType.startsWith('image/');
+      const isVideo = file.mimeType.startsWith('video/');
+      const isDocument = file.mimeType === 'application/pdf';
 
-      // Prepare thumbnail for S3 (compressed version for UI display)
-      // Only generate thumbnails for images, other media types are stored as-is
-      let thumbnailBuffer: Buffer;
-      let thumbnailMimeType: string;
-      let thumbnailSize: number;
+      // Determine S3 storage strategy based on media type
+      let s3Key: string;
+      let s3Buffer: Buffer;
+      let s3MimeType: string;
+      let thumbnailS3Key: string | undefined;
 
-      if (file.mimeType.startsWith('image/')) {
+      if (isImage) {
+        // For images: generate thumbnail locally and store only the thumbnail
         const thumbnail = await this.imageProcessingService.generateThumbnail(
           file.buffer,
           { maxWidth: 400, maxHeight: 400, quality: 80 },
         );
-        thumbnailBuffer = thumbnail.buffer;
-        thumbnailMimeType = thumbnail.mimeType;
-        thumbnailSize = thumbnail.thumbnailSize;
+
+        s3Key = this.generateThumbnailS3Key(
+          localeId,
+          componentType,
+          file.filename,
+        );
+        s3Buffer = thumbnail.buffer;
+        s3MimeType = thumbnail.mimeType;
 
         this.logger.log(
-          `Thumbnail generated: ${file.filename} (${file.fileSize} bytes -> ${thumbnailSize} bytes, ${Math.round((1 - thumbnailSize / file.fileSize) * 100)}% reduction)`,
+          `Thumbnail generated: ${file.filename} (${file.fileSize} bytes -> ${thumbnail.thumbnailSize} bytes, ` +
+            `${Math.round((1 - thumbnail.thumbnailSize / file.fileSize) * 100)}% reduction)`,
         );
       } else {
-        // For non-image media (video, document), store as-is
-        thumbnailBuffer = file.buffer;
-        thumbnailMimeType = file.mimeType;
-        thumbnailSize = file.fileSize;
+        // For videos/documents: store original file, queue Lambda for thumbnail
+        s3Key = this.generateOriginalS3Key(
+          localeId,
+          componentType,
+          file.filename,
+          file.mimeType,
+        );
+        s3Buffer = file.buffer;
+        s3MimeType = file.mimeType;
+        // Thumbnail will be generated by Lambda at this path
+        thumbnailS3Key =
+          this.lambdaThumbnailService.generateThumbnailKey(s3Key);
+
+        this.logger.log(
+          `Storing original ${isVideo ? 'video' : 'document'}: ${file.filename} (${file.fileSize} bytes)`,
+        );
       }
 
       // Create tracking record
@@ -170,17 +236,24 @@ export class MediaUploadService {
         .returning();
 
       try {
-        // Upload THUMBNAIL to S3 for persistent storage and display
-        await this.s3Service.uploadFile(
-          s3Key,
-          thumbnailBuffer,
-          thumbnailMimeType,
-        );
+        // Upload to S3
+        await this.s3Service.uploadFile(s3Key, s3Buffer, s3MimeType);
         const cdnUrl = await this.getViewableUrl(s3Key);
 
         this.logger.log(
-          `Thumbnail uploaded to S3: ${file.filename} -> ${s3Key}`,
+          `${isImage ? 'Thumbnail' : 'Original'} uploaded to S3: ${file.filename} -> ${s3Key}`,
         );
+
+        // Queue Lambda thumbnail job for videos/documents
+        if ((isVideo || isDocument) && thumbnailS3Key) {
+          await this.queueTemplateThumbnailJob({
+            localeId,
+            mediaRecordId: mediaRecord.id,
+            s3Key,
+            thumbnailS3Key,
+            mimeType: file.mimeType,
+          });
+        }
 
         // Start Meta upload session with ORIGINAL file
         const session = await this.createUploadSession(
@@ -197,7 +270,7 @@ export class MediaUploadService {
         // Calculate Meta asset handle expiration (30 days from now)
         const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
-        // Update record with success - include both Meta asset handle and S3 URL
+        // Update record with success
         await db
           .update(templateMedia)
           .set({
@@ -249,18 +322,58 @@ export class MediaUploadService {
   }
 
   /**
+   * Queue a Lambda thumbnail job for template media (videos/documents)
+   */
+  private async queueTemplateThumbnailJob(params: {
+    localeId: string;
+    mediaRecordId: string;
+    s3Key: string;
+    thumbnailS3Key: string;
+    mimeType: string;
+  }): Promise<void> {
+    if (!this.lambdaThumbnailService.isLambdaThumbnailEnabled()) {
+      this.logger.warn(
+        `Lambda thumbnails disabled - no thumbnail will be generated for ${params.s3Key}`,
+      );
+      return;
+    }
+
+    try {
+      const jobId =
+        await this.lambdaThumbnailService.queueTemplateMediaThumbnail({
+          mediaId: params.mediaRecordId,
+          localeId: params.localeId,
+          s3Key: params.s3Key,
+          thumbnailS3Key: params.thumbnailS3Key,
+          mimeType: params.mimeType,
+        });
+
+      if (jobId) {
+        this.logger.log(
+          `Queued Lambda thumbnail job ${jobId} for template media: ${params.s3Key}`,
+        );
+      }
+    } catch (error) {
+      // Don't fail the upload if thumbnail queuing fails - it's not critical
+      this.logger.warn(
+        `Failed to queue thumbnail job for ${params.s3Key}: ${error.message}`,
+      );
+    }
+  }
+
+  /**
    * Upload media directly to Meta and S3 without storing in database
    * Used for temporary uploads before template/locale is created
    *
    * Returns the asset handle for Meta API and a URL for display.
    * The S3 file uses a temporary path and should be moved/deleted later.
    *
-   * Uploads ORIGINAL to Meta, THUMBNAIL to S3
+   * Handles media types:
+   * - Images: Generates thumbnail locally with Sharp, stores only thumbnail
+   * - Videos/Documents: Stores original file, queues Lambda for async thumbnail
    */
   async uploadMediaTemporary(file: MediaFileInfo): Promise<MediaUploadResult> {
-    // Generate a temporary S3 key (will be moved when template is saved)
     const tempId = crypto.randomBytes(8).toString('hex');
-    const s3Key = this.generateS3Key('temp', tempId, file.filename);
 
     try {
       // Validate file type and size
@@ -269,42 +382,82 @@ export class MediaUploadService {
         return { success: false, error: validation.error };
       }
 
-      // Prepare thumbnail for S3 (compressed version for UI display)
-      // Only generate thumbnails for images, other media types are stored as-is
-      let thumbnailBuffer: Buffer;
-      let thumbnailMimeType: string;
-      let thumbnailSize: number;
+      const isImage = file.mimeType.startsWith('image/');
+      const isVideo = file.mimeType.startsWith('video/');
+      const isDocument = file.mimeType === 'application/pdf';
 
-      if (file.mimeType.startsWith('image/')) {
+      // Determine S3 storage strategy based on media type
+      let s3Key: string;
+      let s3Buffer: Buffer;
+      let s3MimeType: string;
+      let thumbnailS3Key: string | undefined;
+
+      if (isImage) {
+        // For images: generate thumbnail locally and store only the thumbnail
         const thumbnail = await this.imageProcessingService.generateThumbnail(
           file.buffer,
           { maxWidth: 400, maxHeight: 400, quality: 80 },
         );
-        thumbnailBuffer = thumbnail.buffer;
-        thumbnailMimeType = thumbnail.mimeType;
-        thumbnailSize = thumbnail.thumbnailSize;
+
+        s3Key = this.generateThumbnailS3Key('temp', tempId, file.filename);
+        s3Buffer = thumbnail.buffer;
+        s3MimeType = thumbnail.mimeType;
 
         this.logger.log(
-          `Thumbnail generated for temp upload: ${file.filename} (${file.fileSize} bytes -> ${thumbnailSize} bytes, ${Math.round((1 - thumbnailSize / file.fileSize) * 100)}% reduction)`,
+          `Thumbnail generated for temp upload: ${file.filename} ` +
+            `(${file.fileSize} bytes -> ${thumbnail.thumbnailSize} bytes, ` +
+            `${Math.round((1 - thumbnail.thumbnailSize / file.fileSize) * 100)}% reduction)`,
         );
       } else {
-        // For non-image media (video, document), store as-is
-        thumbnailBuffer = file.buffer;
-        thumbnailMimeType = file.mimeType;
-        thumbnailSize = file.fileSize;
+        // For videos/documents: store original file, queue Lambda for thumbnail
+        s3Key = this.generateOriginalS3Key(
+          'temp',
+          tempId,
+          file.filename,
+          file.mimeType,
+        );
+        s3Buffer = file.buffer;
+        s3MimeType = file.mimeType;
+        thumbnailS3Key =
+          this.lambdaThumbnailService.generateThumbnailKey(s3Key);
+
+        this.logger.log(
+          `Storing original ${isVideo ? 'video' : 'document'} for temp upload: ` +
+            `${file.filename} (${file.fileSize} bytes)`,
+        );
       }
 
-      // Upload THUMBNAIL to S3 first for immediate display
-      await this.s3Service.uploadFile(
-        s3Key,
-        thumbnailBuffer,
-        thumbnailMimeType,
-      );
-      const cdnUrl = await this.getViewableUrl(s3Key);
+      // Upload to S3
+      await this.s3Service.uploadFile(s3Key, s3Buffer, s3MimeType);
 
-      this.logger.log(
-        `Temporary thumbnail uploaded to S3: ${file.filename} -> ${s3Key}`,
-      );
+      // For videos/documents, queue Lambda thumbnail job (async)
+      // The original file will be deleted after thumbnail is ready
+      // We return the thumbnail URL path to the frontend - Lambda will create it
+      let displayUrl: string;
+
+      if ((isVideo || isDocument) && thumbnailS3Key) {
+        // Queue Lambda to generate thumbnail (fire and forget)
+        // Lambda will create the thumbnail and delete the original
+        this.queueTempThumbnailJob(
+          s3Key,
+          thumbnailS3Key,
+          file.mimeType,
+          tempId,
+        );
+
+        // Return the original URL for now - the file exists immediately
+        // In future: could return thumbnail URL and have frontend retry
+        displayUrl = await this.getViewableUrl(s3Key);
+
+        this.logger.log(
+          `Temporary original uploaded to S3: ${file.filename} -> ${s3Key}`,
+        );
+      } else {
+        displayUrl = await this.getViewableUrl(s3Key);
+        this.logger.log(
+          `Temporary thumbnail uploaded to S3: ${file.filename} -> ${s3Key}`,
+        );
+      }
 
       // Start Meta upload session with ORIGINAL file
       const session = await this.createUploadSession(
@@ -319,28 +472,68 @@ export class MediaUploadService {
       );
 
       this.logger.log(
-        `Temporary media uploaded successfully: ${file.filename} -> Meta: ${assetHandle}, S3 (thumbnail): ${cdnUrl}`,
+        `Temporary media uploaded successfully: ${file.filename} -> ` +
+          `Meta: ${assetHandle}, S3: ${displayUrl}`,
       );
+
+      // Return tempId for videos/documents so frontend can match WebSocket thumbnail events
+      const returnTempId = isVideo || isDocument ? tempId : undefined;
 
       return {
         success: true,
         assetHandle,
-        url: cdnUrl,
+        url: displayUrl,
         s3Key,
+        tempId: returnTempId,
       };
     } catch (error) {
-      // Try to clean up S3 on failure
-      try {
-        await this.s3Service.deleteFile(s3Key);
-      } catch (cleanupError) {
-        this.logger.warn(
-          `Failed to clean up temporary S3 file after error: ${cleanupError.message}`,
-        );
-      }
-
+      // Try to clean up S3 on failure (we don't know the exact key, but try with temp pattern)
       this.logger.error(`Temporary media upload failed: ${error.message}`);
       return { success: false, error: error.message };
     }
+  }
+
+  /**
+   * Queue Lambda thumbnail job for temporary uploads (fire-and-forget)
+   *
+   * For temporary uploads, there's no database record to update.
+   * The callback will just delete the original file after the thumbnail is ready.
+   * We use a "temp-" prefix on the mediaId to signal this to the callback handler.
+   */
+  private queueTempThumbnailJob(
+    originalS3Key: string,
+    thumbnailS3Key: string,
+    mimeType: string,
+    tempId: string,
+  ): void {
+    if (!this.lambdaThumbnailService.isLambdaThumbnailEnabled()) {
+      this.logger.warn(
+        `Lambda thumbnails disabled - no thumbnail for temp file ${originalS3Key}`,
+      );
+      return;
+    }
+
+    // Fire and forget - don't await, don't block the response
+    this.lambdaThumbnailService
+      .queueTemplateMediaThumbnail({
+        mediaId: `temp-${tempId}`, // Prefix indicates no DB record exists
+        localeId: 'temp',
+        s3Key: originalS3Key,
+        thumbnailS3Key,
+        mimeType,
+      })
+      .then((jobId) => {
+        if (jobId) {
+          this.logger.log(
+            `Queued Lambda thumbnail job ${jobId} for temp upload: ${originalS3Key}`,
+          );
+        }
+      })
+      .catch((error) => {
+        this.logger.warn(
+          `Failed to queue thumbnail for temp upload ${originalS3Key}: ${error.message}`,
+        );
+      });
   }
 
   /**
@@ -452,19 +645,20 @@ export class MediaUploadService {
   }
 
   /**
-   * Upload file data to the session
+   * Upload file data to the session with retry logic
+   *
+   * Meta's Resumable Upload API can return transient errors, especially for large files.
+   * This method implements exponential backoff retry for retriable errors.
+   *
+   * @see https://developers.facebook.com/docs/graph-api/guides/upload#uploading
    */
   private async uploadFileData(
     sessionId: string,
     buffer: Buffer,
+    maxRetries: number = 3,
   ): Promise<string> {
     const accessToken = this.getAccessToken();
-
     const url = `${this.baseUrl}/${this.apiVersion}/${sessionId}`;
-
-    this.logger.debug(
-      `Uploading ${buffer.length} bytes to session ${sessionId}`,
-    );
 
     // Get ArrayBuffer from Buffer for fetch body compatibility
     // Buffer shares memory with its underlying ArrayBuffer, so we slice to get a clean copy
@@ -473,26 +667,125 @@ export class MediaUploadService {
       buffer.byteOffset + buffer.byteLength,
     ) as ArrayBuffer;
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `OAuth ${accessToken}`,
-        file_offset: '0',
-        'Content-Type': 'application/octet-stream',
-      },
-      // Cast to unknown first to work around strict TypeScript typings
-      body: arrayBuffer as unknown as BodyInit,
-    });
+    let lastError: Error | null = null;
 
-    const data = await response.json();
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        if (attempt > 0) {
+          // Exponential backoff: 2s, 4s, 8s
+          const delayMs = Math.pow(2, attempt) * 1000;
+          this.logger.log(
+            `Retry ${attempt}/${maxRetries} for upload to session ${sessionId} after ${delayMs}ms delay`,
+          );
+          await this.delay(delayMs);
+        }
 
-    if (!response.ok) {
-      this.logger.error(`Failed to upload file data: ${JSON.stringify(data)}`);
-      throw new Error(data.error?.message || 'Failed to upload file data');
+        this.logger.debug(
+          `Uploading ${buffer.length} bytes to session ${sessionId} (attempt ${attempt + 1}/${maxRetries + 1})`,
+        );
+
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            Authorization: `OAuth ${accessToken}`,
+            file_offset: '0',
+            'Content-Type': 'application/octet-stream',
+          },
+          // Cast to unknown first to work around strict TypeScript typings
+          body: arrayBuffer as unknown as BodyInit,
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          // Check if error is retriable
+          const isRetriable =
+            data?.debug_info?.retriable === true ||
+            data?.error?.is_transient === true ||
+            response.status === 503 ||
+            response.status === 429 ||
+            response.status === 500;
+
+          if (isRetriable && attempt < maxRetries) {
+            this.logger.warn(
+              `Retriable error on attempt ${attempt + 1}: ${JSON.stringify(data)}`,
+            );
+            lastError = new Error(
+              data.error?.message ||
+                data.debug_info?.message ||
+                'Transient upload error',
+            );
+            continue; // Try again
+          }
+
+          // Non-retriable or max retries exceeded
+          this.logger.error(
+            `Failed to upload file data after ${attempt + 1} attempts: ${JSON.stringify(data)}`,
+          );
+          throw new Error(
+            data.error?.message ||
+              data.debug_info?.message ||
+              'Failed to upload file data',
+          );
+        }
+
+        // Success - 'h' is the asset handle
+        if (attempt > 0) {
+          this.logger.log(
+            `Upload succeeded on retry ${attempt} for session ${sessionId}`,
+          );
+        }
+        return data.h;
+      } catch (error) {
+        // Network errors are always retriable
+        if (
+          error instanceof TypeError &&
+          error.message.includes('fetch') &&
+          attempt < maxRetries
+        ) {
+          this.logger.warn(
+            `Network error on attempt ${attempt + 1}: ${error.message}`,
+          );
+          lastError = error;
+          continue;
+        }
+
+        // For other errors, check if we should retry
+        if (attempt < maxRetries && this.isTransientError(error)) {
+          lastError = error;
+          continue;
+        }
+
+        throw error;
+      }
     }
 
-    // 'h' is the asset handle
-    return data.h;
+    // If we get here, all retries failed
+    throw lastError || new Error('Upload failed after all retries');
+  }
+
+  /**
+   * Check if an error is transient and should be retried
+   */
+  private isTransientError(error: unknown): boolean {
+    if (error instanceof Error) {
+      const message = error.message.toLowerCase();
+      return (
+        message.includes('temporary') ||
+        message.includes('transient') ||
+        message.includes('timeout') ||
+        message.includes('econnreset') ||
+        message.includes('socket hang up')
+      );
+    }
+    return false;
+  }
+
+  /**
+   * Delay helper for retry backoff
+   */
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**

@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  LocationEditorModal,
+  type LocationEditorResult,
+} from "@/components/location";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -29,10 +33,14 @@ interface HeaderEditorProps {
   onChange: (header: TemplateHeader | undefined) => void;
   /** Whether the editor is disabled */
   disabled?: boolean;
-  /** Callback to upload media file - returns assetHandle for Meta and url for display */
-  onMediaUpload?: (
-    file: File,
-  ) => Promise<{ assetHandle?: string; url?: string; error?: string }>;
+  /** Callback to upload media file - returns assetHandle for Meta, url for display, and tempId for thumbnail events */
+  onMediaUpload?: (file: File) => Promise<{
+    assetHandle?: string;
+    url?: string;
+    error?: string;
+    /** Temporary ID for matching WebSocket thumbnail events (videos/documents only) */
+    tempId?: string;
+  }>;
   /** Whether media is currently uploading */
   isUploading?: boolean;
 }
@@ -92,6 +100,7 @@ export function HeaderEditor({
   isUploading = false,
 }: HeaderEditorProps) {
   const [dragActive, setDragActive] = useState(false);
+  const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
 
   const currentFormat = value?.format || "TEXT";
 
@@ -238,19 +247,18 @@ export function HeaderEditor({
     [handleFileSelect],
   );
 
-  // Handle location field changes
-  const handleLocationChange = useCallback(
-    (field: keyof LocationHeader, fieldValue: string | number) => {
-      if (isLocationHeader(value)) {
-        onChange({ ...value, [field]: fieldValue });
-      } else {
-        onChange({
-          format: "LOCATION",
-          [field]: fieldValue,
-        } as LocationHeader);
-      }
+  // Handle location save from modal
+  const handleLocationSave = useCallback(
+    (location: LocationEditorResult) => {
+      onChange({
+        format: "LOCATION",
+        latitude: location.latitude,
+        longitude: location.longitude,
+        name: location.name,
+        address: location.address,
+      } as LocationHeader);
     },
-    [value, onChange],
+    [onChange],
   );
 
   // Clear header
@@ -378,21 +386,34 @@ export function HeaderEditor({
               </div>
             ) : isMediaHeader(value) && (value.handle || value.url) ? (
               <div className="flex flex-col items-center gap-2">
-                {/* Show actual image preview if URL is available */}
-                {currentFormat === "IMAGE" && value.url ? (
+                {/* Show thumbnail preview for all media types with URL */}
+                {value.url ? (
                   <div className="relative w-full max-w-[200px]">
                     <img
                       src={value.url}
                       alt={value.filename || "Header preview"}
                       className="w-full h-auto rounded-lg object-cover max-h-[150px]"
                       onError={(e) => {
-                        console.error("[HeaderEditor] Image failed to load:", {
-                          url: value.url,
-                          filename: value.filename,
-                          error: e,
-                        });
+                        console.error(
+                          "[HeaderEditor] Image/thumbnail failed to load:",
+                          {
+                            url: value.url,
+                            filename: value.filename,
+                            format: currentFormat,
+                            error: e,
+                          },
+                        );
+                        // Hide the broken image and show fallback icon
+                        (e.target as HTMLImageElement).style.display = "none";
                       }}
                     />
+                    {/* Show format badge for video/document thumbnails */}
+                    {(currentFormat === "VIDEO" ||
+                      currentFormat === "DOCUMENT") && (
+                      <div className="absolute top-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded">
+                        {currentFormat === "VIDEO" ? "Video" : "PDF"}
+                      </div>
+                    )}
                     <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 hover:opacity-100 transition-opacity rounded-lg">
                       <p className="text-white text-sm font-medium">
                         Click to replace
@@ -415,7 +436,7 @@ export function HeaderEditor({
                 <p className="text-sm font-medium">
                   {value.filename || "File uploaded"}
                 </p>
-                {!(currentFormat === "IMAGE" && value.url) && (
+                {!value.url && (
                   <p className="text-xs text-muted-foreground">
                     Click to replace
                   </p>
@@ -439,61 +460,71 @@ export function HeaderEditor({
       )}
 
       {currentFormat === "LOCATION" && (
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="location-lat">Latitude</Label>
-            <Input
-              id="location-lat"
-              type="number"
-              step="any"
-              value={isLocationHeader(value) ? (value.latitude ?? "") : ""}
-              onChange={(e) =>
-                handleLocationChange(
-                  "latitude",
-                  parseFloat(e.target.value) || 0,
-                )
-              }
-              placeholder="-90 to 90"
-              disabled={disabled}
-            />
+        <div className="space-y-2">
+          <Label>Location</Label>
+
+          {/* Location display/button area */}
+          <div
+            className={`
+              relative border-2 border-dashed rounded-lg p-6 text-center transition-colors
+              border-muted-foreground/25
+              ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:border-primary/50"}
+            `}
+            onClick={() => !disabled && setIsLocationModalOpen(true)}
+          >
+            {isLocationHeader(value) && value.latitude !== undefined ? (
+              <div className="flex flex-col items-center gap-2">
+                <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <MapPin className="h-6 w-6 text-primary" />
+                </div>
+                <div className="space-y-1">
+                  {value.name && (
+                    <p className="text-sm font-medium">{value.name}</p>
+                  )}
+                  {value.address && (
+                    <p className="text-xs text-muted-foreground line-clamp-2">
+                      {value.address}
+                    </p>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    {value.latitude.toFixed(6)}, {value.longitude.toFixed(6)}
+                  </p>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Click to edit location
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-2">
+                <MapPin className="h-8 w-8 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">
+                  Click to select a location
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Choose a location on the map or search by address
+                </p>
+              </div>
+            )}
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="location-lng">Longitude</Label>
-            <Input
-              id="location-lng"
-              type="number"
-              step="any"
-              value={isLocationHeader(value) ? (value.longitude ?? "") : ""}
-              onChange={(e) =>
-                handleLocationChange(
-                  "longitude",
-                  parseFloat(e.target.value) || 0,
-                )
-              }
-              placeholder="-180 to 180"
-              disabled={disabled}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="location-name">Location Name</Label>
-            <Input
-              id="location-name"
-              value={isLocationHeader(value) ? (value.name ?? "") : ""}
-              onChange={(e) => handleLocationChange("name", e.target.value)}
-              placeholder="e.g., Our Office"
-              disabled={disabled}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="location-address">Address</Label>
-            <Input
-              id="location-address"
-              value={isLocationHeader(value) ? (value.address ?? "") : ""}
-              onChange={(e) => handleLocationChange("address", e.target.value)}
-              placeholder="Street address"
-              disabled={disabled}
-            />
-          </div>
+
+          {/* Location Editor Modal */}
+          <LocationEditorModal
+            isOpen={isLocationModalOpen}
+            onClose={() => setIsLocationModalOpen(false)}
+            onSave={handleLocationSave}
+            initialLocation={
+              isLocationHeader(value) && value.latitude !== undefined
+                ? {
+                    latitude: value.latitude,
+                    longitude: value.longitude,
+                    name: value.name,
+                    address: value.address,
+                  }
+                : undefined
+            }
+            title="Select Location"
+            description="Click on the map or search for an address to select a location for the template header."
+          />
         </div>
       )}
     </div>

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ImageProcessingService } from '@shared/services/image-processing.service';
+import { LambdaThumbnailService } from '@shared/services/lambda-thumbnail.service';
 import { S3Service } from '@shared/services/s3.service';
 import { TeamModule } from '../team/team.module';
 import {
@@ -35,6 +36,7 @@ import {
     // Shared Services
     S3Service,
     ImageProcessingService,
+    LambdaThumbnailService,
 
     // Core Services
     TemplatesService,

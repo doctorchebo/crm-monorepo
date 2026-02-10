@@ -35,13 +35,19 @@ export interface ThumbnailJobMessage {
   outputBucket: string;
   outputKey?: string; // Optional - auto-generated if not provided
   mimeType: string;
-  context: 'kb-media' | 'message-attachment' | 'profile-picture';
+  context:
+    | 'kb-media'
+    | 'message-attachment'
+    | 'profile-picture'
+    | 'template-media';
   entityIds?: {
     mediaId?: string;
     attachmentId?: string;
     messageId?: string;
     chatId?: string;
     userId?: string;
+    localeId?: string;
+    originalS3Key?: string; // For template-media: original file to delete after thumbnail
   };
   callback: {
     type: 'webhook';
@@ -69,13 +75,19 @@ export interface ThumbnailCallbackResult {
     bucket: string;
     key: string;
   };
-  context?: 'kb-media' | 'message-attachment' | 'profile-picture';
+  context?:
+    | 'kb-media'
+    | 'message-attachment'
+    | 'profile-picture'
+    | 'template-media';
   entityIds?: {
     mediaId?: string;
     attachmentId?: string;
     messageId?: string;
     chatId?: string;
     userId?: string;
+    localeId?: string;
+    originalS3Key?: string;
   };
 }
 
@@ -118,6 +130,24 @@ export interface QueueMessageThumbnailParams {
 export interface QueueProfilePictureThumbnailParams {
   userId: number;
   s3Key: string;
+  mimeType: string;
+  /** Target S3 key for thumbnail (optional - auto-generated if not provided) */
+  thumbnailS3Key?: string;
+  /** S3 bucket (optional - uses default if not provided) */
+  s3Bucket?: string;
+}
+
+/**
+ * Parameters for queueing a template media thumbnail job
+ */
+export interface QueueTemplateMediaThumbnailParams {
+  /** Template media record ID */
+  mediaId: string;
+  /** Locale ID for the template */
+  localeId: string;
+  /** S3 key of the original file (to be deleted after thumbnail generation) */
+  s3Key: string;
+  /** MIME type of the original file */
   mimeType: string;
   /** Target S3 key for thumbnail (optional - auto-generated if not provided) */
   thumbnailS3Key?: string;
@@ -437,6 +467,60 @@ export class LambdaThumbnailService implements OnModuleInit {
       `user-${params.userId}`,
       jobId,
       'profile-picture',
+    );
+  }
+
+  /**
+   * Queue a template media file for thumbnail generation via Lambda
+   *
+   * For videos and documents uploaded as template headers, this:
+   * 1. Queues Lambda to generate a thumbnail from the original file
+   * 2. Stores the original S3 key in entityIds for cleanup after thumbnail is ready
+   *
+   * @returns Job ID if successfully queued, null if not supported or failed
+   */
+  async queueTemplateMediaThumbnail(
+    params: QueueTemplateMediaThumbnailParams,
+  ): Promise<string | null> {
+    if (!this.shouldUseLambda(params.mimeType)) {
+      this.logger.warn(
+        `[Lambda Thumbnail] Type ${params.mimeType} not supported for template media - thumbnail will NOT be generated`,
+      );
+      return null;
+    }
+
+    const jobId = uuidv4();
+    const bucket = params.s3Bucket || this.bucketName;
+    const outputKey =
+      params.thumbnailS3Key || this.generateThumbnailKey(params.s3Key);
+
+    const message: ThumbnailJobMessage = {
+      jobType: 'thumbnail',
+      jobId,
+      inputBucket: bucket,
+      inputKey: params.s3Key,
+      outputBucket: bucket,
+      outputKey,
+      mimeType: params.mimeType,
+      context: 'template-media',
+      entityIds: {
+        mediaId: params.mediaId,
+        localeId: params.localeId,
+        originalS3Key: params.s3Key, // Store for cleanup after thumbnail is ready
+      },
+      callback: {
+        type: 'webhook',
+        url: `${this.webhookBaseUrl}/api/v1/media/thumbnail/callback`,
+      },
+      // CRITICAL: Safety config prevents infinite loops and runaway costs
+      safety: this.createSafetyConfig(),
+    };
+
+    return this.sendToQueue(
+      message,
+      params.localeId || params.mediaId,
+      jobId,
+      'template-media',
     );
   }
 

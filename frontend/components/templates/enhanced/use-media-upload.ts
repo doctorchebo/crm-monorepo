@@ -34,6 +34,8 @@ interface UploadResult {
   mediaId?: string;
   url?: string;
   error?: string;
+  /** Temporary ID for matching WebSocket thumbnail events (videos/documents only) */
+  tempId?: string;
 }
 
 /**
@@ -148,6 +150,7 @@ export function useMediaUpload(templateId?: string, localeId?: string) {
             success: response.success,
             assetHandle: response.assetHandle,
             url: response.url,
+            tempId: response.tempId,
             error: response.error,
           });
 
@@ -156,6 +159,7 @@ export function useMediaUpload(templateId?: string, localeId?: string) {
             assetHandle: response.assetHandle,
             url: response.url, // URL from S3 for display
             error: response.error,
+            tempId: response.tempId, // For matching WebSocket thumbnail events
           };
 
           if (result.success) {

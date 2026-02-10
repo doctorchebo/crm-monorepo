@@ -682,6 +682,8 @@ export class TemplatesController {
       filename: body.filename,
       mimeType: body.mimeType,
       fileSize: buffer.length,
+      // tempId for matching WebSocket thumbnail events (videos/documents only)
+      tempId: result.tempId,
     };
   }
 

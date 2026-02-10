@@ -15,12 +15,14 @@ import {
 } from "@/components/ui/tooltip";
 import { useComponentValidation } from "@/hooks/use-component-validation";
 import { useNotification } from "@/hooks/use-notification";
+import { useTemplateMediaThumbnail } from "@/hooks/use-template-media-thumbnail";
 import {
   componentsFromLegacy,
   componentsToLegacy,
   createEmptyComponents,
   isLocationHeader,
   isMediaHeader,
+  MediaHeader,
   TemplateComponents,
 } from "@/lib/types/template-components.types";
 import { cn } from "@/lib/utils";
@@ -248,6 +250,22 @@ export function EnhancedTemplateEditor({
     localeId,
   );
 
+  // Template media thumbnail WebSocket hook (for video/document thumbnails)
+  const { registerPendingThumbnail, unregisterPendingThumbnail } =
+    useTemplateMediaThumbnail({ debug: true });
+
+  // Track current pending thumbnail tempId for cleanup
+  const pendingThumbnailTempIdRef = useRef<string | null>(null);
+
+  // Cleanup pending thumbnail on unmount
+  useEffect(() => {
+    return () => {
+      if (pendingThumbnailTempIdRef.current) {
+        unregisterPendingThumbnail(pendingThumbnailTempIdRef.current);
+      }
+    };
+  }, [unregisterPendingThumbnail]);
+
   // Tracking which carousel cards are uploading
   const [uploadingCards, setUploadingCards] = useState<Set<number>>(new Set());
 
@@ -325,7 +343,12 @@ export function EnhancedTemplateEditor({
   const handleHeaderMediaUpload = useCallback(
     async (
       file: File,
-    ): Promise<{ assetHandle?: string; url?: string; error?: string }> => {
+    ): Promise<{
+      assetHandle?: string;
+      url?: string;
+      error?: string;
+      tempId?: string;
+    }> => {
       try {
         // Determine media type from file
         let mediaType: "IMAGE" | "VIDEO" | "DOCUMENT" = "IMAGE";
@@ -336,6 +359,58 @@ export function EnhancedTemplateEditor({
         }
 
         const result = await upload(file, "header", mediaType);
+
+        // For videos and documents, register for thumbnail WebSocket event
+        if (
+          result.success &&
+          result.tempId &&
+          (mediaType === "VIDEO" || mediaType === "DOCUMENT")
+        ) {
+          // Clean up any previous pending thumbnail
+          if (pendingThumbnailTempIdRef.current) {
+            unregisterPendingThumbnail(pendingThumbnailTempIdRef.current);
+          }
+
+          // Store the tempId for cleanup
+          pendingThumbnailTempIdRef.current = result.tempId;
+
+          // Register callback for when thumbnail is ready
+          registerPendingThumbnail(result.tempId, (thumbnailUrl: string) => {
+            console.log(
+              `[EnhancedTemplateEditor] Thumbnail ready for tempId ${result.tempId}: ${thumbnailUrl}`,
+            );
+
+            // Update the header with the thumbnail URL
+            // Use functional update to get latest state, then notify parent in a separate effect
+            setComponents((currentComponents) => {
+              const currentHeader = currentComponents.header;
+              if (currentHeader && isMediaHeader(currentHeader)) {
+                const updatedHeader: MediaHeader = {
+                  ...currentHeader,
+                  url: thumbnailUrl,
+                };
+                const newComponents = {
+                  ...currentComponents,
+                  header: updatedHeader,
+                };
+
+                // Defer parent notification to avoid "Cannot update while rendering" error
+                setTimeout(() => {
+                  onChange?.(newComponents);
+                  const legacy = componentsToLegacy(newComponents);
+                  onLegacyChange?.(legacy);
+                }, 0);
+
+                return newComponents;
+              }
+              return currentComponents;
+            });
+
+            // Clear the pending ref
+            pendingThumbnailTempIdRef.current = null;
+          });
+        }
+
         // Note: We don't call handleHeaderChange here anymore.
         // The header-editor handles the state update using the returned url.
         // This prevents race conditions between local preview and final URL.
@@ -343,6 +418,7 @@ export function EnhancedTemplateEditor({
           assetHandle: result.assetHandle,
           url: result.url,
           error: result.error,
+          tempId: result.tempId,
         };
       } catch (error) {
         console.error("Header media upload failed:", error);
@@ -351,7 +427,13 @@ export function EnhancedTemplateEditor({
         return { error: errorMessage };
       }
     },
-    [upload],
+    [
+      upload,
+      registerPendingThumbnail,
+      unregisterPendingThumbnail,
+      onChange,
+      onLegacyChange,
+    ],
   );
 
   // Handle carousel card media upload
