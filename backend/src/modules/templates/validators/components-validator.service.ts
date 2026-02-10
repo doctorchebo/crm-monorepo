@@ -5,6 +5,7 @@ import { ButtonValidatorService } from './button-validator.service';
 import { HeaderValidatorService } from './header-validator.service';
 import {
   createValidationResult,
+  validateVariablePositions,
   ValidationError,
   ValidationResult,
 } from './validation-error.interface';
@@ -110,6 +111,11 @@ export class ComponentsValidatorService {
         code: 'BODY_TEXT_TOO_LONG',
       });
     }
+
+    // Check variable positions (Meta API doesn't allow variables at start/end)
+    errors.push(
+      ...validateVariablePositions(components.body.text, 'body.text', 'Body'),
+    );
 
     // Count variables
     const variables = components.body.text.match(/\{\{[^}]+\}\}/g) || [];

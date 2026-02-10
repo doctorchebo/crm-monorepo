@@ -90,6 +90,137 @@ export interface ValidationResult {
 }
 
 // ============================================================================
+// VARIABLE POSITION UTILITIES
+// ============================================================================
+
+/**
+ * Pattern string for template variables
+ * Matches patterns like {{variable_name}}, {{customer.first_name}}, {{1}}
+ *
+ * IMPORTANT: We use a pattern string and create fresh RegExp instances
+ * to avoid global regex state issues. Never use a global regex with .test()
+ * or .exec() on a module-level const, as the lastIndex persists between calls.
+ */
+const VARIABLE_PATTERN = "\\{\\{[^}]+\\}\\}";
+
+/**
+ * Check if text contains any template variables
+ */
+function containsVariables(text: string): boolean {
+  return new RegExp(VARIABLE_PATTERN).test(text);
+}
+
+/**
+ * Find all variable matches in text
+ */
+function findAllVariables(text: string): RegExpMatchArray[] {
+  return [...text.matchAll(new RegExp(VARIABLE_PATTERN, "g"))];
+}
+
+/**
+ * Find the first variable match in text
+ */
+function findFirstVariable(text: string): RegExpMatchArray | null {
+  return text.match(new RegExp(VARIABLE_PATTERN));
+}
+
+/**
+ * Punctuation and symbols that Meta API ignores when checking variable positions.
+ * If a variable is only preceded/followed by these characters (and whitespace),
+ * Meta still considers it as starting/ending with a variable.
+ *
+ * Includes: . , ! ? ; : ' " ( ) [ ] { } < > … — – -
+ */
+const IGNORABLE_PUNCTUATION_REGEX = /^[\s.,!?;:'"()\[\]{}<>…—–-]*$/;
+
+/**
+ * Check if text starts with a variable (after trimming whitespace and ignorable punctuation)
+ * Meta API doesn't allow variables at the start of template components.
+ *
+ * Examples:
+ * - "{{name}} hello" → true (starts with variable)
+ * - "Hi {{name}}" → false (starts with "Hi")
+ * - "...{{name}}" → true (only punctuation before variable)
+ */
+export function startsWithVariable(text: string): boolean {
+  if (!text) return false;
+  const trimmed = text.trim();
+  if (!containsVariables(trimmed)) return false;
+
+  // Find the first variable
+  const match = findFirstVariable(trimmed);
+  if (!match || match.index === undefined) return false;
+
+  // Check what comes before the first variable
+  const beforeVariable = trimmed.slice(0, match.index);
+
+  // If nothing before, or only ignorable punctuation, it effectively starts with a variable
+  return IGNORABLE_PUNCTUATION_REGEX.test(beforeVariable);
+}
+
+/**
+ * Check if text ends with a variable (after trimming whitespace and ignorable punctuation)
+ * Meta API doesn't allow variables at the end of template components.
+ *
+ * Examples:
+ * - "Hello {{name}}" → true (ends with variable)
+ * - "{{name}} hello" → false (ends with "hello")
+ * - "{{name}}." → true (only punctuation after variable)
+ * - "{{name}}!" → true (only punctuation after variable)
+ * - "{{date}}. Thanks!" → false (has "Thanks!" which is actual text)
+ */
+export function endsWithVariable(text: string): boolean {
+  if (!text) return false;
+  const trimmed = text.trim();
+
+  // Find all variables
+  const matches = findAllVariables(trimmed);
+  if (matches.length === 0) return false;
+
+  // Get the last variable match
+  const lastMatch = matches[matches.length - 1];
+  const matchEnd = (lastMatch.index ?? 0) + lastMatch[0].length;
+
+  // Check what comes after the last variable
+  const afterVariable = trimmed.slice(matchEnd);
+
+  // If nothing after, or only ignorable punctuation, it effectively ends with a variable
+  return IGNORABLE_PUNCTUATION_REGEX.test(afterVariable);
+}
+
+/**
+ * Validate variable positions in text
+ * Returns validation errors for leading or trailing variables
+ */
+export function validateVariablePositions(
+  text: string,
+  field: string,
+  componentName: string,
+): ValidationError[] {
+  const errors: ValidationError[] = [];
+
+  if (startsWithVariable(text)) {
+    errors.push({
+      field,
+      message: `${componentName} cannot start with a variable. Add text before the first variable.`,
+      severity: "error",
+      code: `${field.toUpperCase().replace(".", "_")}_STARTS_WITH_VARIABLE`,
+    });
+  }
+
+  if (endsWithVariable(text)) {
+    errors.push({
+      field,
+      message: `${componentName} cannot end with a variable. Add text after the last variable.`,
+      severity: "error",
+      code: `${field.toUpperCase().replace(".", "_")}_ENDS_WITH_VARIABLE`,
+    });
+  }
+
+  return errors;
+}
+
+// ============================================================================
 // MAIN VALIDATION FUNCTION
 // ============================================================================
 
@@ -186,6 +317,13 @@ function validateHeader(
         severity: "error",
         code: "AUTH_NO_HEADER_TEXT",
       });
+    }
+
+    // Check for variables at start or end (Meta API restriction)
+    if (header.text.trim().length > 0) {
+      errors.push(
+        ...validateVariablePositions(header.text, "header.text", "Header"),
+      );
     }
   }
 
@@ -290,6 +428,10 @@ function validateBody(
       });
     }
   }
+
+  // Check for variables at start or end (Meta API restriction)
+  // This applies to all template categories
+  errors.push(...validateVariablePositions(bodyText, "body.text", "Body"));
 
   return errors;
 }

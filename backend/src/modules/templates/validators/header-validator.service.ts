@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { TemplateHeaderDto } from '../dto';
 import { HeaderFormat, TEMPLATE_LIMITS, TemplateCategory } from '../types';
-import { ValidationError } from './validation-error.interface';
+import {
+  ValidationError,
+  validateVariablePositions,
+} from './validation-error.interface';
 
 /**
  * Service for validating template headers
@@ -71,6 +74,11 @@ export class HeaderValidatorService {
         code: 'HEADER_TEXT_TOO_LONG',
       });
     }
+
+    // Check variable positions (Meta API doesn't allow variables at start/end)
+    errors.push(
+      ...validateVariablePositions(header.text, 'header.text', 'Header'),
+    );
 
     // Check for variables in header
     const variables = header.text.match(/\{\{[^}]+\}\}/g) || [];

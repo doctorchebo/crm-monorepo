@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useNotification } from "@/hooks/use-notification";
+import { useTabState } from "@/hooks/use-tab-state";
 import {
   backendApi,
   LANGUAGE_DISPLAY_NAMES,
@@ -29,9 +30,149 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { TemplateForm } from "../../form";
-import { useTabState } from "@/hooks/use-tab-state";
 
-// Statuses that cannot be edited
+// ============================================================================
+// LOADING SKELETON COMPONENT
+// ============================================================================
+
+/**
+ * Skeleton component that mirrors the actual template edit page layout.
+ * Provides a better loading experience by matching the visual structure.
+ */
+function TemplateEditSkeleton() {
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      <div className="flex-1 overflow-y-auto space-y-6 p-6">
+        {/* Header with Back Button */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            {/* Back button skeleton */}
+            <Skeleton className="h-9 w-20" />
+            <div>
+              {/* Title and version badge */}
+              <div className="flex items-center gap-3">
+                <Skeleton className="h-9 w-48" />
+                <Skeleton className="h-6 w-32 rounded-full" />
+              </div>
+              {/* Description */}
+              <Skeleton className="h-4 w-64 mt-2" />
+            </div>
+          </div>
+          {/* Manage Versions button */}
+          <Skeleton className="h-9 w-36" />
+        </div>
+
+        {/* Locale Tabs */}
+        <div className="flex items-center gap-2">
+          <div className="flex-1">
+            <div className="flex items-center gap-1 p-1 bg-muted/50 rounded-lg w-fit">
+              <Skeleton className="h-8 w-24 rounded-md" />
+              <Skeleton className="h-8 w-24 rounded-md" />
+            </div>
+          </div>
+          {/* Add Language button */}
+          <Skeleton className="h-9 w-32" />
+        </div>
+
+        {/* Template Form Skeleton */}
+        <div className="flex flex-col lg:flex-row gap-6">
+          {/* Left Column - Form Fields */}
+          <div className="flex-1 space-y-6 min-w-0">
+            {/* Template Name Section */}
+            <div className="rounded-lg border bg-card p-6 space-y-4">
+              <div className="space-y-2">
+                <Skeleton className="h-5 w-32" />
+                <Skeleton className="h-10 w-full" />
+              </div>
+              <div className="space-y-2">
+                <Skeleton className="h-5 w-24" />
+                <Skeleton className="h-10 w-full" />
+              </div>
+            </div>
+
+            {/* Header Section */}
+            <div className="rounded-lg border bg-card p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <Skeleton className="h-6 w-24" />
+                <Skeleton className="h-5 w-16 rounded" />
+              </div>
+              <div className="flex gap-2">
+                <Skeleton className="h-9 w-20" />
+                <Skeleton className="h-9 w-20" />
+                <Skeleton className="h-9 w-20" />
+              </div>
+              <Skeleton className="h-10 w-full" />
+            </div>
+
+            {/* Body Section */}
+            <div className="rounded-lg border bg-card p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <Skeleton className="h-6 w-16" />
+                <Skeleton className="h-5 w-24" />
+              </div>
+              <Skeleton className="h-32 w-full" />
+              <Skeleton className="h-4 w-48" />
+            </div>
+
+            {/* Footer Section */}
+            <div className="rounded-lg border bg-card p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <Skeleton className="h-6 w-20" />
+                <Skeleton className="h-5 w-16 rounded" />
+              </div>
+              <Skeleton className="h-10 w-full" />
+            </div>
+
+            {/* Buttons Section */}
+            <div className="rounded-lg border bg-card p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <Skeleton className="h-6 w-24" />
+                <Skeleton className="h-5 w-16 rounded" />
+              </div>
+              <Skeleton className="h-9 w-32" />
+            </div>
+          </div>
+
+          {/* Right Column - Preview */}
+          <div className="hidden lg:block lg:w-[380px] lg:flex-shrink-0">
+            <div className="sticky top-6">
+              <div className="rounded-lg border bg-card p-4">
+                <Skeleton className="h-5 w-24 mb-4" />
+                {/* Phone Preview Frame */}
+                <div className="mx-auto w-[280px]">
+                  <div className="rounded-[2rem] border-4 border-gray-800 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 p-2">
+                    {/* Phone Screen */}
+                    <div className="rounded-[1.5rem] bg-white dark:bg-gray-800 overflow-hidden">
+                      {/* Status Bar */}
+                      <div className="h-6 bg-gray-200 dark:bg-gray-700" />
+                      {/* Chat Header */}
+                      <div className="p-3 border-b flex items-center gap-2">
+                        <Skeleton className="h-8 w-8 rounded-full" />
+                        <Skeleton className="h-4 w-24" />
+                      </div>
+                      {/* Message Area */}
+                      <div className="p-3 min-h-[300px] space-y-3">
+                        <div className="bg-green-100 dark:bg-green-900/30 rounded-lg p-3 max-w-[85%] ml-auto space-y-2">
+                          <Skeleton className="h-3 w-full" />
+                          <Skeleton className="h-3 w-4/5" />
+                          <Skeleton className="h-3 w-3/5" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// CONSTANTS
+// ============================================================================
 const IMMUTABLE_STATUSES: TemplateVersionStatus[] = [
   "pending_approval",
   "approved",
@@ -43,7 +184,6 @@ const SUPPORTED_LOCALES = SUPPORTED_LANGUAGES.map((code) => ({
   code,
   name: LANGUAGE_DISPLAY_NAMES[code],
   flag: LANGUAGE_FLAGS[code],
-  
 }));
 
 interface Template {
@@ -79,12 +219,12 @@ export default function EditTemplatePage() {
   // Initialize from URL param if provided, otherwise default to "en"
   const [selectedLocale, setSelectedLocale] = useTabState({
     defaultValue: localeFromUrl || "en",
-    paramName: "locale"
+    paramName: "locale",
   });
 
   // Version management state
   const [versionInfo, setVersionInfo] = useState<TemplateVersionInfo | null>(
-    null
+    null,
   );
   const [isLoadingVersion, setIsLoadingVersion] = useState(true);
   const [versionDrawerOpen, setVersionDrawerOpen] = useState(false);
@@ -117,23 +257,23 @@ export default function EditTemplatePage() {
   }, [showAddLocale]);
 
   // Fetch template data
-  const { data: templateData } = useSWR<Template>(
+  const { data: templateData, isLoading: isLoadingTemplate } = useSWR<Template>(
     templateId ? `template-${templateId}` : null,
     templateId
       ? () => backendApi.templates.get(templateId) as Promise<Template>
-      : null
+      : null,
   );
 
   // Get existing locales from template (memoized to prevent infinite loops)
   const existingLocales = useMemo(
     () => templateData?.locales?.map((l) => l.locale) || [],
-    [templateData?.locales]
+    [templateData?.locales],
   );
 
   // Get available locales (not yet added)
   const availableLocales = useMemo(
     () => SUPPORTED_LOCALES.filter((l) => !existingLocales.includes(l.code)),
-    [existingLocales]
+    [existingLocales],
   );
 
   // Set initial selected locale when template loads
@@ -174,8 +314,15 @@ export default function EditTemplatePage() {
       try {
         const info = await backendApi.templates.getVersionInfo(
           templateId,
-          selectedLocale
+          selectedLocale,
         );
+        console.log("[EditPage] fetchVersionInfo result:", {
+          hasDraft: !!info.draftVersion,
+          hasActive: !!info.activeVersion,
+          draftId: info.draftVersion?.id,
+          draftBody: info.draftVersion?.content?.body?.substring(0, 50),
+          draftStatus: info.draftVersion?.status,
+        });
         setVersionInfo(info);
 
         // Only update view mode when NOT doing a silent fetch
@@ -225,7 +372,7 @@ export default function EditTemplatePage() {
         setIsLoadingVersion(false);
       }
     },
-    [templateId, selectedLocale, existingLocales, versionInfo]
+    [templateId, selectedLocale, existingLocales, versionInfo],
   );
 
   // Initial fetch on mount and locale change
@@ -375,7 +522,7 @@ export default function EditTemplatePage() {
       });
       addNotification(
         t("versions.toast.draftCreated") || "New draft version created",
-        "success"
+        "success",
       );
       setVersionDrawerOpen(false);
       setViewOnlyMode(false);
@@ -385,7 +532,7 @@ export default function EditTemplatePage() {
       console.error("Error creating draft:", error);
       addNotification(
         t("versions.toast.createFailed") || "Failed to create draft version",
-        "error"
+        "error",
       );
     }
   };
@@ -395,14 +542,14 @@ export default function EditTemplatePage() {
       await backendApi.templates.deleteVersion(templateId, versionId);
       addNotification(
         t("versions.toast.draftDeleted") || "Draft deleted",
-        "success"
+        "success",
       );
       fetchVersionInfo();
     } catch (error) {
       console.error("Error deleting draft:", error);
       addNotification(
         t("versions.toast.deleteFailed") || "Failed to delete draft",
-        "error"
+        "error",
       );
     }
   };
@@ -412,14 +559,14 @@ export default function EditTemplatePage() {
       await backendApi.templates.setActiveVersion(templateId, versionId);
       addNotification(
         t("versions.toast.setActive") || "Version set as active",
-        "success"
+        "success",
       );
       fetchVersionInfo();
     } catch (error) {
       console.error("Error setting active version:", error);
       addNotification(
         t("versions.toast.setActiveFailed") || "Failed to set active version",
-        "error"
+        "error",
       );
     }
   };
@@ -445,21 +592,13 @@ export default function EditTemplatePage() {
     }
   };
 
-  if (isLoadingVersion) {
-    return (
-      <div className="flex flex-col h-full overflow-hidden">
-        <div className="flex-1 overflow-y-auto space-y-6 p-6">
-          <div className="flex items-center gap-4">
-            <Skeleton className="h-9 w-20" />
-            <div className="space-y-2">
-              <Skeleton className="h-8 w-48" />
-              <Skeleton className="h-4 w-64" />
-            </div>
-          </div>
-          <Skeleton className="h-[400px] w-full" />
-        </div>
-      </div>
-    );
+  // Combined loading state: wait for both template data AND version info
+  // This prevents flash of incorrect UI states (e.g., "creating new locale" banner)
+  const isInitialLoading =
+    isLoadingTemplate || (isLoadingVersion && !templateData);
+
+  if (isInitialLoading) {
+    return <TemplateEditSkeleton />;
   }
 
   return (
@@ -490,10 +629,10 @@ export default function EditTemplatePage() {
                       versionStatusInfo.color === "green"
                         ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
                         : versionStatusInfo.color === "yellow"
-                        ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
-                        : versionStatusInfo.color === "red"
-                        ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
-                        : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+                          ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
+                          : versionStatusInfo.color === "red"
+                            ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                            : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
                     }`}
                   >
                     <versionStatusInfo.icon className="h-3.5 w-3.5" />
@@ -537,10 +676,10 @@ export default function EditTemplatePage() {
                   ? t("versions.viewingHistoricalVersion") ||
                     "You are viewing a historical version"
                   : versionInfo?.draftVersion?.status === "pending_approval"
-                  ? t("versions.pendingVersionReadOnly") ||
-                    "This version is pending approval and cannot be edited"
-                  : t("versions.approvedVersionReadOnly") ||
-                    "This version has been approved and cannot be edited"}
+                    ? t("versions.pendingVersionReadOnly") ||
+                      "This version is pending approval and cannot be edited"
+                    : t("versions.approvedVersionReadOnly") ||
+                      "This version has been approved and cannot be edited"}
               </span>
             </AlertTitle>
             <AlertDescription className="text-amber-700 dark:text-amber-300 mt-2">
@@ -556,10 +695,10 @@ export default function EditTemplatePage() {
                       ? t("versions.pendingVersionDescription") ||
                         "Templates pending approval cannot be modified. Wait for the approval process to complete."
                       : versionInfo?.canCreateNewVersion
-                      ? t("versions.approvedVersionDescription") ||
-                        "Approved templates are locked to ensure consistency with WhatsApp. To make changes, create a new draft version that copies the current content."
-                      : t("versions.approvedVersionWithDraftDescription") ||
-                        "This version is locked. A draft version already exists - use the version history to edit it."}
+                        ? t("versions.approvedVersionDescription") ||
+                          "Approved templates are locked to ensure consistency with WhatsApp. To make changes, create a new draft version that copies the current content."
+                        : t("versions.approvedVersionWithDraftDescription") ||
+                          "This version is locked. A draft version already exists - use the version history to edit it."}
                   </p>
                   {/* Only show Create New Draft button if canCreateNewVersion is true */}
                   {versionInfo?.canCreateNewVersion && (
@@ -629,7 +768,7 @@ export default function EditTemplatePage() {
             <TabsList className="h-auto p-1 bg-muted/50">
               {existingLocales.map((localeCode) => {
                 const localeInfo = SUPPORTED_LOCALES.find(
-                  (l) => l.code === localeCode
+                  (l) => l.code === localeCode,
                 );
                 return (
                   <TabsTrigger
@@ -697,12 +836,13 @@ export default function EditTemplatePage() {
           onLocaleChange={handleLocaleChange}
           availableLocales={existingLocales}
           onSaveSuccess={() => {
+            console.log("[EditPage] onSaveSuccess - fetching version info");
             // Refresh version info after save
             fetchVersionInfo();
           }}
           isEditMode={true}
-          versionData={
-            versionInfo?.draftVersion
+          versionData={(() => {
+            const data = versionInfo?.draftVersion
               ? {
                   id: versionInfo.draftVersion.id,
                   versionNumber: versionInfo.draftVersion.versionNumber,
@@ -711,15 +851,22 @@ export default function EditTemplatePage() {
                   canEdit: versionInfo.draftVersion.canEdit,
                 }
               : versionInfo?.activeVersion
-              ? {
-                  id: versionInfo.activeVersion.id,
-                  versionNumber: versionInfo.activeVersion.versionNumber,
-                  content: versionInfo.activeVersion.content,
-                  status: versionInfo.activeVersion.status,
-                  canEdit: versionInfo.activeVersion.canEdit,
-                }
-              : null
-          }
+                ? {
+                    id: versionInfo.activeVersion.id,
+                    versionNumber: versionInfo.activeVersion.versionNumber,
+                    content: versionInfo.activeVersion.content,
+                    status: versionInfo.activeVersion.status,
+                    canEdit: versionInfo.activeVersion.canEdit,
+                  }
+                : null;
+            console.log("[EditPage] versionData passed to form:", {
+              id: data?.id,
+              status: data?.status,
+              canEdit: data?.canEdit,
+              bodyPreview: data?.content?.body?.substring(0, 50),
+            });
+            return data;
+          })()}
         />
       </div>
 

@@ -423,7 +423,9 @@ export class TemplateVersionService {
   /**
    * Update a draft version's content
    *
-   * Enforces immutability - only draft or rejected versions can be edited
+   * Enforces immutability - only draft or rejected versions can be edited.
+   * Also syncs content to templateLocales to keep the locale data in sync
+   * with the current working version.
    */
   async updateVersionContent(
     versionId: string,
@@ -434,11 +436,22 @@ export class TemplateVersionService {
     // Check if version is editable
     this.enforceEditable(version);
 
+    this.logger.log(
+      `Updating version ${versionId} - incoming body: ${(content.body as string)?.substring(0, 50)}...`,
+    );
+    this.logger.log(
+      `Existing body: ${(version.content.body as string)?.substring(0, 50)}...`,
+    );
+
     // Merge with existing content
     const updatedContent: VersionContent = {
       ...version.content,
       ...content,
     };
+
+    this.logger.log(
+      `Merged body: ${(updatedContent.body as string)?.substring(0, 50)}...`,
+    );
 
     await db
       .update(templateVersions)
@@ -450,7 +463,17 @@ export class TemplateVersionService {
 
     this.logger.log(`Updated draft version ${versionId}`);
 
-    return this.getVersion(versionId);
+    // Sync content to templateLocales to keep locale data up-to-date
+    // This ensures that services reading from templateLocales get the latest content
+    await this.syncContentToLocale(version.localeId, updatedContent);
+
+    // Verify the save worked
+    const savedVersion = await this.getVersion(versionId);
+    this.logger.log(
+      `After save - body: ${(savedVersion.content.body as string)?.substring(0, 50)}...`,
+    );
+
+    return savedVersion;
   }
 
   /**
@@ -545,20 +568,16 @@ export class TemplateVersionService {
         // Approved: set activeVersion, approvalStatus, and sync content to locale
         const versionContent = versionData.content as VersionContent;
 
+        // Sync content to locale
+        await this.syncContentToLocale(versionData.localeId, versionContent);
+
+        // Update approval-specific fields separately
         await db
           .update(templateLocales)
           .set({
             activeVersion: version.versionNumber,
             approvalStatus: 'approved',
             reviewedAt: new Date(),
-            updatedAt: new Date(),
-            // Sync content from approved version to locale for query convenience
-            header: versionContent.header,
-            body: versionContent.body,
-            footer: versionContent.footer,
-            exampleVars: versionContent.exampleVars,
-            category: versionContent.category,
-            components: versionContent.components,
           })
           .where(eq(templateLocales.id, versionData.localeId));
       } else if (newStatus === VersionStatus.REJECTED) {
@@ -762,6 +781,39 @@ export class TemplateVersionService {
           `Only draft or rejected versions can be modified.`,
       );
     }
+  }
+
+  /**
+   * Sync version content to templateLocales table.
+   *
+   * This ensures that services reading from templateLocales (like message sending,
+   * variable resolution, AI recommendations) always have access to the latest
+   * template content. The version system tracks history and approval state,
+   * while the locale table provides the current working content.
+   *
+   * @param localeId - The locale ID to update
+   * @param content - The version content to sync
+   */
+  private async syncContentToLocale(
+    localeId: string,
+    content: VersionContent,
+  ): Promise<void> {
+    await db
+      .update(templateLocales)
+      .set({
+        header: content.header ?? null,
+        body: content.body,
+        footer: content.footer ?? null,
+        exampleVars: content.exampleVars || {},
+        category: content.category || 'utility',
+        components: content.components || null,
+        updatedAt: new Date(),
+      })
+      .where(eq(templateLocales.id, localeId));
+
+    this.logger.log(
+      `Synced content to locale ${localeId} - body: ${content.body?.substring(0, 50)}...`,
+    );
   }
 
   /**

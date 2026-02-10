@@ -7,6 +7,7 @@ import {
   createEmptyComponents,
   dtoToComponents,
   EnhancedTemplateEditor,
+  EnhancedTemplatePreview,
   hasAdvancedFeatures,
   TemplateComponents,
 } from "@/components/templates/enhanced";
@@ -188,6 +189,9 @@ export function TemplateForm({
   // Handle enhanced components change
   const handleComponentsChange = useCallback(
     (components: TemplateComponents) => {
+      console.log("[TemplateForm] handleComponentsChange called:", {
+        bodyText: components.body?.text?.substring(0, 50),
+      });
       setFormData((prev) => ({
         ...prev,
         components,
@@ -331,13 +335,16 @@ export function TemplateForm({
     }
   }, [versionData, controlledLocale]);
 
-  // Extract variables from body
+  // Extract variables from body (check components first, then legacy formData.body)
   const extractedVariables = useMemo(() => {
+    // Get the body text from the components (primary source) or legacy formData
+    const bodyText = formData.components?.body?.text || formData.body || "";
+
     const regex = /\{\{([^}]+)\}\}/g;
     const vars: string[] = [];
     let match;
 
-    while ((match = regex.exec(formData.body)) !== null) {
+    while ((match = regex.exec(bodyText)) !== null) {
       const varName = match[1].trim();
       if (!vars.includes(varName)) {
         vars.push(varName);
@@ -345,7 +352,7 @@ export function TemplateForm({
     }
 
     return vars;
-  }, [formData.body]);
+  }, [formData.components?.body?.text, formData.body]);
 
   // Update example vars structure when variables change
   useEffect(() => {
@@ -468,6 +475,13 @@ export function TemplateForm({
           formData.components || createEmptyComponents(),
         );
 
+        console.log("[TemplateForm] Building payload:", {
+          "formData.components?.body?.text": formData.components?.body?.text,
+          "legacy.body": legacy.body,
+          "formData.body": formData.body,
+          useEnhancedMode,
+        });
+
         // Base payload with legacy fields
         const payload: Record<string, unknown> = {
           header: legacy.header || formData.header || null,
@@ -482,6 +496,8 @@ export function TemplateForm({
           payload.components = componentsToDto(formData.components);
         }
 
+        console.log("[TemplateForm] Final payload:", payload);
+
         return payload;
       };
 
@@ -493,27 +509,57 @@ export function TemplateForm({
           isVisible: formData.isVisible,
         });
 
-        // If we have version data, save to the version; otherwise save to locale
-        if (versionData && versionData.canEdit) {
-          // Save content to the version
-          await backendApi.templates.updateVersionContent(
-            templateId,
-            versionData.id,
-            buildContentPayload(),
-          );
-        } else if (!versionData) {
-          // Legacy mode: save directly to locale (for non-versioned templates)
+        // Determine where to save content based on version state
+        let contentSaved = false;
+
+        if (versionData) {
+          if (versionData.canEdit) {
+            // Save content to the version
+            const payload = buildContentPayload();
+            console.log("[TemplateForm] Saving to version:", {
+              templateId,
+              versionId: versionData.id,
+              versionStatus: versionData.status,
+              payloadBody: (payload.body as string)?.substring(0, 100),
+            });
+
+            const result = await backendApi.templates.updateVersionContent(
+              templateId,
+              versionData.id,
+              payload,
+            );
+
+            console.log("[TemplateForm] Save result:", {
+              resultBody: result?.content?.body?.substring(0, 100),
+              resultId: result?.id,
+            });
+
+            contentSaved = true;
+          } else {
+            // Version exists but cannot be edited - this should not happen
+            // as the form should be read-only, but handle gracefully
+            throw new Error(
+              t("cannotEditVersion") ||
+                "This version cannot be edited. Please create a new draft to make changes.",
+            );
+          }
+        } else {
+          // No version data - save directly to locale (for new locales or legacy mode)
           await backendApi.templates.addLocale(templateId, {
             locale: formData.selectedLocale,
             ...buildContentPayload(),
           });
+          contentSaved = true;
         }
 
-        addNotification(
-          t("templateUpdated") || "Template updated successfully",
-          "success",
-          3000,
-        );
+        // Only show success if content was actually saved
+        if (contentSaved) {
+          addNotification(
+            t("templateUpdated") || "Template updated successfully",
+            "success",
+            3000,
+          );
+        }
 
         // Refresh template data
         globalMutate(`template-${templateId}`);
@@ -586,237 +632,147 @@ export function TemplateForm({
   const hasWarnings = validationErrors.some((e) => e.severity === "warning");
 
   return (
-    <div className="space-y-6">
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Basic Info - Global fields */}
-        <Card className="p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold">
-              {t("basicInfo") || "Basic Information"}
-            </h2>
-            {isEditMode && (
-              <Badge variant="outline" className="gap-1">
-                <Globe className="h-3 w-3" />
-                {t("globalField") || "Global"}
-              </Badge>
-            )}
-          </div>
-
-          <div className="space-y-4">
-            {/* Display Name - User-friendly name */}
-            <div>
-              <Label htmlFor="displayName">
-                {t("displayName") || "Display Name"}
-              </Label>
-              <Input
-                id="displayName"
-                value={formData.displayName}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  setFormData({ ...formData, displayName: e.target.value })
-                }
-                placeholder={
-                  t("displayNamePlaceholder") || "e.g., Order Confirmation"
-                }
-                disabled={readOnly}
-              />
-              <p className="text-xs text-muted-foreground mt-1">
-                {t("displayNameHint") ||
-                  "This is the name shown to users in the template selector"}
-              </p>
-            </div>
-
-            {/* Generated Meta Name - Read-only preview */}
-            {formData.displayName && (
-              <div className="p-3 bg-muted rounded-md">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="text-xs font-medium text-muted-foreground">
-                      {t("metaTemplateName") || "Meta Template Name"}
-                    </span>
-                    <p className="font-mono text-sm">{generatedName}</p>
-                  </div>
-                  <span className="text-xs text-muted-foreground bg-background px-2 py-1 rounded">
-                    {t("autoGenerated") || "Auto-generated"}
-                  </span>
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {t("metaTemplateNameHint") ||
-                    "This name is used by Meta's API and follows their naming rules"}
-                </p>
-              </div>
-            )}
-
-            <div>
-              <Label htmlFor="description">
-                {t("description") || "Description"}
-              </Label>
-              <Textarea
-                id="description"
-                value={formData.description}
-                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                  setFormData({ ...formData, description: e.target.value })
-                }
-                placeholder="Describe what this template is used for..."
-                rows={3}
-                disabled={readOnly}
-              />
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="isVisible"
-                checked={formData.isVisible}
-                onCheckedChange={(checked) =>
-                  setFormData({ ...formData, isVisible: checked as boolean })
-                }
-                disabled={readOnly}
-              />
-              <Label htmlFor="isVisible">
-                {t("makeVisible") || "Make this template visible in chats"}
-              </Label>
-            </div>
-          </div>
-        </Card>
-
-        {/* Platforms - Global field */}
-        <Card className="p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold">
-              {t("platforms") || "Available Platforms"}
-            </h2>
-            {isEditMode && (
-              <Badge variant="outline" className="gap-1">
-                <Globe className="h-3 w-3" />
-                {t("globalField") || "Global"}
-              </Badge>
-            )}
-          </div>
-
-          <div className="space-y-2">
-            {PLATFORMS.map((platform) => (
-              <div key={platform} className="flex items-center gap-2">
-                <Checkbox
-                  id={`platform-${platform}`}
-                  checked={formData.enabledPlatforms.includes(platform)}
-                  onCheckedChange={(checked) => {
-                    setFormData((prev) => ({
-                      ...prev,
-                      enabledPlatforms: checked
-                        ? [...prev.enabledPlatforms, platform]
-                        : prev.enabledPlatforms.filter((p) => p !== platform),
-                    }));
-                  }}
-                  disabled={readOnly}
-                />
-                <Label htmlFor={`platform-${platform}`} className="capitalize">
-                  {platform}
-                </Label>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        {/* Locale-specific content */}
-        <Card className="p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold">
-              {t("content") || "Content"}
-            </h2>
-            {isEditMode && (
-              <Badge variant="secondary" className="gap-1">
-                {t("localeSpecific") || "Locale-specific"}
-              </Badge>
-            )}
-          </div>
-
-          {/* Language selector - only shown for new templates (edit mode uses tabs) */}
-          {!isEditMode && (
-            <div className="mb-4">
-              <Label htmlFor="locale">{t("language") || "Language"}</Label>
-              <Select
-                value={formData.selectedLocale}
-                onValueChange={(value: string) => {
-                  setFormData({ ...formData, selectedLocale: value });
-                  // Notify parent of locale change
-                  onLocaleChange?.(value);
-                }}
-                disabled={readOnly}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {SUPPORTED_LOCALES.map((loc) => (
-                    <SelectItem key={loc.code} value={loc.code}>
-                      {loc.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-
-          {/* Category selector */}
-          <div className="mb-4">
-            <Label htmlFor="category">{t("category") || "Category"}</Label>
-            <Select
-              value={formData.category}
-              onValueChange={(value: string) => {
-                setFormData({ ...formData, category: value });
-              }}
-              disabled={readOnly}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select a category" />
-              </SelectTrigger>
-              <SelectContent>
-                {TEMPLATE_CATEGORIES.map((cat) => (
-                  <SelectItem key={cat.code} value={cat.code}>
-                    {t(`categories.${cat.code}`) || cat.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground mt-1">
-              {t("categoryHint") ||
-                "Meta requires a category for template approval"}
-            </p>
-            {/* Category description help text */}
-            {formData.category && (
-              <div className="mt-2 p-3 rounded-md bg-muted/50 border border-border">
-                <p className="text-sm text-muted-foreground">
-                  {t(`categoryDescriptions.${formData.category}`)}
-                </p>
-              </div>
-            )}
-          </div>
-        </Card>
-
-        {/* Enhanced Template Editor - handles header, body, footer, buttons, carousel */}
-        <EnhancedTemplateEditor
-          templateId={templateId}
-          localeId={currentLocaleId}
-          initialComponents={formData.components}
-          legacyData={{
-            header: formData.header,
-            body: formData.body,
-            footer: formData.footer,
-          }}
-          category={
-            formData.category as "utility" | "marketing" | "authentication"
-          }
-          disabled={readOnly}
-          onChange={handleComponentsChange}
-          onLegacyChange={handleLegacyChange}
-          exampleVars={formData.exampleVars}
-        />
-
-        {/* Variables - Locale-specific */}
-        {extractedVariables.length > 0 && (
+    <form onSubmit={handleSubmit} className="space-y-6">
+      {/* Two-column layout: Configuration on left, Preview on right */}
+      <div className="flex flex-col lg:flex-row gap-6">
+        {/* Left Column - Configuration */}
+        <div className="flex-1 space-y-6 min-w-0">
+          {/* Basic Info - Global fields */}
           <Card className="p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold">
-                {t("variables") || "Variables"}
+                {t("basicInfo") || "Basic Information"}
+              </h2>
+              {isEditMode && (
+                <Badge variant="outline" className="gap-1">
+                  <Globe className="h-3 w-3" />
+                  {t("globalField") || "Global"}
+                </Badge>
+              )}
+            </div>
+
+            <div className="space-y-4">
+              {/* Display Name - User-friendly name */}
+              <div>
+                <Label htmlFor="displayName">
+                  {t("displayName") || "Display Name"}
+                </Label>
+                <Input
+                  id="displayName"
+                  value={formData.displayName}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setFormData({ ...formData, displayName: e.target.value })
+                  }
+                  placeholder={
+                    t("displayNamePlaceholder") || "e.g., Order Confirmation"
+                  }
+                  disabled={readOnly}
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  {t("displayNameHint") ||
+                    "This is the name shown to users in the template selector"}
+                </p>
+              </div>
+
+              {/* Generated Meta Name - Read-only preview */}
+              {formData.displayName && (
+                <div className="p-3 bg-muted rounded-md">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-medium text-muted-foreground">
+                        {t("metaTemplateName") || "Meta Template Name"}
+                      </span>
+                      <p className="font-mono text-sm">{generatedName}</p>
+                    </div>
+                    <span className="text-xs text-muted-foreground bg-background px-2 py-1 rounded">
+                      {t("autoGenerated") || "Auto-generated"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {t("metaTemplateNameHint") ||
+                      "This name is used by Meta's API and follows their naming rules"}
+                  </p>
+                </div>
+              )}
+
+              <div>
+                <Label htmlFor="description">
+                  {t("description") || "Description"}
+                </Label>
+                <Textarea
+                  id="description"
+                  value={formData.description}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                    setFormData({ ...formData, description: e.target.value })
+                  }
+                  placeholder="Describe what this template is used for..."
+                  rows={3}
+                  disabled={readOnly}
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="isVisible"
+                  checked={formData.isVisible}
+                  onCheckedChange={(checked) =>
+                    setFormData({ ...formData, isVisible: checked as boolean })
+                  }
+                  disabled={readOnly}
+                />
+                <Label htmlFor="isVisible">
+                  {t("makeVisible") || "Make this template visible in chats"}
+                </Label>
+              </div>
+            </div>
+          </Card>
+
+          {/* Platforms - Global field */}
+          <Card className="p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold">
+                {t("platforms") || "Available Platforms"}
+              </h2>
+              {isEditMode && (
+                <Badge variant="outline" className="gap-1">
+                  <Globe className="h-3 w-3" />
+                  {t("globalField") || "Global"}
+                </Badge>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              {PLATFORMS.map((platform) => (
+                <div key={platform} className="flex items-center gap-2">
+                  <Checkbox
+                    id={`platform-${platform}`}
+                    checked={formData.enabledPlatforms.includes(platform)}
+                    onCheckedChange={(checked) => {
+                      setFormData((prev) => ({
+                        ...prev,
+                        enabledPlatforms: checked
+                          ? [...prev.enabledPlatforms, platform]
+                          : prev.enabledPlatforms.filter((p) => p !== platform),
+                      }));
+                    }}
+                    disabled={readOnly}
+                  />
+                  <Label
+                    htmlFor={`platform-${platform}`}
+                    className="capitalize"
+                  >
+                    {platform}
+                  </Label>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          {/* Locale-specific content */}
+          <Card className="p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold">
+                {t("content") || "Content"}
               </h2>
               {isEditMode && (
                 <Badge variant="secondary" className="gap-1">
@@ -825,108 +781,222 @@ export function TemplateForm({
               )}
             </div>
 
-            <p className="text-sm text-muted-foreground mb-4">
-              {t("variablesHelp") ||
-                "Enter friendly example values for your variables. These help you preview the template and are used as placeholders in the approval request."}
-            </p>
+            {/* Language selector - only shown for new templates (edit mode uses tabs) */}
+            {!isEditMode && (
+              <div className="mb-4">
+                <Label htmlFor="locale">{t("language") || "Language"}</Label>
+                <Select
+                  value={formData.selectedLocale}
+                  onValueChange={(value: string) => {
+                    setFormData({ ...formData, selectedLocale: value });
+                    // Notify parent of locale change
+                    onLocaleChange?.(value);
+                  }}
+                  disabled={readOnly}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SUPPORTED_LOCALES.map((loc) => (
+                      <SelectItem key={loc.code} value={loc.code}>
+                        {loc.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
-            <div className="space-y-3">
-              {extractedVariables.map((varName) => (
-                <div key={varName}>
-                  <Label htmlFor={`var-${varName}`} className="text-sm">
-                    {"{{"}
-                    {varName}
-                    {"}}"}
-                  </Label>
-                  <Input
-                    id={`var-${varName}`}
-                    value={formData.exampleVars[varName] || ""}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        exampleVars: {
-                          ...prev.exampleVars,
-                          [varName]: e.target.value,
-                        },
-                      }))
-                    }
-                    placeholder={
-                      t("variableExamplePlaceholder", { varName }) ||
-                      `Example value for ${varName}`
-                    }
-                    disabled={readOnly}
-                  />
+            {/* Category selector */}
+            <div className="mb-4">
+              <Label htmlFor="category">{t("category") || "Category"}</Label>
+              <Select
+                value={formData.category}
+                onValueChange={(value: string) => {
+                  setFormData({ ...formData, category: value });
+                }}
+                disabled={readOnly}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a category" />
+                </SelectTrigger>
+                <SelectContent>
+                  {TEMPLATE_CATEGORIES.map((cat) => (
+                    <SelectItem key={cat.code} value={cat.code}>
+                      {t(`categories.${cat.code}`) || cat.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">
+                {t("categoryHint") ||
+                  "Meta requires a category for template approval"}
+              </p>
+              {/* Category description help text */}
+              {formData.category && (
+                <div className="mt-2 p-3 rounded-md bg-muted/50 border border-border">
+                  <p className="text-sm text-muted-foreground">
+                    {t(`categoryDescriptions.${formData.category}`)}
+                  </p>
                 </div>
-              ))}
+              )}
             </div>
           </Card>
-        )}
 
-        {/* Validation Errors/Warnings */}
-        {validationErrors.length > 0 && (
-          <Card
-            className={`p-4 border-2 ${
-              hasErrors
-                ? "border-red-300 bg-red-50"
-                : "border-yellow-300 bg-yellow-50"
-            }`}
-          >
-            <div className="space-y-2">
-              {validationErrors.map((error, idx) => (
-                <div key={idx} className="flex gap-2">
-                  {error.severity === "error" ? (
-                    <AlertCircle className="h-4 w-4 text-red-600 flex-shrink-0 mt-0.5" />
-                  ) : (
-                    <AlertCircle className="h-4 w-4 text-yellow-600 flex-shrink-0 mt-0.5" />
-                  )}
-                  <div>
-                    <p
-                      className={`text-sm font-medium ${
-                        error.severity === "error"
-                          ? "text-red-900"
-                          : "text-yellow-900"
-                      }`}
-                    >
-                      {error.field}
-                    </p>
-                    <p
-                      className={`text-sm ${
-                        error.severity === "error"
-                          ? "text-red-800"
-                          : "text-yellow-800"
-                      }`}
-                    >
-                      {error.message}
-                    </p>
+          {/* Enhanced Template Editor - handles header, body, footer, buttons, carousel */}
+          <EnhancedTemplateEditor
+            templateId={templateId}
+            localeId={currentLocaleId}
+            initialComponents={formData.components}
+            legacyData={{
+              header: formData.header,
+              body: formData.body,
+              footer: formData.footer,
+            }}
+            category={
+              formData.category as "utility" | "marketing" | "authentication"
+            }
+            disabled={readOnly}
+            onChange={handleComponentsChange}
+            onLegacyChange={handleLegacyChange}
+            exampleVars={formData.exampleVars}
+          />
+
+          {/* Variables - Locale-specific */}
+          {extractedVariables.length > 0 && (
+            <Card className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold">
+                  {t("variables") || "Variables"}
+                </h2>
+                {isEditMode && (
+                  <Badge variant="secondary" className="gap-1">
+                    {t("localeSpecific") || "Locale-specific"}
+                  </Badge>
+                )}
+              </div>
+
+              <p className="text-sm text-muted-foreground mb-4">
+                {t("variablesHelp") ||
+                  "Enter friendly example values for your variables. These help you preview the template and are used as placeholders in the approval request."}
+              </p>
+
+              <div className="space-y-3">
+                {extractedVariables.map((varName) => (
+                  <div key={varName}>
+                    <Label htmlFor={`var-${varName}`} className="text-sm">
+                      {"{{"}
+                      {varName}
+                      {"}}"}
+                    </Label>
+                    <Input
+                      id={`var-${varName}`}
+                      value={formData.exampleVars[varName] || ""}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          exampleVars: {
+                            ...prev.exampleVars,
+                            [varName]: e.target.value,
+                          },
+                        }))
+                      }
+                      placeholder={
+                        t("variableExamplePlaceholder", { varName }) ||
+                        `Example value for ${varName}`
+                      }
+                      disabled={readOnly}
+                    />
                   </div>
-                </div>
-              ))}
-            </div>
-          </Card>
-        )}
-
-        {/* Actions */}
-        <div className="flex gap-3 justify-end">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => router.push(`/${locale}/dashboard/templates`)}
-          >
-            {readOnly
-              ? tCommon("back") || "Back"
-              : tCommon("cancel") || "Cancel"}
-          </Button>
-
-          {!readOnly && (
-            <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting && <Loader className="h-4 w-4 mr-2 animate-spin" />}
-              {templateId
-                ? t("update") || "Update"
-                : tCommon("create") || "Create"}
-            </Button>
+                ))}
+              </div>
+            </Card>
           )}
         </div>
-      </form>
-    </div>
+
+        {/* Right Column - Live Preview */}
+        <div className="hidden lg:block lg:w-[380px] lg:flex-shrink-0">
+          <div className="sticky top-6">
+            <Card className="p-4">
+              <h3 className="text-sm font-medium text-muted-foreground mb-4">
+                {t("livePreview") || "Live Preview"}
+              </h3>
+              <EnhancedTemplatePreview
+                components={formData.components || createEmptyComponents()}
+                exampleVars={formData.exampleVars}
+                showPhoneFrame={true}
+                templateName={
+                  formData.displayName || t("untitled") || "Untitled"
+                }
+              />
+            </Card>
+          </div>
+        </div>
+      </div>
+
+      {/* Validation Errors/Warnings */}
+      {validationErrors.length > 0 && (
+        <Card
+          className={`p-4 border-2 ${
+            hasErrors
+              ? "border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950/50"
+              : "border-yellow-300 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-950/50"
+          }`}
+        >
+          <div className="space-y-2">
+            {validationErrors.map((error, idx) => (
+              <div key={idx} className="flex gap-2">
+                {error.severity === "error" ? (
+                  <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                ) : (
+                  <AlertCircle className="h-4 w-4 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
+                )}
+                <div>
+                  <p
+                    className={`text-sm font-medium ${
+                      error.severity === "error"
+                        ? "text-red-900 dark:text-red-200"
+                        : "text-yellow-900 dark:text-yellow-200"
+                    }`}
+                  >
+                    {error.field}
+                  </p>
+                  <p
+                    className={`text-sm ${
+                      error.severity === "error"
+                        ? "text-red-800 dark:text-red-300"
+                        : "text-yellow-800 dark:text-yellow-300"
+                    }`}
+                  >
+                    {error.message}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Actions */}
+      <div className="flex gap-3 justify-end">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => router.push(`/${locale}/dashboard/templates`)}
+        >
+          {readOnly ? tCommon("back") || "Back" : tCommon("cancel") || "Cancel"}
+        </Button>
+
+        {!readOnly && (
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting && <Loader className="h-4 w-4 mr-2 animate-spin" />}
+            {templateId
+              ? t("update") || "Update"
+              : tCommon("create") || "Create"}
+          </Button>
+        )}
+      </div>
+    </form>
   );
 }

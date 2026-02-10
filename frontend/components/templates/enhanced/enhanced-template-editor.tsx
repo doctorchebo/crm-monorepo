@@ -137,6 +137,8 @@ export function EnhancedTemplateEditor({
 
   // Track if we've received initial data to prevent overwriting user edits
   const hasReceivedInitialData = useRef(false);
+  // Track the initial body text to detect if initialComponents actually changed
+  const initialBodyTextRef = useRef<string | undefined>(undefined);
 
   // Compute initial mode from initialComponents
   const computedInitialMode = useMemo(
@@ -171,12 +173,11 @@ export function EnhancedTemplateEditor({
   /**
    * Sync mode and components when initialComponents prop changes.
    * This handles the async loading case where version data arrives after initial render.
-   * We only sync once to avoid overwriting user edits during the session.
+   *
+   * Key insight: We need to sync when initialComponents has meaningful data that differs
+   * from what we last synced, but NOT when the user is actively editing.
    */
   useEffect(() => {
-    // Skip if we've already processed initial data or there's nothing to sync
-    if (hasReceivedInitialData.current) return;
-
     // Check if initialComponents has meaningful data (not just empty defaults)
     const hasComponentData =
       initialComponents &&
@@ -185,14 +186,42 @@ export function EnhancedTemplateEditor({
         initialComponents.buttons?.length ||
         initialComponents.carousel?.length);
 
-    if (hasComponentData) {
-      // Mark that we've received and processed the initial data
-      hasReceivedInitialData.current = true;
+    const currentInitialBodyText = initialComponents?.body?.text || "";
 
-      // Update components state
+    console.log("[EnhancedTemplateEditor] Sync useEffect:", {
+      hasReceivedInitialData: hasReceivedInitialData.current,
+      initialBodyTextRef: initialBodyTextRef.current?.substring(0, 30),
+      currentInitialBodyText: currentInitialBodyText.substring(0, 30),
+      currentComponentsBodyText: components.body?.text?.substring(0, 30),
+      hasComponentData,
+    });
+
+    // Case 1: First time receiving meaningful data
+    if (!hasReceivedInitialData.current && hasComponentData) {
+      console.log("[EnhancedTemplateEditor] First sync from initialComponents");
+      hasReceivedInitialData.current = true;
+      initialBodyTextRef.current = currentInitialBodyText;
       setComponents(initialComponents);
 
-      // Update mode based on the new components
+      if (requiresAdvancedMode(initialComponents)) {
+        setMode("advanced");
+      }
+      return;
+    }
+
+    // Case 2: initialComponents changed after initial load (e.g., page refresh with new data)
+    // Only sync if the new initialComponents is different from what we last synced
+    if (
+      hasReceivedInitialData.current &&
+      hasComponentData &&
+      initialBodyTextRef.current !== currentInitialBodyText
+    ) {
+      console.log(
+        "[EnhancedTemplateEditor] Re-syncing due to changed initialComponents",
+      );
+      initialBodyTextRef.current = currentInitialBodyText;
+      setComponents(initialComponents);
+
       if (requiresAdvancedMode(initialComponents)) {
         setMode("advanced");
       }
@@ -225,6 +254,12 @@ export function EnhancedTemplateEditor({
   // Handle component changes
   const handleComponentsChange = useCallback(
     (newComponents: TemplateComponents) => {
+      console.log("[EnhancedTemplateEditor] handleComponentsChange:", {
+        bodyText: newComponents.body?.text?.substring(0, 50),
+        hasOnChange: !!onChange,
+      });
+      // Update the ref so useEffect knows this is an internal change, not external
+      initialBodyTextRef.current = newComponents.body?.text || "";
       setComponents(newComponents);
       onChange?.(newComponents);
 

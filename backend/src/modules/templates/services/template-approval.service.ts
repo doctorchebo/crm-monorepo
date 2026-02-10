@@ -100,6 +100,9 @@ export class TemplateApprovalService {
   /**
    * Validate template for Meta approval without submitting
    * Use this to show validation errors/warnings before the confirmation modal
+   *
+   * IMPORTANT: This reads from the latest draft version's content, not the
+   * locale's body field, since the locale is only updated when a version is approved.
    */
   async validateForApproval(
     templateId: string,
@@ -121,15 +124,85 @@ export class TemplateApprovalService {
       throw new NotFoundException(`Locale ${locale} not found for template`);
     }
 
-    // Run full Meta validation
-    const validationErrors = this.validatorService.validateForMetaApproval(
-      template.name,
-      localeData.body,
-      localeData.category || 'utility',
-      localeData.exampleVars as Record<string, string>,
-      localeData.header || undefined,
-      localeData.footer || undefined,
-    );
+    // Get the latest draft version for this locale to validate current content
+    // The locale's body/header/footer fields are only updated when a version is approved,
+    // so we need to read from the version's content for accurate validation
+    const draftVersion = await db.query.templateVersions.findFirst({
+      where: and(
+        eq(templateVersions.templateId, templateId),
+        eq(templateVersions.localeId, localeData.id),
+        eq(templateVersions.status, 'draft'),
+      ),
+      orderBy: [desc(templateVersions.versionNumber)],
+    });
+
+    // Use version content if available, otherwise fall back to locale data
+    const versionContent = draftVersion?.content as {
+      header?: string | null;
+      body: string;
+      footer?: string | null;
+      exampleVars?: Record<string, string>;
+      category?: string;
+      components?: TemplateComponentsDto;
+    } | null;
+
+    // Determine what content to validate
+    const bodyText =
+      versionContent?.components?.body?.text ||
+      versionContent?.body ||
+      localeData.body;
+    const headerText =
+      versionContent?.components?.header?.text ||
+      versionContent?.header ||
+      localeData.header;
+    const footerText =
+      versionContent?.components?.footer?.text ||
+      versionContent?.footer ||
+      localeData.footer;
+    const category =
+      versionContent?.category || localeData.category || 'utility';
+    const exampleVars =
+      versionContent?.exampleVars ||
+      (localeData.exampleVars as Record<string, string>);
+    const components = versionContent?.components;
+
+    let validationErrors: ValidationError[];
+
+    // Use components validator for enhanced templates, legacy validator for others
+    if (components) {
+      // Enhanced template: use ComponentsValidatorService
+      const componentsResult = this.componentsValidator.validate(
+        components,
+        category as TemplateCategory,
+      );
+
+      // Convert to ValidationError format and add template name validation
+      validationErrors = [
+        ...this.validatorService.validateTemplateName(template.name),
+        ...componentsResult.errors.map((e) => ({
+          field: e.field,
+          message: e.message,
+          severity: e.severity,
+          code: e.code,
+        })),
+        ...componentsResult.warnings.map((e) => ({
+          field: e.field,
+          message: e.message,
+          severity: e.severity,
+          code: e.code,
+        })),
+      ];
+    } else {
+      // Legacy template: use TemplateValidatorService
+      validationErrors = this.validatorService.validateForMetaApproval(
+        template.name,
+        bodyText,
+        category,
+        exampleVars,
+        headerText || undefined,
+        footerText || undefined,
+      );
+    }
 
     const summary =
       this.validatorService.getValidationSummary(validationErrors);

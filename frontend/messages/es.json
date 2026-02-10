@@ -1219,6 +1219,8 @@
     "variablesHelp": "Ingresa valores de ejemplo descriptivos para tus variables. Estos te ayudan a previsualizar la plantilla y se usan como marcadores en la solicitud de aprobación.",
     "variableExamplePlaceholder": "Valor de ejemplo para {varName}",
     "preview": "Vista Previa",
+    "livePreview": "Vista Previa en Vivo",
+    "untitled": "Sin Título",
     "simpleMode": "Simple",
     "advancedMode": "Avanzado",
     "modeHelpText": "Modo simple: Plantillas de solo texto básicas. Modo avanzado: Añade botones, cabeceras multimedia, carruseles y más.",
