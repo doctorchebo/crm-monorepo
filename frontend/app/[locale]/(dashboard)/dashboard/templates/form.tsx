@@ -204,9 +204,6 @@ export function TemplateForm({
   // Handle enhanced components change
   const handleComponentsChange = useCallback(
     (components: TemplateComponents) => {
-      console.log("[TemplateForm] handleComponentsChange called:", {
-        bodyText: components.body?.text?.substring(0, 50),
-      });
       setFormData((prev) => ({
         ...prev,
         components,

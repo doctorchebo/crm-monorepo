@@ -185,17 +185,8 @@ export function EnhancedTemplateEditor({
 
     const currentInitialBodyText = initialComponents?.body?.text || "";
 
-    console.log("[EnhancedTemplateEditor] Sync useEffect:", {
-      hasReceivedInitialData: hasReceivedInitialData.current,
-      initialBodyTextRef: initialBodyTextRef.current?.substring(0, 30),
-      currentInitialBodyText: currentInitialBodyText.substring(0, 30),
-      currentComponentsBodyText: components.body?.text?.substring(0, 30),
-      hasComponentData,
-    });
-
     // Case 1: First time receiving meaningful data
     if (!hasReceivedInitialData.current && hasComponentData) {
-      console.log("[EnhancedTemplateEditor] First sync from initialComponents");
       hasReceivedInitialData.current = true;
       initialBodyTextRef.current = currentInitialBodyText;
       setComponents(initialComponents);
@@ -213,9 +204,6 @@ export function EnhancedTemplateEditor({
       hasComponentData &&
       initialBodyTextRef.current !== currentInitialBodyText
     ) {
-      console.log(
-        "[EnhancedTemplateEditor] Re-syncing due to changed initialComponents",
-      );
       initialBodyTextRef.current = currentInitialBodyText;
       setComponents(initialComponents);
 
@@ -267,10 +255,6 @@ export function EnhancedTemplateEditor({
   // Handle component changes
   const handleComponentsChange = useCallback(
     (newComponents: TemplateComponents) => {
-      console.log("[EnhancedTemplateEditor] handleComponentsChange:", {
-        bodyText: newComponents.body?.text?.substring(0, 50),
-        hasOnChange: !!onChange,
-      });
       // Update the ref so useEffect knows this is an internal change, not external
       initialBodyTextRef.current = newComponents.body?.text || "";
       setComponents(newComponents);
@@ -371,10 +355,6 @@ export function EnhancedTemplateEditor({
 
           // Register callback for when thumbnail is ready
           registerPendingThumbnail(result.tempId, (thumbnailUrl: string) => {
-            console.log(
-              `[EnhancedTemplateEditor] Thumbnail ready for tempId ${result.tempId}: ${thumbnailUrl}`,
-            );
-
             // Update the header with the thumbnail URL (keep original url for video playback)
             // Use functional update to get latest state, then notify parent in a separate effect
             setComponents((currentComponents) => {
