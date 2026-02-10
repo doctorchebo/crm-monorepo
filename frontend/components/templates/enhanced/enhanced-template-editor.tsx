@@ -30,7 +30,6 @@ import { TEMPLATE_LIMITS } from "@/lib/validation/template-components.validation
 import {
   AlertCircle,
   AlertTriangle,
-  Eye,
   HelpCircle,
   LayoutGrid,
   Type,
@@ -39,7 +38,6 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ButtonEditor } from "./button-editor";
 import { CarouselEditor } from "./carousel-editor";
-import { EnhancedTemplatePreview } from "./enhanced-template-preview";
 import { HeaderEditor } from "./header-editor";
 import { useMediaUpload } from "./use-media-upload";
 
@@ -153,9 +151,6 @@ export function EnhancedTemplateEditor({
 
   // Active tab in advanced mode
   const [activeTab, setActiveTab] = useState("header");
-
-  // Preview modal state
-  const [showPreview, setShowPreview] = useState(false);
 
   // Components state
   const [components, setComponents] = useState<TemplateComponents>(() => {
@@ -380,14 +375,14 @@ export function EnhancedTemplateEditor({
               `[EnhancedTemplateEditor] Thumbnail ready for tempId ${result.tempId}: ${thumbnailUrl}`,
             );
 
-            // Update the header with the thumbnail URL
+            // Update the header with the thumbnail URL (keep original url for video playback)
             // Use functional update to get latest state, then notify parent in a separate effect
             setComponents((currentComponents) => {
               const currentHeader = currentComponents.header;
               if (currentHeader && isMediaHeader(currentHeader)) {
                 const updatedHeader: MediaHeader = {
                   ...currentHeader,
-                  url: thumbnailUrl,
+                  thumbnailUrl: thumbnailUrl,
                 };
                 const newComponents = {
                   ...currentComponents,
@@ -842,36 +837,6 @@ export function EnhancedTemplateEditor({
             )}
           </Tabs>
         </Card>
-      )}
-
-      {/* Preview Button */}
-      <div className="flex justify-end">
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => setShowPreview(true)}
-        >
-          <Eye className="h-4 w-4 mr-2" />
-          {t("preview") || "Preview"}
-        </Button>
-      </div>
-
-      {/* Preview Modal */}
-      {showPreview && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="max-w-lg w-full">
-            <EnhancedTemplatePreview
-              components={components}
-              exampleVars={exampleVars}
-              showPhoneFrame={true}
-            />
-            <div className="flex justify-center mt-4">
-              <Button variant="outline" onClick={() => setShowPreview(false)}>
-                {t("closePreview") || "Close Preview"}
-              </Button>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   );

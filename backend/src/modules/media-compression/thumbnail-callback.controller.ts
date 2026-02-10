@@ -226,8 +226,13 @@ export class ThumbnailCallbackController {
           height: payload.height,
         });
 
-        // Delete the original file from S3 (thumbnail is now ready for display)
-        if (originalS3Key) {
+        // For documents (PDFs), delete the original file since we only need the thumbnail
+        // For videos, KEEP the original file since the frontend needs it for playback
+        const isVideo = originalS3Key
+          ? /\.(mp4|mov|avi|webm|mkv|m4v)$/i.test(originalS3Key)
+          : false;
+
+        if (originalS3Key && !isVideo) {
           try {
             await this.s3Service.deleteFile(originalS3Key);
             this.logger.log(
@@ -238,6 +243,10 @@ export class ThumbnailCallbackController {
               `[Thumbnail Callback] Failed to delete temp original file ${originalS3Key}: ${deleteError.message}`,
             );
           }
+        } else if (isVideo) {
+          this.logger.log(
+            `[Thumbnail Callback] Keeping temp video file for playback: ${originalS3Key}`,
+          );
         }
       } else {
         this.logger.warn(

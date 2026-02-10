@@ -11,6 +11,7 @@ import {
   hasAdvancedFeatures,
   TemplateComponents,
 } from "@/components/templates/enhanced";
+import { RequestApprovalModal } from "@/components/templates/request-approval-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -33,7 +34,7 @@ import {
   SUPPORTED_LANGUAGES,
 } from "@/lib/api/endpoints";
 import { toMetaTemplateName } from "@/lib/utils/template-name";
-import { AlertCircle, Globe, Loader } from "lucide-react";
+import { AlertCircle, Globe, Loader, Send } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -134,6 +135,8 @@ interface TemplateFormProps {
   isEditMode?: boolean;
   /** Version data when editing in version mode */
   versionData?: VersionData | null;
+  /** Callback when a new template is created (passes new templateId) */
+  onTemplateCreated?: (templateId: string) => void;
 }
 
 export function TemplateForm({
@@ -145,6 +148,7 @@ export function TemplateForm({
   onSaveSuccess,
   isEditMode = false,
   versionData,
+  onTemplateCreated,
 }: TemplateFormProps) {
   const router = useRouter();
   const params = useParams();
@@ -152,6 +156,17 @@ export function TemplateForm({
   const t = useTranslations("templates");
   const tCommon = useTranslations("common");
   const { addNotification } = useNotification();
+
+  // Track the saved template ID (for new templates that were just created)
+  const [savedTemplateId, setSavedTemplateId] = useState<string | null>(null);
+  // The effective template ID (either passed in or saved after creation)
+  const effectiveTemplateId = templateId || savedTemplateId;
+
+  // Track if template has been saved (for showing Request Approval button)
+  const [hasSavedDraft, setHasSavedDraft] = useState(!!templateId);
+
+  // Request Approval modal state
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
 
   const [formData, setFormData] = useState<FormData>({
     displayName: "",
@@ -170,21 +185,21 @@ export function TemplateForm({
   // @ts-ignore - SWR conditional fetcher type mismatch
   const { data: existingTemplate }: { data: Template | null | undefined } =
     useSWR(
-      templateId ? `template-${templateId}` : null,
-      !templateId
+      effectiveTemplateId ? `template-${effectiveTemplateId}` : null,
+      !effectiveTemplateId
         ? null
-        : async () => await backendApi.templates.get(templateId),
+        : async () => await backendApi.templates.get(effectiveTemplateId),
     );
 
   // Get locale ID for media uploads
   const currentLocaleId = useMemo(() => {
-    if (!templateId) return undefined;
+    if (!effectiveTemplateId) return undefined;
     // Find the locale ID from existing template data
     const localeData = existingTemplate?.locales?.find(
       (l) => l.locale === formData.selectedLocale,
     );
     return localeData?.id;
-  }, [templateId, existingTemplate, formData.selectedLocale]);
+  }, [effectiveTemplateId, existingTemplate, formData.selectedLocale]);
 
   // Handle enhanced components change
   const handleComponentsChange = useCallback(
@@ -407,16 +422,19 @@ export function TemplateForm({
       }
 
       // For existing template, validate on backend only if the locale already exists
-      if (templateId) {
+      if (effectiveTemplateId) {
         // Check if the selected locale already exists for this template
         const localeExists = existingTemplate?.locales?.some(
           (loc) => loc.locale === formData.selectedLocale,
         );
 
         if (localeExists) {
-          const result = (await backendApi.templates.validate(templateId, {
-            locale: formData.selectedLocale,
-          })) as { errors?: ValidationError[]; hasCriticalErrors?: boolean };
+          const result = (await backendApi.templates.validate(
+            effectiveTemplateId,
+            {
+              locale: formData.selectedLocale,
+            },
+          )) as { errors?: ValidationError[]; hasCriticalErrors?: boolean };
           setValidationErrors(result.errors || []);
           return !(result.hasCriticalErrors || false);
         }
@@ -501,9 +519,9 @@ export function TemplateForm({
         return payload;
       };
 
-      if (templateId) {
+      if (effectiveTemplateId) {
         // Update existing template global fields
-        await backendApi.templates.update(templateId, {
+        await backendApi.templates.update(effectiveTemplateId, {
           displayName: formData.displayName,
           description: formData.description,
           isVisible: formData.isVisible,
@@ -517,14 +535,14 @@ export function TemplateForm({
             // Save content to the version
             const payload = buildContentPayload();
             console.log("[TemplateForm] Saving to version:", {
-              templateId,
+              templateId: effectiveTemplateId,
               versionId: versionData.id,
               versionStatus: versionData.status,
               payloadBody: (payload.body as string)?.substring(0, 100),
             });
 
             const result = await backendApi.templates.updateVersionContent(
-              templateId,
+              effectiveTemplateId,
               versionData.id,
               payload,
             );
@@ -545,7 +563,7 @@ export function TemplateForm({
           }
         } else {
           // No version data - save directly to locale (for new locales or legacy mode)
-          await backendApi.templates.addLocale(templateId, {
+          await backendApi.templates.addLocale(effectiveTemplateId, {
             locale: formData.selectedLocale,
             ...buildContentPayload(),
           });
@@ -559,17 +577,18 @@ export function TemplateForm({
             "success",
             3000,
           );
+          setHasSavedDraft(true);
         }
 
         // Refresh template data
-        globalMutate(`template-${templateId}`);
+        globalMutate(`template-${effectiveTemplateId}`);
 
         // Call success callback (stay on edit page) or navigate back
         if (onSaveSuccess) {
           onSaveSuccess();
-        } else {
-          router.push(`/${locale}/dashboard/templates`);
         }
+        // In create mode (no original templateId), stay on the page
+        // In edit mode with no callback, stay on page as well
       } else {
         // Create new template
         const templateRes = (await backendApi.templates.create({
@@ -585,12 +604,21 @@ export function TemplateForm({
         });
 
         addNotification(
-          t("templateCreated") || "Template created successfully",
+          t("templateCreated") ||
+            "Template created successfully. You can now request approval.",
           "success",
-          3000,
+          4000,
         );
 
-        router.push(`/${locale}/dashboard/templates`);
+        // Store the new template ID to enable Request Approval
+        setSavedTemplateId(templateRes.id);
+        setHasSavedDraft(true);
+
+        // Notify parent of creation
+        onTemplateCreated?.(templateRes.id);
+
+        // Refresh the templates list
+        globalMutate(`template-${templateRes.id}`);
       }
     } catch (error: unknown) {
       console.error("Error saving template:", error);
@@ -915,9 +943,10 @@ export function TemplateForm({
           )}
         </div>
 
-        {/* Right Column - Live Preview */}
+        {/* Right Column - Live Preview & Actions (Floating) */}
         <div className="hidden lg:block lg:w-[380px] lg:flex-shrink-0">
-          <div className="sticky top-6">
+          <div className="sticky top-6 space-y-4">
+            {/* Preview Card */}
             <Card className="p-4">
               <h3 className="text-sm font-medium text-muted-foreground mb-4">
                 {t("livePreview") || "Live Preview"}
@@ -931,8 +960,103 @@ export function TemplateForm({
                 }
               />
             </Card>
+
+            {/* Floating Action Buttons */}
+            <Card className="p-4">
+              <div className="flex flex-col gap-3">
+                {/* Cancel/Back button */}
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => router.push(`/${locale}/dashboard/templates`)}
+                >
+                  {readOnly
+                    ? tCommon("back") || "Back"
+                    : tCommon("cancel") || "Cancel"}
+                </Button>
+
+                {/* Save/Update button */}
+                {!readOnly && (
+                  <Button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="w-full"
+                  >
+                    {isSubmitting && (
+                      <Loader className="h-4 w-4 mr-2 animate-spin" />
+                    )}
+                    {hasSavedDraft
+                      ? t("update") || "Update"
+                      : t("saveDraft") || "Save Draft"}
+                  </Button>
+                )}
+
+                {/* Request Approval button - shows after draft is saved */}
+                {!readOnly && hasSavedDraft && effectiveTemplateId && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="w-full gap-2"
+                    onClick={() => setShowApprovalModal(true)}
+                  >
+                    <Send className="h-4 w-4" />
+                    {t("requestApproval") || "Request Approval"}
+                  </Button>
+                )}
+              </div>
+
+              {/* Help text for new templates */}
+              {!hasSavedDraft && !readOnly && (
+                <p className="text-xs text-muted-foreground mt-3 text-center">
+                  {t("saveDraftHint") ||
+                    "Save your template first, then request approval"}
+                </p>
+              )}
+            </Card>
           </div>
         </div>
+      </div>
+
+      {/* Mobile Action Buttons (shown only on small screens) */}
+      <div className="lg:hidden">
+        <Card className="p-4">
+          <div className="flex flex-col gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={() => router.push(`/${locale}/dashboard/templates`)}
+            >
+              {readOnly
+                ? tCommon("back") || "Back"
+                : tCommon("cancel") || "Cancel"}
+            </Button>
+
+            {!readOnly && (
+              <Button type="submit" disabled={isSubmitting} className="w-full">
+                {isSubmitting && (
+                  <Loader className="h-4 w-4 mr-2 animate-spin" />
+                )}
+                {hasSavedDraft
+                  ? t("update") || "Update"
+                  : t("saveDraft") || "Save Draft"}
+              </Button>
+            )}
+
+            {!readOnly && hasSavedDraft && effectiveTemplateId && (
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full gap-2"
+                onClick={() => setShowApprovalModal(true)}
+              >
+                <Send className="h-4 w-4" />
+                {t("requestApproval") || "Request Approval"}
+              </Button>
+            )}
+          </div>
+        </Card>
       </div>
 
       {/* Validation Errors/Warnings */}
@@ -978,25 +1102,26 @@ export function TemplateForm({
         </Card>
       )}
 
-      {/* Actions */}
-      <div className="flex gap-3 justify-end">
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => router.push(`/${locale}/dashboard/templates`)}
-        >
-          {readOnly ? tCommon("back") || "Back" : tCommon("cancel") || "Cancel"}
-        </Button>
-
-        {!readOnly && (
-          <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting && <Loader className="h-4 w-4 mr-2 animate-spin" />}
-            {templateId
-              ? t("update") || "Update"
-              : tCommon("create") || "Create"}
-          </Button>
-        )}
-      </div>
+      {/* Request Approval Modal */}
+      {effectiveTemplateId && (
+        <RequestApprovalModal
+          open={showApprovalModal}
+          onOpenChange={setShowApprovalModal}
+          templateId={effectiveTemplateId}
+          locale={formData.selectedLocale}
+          templateName={formData.displayName || t("untitled") || "Untitled"}
+          onSuccess={() => {
+            addNotification(
+              t("approvalRequestSubmitted") ||
+                "Approval request submitted successfully",
+              "success",
+              3000,
+            );
+            // Refresh template data
+            globalMutate(`template-${effectiveTemplateId}`);
+          }}
+        />
+      )}
     </form>
   );
 }

@@ -1,6 +1,7 @@
 import { db } from '@database/db.connection';
 import {
   templateLocales,
+  templateMedia,
   templates,
   TemplateVersion,
   templateVersions,
@@ -12,6 +13,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { S3Service } from '@shared/services/s3.service';
 import { and, desc, eq } from 'drizzle-orm';
 
 /**
@@ -132,6 +134,8 @@ export interface CreateVersionResult {
 export class TemplateVersionService {
   private readonly logger = new Logger(TemplateVersionService.name);
 
+  constructor(private readonly s3Service: S3Service) {}
+
   /**
    * Get comprehensive version info for a template locale
    * Also syncs version status with locale approvalStatus if they're out of sync
@@ -221,13 +225,13 @@ export class TemplateVersionService {
     );
 
     // Find active version - the one marked as active by the locale
-    const activeVersion =
+    let activeVersion =
       allVersions.find(
         (v) => v.isActive && v.status === VersionStatus.APPROVED,
       ) || null;
 
     // Find draft version (latest draft or rejected)
-    const draftVersion =
+    let draftVersion =
       allVersions.find(
         (v) =>
           v.status === VersionStatus.DRAFT ||
@@ -235,9 +239,22 @@ export class TemplateVersionService {
       ) || null;
 
     // Find pending version
-    const pendingVersion =
+    let pendingVersion =
       allVersions.find((v) => v.status === VersionStatus.PENDING_APPROVAL) ||
       null;
+
+    // Enrich the primary versions with media thumbnail URLs
+    // We only enrich the versions that will be displayed (active, draft, pending)
+    // to avoid excessive S3 calls for the full version history
+    if (activeVersion) {
+      activeVersion = await this.enrichVersionWithMediaUrls(activeVersion);
+    }
+    if (draftVersion) {
+      draftVersion = await this.enrichVersionWithMediaUrls(draftVersion);
+    }
+    if (pendingVersion) {
+      pendingVersion = await this.enrichVersionWithMediaUrls(pendingVersion);
+    }
 
     // Determine if can create new version
     // Allow creation if there's no existing draft (pending versions don't block creation)
@@ -923,6 +940,97 @@ export class TemplateVersionService {
       canEdit: isEditable,
       canDelete,
       canSubmit,
+    };
+  }
+
+  /**
+   * Enrich version content with media thumbnail URLs from templateMedia table
+   *
+   * When a video/document header is uploaded, the thumbnail is generated asynchronously
+   * and stored in S3. The s3Key in templateMedia is updated to point to the thumbnail.
+   * This method looks up the media record and generates a presigned URL for display.
+   */
+  private async enrichContentWithMediaUrls(
+    localeId: string,
+    content: VersionContent,
+  ): Promise<VersionContent> {
+    // Check if we have a media header that might need thumbnail enrichment
+    const components = content.components as
+      | Record<string, unknown>
+      | undefined;
+    if (!components?.header) {
+      return content;
+    }
+
+    const header = components.header as Record<string, unknown>;
+    const format = header.format as string;
+
+    // Only enrich for media types that have thumbnails
+    if (!['VIDEO', 'DOCUMENT'].includes(format)) {
+      return content;
+    }
+
+    try {
+      // Look up the header media record for this locale
+      // Note: This query may fail if s3_key column doesn't exist (migration not run)
+      const headerMedia = await db.query.templateMedia.findFirst({
+        where: and(
+          eq(templateMedia.localeId, localeId),
+          eq(templateMedia.componentType, 'header'),
+          eq(templateMedia.uploadStatus, 'completed'),
+        ),
+      });
+
+      if (!headerMedia?.s3Key) {
+        return content;
+      }
+
+      // Generate presigned URL for the thumbnail
+      const { url: thumbnailUrl } =
+        await this.s3Service.generatePresignedDownloadUrl(headerMedia.s3Key, {
+          expiresIn: 3600, // 1 hour
+        });
+
+      // Deep clone the content to avoid mutating the original
+      const enrichedContent: VersionContent = {
+        ...content,
+        components: {
+          ...components,
+          header: {
+            ...header,
+            thumbnailUrl,
+          },
+        },
+      };
+
+      this.logger.debug(
+        `Enriched header with thumbnail URL for locale ${localeId}`,
+      );
+
+      return enrichedContent;
+    } catch (error) {
+      // Handle case where s3_key column doesn't exist (migration not run)
+      // or any other database/S3 error - just return content without enrichment
+      this.logger.warn(
+        `Failed to enrich content with media URLs for locale ${localeId}: ${error.message}`,
+      );
+      return content;
+    }
+  }
+
+  /**
+   * Enrich version details with media URLs
+   */
+  async enrichVersionWithMediaUrls(
+    version: VersionDetails,
+  ): Promise<VersionDetails> {
+    const enrichedContent = await this.enrichContentWithMediaUrls(
+      version.localeId,
+      version.content,
+    );
+    return {
+      ...version,
+      content: enrichedContent,
     };
   }
 }

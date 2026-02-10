@@ -133,25 +133,38 @@ function HeaderPreview({
 
     return (
       <div className="mb-3 rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-800">
-        {header.url ? (
-          isImage ? (
-            <img
-              src={header.url}
-              alt="Header"
-              className="w-full h-40 object-cover"
-              onError={(e) => {
-                console.error("[TemplatePreview] Image failed to load:", {
-                  url: header.url,
-                  filename: header.filename,
-                });
-              }}
-            />
-          ) : isVideo ? (
-            <video
-              src={header.url}
-              className="w-full h-40 object-cover"
-              controls
-            />
+        {isImage && header.url ? (
+          <img
+            src={header.url}
+            alt="Header"
+            className="w-full h-40 object-cover"
+            onError={(e) => {
+              console.error("[TemplatePreview] Image failed to load:", {
+                url: header.url,
+                filename: header.filename,
+              });
+            }}
+          />
+        ) : isVideo && header.url ? (
+          <video
+            src={header.url}
+            className="w-full h-40 object-cover"
+            controls
+          />
+        ) : isDoc ? (
+          // For documents, show thumbnail if available, otherwise show icon
+          header.thumbnailUrl ? (
+            <div className="relative">
+              <img
+                src={header.thumbnailUrl}
+                alt={header.filename || "Document thumbnail"}
+                className="w-full h-40 object-cover"
+              />
+              <div className="absolute bottom-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded flex items-center gap-1">
+                <FileText className="h-3 w-3" />
+                {header.filename || "Document"}
+              </div>
+            </div>
           ) : (
             <div className="flex items-center gap-3 p-4">
               <FileText className="h-8 w-8 text-gray-500" />

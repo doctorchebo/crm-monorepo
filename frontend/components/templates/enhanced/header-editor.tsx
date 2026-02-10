@@ -386,53 +386,89 @@ export function HeaderEditor({
               </div>
             ) : isMediaHeader(value) && (value.handle || value.url) ? (
               <div className="flex flex-col items-center gap-2">
-                {/* Show thumbnail preview for all media types with URL */}
-                {value.url ? (
-                  <div className="relative w-full max-w-[200px]">
-                    <img
-                      src={value.url}
-                      alt={value.filename || "Header preview"}
-                      className="w-full h-auto rounded-lg object-cover max-h-[150px]"
-                      onError={(e) => {
-                        console.error(
-                          "[HeaderEditor] Image/thumbnail failed to load:",
-                          {
-                            url: value.url,
-                            filename: value.filename,
-                            format: currentFormat,
-                            error: e,
-                          },
-                        );
-                        // Hide the broken image and show fallback icon
-                        (e.target as HTMLImageElement).style.display = "none";
-                      }}
-                    />
-                    {/* Show format badge for video/document thumbnails */}
-                    {(currentFormat === "VIDEO" ||
-                      currentFormat === "DOCUMENT") && (
-                      <div className="absolute top-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded">
-                        {currentFormat === "VIDEO" ? "Video" : "PDF"}
+                {/* 
+                  For IMAGE: show value.url directly (it's an image)
+                  For VIDEO/DOCUMENT: show value.thumbnailUrl if available, otherwise show loading
+                */}
+                {(() => {
+                  const isImage = currentFormat === "IMAGE";
+                  const hasThumbnail = !isImage && value.thumbnailUrl;
+                  const isWaitingForThumbnail =
+                    !isImage && value.url && !value.thumbnailUrl;
+
+                  // Determine which URL to display
+                  const displayUrl = isImage ? value.url : value.thumbnailUrl;
+
+                  if (isWaitingForThumbnail) {
+                    // Video/Document uploaded but thumbnail not ready yet
+                    return (
+                      <div className="relative w-full max-w-[200px]">
+                        <div className="w-full h-[150px] rounded-lg bg-muted flex flex-col items-center justify-center gap-2">
+                          <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                          <p className="text-xs text-muted-foreground">
+                            Generating thumbnail...
+                          </p>
+                        </div>
+                        <div className="absolute top-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded">
+                          {currentFormat === "VIDEO" ? "Video" : "PDF"}
+                        </div>
                       </div>
-                    )}
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 hover:opacity-100 transition-opacity rounded-lg">
-                      <p className="text-white text-sm font-medium">
-                        Click to replace
-                      </p>
+                    );
+                  }
+
+                  if (displayUrl) {
+                    return (
+                      <div className="relative w-full max-w-[200px]">
+                        <img
+                          src={displayUrl}
+                          alt={value.filename || "Header preview"}
+                          className="w-full h-auto rounded-lg object-cover max-h-[150px]"
+                          onError={(e) => {
+                            console.error(
+                              "[HeaderEditor] Image/thumbnail failed to load:",
+                              {
+                                url: displayUrl,
+                                filename: value.filename,
+                                format: currentFormat,
+                                error: e,
+                              },
+                            );
+                            // Hide the broken image and show fallback icon
+                            (e.target as HTMLImageElement).style.display =
+                              "none";
+                          }}
+                        />
+                        {/* Show format badge for video/document thumbnails */}
+                        {(currentFormat === "VIDEO" ||
+                          currentFormat === "DOCUMENT") && (
+                          <div className="absolute top-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded">
+                            {currentFormat === "VIDEO" ? "Video" : "PDF"}
+                          </div>
+                        )}
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 hover:opacity-100 transition-opacity rounded-lg">
+                          <p className="text-white text-sm font-medium">
+                            Click to replace
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  // Fallback: show icon
+                  return (
+                    <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
+                      {currentFormat === "IMAGE" && (
+                        <Image className="h-6 w-6 text-primary" />
+                      )}
+                      {currentFormat === "VIDEO" && (
+                        <Video className="h-6 w-6 text-primary" />
+                      )}
+                      {currentFormat === "DOCUMENT" && (
+                        <FileText className="h-6 w-6 text-primary" />
+                      )}
                     </div>
-                  </div>
-                ) : (
-                  <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
-                    {currentFormat === "IMAGE" && (
-                      <Image className="h-6 w-6 text-primary" />
-                    )}
-                    {currentFormat === "VIDEO" && (
-                      <Video className="h-6 w-6 text-primary" />
-                    )}
-                    {currentFormat === "DOCUMENT" && (
-                      <FileText className="h-6 w-6 text-primary" />
-                    )}
-                  </div>
-                )}
+                  );
+                })()}
                 <p className="text-sm font-medium">
                   {value.filename || "File uploaded"}
                 </p>

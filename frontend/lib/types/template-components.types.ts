@@ -34,8 +34,10 @@ export interface MediaHeader extends TemplateHeaderBase {
   handle?: string;
   /** Asset handle from Meta's resumable upload API */
   assetHandle?: string;
-  /** Public URL for the media */
+  /** Public URL for the media (video/document original, or image) */
   url?: string;
+  /** Thumbnail URL for video/document (generated asynchronously) */
+  thumbnailUrl?: string;
   /** Filename for documents */
   filename?: string;
 }
@@ -512,6 +514,8 @@ export function dtoToComponents(
         // DTO stores URL as `link`, convert to `url` for frontend
         url:
           (headerDto.link as string) || (headerDto.url as string) || undefined,
+        // Thumbnail URL from backend (for video/document headers)
+        thumbnailUrl: headerDto.thumbnailUrl as string | undefined,
         filename: headerDto.filename as string | undefined,
       };
     } else if (format === "LOCATION") {
@@ -708,6 +712,10 @@ export function componentsToDto(
         assetHandle: components.header.assetHandle || components.header.handle,
         link: components.header.url,
         filename: components.header.filename,
+        // Thumbnail URL is saved in version content for persistence across sessions
+        // For temp uploads, this is the only source. For saved media, backend may also
+        // enrich from templateMedia.s3Key if available.
+        thumbnailUrl: components.header.thumbnailUrl,
       };
     } else if (isLocationHeader(components.header)) {
       dto.header = {
