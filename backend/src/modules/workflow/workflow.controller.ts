@@ -18,6 +18,8 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ProfilePictureUrlService } from '@shared/services/profile-picture-url.service';
+import { AuditQueryService } from '../audit/audit-query.service';
+import { AuditEntityType } from '../audit/audit.types';
 import { JwtAuthGuard } from '../auth/auth.guard';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import {
@@ -46,7 +48,6 @@ import {
   UpdateStageDto,
 } from './dto';
 import {
-  ActivityLogService,
   AiActionLoggerService,
   AiConfigurationService,
   AntiBanSafeguardService,
@@ -81,7 +82,7 @@ export class WorkflowController {
     private readonly usageThrottle: UsageThrottleService,
     private readonly aiConfigService: AiConfigurationService,
     private readonly whatsAppService: WhatsAppService,
-    private readonly activityLogService: ActivityLogService,
+    private readonly auditQueryService: AuditQueryService,
   ) {}
 
   // ==========================================================================
@@ -280,23 +281,17 @@ export class WorkflowController {
   ) {
     const userId = req.user.userId;
 
-    // Parse activity types if provided (comma-separated)
-    const parsedActivityTypes = activityTypes
-      ? (activityTypes.split(',') as any[])
-      : undefined;
-
     // Parse dates if provided
     const parsedStartDate = startDate ? new Date(startDate) : undefined;
     const parsedEndDate = endDate ? new Date(endDate) : undefined;
 
-    return this.activityLogService.getActivityLogs(
+    return this.auditQueryService.getAuditLogs(
       userId,
       page || 1,
       pageSize || 20,
       {
-        activityTypes: parsedActivityTypes,
-        entityType,
-        chatId,
+        category: 'pipeline',
+        entityType: entityType as AuditEntityType | undefined,
         startDate: parsedStartDate,
         endDate: parsedEndDate,
       },
@@ -1174,8 +1169,8 @@ export class WorkflowController {
    */
   @Delete('ai-config/chat-overrides/:chatId')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async deleteChatOverride(@Param('chatId') chatId: string) {
-    await this.aiConfigService.deleteChatOverride(chatId);
+  async deleteChatOverride(@Param('chatId') chatId: string, @Req() req: any) {
+    await this.aiConfigService.deleteChatOverride(chatId, req.user.userId);
   }
 
   /**
@@ -1210,8 +1205,11 @@ export class WorkflowController {
    */
   @Delete('ai-config/stage-settings/:stageId')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async deleteStageSettings(@Param('stageId') stageId: string) {
-    await this.aiConfigService.deleteStageSettings(stageId);
+  async deleteStageSettings(
+    @Param('stageId') stageId: string,
+    @Req() req: any,
+  ) {
+    await this.aiConfigService.deleteStageSettings(stageId, req.user.userId);
   }
 
   // ==========================================================================

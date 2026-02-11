@@ -1,5 +1,6 @@
 "use client";
 
+import { EntityAuditHistoryPanel } from "@/components/audit";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -7,7 +8,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useNotification } from "@/hooks/use-notification";
 import { backendApi, type Sender } from "@/lib/api/endpoints";
-import { ArrowLeft, CheckCircle2, Shield, ShieldCheck } from "lucide-react";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  History,
+  Shield,
+  ShieldCheck,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
@@ -26,6 +33,7 @@ export default function SenderFormPage({
   const { addNotification } = useNotification();
   const [isLoading, setIsLoading] = useState(false);
   const [isFetching, setIsFetching] = useState(isEdit);
+  const [showHistory, setShowHistory] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const [formData, setFormData] = useState<Partial<Sender>>({
@@ -105,7 +113,7 @@ export default function SenderFormPage({
 
       addNotification(
         isEdit ? t("updateSuccess") : t("createSuccess"),
-        "success"
+        "success",
       );
 
       router.push(`/${locale}/dashboard/senders`);
@@ -190,6 +198,17 @@ export default function SenderFormPage({
             {isEdit ? t("editSenderSubtitle") : t("addSenderSubtitle")}
           </p>
         </div>
+        {isEdit && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto gap-2"
+            onClick={() => setShowHistory(true)}
+          >
+            <History className="h-4 w-4" />
+            {t("history")}
+          </Button>
+        )}
       </div>
 
       {/* Form */}
@@ -310,12 +329,22 @@ export default function SenderFormPage({
               {isLoading
                 ? tCommon("loading")
                 : isEdit
-                ? tCommon("update")
-                : tCommon("create")}
+                  ? tCommon("update")
+                  : tCommon("create")}
             </Button>
           </div>
         </form>
       </Card>
+
+      {isEdit && senderId && (
+        <EntityAuditHistoryPanel
+          open={showHistory}
+          onOpenChange={setShowHistory}
+          entityType="sender"
+          entityId={senderId}
+          entityName={formData.displayName || formData.phoneNumber || undefined}
+        />
+      )}
     </div>
   );
 }

@@ -59,7 +59,6 @@ import { ProfilePictureUrlService } from '@shared/services/profile-picture-url.s
 import { WorkflowAITestingController } from './controllers/workflow-ai-testing.controller';
 import { WorkflowBuilderController } from './controllers/workflow-builder.controller';
 import {
-  ActivityLogService,
   AiActionLoggerService,
   AiConfigurationService,
   AiResponseGenerator,
@@ -88,6 +87,9 @@ import {
   WorkflowStatusService,
 } from './services';
 // Import WorkflowActionHandlerService directly to avoid circular dependency through index
+import { PermissionService } from '../../shared/services/permission.service';
+import { AuditQueryService } from '../audit/audit-query.service';
+import { AuditWriteService } from '../audit/audit-write.service';
 import { WorkflowActionHandlerService } from './services/workflow-action-handler.service';
 import { WorkflowController } from './workflow.controller';
 
@@ -109,7 +111,9 @@ import { WorkflowController } from './workflow.controller';
   ],
   providers: [
     // Core services
-    ActivityLogService,
+    AuditWriteService,
+    AuditQueryService,
+    PermissionService,
     LLMService,
     StageService,
     RuleEngineService,
@@ -159,7 +163,8 @@ import { WorkflowController } from './workflow.controller';
   ],
   exports: [
     // Export services for use in other modules
-    ActivityLogService,
+    AuditWriteService,
+    AuditQueryService,
     WorkflowEngineService,
     StageService,
     RuleEngineService,

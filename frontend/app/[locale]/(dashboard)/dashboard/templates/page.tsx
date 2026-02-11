@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  SectionAuditButton,
+  SectionAuditSheet,
+} from "@/components/audit/section-audit-sheet";
 import { DeleteConfirmationDialog } from "@/components/dialogs/delete-confirmation-dialog";
 import {
   TemplateCard,
@@ -73,6 +77,7 @@ export default function TemplatesPage() {
   );
 
   // Dialog state
+  const [showAuditHistory, setShowAuditHistory] = useState(false);
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -365,6 +370,7 @@ export default function TemplatesPage() {
       }
       headerActions={
         <div className="flex items-center gap-2">
+          <SectionAuditButton onClick={() => setShowAuditHistory(true)} />
           {/* Sync All Pending Button */}
           {pendingTemplatesCount > 0 && (
             <TooltipProvider>
@@ -538,6 +544,12 @@ export default function TemplatesPage() {
         onConfirm={handleBulkDelete}
         onCancel={() => setBulkDeleteDialogOpen(false)}
         isLoading={isDeleting}
+      />
+
+      <SectionAuditSheet
+        open={showAuditHistory}
+        onOpenChange={setShowAuditHistory}
+        category="templates"
       />
     </PageLayout>
   );

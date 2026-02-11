@@ -84,7 +84,8 @@ export class LabelsController {
     @Body() dto: UpdateLabelDto,
   ) {
     const teamId = await this.getTeamId(req);
-    return this.labelsService.updateLabel(labelId, teamId, dto);
+    const userId = req.user.userId;
+    return this.labelsService.updateLabel(labelId, teamId, dto, userId);
   }
 
   /**
@@ -93,7 +94,8 @@ export class LabelsController {
   @Delete(':labelId')
   async deleteLabel(@Param('labelId') labelId: string, @Req() req: any) {
     const teamId = await this.getTeamId(req);
-    await this.labelsService.deleteLabel(labelId, teamId);
+    const userId = req.user.userId;
+    await this.labelsService.deleteLabel(labelId, teamId, userId);
     return { success: true, message: 'Label deleted successfully' };
   }
 
@@ -128,10 +130,12 @@ export class LabelsController {
   @Post('remove')
   async removeLabels(@Req() req: any, @Body() dto: RemoveLabelsDto) {
     const teamId = await this.getTeamId(req);
+    const userId = req.user.userId;
     return this.labelsService.removeLabelsFromChats(
       dto.chatIds,
       dto.labelIds,
       teamId,
+      userId,
     );
   }
 

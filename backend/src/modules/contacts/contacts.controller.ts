@@ -98,9 +98,11 @@ export class ContactsController {
   async update(
     @Param('contactId') contactId: string,
     @Body() updateContactDto: UpdateContactDto,
+    @Req() req: any,
   ) {
+    const userId = req.user?.userId;
     this.logger.log(`Update contact: ${contactId}`);
-    return this.contactsService.update(contactId, updateContactDto);
+    return this.contactsService.update(userId, contactId, updateContactDto);
   }
 
   /**
@@ -108,9 +110,10 @@ export class ContactsController {
    * DELETE /contacts/:contactId
    */
   @Delete(':contactId')
-  async delete(@Param('contactId') contactId: string) {
+  async delete(@Param('contactId') contactId: string, @Req() req: any) {
+    const userId = req.user?.userId;
     this.logger.log(`Delete contact: ${contactId}`);
-    await this.contactsService.delete(contactId);
+    await this.contactsService.delete(userId, contactId);
     return { success: true };
   }
 
@@ -120,10 +123,14 @@ export class ContactsController {
    * Body: { contactIds: string[] }
    */
   @Post('bulk-delete')
-  async bulkDelete(@Body() body: { contactIds: string[] }) {
+  async bulkDelete(@Body() body: { contactIds: string[] }, @Req() req: any) {
+    const userId = req.user?.userId;
     const { contactIds } = body;
     this.logger.log(`Bulk delete ${contactIds?.length || 0} contacts`);
-    const deletedCount = await this.contactsService.bulkDelete(contactIds);
+    const deletedCount = await this.contactsService.bulkDelete(
+      userId,
+      contactIds,
+    );
     return { success: true, deletedCount };
   }
 

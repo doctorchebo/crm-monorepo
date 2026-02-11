@@ -1,24 +1,25 @@
 import { db } from '@database/db.connection';
 import {
-    chatLabels,
-    chats,
-    labels,
-    NewChatLabel,
-    NewLabel,
+  chatLabels,
+  chats,
+  labels,
+  NewChatLabel,
+  NewLabel,
 } from '@database/schema';
 import {
-    BadRequestException,
-    ConflictException,
-    Injectable,
-    Logger,
-    NotFoundException,
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
 } from '@nestjs/common';
 import { and, count, eq, inArray, sql } from 'drizzle-orm';
 
+import { AuditWriteService } from '../audit/audit-write.service';
 import {
-    CreateLabelDto,
-    LabelResponseDto,
-    UpdateLabelDto,
+  CreateLabelDto,
+  LabelResponseDto,
+  UpdateLabelDto,
 } from './dto/labels.dto';
 
 /**
@@ -29,6 +30,8 @@ import {
 @Injectable()
 export class LabelsService {
   private readonly logger = new Logger(LabelsService.name);
+
+  constructor(private readonly auditWriteService: AuditWriteService) {}
 
   // ========== Label CRUD Operations ==========
 
@@ -158,6 +161,12 @@ export class LabelsService {
       `Created label "${dto.name}" for team ${teamId} by user ${userId}`,
     );
 
+    await this.auditWriteService.logLabelCreated({
+      userId,
+      entityId: result[0].id,
+      entityName: dto.name,
+    });
+
     return {
       ...result[0],
       isSystem: result[0].isSystem ?? false,
@@ -175,6 +184,7 @@ export class LabelsService {
     labelId: string,
     teamId: number,
     dto: UpdateLabelDto,
+    userId?: number,
   ): Promise<LabelResponseDto> {
     // Check if label exists and belongs to the team
     const existing = await db
@@ -213,6 +223,18 @@ export class LabelsService {
 
     this.logger.log(`Updated label ${labelId} for team ${teamId}`);
 
+    if (userId) {
+      await this.auditWriteService.logLabelUpdated({
+        userId,
+        entityId: labelId,
+        entityName: result[0].name,
+        changes: dto as unknown as Record<
+          string,
+          { from: unknown; to: unknown }
+        >,
+      });
+    }
+
     return {
       ...result[0],
       isSystem: result[0].isSystem ?? false,
@@ -226,7 +248,11 @@ export class LabelsService {
   /**
    * Delete a label
    */
-  async deleteLabel(labelId: string, teamId: number): Promise<void> {
+  async deleteLabel(
+    labelId: string,
+    teamId: number,
+    userId?: number,
+  ): Promise<void> {
     // Check if label exists and belongs to the team
     const existing = await db
       .select()
@@ -245,6 +271,14 @@ export class LabelsService {
 
     // Delete the label (cascade will remove chat_labels associations)
     await db.delete(labels).where(eq(labels.id, labelId));
+
+    if (userId) {
+      await this.auditWriteService.logLabelDeleted({
+        userId,
+        entityId: labelId,
+        entityName: existing[0].name,
+      });
+    }
 
     this.logger.log(`Deleted label ${labelId} from team ${teamId}`);
   }
@@ -334,6 +368,19 @@ export class LabelsService {
       `Applied ${applied} labels to chats (${skipped} skipped as duplicates)`,
     );
 
+    if (userId) {
+      const labelNames = await db
+        .select({ name: labels.name })
+        .from(labels)
+        .where(inArray(labels.id, labelIds));
+      await this.auditWriteService.logLabelsApplied({
+        userId,
+        labelNames: labelNames.map((l) => l.name),
+        chatIds,
+        metadata: { count: applied },
+      });
+    }
+
     return { applied, skipped };
   }
 
@@ -344,6 +391,7 @@ export class LabelsService {
     chatIds: string[],
     labelIds: string[],
     teamId: number,
+    userId?: number,
   ): Promise<{ removed: number }> {
     // Verify all labels belong to the team
     const validLabels = await db
@@ -367,6 +415,19 @@ export class LabelsService {
     const removed = (result as any).rowCount || 0;
 
     this.logger.log(`Removed ${removed} labels from chats`);
+
+    if (userId) {
+      const labelNames = await db
+        .select({ name: labels.name })
+        .from(labels)
+        .where(inArray(labels.id, labelIds));
+      await this.auditWriteService.logLabelsRemoved({
+        userId,
+        labelNames: labelNames.map((l) => l.name),
+        chatIds,
+        metadata: { count: removed },
+      });
+    }
 
     return { removed };
   }

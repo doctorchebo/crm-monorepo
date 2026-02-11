@@ -23,6 +23,7 @@ import {
 import { Injectable, Logger } from '@nestjs/common';
 import { AI_DEFAULTS } from '@shared/constants/ai-defaults';
 import { eq } from 'drizzle-orm';
+import { AuditWriteService } from '../../audit/audit-write.service';
 
 // ============================================================================
 // Types
@@ -194,6 +195,8 @@ const DEFAULT_CONFIG: Omit<ResolvedAiConfig, 'source'> = {
 export class AiConfigurationService {
   private readonly logger = new Logger(AiConfigurationService.name);
 
+  constructor(private readonly auditService: AuditWriteService) {}
+
   // ==========================================================================
   // User AI Configuration CRUD
   // ==========================================================================
@@ -280,6 +283,15 @@ export class AiConfigurationService {
       .returning();
 
     this.logger.log(`Updated AI configuration for user ${userId}`);
+
+    await this.auditService.logSettingChanged({
+      userId,
+      entityId: String(userId),
+      entityName: 'AI Configuration',
+      changes: dto as unknown as Record<string, { from: unknown; to: unknown }>,
+      metadata: { scope: 'user' },
+    });
+
     return updated;
   }
 
@@ -336,6 +348,18 @@ export class AiConfigurationService {
         .returning();
 
       this.logger.log(`Updated chat override for chat ${chatId}`);
+
+      await this.auditService.logSettingChanged({
+        userId,
+        entityId: chatId,
+        entityName: 'Chat AI Override',
+        changes: dto as unknown as Record<
+          string,
+          { from: unknown; to: unknown }
+        >,
+        metadata: { scope: 'chat', action: 'updated' },
+      });
+
       return updated;
     }
 
@@ -364,13 +388,22 @@ export class AiConfigurationService {
       .returning();
 
     this.logger.log(`Created chat override for chat ${chatId}`);
+
+    await this.auditService.logSettingChanged({
+      userId,
+      entityId: chatId,
+      entityName: 'Chat AI Override',
+      changes: dto as unknown as Record<string, { from: unknown; to: unknown }>,
+      metadata: { scope: 'chat', action: 'created' },
+    });
+
     return created;
   }
 
   /**
    * Delete chat AI override (reverts to defaults)
    */
-  async deleteChatOverride(chatId: string): Promise<boolean> {
+  async deleteChatOverride(chatId: string, userId?: number): Promise<boolean> {
     const result = await db
       .delete(chatAiOverrides)
       .where(eq(chatAiOverrides.chatId, chatId))
@@ -378,6 +411,16 @@ export class AiConfigurationService {
 
     if (result.length > 0) {
       this.logger.log(`Deleted chat override for chat ${chatId}`);
+
+      if (userId) {
+        await this.auditService.logSettingChanged({
+          userId,
+          entityId: chatId,
+          entityName: 'Chat AI Override',
+          metadata: { scope: 'chat', action: 'deleted' },
+        });
+      }
+
       return true;
     }
     return false;
@@ -449,6 +492,18 @@ export class AiConfigurationService {
         .returning();
 
       this.logger.log(`Updated stage settings for stage ${stageId}`);
+
+      await this.auditService.logSettingChanged({
+        userId,
+        entityId: stageId,
+        entityName: 'Stage AI Settings',
+        changes: dto as unknown as Record<
+          string,
+          { from: unknown; to: unknown }
+        >,
+        metadata: { scope: 'stage', action: 'updated' },
+      });
+
       return updated;
     }
 
@@ -478,13 +533,25 @@ export class AiConfigurationService {
       .returning();
 
     this.logger.log(`Created stage settings for stage ${stageId}`);
+
+    await this.auditService.logSettingChanged({
+      userId,
+      entityId: stageId,
+      entityName: 'Stage AI Settings',
+      changes: dto as unknown as Record<string, { from: unknown; to: unknown }>,
+      metadata: { scope: 'stage', action: 'created' },
+    });
+
     return created;
   }
 
   /**
    * Delete workflow stage AI settings
    */
-  async deleteStageSettings(stageId: string): Promise<boolean> {
+  async deleteStageSettings(
+    stageId: string,
+    userId?: number,
+  ): Promise<boolean> {
     const result = await db
       .delete(workflowStageAiSettings)
       .where(eq(workflowStageAiSettings.stageId, stageId))
@@ -492,6 +559,16 @@ export class AiConfigurationService {
 
     if (result.length > 0) {
       this.logger.log(`Deleted stage settings for stage ${stageId}`);
+
+      if (userId) {
+        await this.auditService.logSettingChanged({
+          userId,
+          entityId: stageId,
+          entityName: 'Stage AI Settings',
+          metadata: { scope: 'stage', action: 'deleted' },
+        });
+      }
+
       return true;
     }
     return false;

@@ -11,11 +11,12 @@ import { createHash, randomBytes } from 'crypto';
 import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 import { db } from '../../database/db.connection';
 import {
+  chats,
   passwordResetTokens,
   teamMembers,
   users,
-  chats,
 } from '../../database/schema';
+import { AuditWriteService } from '../audit/audit-write.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { DeleteAccountDto } from './dto/delete-account.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
@@ -30,6 +31,7 @@ export class AuthService {
   constructor(
     private jwtService: JwtService,
     private configService: ConfigService,
+    private auditService: AuditWriteService,
   ) {}
 
   async register(registerDto: RegisterDto) {
@@ -134,6 +136,11 @@ export class AuthService {
     const accessExpiresAt = new Date(Date.now() + accessExpiresIn * 1000);
     const refreshExpiresAt = new Date(Date.now() + refreshExpiresIn * 1000);
 
+    await this.auditService.logAuthAction({
+      userId: user.id,
+      action: 'sign_in',
+    });
+
     return {
       access_token: accessToken,
       refresh_token: refreshToken,
@@ -235,6 +242,11 @@ export class AuthService {
       this.logger.log(
         `[Password Reset] Development mode - Reset link for ${user.email}: ${resetUrl}`,
       );
+
+      await this.auditService.logAuthAction({
+        userId: user.id,
+        action: 'password_reset_requested',
+      });
     }
 
     return {
@@ -291,6 +303,11 @@ export class AuthService {
       `[Password Reset] Password reset successfully for user ID: ${resetToken.userId}`,
     );
 
+    await this.auditService.logAuthAction({
+      userId: resetToken.userId,
+      action: 'password_reset_completed',
+    });
+
     return {
       success: true,
       message: 'Password has been reset successfully',
@@ -338,6 +355,11 @@ export class AuthService {
     await db.update(users).set({ passwordHash }).where(eq(users.id, userId));
 
     this.logger.log(`[Auth Service] Password changed for user ID: ${userId}`);
+
+    await this.auditService.logAuthAction({
+      userId,
+      action: 'password_changed',
+    });
 
     return {
       success: true,
@@ -424,6 +446,11 @@ export class AuthService {
     }
 
     this.logger.log(`[Auth Service] Account deleted for user ID: ${userId}`);
+
+    await this.auditService.logAuthAction({
+      userId,
+      action: 'account_deleted',
+    });
 
     return {
       success: true,

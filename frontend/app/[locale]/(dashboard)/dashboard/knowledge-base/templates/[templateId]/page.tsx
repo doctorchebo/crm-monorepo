@@ -1,5 +1,6 @@
 "use client";
 
+import { EntityAuditHistoryPanel } from "@/components/audit/entity-audit-history-panel";
 import { FieldsManager } from "@/components/knowledge-base/template-editor/fields-manager";
 import { TemplateForm } from "@/components/knowledge-base/template-editor/template-form";
 import {
@@ -21,7 +22,7 @@ import {
   UpdateTemplateDto,
 } from "@/lib/api/knowledge-base";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { AlertCircle, ArrowLeft, Save, X } from "lucide-react";
+import { AlertCircle, ArrowLeft, History, Save, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation"; // useParams is correct for app router
 import { use, useEffect, useState } from "react";
@@ -65,6 +66,7 @@ export default function TemplateEditorPage({
   const [isSaving, setIsSaving] = useState(false);
   const [template, setTemplate] = useState<KbObjectTemplate | null>(null);
   const [saveErrors, setSaveErrors] = useState<string[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
 
   const form = useForm<TemplateFormValues>({
     resolver: zodResolver(templateSchema) as any,
@@ -333,10 +335,23 @@ export default function TemplateEditorPage({
                 : t("title.edit", { name: template?.displayName ?? "" })}
             </h1>
           </div>
-          <Button onClick={form.handleSubmit(onSubmit)} disabled={isSaving}>
-            <Save className="h-4 w-4 mr-2" />
-            {isSaving ? t("saving") : t("save")}
-          </Button>
+          <div className="flex items-center gap-2">
+            {!isNew && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowHistory(true)}
+                className="gap-2"
+              >
+                <History className="h-4 w-4" />
+                {t("history")}
+              </Button>
+            )}
+            <Button onClick={form.handleSubmit(onSubmit)} disabled={isSaving}>
+              <Save className="h-4 w-4 mr-2" />
+              {isSaving ? t("saving") : t("save")}
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -397,6 +412,16 @@ export default function TemplateEditorPage({
           </div>
         </form>
       </Form>
+
+      {!isNew && (
+        <EntityAuditHistoryPanel
+          open={showHistory}
+          onOpenChange={setShowHistory}
+          entityType="kb_template"
+          entityId={templateId}
+          entityName={template?.displayName || undefined}
+        />
+      )}
     </div>
   );
 }

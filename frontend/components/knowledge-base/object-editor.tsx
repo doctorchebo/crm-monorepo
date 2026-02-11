@@ -6,6 +6,7 @@
 
 "use client";
 
+import { EntityAuditHistoryPanel } from "@/components/audit/entity-audit-history-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -55,6 +56,7 @@ import {
   ArrowLeft,
   BookOpen,
   HelpCircle,
+  History,
   Loader2,
   Plus,
   RefreshCw,
@@ -532,7 +534,7 @@ export function ObjectEditor({
   // Form state
   const [name, setName] = useState("");
   const [selectedTemplateId, setSelectedTemplateId] = useState(
-    initialTemplateId || ""
+    initialTemplateId || "",
   );
   const [fieldValues, setFieldValues] = useState<FieldValue>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -540,9 +542,10 @@ export function ObjectEditor({
   const [hasChanges, setHasChanges] = useState(false);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState<string | null>(
-    null
+    null,
   );
   const [draftId, setDraftId] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
 
   // Fetch templates list for dropdown (summary only, no fields)
   const { data: templates, isLoading: isLoadingTemplates } = useSWR<
@@ -555,13 +558,13 @@ export function ObjectEditor({
       selectedTemplateId
         ? ["knowledge-base-template-detail", selectedTemplateId]
         : null,
-      () => knowledgeBaseApi.getTemplate(selectedTemplateId)
+      () => knowledgeBaseApi.getTemplate(selectedTemplateId),
     );
 
   // Fetch existing object if editing
   const { data: object, isLoading: isLoadingObject } = useSWR<KbObject>(
     objectId ? ["knowledge-base-object", objectId] : null,
-    () => knowledgeBaseApi.getObject(objectId!)
+    () => knowledgeBaseApi.getObject(objectId!),
   );
 
   // Use the full template details (with fields) for rendering
@@ -730,8 +733,8 @@ export function ObjectEditor({
       setPendingNavigation(path);
       setShowUnsavedDialog(true);
     } else {
-      // If we have a draft and we are leaving without changes (e.g. just uploaded media but didn't change form?), 
-      // actually if hasChanges is false, we assume it's safe. 
+      // If we have a draft and we are leaving without changes (e.g. just uploaded media but didn't change form?),
+      // actually if hasChanges is false, we assume it's safe.
       // But for draftId, we should cleanup if we are navigating away and NOT saving.
       // However, hasChanges is set to true when draft is created.
       router.push(path);
@@ -818,6 +821,17 @@ export function ObjectEditor({
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {!isNew && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowHistory(true)}
+              className="gap-2"
+            >
+              <History className="h-4 w-4" />
+              {t("history")}
+            </Button>
+          )}
           {!isNew && object?.status !== "indexed" && (
             <Button
               variant="outline"
@@ -958,8 +972,6 @@ export function ObjectEditor({
                 </CardContent>
               </Card>
             )}
-
-
         </div>
 
         {/* Sidebar */}
@@ -1044,7 +1056,7 @@ export function ObjectEditor({
                   </span>
                   <span>
                     {selectedTemplate.fields?.filter(
-                      (f) => f.aiIncludeInEmbedding
+                      (f) => f.aiIncludeInEmbedding,
                     ).length || 0}
                   </span>
                 </div>
@@ -1150,6 +1162,16 @@ export function ObjectEditor({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {!isNew && objectId && (
+        <EntityAuditHistoryPanel
+          open={showHistory}
+          onOpenChange={setShowHistory}
+          entityType="kb_object"
+          entityId={objectId}
+          entityName={name || undefined}
+        />
+      )}
     </div>
   );
 }

@@ -22,13 +22,13 @@ import { ChatVisibilityService } from '@modules/chats/services/chat-visibility.s
 import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { getDefaultChatStageAssignmentValues } from '@shared/constants/ai-defaults';
 import { and, asc, desc, eq } from 'drizzle-orm';
+import { AuditWriteService } from '../../audit/audit-write.service';
 import {
   CreateStageRequest,
   DEFAULT_WORKFLOW_STAGES,
   UpdateStageRequest,
   WorkflowStageConfig,
 } from '../types';
-import { ActivityLogService } from './activity-log.service';
 import { AiConfigurationService } from './ai-configuration.service';
 
 @Injectable()
@@ -39,7 +39,7 @@ export class StageService {
     private readonly chatVisibilityService: ChatVisibilityService,
     @Inject(forwardRef(() => AiConfigurationService))
     private readonly aiConfigService: AiConfigurationService,
-    private readonly activityLogService: ActivityLogService,
+    private readonly auditWriteService: AuditWriteService,
   ) {}
 
   /**
@@ -211,7 +211,7 @@ export class StageService {
    */
   private async getUserInfo(
     userId: number,
-  ): Promise<{ name: string | null; teamId: string | null }> {
+  ): Promise<{ name: string | null; teamId: number | null }> {
     const membership = await db.query.teamMembers.findFirst({
       where: and(
         eq(teamMembers.userId, userId),
@@ -272,12 +272,13 @@ export class StageService {
     this.logger.log(`Created stage "${request.name}" for user ${userId}`);
 
     // Log activity for history tracking
-    await this.activityLogService.logStageCreated(
+    await this.auditWriteService.logStageCreated({
       userId,
-      userInfo.name || 'Unknown User',
-      stage.id,
-      stage.name,
-      {
+      userName: userInfo.name || 'Unknown User',
+      teamId: userInfo.teamId ?? undefined,
+      entityId: stage.id,
+      entityName: stage.name,
+      metadata: {
         name: stage.name,
         description: stage.description,
         color: stage.color,
@@ -287,8 +288,7 @@ export class StageService {
         aiAutoReply: stage.aiAutoReply,
         aiHandoffRequired: stage.aiHandoffRequired,
       },
-      userInfo.teamId ?? undefined,
-    );
+    });
 
     return {
       id: stage.id,
@@ -372,15 +372,15 @@ export class StageService {
       aiHandoffRequired: stage.aiHandoffRequired,
     };
 
-    await this.activityLogService.logStageUpdated(
+    await this.auditWriteService.logStageUpdated({
       userId,
-      userInfo.name || 'Unknown User',
-      stage.id,
-      stage.name,
-      previousState,
-      newState,
-      userInfo.teamId ?? undefined,
-    );
+      userName: userInfo.name || 'Unknown User',
+      teamId: userInfo.teamId ?? undefined,
+      entityId: stage.id,
+      entityName: stage.name,
+      changes: this.auditWriteService.buildChanges(previousState, newState),
+      metadata: { previousState, newState },
+    });
 
     return {
       id: stage.id,
@@ -468,23 +468,23 @@ export class StageService {
 
     if (result.length > 0) {
       // Log activity for history tracking
-      await this.activityLogService.logStageDeleted(
+      await this.auditWriteService.logStageDeleted({
         userId,
-        userInfo.name || 'Unknown User',
-        stageId,
-        stageToDelete.name,
-        {
+        userName: userInfo.name || 'Unknown User',
+        teamId: userInfo.teamId ?? undefined,
+        entityId: stageId,
+        entityName: stageToDelete.name,
+        metadata: {
           name: stageToDelete.name,
           description: stageToDelete.description,
           color: stageToDelete.color,
           sortOrder: stageToDelete.sortOrder,
           isDefault: stageToDelete.isDefault,
           isFinal: stageToDelete.isFinal,
+          movedChatsCount: assignments.length,
+          targetStageName,
         },
-        assignments.length,
-        targetStageName,
-        userInfo.teamId ?? undefined,
-      );
+      });
     }
 
     return result.length > 0;
@@ -517,12 +517,13 @@ export class StageService {
     }
 
     // Log activity for history tracking
-    await this.activityLogService.logStagesReordered(
+    await this.auditWriteService.logStageReordered({
       userId,
-      userInfo.name || 'Unknown User',
-      stageOrder,
-      userInfo.teamId ?? undefined,
-    );
+      userName: userInfo.name || 'Unknown User',
+      teamId: userInfo.teamId ?? undefined,
+      entityId: 'batch',
+      metadata: { stageIds: stageOrder, newOrder: stageOrder },
+    });
 
     return this.getStages(userId);
   }
@@ -702,6 +703,22 @@ export class StageService {
     this.logger.log(
       `Chat ${chatId} transitioned from ${fromStageId || 'unassigned'} to ${toStageId}: ${reason}`,
     );
+
+    // Write to unified audit log (dual-write alongside chatStageHistory)
+    const userInfo = await this.getUserInfo(userId);
+    await this.auditWriteService.logChatTransitioned({
+      userId,
+      userName: userInfo.name || undefined,
+      teamId: userInfo.teamId ?? undefined,
+      chatId,
+      description: reason,
+      metadata: {
+        fromStageId: fromStageId || null,
+        toStageId,
+        triggerType: metadata?.manual ? 'human' : 'system',
+        ...(metadata || {}),
+      },
+    });
   }
 
   /**

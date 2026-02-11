@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ImageProcessingService } from '@shared/services/image-processing.service';
 import { LambdaThumbnailService } from '@shared/services/lambda-thumbnail.service';
 import { S3Service } from '@shared/services/s3.service';
+import { AuditWriteService } from '../audit/audit-write.service';
 import { TeamModule } from '../team/team.module';
 import {
   MessagingProviderFactory,
@@ -63,6 +64,9 @@ import {
 
     // WebSocket Gateway
     TemplateWebhookGateway,
+
+    // Audit
+    AuditWriteService,
   ],
   exports: [
     TemplatesService,

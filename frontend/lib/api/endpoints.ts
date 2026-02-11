@@ -3017,6 +3017,110 @@ export const backendApi = {
   },
 
   // ==================== Public Endpoints ====================
+
+  // ==================== Audit History ====================
+
+  audit: {
+    /**
+     * Get paginated audit history with filters
+     */
+    getHistory: (
+      params?: AuditHistoryParams,
+    ): Promise<PaginatedAuditResponse> => {
+      const searchParams = new URLSearchParams();
+      if (params) {
+        if (params.page !== undefined)
+          searchParams.append("page", String(params.page));
+        if (params.pageSize !== undefined)
+          searchParams.append("pageSize", String(params.pageSize));
+        if (params.category) searchParams.append("category", params.category);
+        if (params.categories?.length)
+          searchParams.append("categories", params.categories.join(","));
+        if (params.entityType)
+          searchParams.append("entityType", params.entityType);
+        if (params.entityId) searchParams.append("entityId", params.entityId);
+        if (params.action) searchParams.append("action", params.action);
+        if (params.actions?.length)
+          searchParams.append("actions", params.actions.join(","));
+        if (params.userId !== undefined)
+          searchParams.append("userId", String(params.userId));
+        if (params.startDate)
+          searchParams.append("startDate", params.startDate);
+        if (params.endDate) searchParams.append("endDate", params.endDate);
+        if (params.chatId) searchParams.append("chatId", params.chatId);
+        if (params.search) searchParams.append("search", params.search);
+      }
+      const query = searchParams.toString();
+      return apiClient.get(`/audit/history${query ? `?${query}` : ""}`);
+    },
+
+    /**
+     * Get audit history for a specific entity
+     */
+    getEntityHistory: (
+      entityType: AuditEntityType,
+      entityId: string,
+    ): Promise<AuditEntry[]> =>
+      apiClient.get(`/audit/entity/${entityType}/${entityId}`),
+
+    /**
+     * Get team members for audit filter dropdown (admin/owner only)
+     */
+    getTeamMembers: (): Promise<AuditTeamMember[]> =>
+      apiClient.get("/audit/team-members"),
+
+    /**
+     * Export audit logs as CSV file download.
+     * Uses the same filter params as getHistory.
+     */
+    exportCsv: async (params?: AuditHistoryParams): Promise<void> => {
+      const searchParams = new URLSearchParams();
+      if (params) {
+        if (params.category) searchParams.append("category", params.category);
+        if (params.categories?.length)
+          searchParams.append("categories", params.categories.join(","));
+        if (params.entityType)
+          searchParams.append("entityType", params.entityType);
+        if (params.entityId) searchParams.append("entityId", params.entityId);
+        if (params.action) searchParams.append("action", params.action);
+        if (params.actions?.length)
+          searchParams.append("actions", params.actions.join(","));
+        if (params.userId !== undefined)
+          searchParams.append("userId", String(params.userId));
+        if (params.startDate)
+          searchParams.append("startDate", params.startDate);
+        if (params.endDate) searchParams.append("endDate", params.endDate);
+        if (params.chatId) searchParams.append("chatId", params.chatId);
+        if (params.search) searchParams.append("search", params.search);
+      }
+      const query = searchParams.toString();
+      const baseUrl =
+        process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001";
+      const url = `${baseUrl}/audit/export${query ? `?${query}` : ""}`;
+
+      const response = await fetch(url, {
+        credentials: "include",
+      });
+
+      if (!response.ok) {
+        throw new Error(`Export failed: ${response.statusText}`);
+      }
+
+      const blob = await response.blob();
+      const downloadUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = downloadUrl;
+      a.download =
+        response.headers
+          .get("content-disposition")
+          ?.match(/filename="?(.+?)"?$/)?.[1] ??
+        `audit-history-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(downloadUrl);
+    },
+  },
 };
 
 // ==================== AI Configuration Types ====================
@@ -3408,4 +3512,204 @@ export interface SetStageAiSettingsDto {
   systemPromptAddition?: string | null;
   goalDescription?: string | null;
   escalationTriggers?: unknown[];
+}
+
+// ==================== Audit Types ====================
+
+/**
+ * Categories for audit log filtering.
+ * Maps to the backend AuditCategory type.
+ */
+export type AuditCategory =
+  | "pipeline"
+  | "contacts"
+  | "templates"
+  | "team"
+  | "catalog"
+  | "senders"
+  | "labels"
+  | "knowledge_base"
+  | "import"
+  | "settings"
+  | "auth";
+
+/**
+ * All possible audit actions across the system.
+ */
+export type AuditAction =
+  // Pipeline / Workflow
+  | "stage_created"
+  | "stage_updated"
+  | "stage_deleted"
+  | "stage_reordered"
+  | "stage_default_changed"
+  | "chat_transitioned"
+  | "handoff_requested"
+  | "handoff_resolved"
+  | "ai_paused"
+  | "ai_resumed"
+  | "chat_assigned"
+  | "chat_reassigned"
+  | "chat_unassigned"
+  | "message_sent_human"
+  | "message_sent_ai"
+  | "message_deleted"
+  | "message_edited"
+  | "note_added"
+  | "lock_acquired"
+  | "lock_released"
+  | "lock_force_released"
+  // Contacts
+  | "contact_created"
+  | "contact_updated"
+  | "contact_deleted"
+  | "contacts_bulk_deleted"
+  // Templates
+  | "template_created"
+  | "template_updated"
+  | "template_deleted"
+  | "template_submitted"
+  | "template_version_created"
+  // Team
+  | "member_added"
+  | "member_removed"
+  | "role_changed"
+  | "invitation_sent"
+  | "invitation_accepted"
+  | "invitation_revoked"
+  | "invitation_expired"
+  | "custom_role_created"
+  | "custom_role_updated"
+  | "custom_role_deleted"
+  // Catalog
+  | "catalog_item_created"
+  | "catalog_item_updated"
+  | "catalog_item_deleted"
+  | "catalog_linked"
+  | "catalog_unlinked"
+  | "collection_created"
+  | "collection_deleted"
+  | "catalog_bulk_import"
+  // Senders
+  | "sender_created"
+  | "sender_updated"
+  | "sender_removed"
+  | "sender_synced"
+  // Labels
+  | "label_created"
+  | "label_updated"
+  | "label_deleted"
+  | "labels_applied"
+  | "labels_removed"
+  // Knowledge Base
+  | "kb_object_created"
+  | "kb_object_updated"
+  | "kb_object_deleted"
+  | "kb_object_published"
+  | "kb_template_created"
+  | "kb_template_updated"
+  | "kb_template_deleted"
+  // Import Jobs
+  | "import_started"
+  | "import_completed"
+  | "import_rolled_back"
+  // Settings
+  | "setting_changed"
+  // Auth
+  | "sign_in"
+  | "sign_up"
+  | "sign_out"
+  | "password_changed"
+  | "password_reset_requested"
+  | "password_reset_completed"
+  | "account_deleted";
+
+/**
+ * Entity types affected by audit actions.
+ */
+export type AuditEntityType =
+  | "chat"
+  | "chat_lock"
+  | "message"
+  | "note"
+  | "contact"
+  | "template"
+  | "template_version"
+  | "team"
+  | "team_member"
+  | "invitation"
+  | "custom_role"
+  | "workflow_stage"
+  | "ai_config"
+  | "catalog"
+  | "catalog_item"
+  | "catalog_collection"
+  | "sender"
+  | "label"
+  | "kb_object"
+  | "kb_template"
+  | "import_job"
+  | "setting"
+  | "user";
+
+/**
+ * A single audit log entry returned from the API.
+ */
+export interface AuditEntry {
+  id: number;
+  userId: number | null;
+  userName: string | null;
+  teamId: number | null;
+  category: AuditCategory | null;
+  entityType: AuditEntityType | null;
+  entityId: string | null;
+  entityName: string | null;
+  action: AuditAction | null;
+  description: string | null;
+  metadata: Record<string, unknown>;
+  changes: Record<string, { from: unknown; to: unknown }> | null;
+  chatId: string | null;
+  ipAddress: string | null;
+  createdAt: string;
+}
+
+/**
+ * Paginated audit history response.
+ */
+export interface PaginatedAuditResponse {
+  items: AuditEntry[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  hasMore: boolean;
+}
+
+/**
+ * Team member info for audit filter dropdown.
+ */
+export interface AuditTeamMember {
+  id: number;
+  name: string;
+  email: string;
+  role: string;
+}
+
+/**
+ * Query parameters for the audit history endpoint.
+ */
+export interface AuditHistoryParams {
+  page?: number;
+  pageSize?: number;
+  category?: AuditCategory;
+  categories?: AuditCategory[];
+  entityType?: AuditEntityType;
+  entityId?: string;
+  action?: AuditAction;
+  actions?: AuditAction[];
+  userId?: number;
+  startDate?: string;
+  endDate?: string;
+  chatId?: string;
+  search?: string;
 }

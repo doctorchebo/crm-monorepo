@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  SectionAuditButton,
+  SectionAuditSheet,
+} from "@/components/audit/section-audit-sheet";
 import { DeleteConfirmationDialog } from "@/components/dialogs/delete-confirmation-dialog";
 import { Badge } from "@/components/ui/badge";
 import { BulkActionBar } from "@/components/ui/bulk-action-bar";
@@ -66,6 +70,7 @@ export default function SendersPage() {
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [bulkDeleteMode, setBulkDeleteMode] = useState(false);
+  const [showAuditHistory, setShowAuditHistory] = useState(false);
 
   // Fetch senders
   const {
@@ -330,6 +335,7 @@ export default function SendersPage() {
       description={t("subtitle")}
       headerActions={
         <div className="flex gap-2">
+          <SectionAuditButton onClick={() => setShowAuditHistory(true)} />
           <Button
             variant="outline"
             onClick={handleSync}
@@ -667,6 +673,12 @@ export default function SendersPage() {
         isLoading={isBulkDeleting}
         onConfirm={handleBulkDelete}
         onCancel={() => setBulkDeleteDialogOpen(false)}
+      />
+
+      <SectionAuditSheet
+        open={showAuditHistory}
+        onOpenChange={setShowAuditHistory}
+        category="senders"
       />
     </PageLayout>
   );

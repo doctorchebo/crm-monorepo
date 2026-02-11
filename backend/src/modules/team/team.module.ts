@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
-import { AuditService } from '../../shared/services/audit.service';
 import { PermissionService } from '../../shared/services/permission.service';
 import { ProfilePictureUrlService } from '../../shared/services/profile-picture-url.service';
+import { AuditWriteService } from '../audit/audit-write.service';
 import { InvitationController } from './invitation.controller';
 import { InvitationService } from './invitation.service';
 import { RolesService } from './services/roles.service';
@@ -13,7 +13,7 @@ import { TeamService } from './team.service';
   providers: [
     TeamService,
     InvitationService,
-    AuditService,
+    AuditWriteService,
     PermissionService,
     ProfilePictureUrlService,
     RolesService,

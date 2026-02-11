@@ -1,5 +1,6 @@
 "use client";
 
+import { EntityAuditHistoryPanel } from "@/components/audit";
 import { VersionTimelineDrawer } from "@/components/templates/version-timeline-drawer";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,7 @@ import {
   Clock,
   GitBranch,
   Globe,
+  History,
   Plus,
   XCircle,
 } from "lucide-react";
@@ -235,6 +237,7 @@ export default function EditTemplatePage() {
     status: TemplateVersionStatus;
   } | null>(null);
   const [showAddLocale, setShowAddLocale] = useState(addingNewLocale);
+  const [showHistory, setShowHistory] = useState(false);
   const addLocaleRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown when clicking outside
@@ -654,6 +657,15 @@ export default function EditTemplatePage() {
             <Button
               variant="outline"
               size="sm"
+              onClick={() => setShowHistory(true)}
+              className="gap-2"
+            >
+              <History className="h-4 w-4" />
+              {t("history") || "History"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
               onClick={handleOpenVersionDrawer}
               className="gap-2"
             >
@@ -903,6 +915,16 @@ export default function EditTemplatePage() {
           }}
         />
       )}
+
+      <EntityAuditHistoryPanel
+        open={showHistory}
+        onOpenChange={setShowHistory}
+        entityType="template"
+        entityId={templateId}
+        entityName={
+          templateData?.displayName || templateData?.name || undefined
+        }
+      />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import {
   Bot,
   FileText,
   GitBranch,
+  History,
   Layers,
   LayoutDashboard,
   LayoutGrid,
@@ -34,6 +35,8 @@ export interface NavItem {
   children?: NavItem[];
   /** Whether this item should be hidden */
   hidden?: boolean;
+  /** Roles allowed to see this item (e.g. ["owner","admin"]). If omitted, visible to all. */
+  requiredRoles?: string[];
 }
 
 /**
@@ -168,6 +171,13 @@ export const navigationConfig: NavItem[] = [
         href: "/dashboard/settings/security",
       },
     ],
+  },
+  {
+    id: "audit",
+    labelKey: "dashboard.auditHistory",
+    icon: History,
+    href: "/dashboard/audit",
+    requiredRoles: ["owner", "admin"],
   },
   {
     id: "activity",

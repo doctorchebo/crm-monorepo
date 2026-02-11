@@ -14,6 +14,7 @@ import {
   SidebarMenuSubItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { useCurrentUserRole } from "@/hooks/use-current-user-role";
 import {
   type NavItem,
   isNavItemActive,
@@ -23,7 +24,7 @@ import { ChevronDown } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 interface SidebarNavProps {
   items: NavItem[];
@@ -211,18 +212,37 @@ function NavSubMenuItem({ item, pathname, t, level = 0 }: NavMenuItemProps) {
 /**
  * Main sidebar navigation component
  * Renders navigation items with support for multi-level submenus
+ * and role-based visibility filtering.
  */
 export function SidebarNav({ items }: SidebarNavProps) {
   const pathname = usePathname();
   const t = useTranslations("dashboard");
+  const { role, isLoading: roleLoading } = useCurrentUserRole();
+
+  // Filter items by hidden flag and role requirements
+  const visibleItems = useMemo(() => {
+    if (roleLoading) {
+      // While role is loading, show items that have no role requirement
+      return items.filter(
+        (item) =>
+          !item.hidden &&
+          (!item.requiredRoles || item.requiredRoles.length === 0),
+      );
+    }
+
+    const userRole = role?.toLowerCase() ?? "";
+    return items.filter((item) => {
+      if (item.hidden) return false;
+      if (!item.requiredRoles || item.requiredRoles.length === 0) return true;
+      return item.requiredRoles.some((r) => r.toLowerCase() === userRole);
+    });
+  }, [items, role, roleLoading]);
 
   return (
     <SidebarMenu>
-      {items
-        .filter((item) => !item.hidden)
-        .map((item) => (
-          <NavMenuItem key={item.id} item={item} pathname={pathname} t={t} />
-        ))}
+      {visibleItems.map((item) => (
+        <NavMenuItem key={item.id} item={item} pathname={pathname} t={t} />
+      ))}
     </SidebarMenu>
   );
 }

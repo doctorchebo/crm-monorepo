@@ -1,5 +1,6 @@
 "use client";
 
+import { EntityAuditHistoryPanel } from "@/components/audit";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -22,6 +23,7 @@ import {
   Clock,
   Copy,
   ExternalLink,
+  History,
   Loader2,
   MessageCircle,
   Pencil,
@@ -181,6 +183,7 @@ export function CatalogItemDetailDrawer({
 
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
 
   /**
    * Handle real-time status updates from WebSocket
@@ -288,256 +291,275 @@ export function CatalogItemDetailDrawer({
   };
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full sm:max-w-lg overflow-y-auto p-6">
-        <SheetHeader className="sr-only">
-          <SheetTitle>{item.name}</SheetTitle>
-          <SheetDescription>Product details</SheetDescription>
-        </SheetHeader>
+    <>
+      <Sheet open={open} onOpenChange={onOpenChange}>
+        <SheetContent className="w-full sm:max-w-lg overflow-y-auto p-6">
+          <SheetHeader className="sr-only">
+            <SheetTitle>{item.name}</SheetTitle>
+            <SheetDescription>Product details</SheetDescription>
+          </SheetHeader>
 
-        {/* Main Image */}
-        <div className="relative aspect-[4/3] min-h-[280px] bg-muted rounded-lg overflow-hidden mb-4 mt-2">
-          {mainImageUrl ? (
-            <Image
-              src={mainImageUrl}
-              alt={item.name}
-              fill
-              className="object-cover"
-            />
-          ) : (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-6xl">📦</span>
+          {/* Main Image */}
+          <div className="relative aspect-[4/3] min-h-[280px] bg-muted rounded-lg overflow-hidden mb-4 mt-2">
+            {mainImageUrl ? (
+              <Image
+                src={mainImageUrl}
+                alt={item.name}
+                fill
+                className="object-cover"
+              />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-6xl">📦</span>
+              </div>
+            )}
+
+            {/* Status badge */}
+            <div className="absolute top-3 left-3">
+              <Badge className={cn("gap-1", statusConfig.color)}>
+                <StatusIcon className="h-3 w-3" />
+                {statusConfig.label}
+              </Badge>
+            </div>
+
+            {/* Product link icon */}
+            {item.link && (
+              <a
+                href={item.link}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="absolute top-3 right-3 p-2 bg-white/90 rounded-full hover:bg-white transition-colors"
+              >
+                <ExternalLink className="h-4 w-4 text-gray-700" />
+              </a>
+            )}
+          </div>
+
+          {/* Thumbnail Gallery */}
+          {item.images.length > 1 && (
+            <div className="flex gap-2 mb-4 overflow-x-auto pb-2 min-h-[88px]">
+              {item.images.map((image, index) => (
+                <button
+                  key={image.id}
+                  onClick={() => setSelectedImageIndex(index)}
+                  className={cn(
+                    "relative w-20 h-20 rounded-lg overflow-hidden flex-shrink-0 border-2 transition-colors",
+                    selectedImageIndex === index
+                      ? "border-primary"
+                      : "border-transparent hover:border-gray-300",
+                  )}
+                >
+                  <Image
+                    src={image.thumbnailUrl || image.url}
+                    alt={`${item.name} - Image ${index + 1}`}
+                    fill
+                    className="object-cover"
+                  />
+                </button>
+              ))}
             </div>
           )}
 
-          {/* Status badge */}
-          <div className="absolute top-3 left-3">
-            <Badge className={cn("gap-1", statusConfig.color)}>
-              <StatusIcon className="h-3 w-3" />
-              {statusConfig.label}
-            </Badge>
-          </div>
+          {/* Title and Price */}
+          <div className="mb-4">
+            <h2 className="text-xl font-semibold mb-2">{item.name}</h2>
 
-          {/* Product link icon */}
-          {item.link && (
-            <a
-              href={item.link}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="absolute top-3 right-3 p-2 bg-white/90 rounded-full hover:bg-white transition-colors"
-            >
-              <ExternalLink className="h-4 w-4 text-gray-700" />
-            </a>
-          )}
-        </div>
-
-        {/* Thumbnail Gallery */}
-        {item.images.length > 1 && (
-          <div className="flex gap-2 mb-4 overflow-x-auto pb-2 min-h-[88px]">
-            {item.images.map((image, index) => (
-              <button
-                key={image.id}
-                onClick={() => setSelectedImageIndex(index)}
-                className={cn(
-                  "relative w-20 h-20 rounded-lg overflow-hidden flex-shrink-0 border-2 transition-colors",
-                  selectedImageIndex === index
-                    ? "border-primary"
-                    : "border-transparent hover:border-gray-300",
-                )}
-              >
-                <Image
-                  src={image.thumbnailUrl || image.url}
-                  alt={`${item.name} - Image ${index + 1}`}
-                  fill
-                  className="object-cover"
-                />
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Title and Price */}
-        <div className="mb-4">
-          <h2 className="text-xl font-semibold mb-2">{item.name}</h2>
-
-          <div className="flex items-baseline gap-2">
-            {item.salePrice ? (
-              <>
-                <span className="text-2xl font-bold text-destructive">
-                  {formatPrice(item.salePrice, item.currency)}
-                </span>
-                <span className="text-lg text-muted-foreground line-through">
+            <div className="flex items-baseline gap-2">
+              {item.salePrice ? (
+                <>
+                  <span className="text-2xl font-bold text-destructive">
+                    {formatPrice(item.salePrice, item.currency)}
+                  </span>
+                  <span className="text-lg text-muted-foreground line-through">
+                    {formatPrice(item.price, item.currency)}
+                  </span>
+                </>
+              ) : (
+                <span className="text-2xl font-bold">
                   {formatPrice(item.price, item.currency)}
                 </span>
-              </>
-            ) : (
-              <span className="text-2xl font-bold">
-                {formatPrice(item.price, item.currency)}
-              </span>
-            )}
+              )}
+            </div>
           </div>
-        </div>
 
-        {/* Action Buttons */}
-        <div className="flex gap-2 mb-6">
-          <Button
-            className="flex-1"
-            onClick={handleSendViaWhatsApp}
-            disabled={!item.link && !item.whatsappProductLink}
-          >
-            <MessageCircle className="mr-2 h-4 w-4" />
-            {t("detail.sendViaWhatsapp")}
-          </Button>
+          {/* Action Buttons */}
+          <div className="flex gap-2 mb-6">
+            <Button
+              className="flex-1"
+              onClick={handleSendViaWhatsApp}
+              disabled={!item.link && !item.whatsappProductLink}
+            >
+              <MessageCircle className="mr-2 h-4 w-4" />
+              {t("detail.sendViaWhatsapp")}
+            </Button>
 
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={handleCopyLink}
-            disabled={!item.link}
-          >
-            <Copy className="h-4 w-4" />
-          </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={handleCopyLink}
+              disabled={!item.link}
+            >
+              <Copy className="h-4 w-4" />
+            </Button>
 
-          <Button variant="outline" size="icon" onClick={onEdit}>
-            <Pencil className="h-4 w-4" />
-          </Button>
-        </div>
+            <Button variant="outline" size="icon" onClick={onEdit}>
+              <Pencil className="h-4 w-4" />
+            </Button>
 
-        <Separator className="my-4" />
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setShowHistory(true)}
+            >
+              <History className="h-4 w-4" />
+            </Button>
+          </div>
 
-        {/* Description */}
-        {item.description && (
-          <div className="mb-6">
-            <h3 className="text-sm font-medium text-muted-foreground mb-2">
-              Description
+          <Separator className="my-4" />
+
+          {/* Description */}
+          {item.description && (
+            <div className="mb-6">
+              <h3 className="text-sm font-medium text-muted-foreground mb-2">
+                Description
+              </h3>
+              <p className="text-sm whitespace-pre-wrap">{item.description}</p>
+            </div>
+          )}
+
+          {/* Product Details */}
+          <div className="space-y-4">
+            <h3 className="text-sm font-medium text-muted-foreground">
+              {t("detail.title")}
             </h3>
-            <p className="text-sm whitespace-pre-wrap">{item.description}</p>
+
+            <dl className="grid grid-cols-2 gap-4 text-sm">
+              {item.retailerId && (
+                <>
+                  <dt className="text-muted-foreground">
+                    {t("detail.itemCode")}
+                  </dt>
+                  <dd className="font-medium">{item.retailerId}</dd>
+                </>
+              )}
+
+              <dt className="text-muted-foreground">
+                {t("detail.availability")}
+              </dt>
+              <dd className="font-medium capitalize">{item.availability}</dd>
+
+              <dt className="text-muted-foreground">{t("detail.condition")}</dt>
+              <dd className="font-medium capitalize">{item.condition}</dd>
+
+              {item.brand && (
+                <>
+                  <dt className="text-muted-foreground">{t("detail.brand")}</dt>
+                  <dd className="font-medium">{item.brand}</dd>
+                </>
+              )}
+
+              {item.link && (
+                <>
+                  <dt className="text-muted-foreground">{t("detail.link")}</dt>
+                  <dd className="font-medium truncate">
+                    <a
+                      href={item.link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary hover:underline"
+                    >
+                      {item.link}
+                    </a>
+                  </dd>
+                </>
+              )}
+            </dl>
           </div>
-        )}
 
-        {/* Product Details */}
-        <div className="space-y-4">
-          <h3 className="text-sm font-medium text-muted-foreground">
-            {t("detail.title")}
-          </h3>
-
-          <dl className="grid grid-cols-2 gap-4 text-sm">
-            {item.retailerId && (
-              <>
-                <dt className="text-muted-foreground">
-                  {t("detail.itemCode")}
-                </dt>
-                <dd className="font-medium">{item.retailerId}</dd>
-              </>
-            )}
-
-            <dt className="text-muted-foreground">
-              {t("detail.availability")}
-            </dt>
-            <dd className="font-medium capitalize">{item.availability}</dd>
-
-            <dt className="text-muted-foreground">{t("detail.condition")}</dt>
-            <dd className="font-medium capitalize">{item.condition}</dd>
-
-            {item.brand && (
-              <>
-                <dt className="text-muted-foreground">{t("detail.brand")}</dt>
-                <dd className="font-medium">{item.brand}</dd>
-              </>
-            )}
-
-            {item.link && (
-              <>
-                <dt className="text-muted-foreground">{t("detail.link")}</dt>
-                <dd className="font-medium truncate">
-                  <a
-                    href={item.link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-primary hover:underline"
-                  >
-                    {item.link}
-                  </a>
-                </dd>
-              </>
-            )}
-          </dl>
-        </div>
-
-        {/* Approval Status Message */}
-        {item.status === "PENDING_APPROVAL" && (
-          <div className="mt-6 p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
-            <div className="flex items-start gap-3">
-              <Clock className="h-5 w-5 text-yellow-600 dark:text-yellow-400 mt-0.5" />
-              <div className="flex-1">
-                <h4 className="font-medium text-yellow-800 dark:text-yellow-200">
-                  {t("approval.pending")}
-                </h4>
-                <p className="text-sm text-yellow-700 dark:text-yellow-300 mt-1">
-                  {t("approval.pendingDescription")}
-                </p>
-                <div className="flex items-center gap-2 mt-3">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleManualRefresh}
-                    disabled={isSyncing}
-                  >
-                    {isSyncing ? (
-                      <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                    ) : (
-                      <RefreshCw className="mr-2 h-3 w-3" />
-                    )}
-                    {t("syncSingleStatus")}
-                  </Button>
-                  {/* Real-time connection indicator */}
-                  <div
-                    className={cn(
-                      "flex items-center gap-1 text-xs px-2 py-1 rounded-full",
-                      isConnected
-                        ? "text-green-700 bg-green-100 dark:text-green-300 dark:bg-green-900/30"
-                        : "text-gray-500 bg-gray-100 dark:text-gray-400 dark:bg-gray-800",
-                    )}
-                    title={
-                      isConnected
-                        ? "Real-time updates active"
-                        : "Real-time updates unavailable"
-                    }
-                  >
-                    {isConnected ? (
-                      <>
-                        <Wifi className="h-3 w-3" />
-                        <span>Live</span>
-                      </>
-                    ) : (
-                      <>
-                        <WifiOff className="h-3 w-3" />
-                        <span>Offline</span>
-                      </>
-                    )}
+          {/* Approval Status Message */}
+          {item.status === "PENDING_APPROVAL" && (
+            <div className="mt-6 p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+              <div className="flex items-start gap-3">
+                <Clock className="h-5 w-5 text-yellow-600 dark:text-yellow-400 mt-0.5" />
+                <div className="flex-1">
+                  <h4 className="font-medium text-yellow-800 dark:text-yellow-200">
+                    {t("approval.pending")}
+                  </h4>
+                  <p className="text-sm text-yellow-700 dark:text-yellow-300 mt-1">
+                    {t("approval.pendingDescription")}
+                  </p>
+                  <div className="flex items-center gap-2 mt-3">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleManualRefresh}
+                      disabled={isSyncing}
+                    >
+                      {isSyncing ? (
+                        <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                      ) : (
+                        <RefreshCw className="mr-2 h-3 w-3" />
+                      )}
+                      {t("syncSingleStatus")}
+                    </Button>
+                    {/* Real-time connection indicator */}
+                    <div
+                      className={cn(
+                        "flex items-center gap-1 text-xs px-2 py-1 rounded-full",
+                        isConnected
+                          ? "text-green-700 bg-green-100 dark:text-green-300 dark:bg-green-900/30"
+                          : "text-gray-500 bg-gray-100 dark:text-gray-400 dark:bg-gray-800",
+                      )}
+                      title={
+                        isConnected
+                          ? "Real-time updates active"
+                          : "Real-time updates unavailable"
+                      }
+                    >
+                      {isConnected ? (
+                        <>
+                          <Wifi className="h-3 w-3" />
+                          <span>Live</span>
+                        </>
+                      ) : (
+                        <>
+                          <WifiOff className="h-3 w-3" />
+                          <span>Offline</span>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {item.status === "REJECTED" && item.statusMessage && (
-          <div className="mt-6 p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
-            <div className="flex items-start gap-3">
-              <X className="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5" />
-              <div>
-                <h4 className="font-medium text-red-800 dark:text-red-200">
-                  {t("approval.rejected")}
-                </h4>
-                <p className="text-sm text-red-700 dark:text-red-300 mt-1">
-                  {t("approval.rejectionReason")}: {item.statusMessage}
-                </p>
+          {item.status === "REJECTED" && item.statusMessage && (
+            <div className="mt-6 p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
+              <div className="flex items-start gap-3">
+                <X className="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5" />
+                <div>
+                  <h4 className="font-medium text-red-800 dark:text-red-200">
+                    {t("approval.rejected")}
+                  </h4>
+                  <p className="text-sm text-red-700 dark:text-red-300 mt-1">
+                    {t("approval.rejectionReason")}: {item.statusMessage}
+                  </p>
+                </div>
               </div>
             </div>
-          </div>
-        )}
-      </SheetContent>
-    </Sheet>
+          )}
+        </SheetContent>
+      </Sheet>
+      {item && (
+        <EntityAuditHistoryPanel
+          open={showHistory}
+          onOpenChange={setShowHistory}
+          entityType="catalog_item"
+          entityId={item.id}
+          entityName={item.name}
+        />
+      )}
+    </>
   );
 }

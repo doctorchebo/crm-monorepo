@@ -115,7 +115,7 @@ export class TeamController {
       teamId,
       'remove_members',
     );
-    return this.teamService.removeMember(teamId, memberId);
+    return this.teamService.removeMember(teamId, memberId, user.userId);
   }
 
   @Post(':teamId/members/:memberId/role')
@@ -131,7 +131,12 @@ export class TeamController {
       teamId,
       'change_roles',
     );
-    return this.teamService.changeRole(teamId, memberId, body.role);
+    return this.teamService.changeRole(
+      teamId,
+      memberId,
+      body.role,
+      user.userId,
+    );
   }
 
   // ========== Role Management ==========
@@ -153,7 +158,7 @@ export class TeamController {
       teamId,
       'team.manage',
     );
-    return this.rolesService.createRole(teamId, body);
+    return this.rolesService.createRole(teamId, body, user.userId);
   }
 
   @Patch(':id/roles/:roleId')
@@ -169,7 +174,7 @@ export class TeamController {
       teamId,
       'team.manage',
     );
-    return this.rolesService.updateRole(teamId, roleId, body);
+    return this.rolesService.updateRole(teamId, roleId, body, user.userId);
   }
 
   @Delete(':id/roles/:roleId')
@@ -184,6 +189,6 @@ export class TeamController {
       teamId,
       'team.manage',
     );
-    return this.rolesService.deleteRole(teamId, roleId);
+    return this.rolesService.deleteRole(teamId, roleId, user.userId);
   }
 }

@@ -19,6 +19,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { AuditWriteService } from '../../audit/audit-write.service';
 import { CreateObjectDto, ListObjectsQueryDto, UpdateObjectDto } from '../dto';
 import { KnowledgeBaseRepository } from '../repositories/knowledge-base.repository';
 import {
@@ -40,7 +41,8 @@ export class ObjectService {
     private readonly indexingService: IndexingService,
     @Inject(forwardRef(() => KbMediaService))
     private readonly mediaService: KbMediaService,
-  ) { }
+    private readonly auditWriteService: AuditWriteService,
+  ) {}
 
   /**
    * Get objects for a user with pagination and filters
@@ -210,6 +212,13 @@ export class ObjectService {
       `Created knowledge object ${object.id} from template ${dto.templateId}`,
     );
 
+    await this.auditWriteService.logKBObjectCreated({
+      userId,
+      entityId: object.id,
+      entityName: dto.name,
+      metadata: { templateId: dto.templateId },
+    });
+
     // Trigger indexing immediately if publishImmediately is true
     if (dto.publishImmediately) {
       this.triggerIndexing(object.id);
@@ -317,6 +326,12 @@ export class ObjectService {
     // Trigger indexing
     this.triggerIndexing(objectId);
 
+    await this.auditWriteService.logKBObjectPublished({
+      userId,
+      entityId: objectId,
+      entityName: object.name,
+    });
+
     return this.getObjectById(userId, objectId);
   }
 
@@ -402,6 +417,12 @@ export class ObjectService {
     await this.repository.deleteObject(objectId);
 
     this.logger.log(`Deleted knowledge object ${objectId}`);
+
+    await this.auditWriteService.logKBObjectDeleted({
+      userId,
+      entityId: objectId,
+      entityName: object.name,
+    });
   }
 
   /**

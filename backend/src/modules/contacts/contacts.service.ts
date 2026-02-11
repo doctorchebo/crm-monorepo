@@ -1,7 +1,8 @@
 import { db } from '@database/db.connection';
 import { Contact, contacts, senders } from '@database/schema';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { and, count, desc, eq, ilike, or, sql, inArray } from 'drizzle-orm';
+import { and, count, desc, eq, ilike, inArray, or } from 'drizzle-orm';
+import { AuditWriteService } from '../audit/audit-write.service';
 import { CreateContactDto } from './dto/create-contact.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
 
@@ -28,6 +29,8 @@ export interface PaginatedContactsResponse {
 @Injectable()
 export class ContactsService {
   private readonly logger = new Logger(ContactsService.name);
+
+  constructor(private readonly auditWriteService: AuditWriteService) {}
 
   /**
    * Create a new contact
@@ -80,6 +83,14 @@ export class ContactsService {
 
         this.logger.log(`Contact reactivated: ${existingContact.contactId}`);
 
+        await this.auditWriteService.logContactCreated({
+          userId,
+          entityId: reactivated.contactId,
+          entityName:
+            `${reactivated.firstName || ''} ${reactivated.lastName || ''}`.trim(),
+          metadata: { phoneNumber: reactivated.phoneNumber },
+        });
+
         return reactivated;
       }
 
@@ -99,6 +110,14 @@ export class ContactsService {
 
       this.logger.log(`Contact created: ${contact.contactId}`);
 
+      await this.auditWriteService.logContactCreated({
+        userId,
+        entityId: contact.contactId,
+        entityName:
+          `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
+        metadata: { phoneNumber: contact.phoneNumber },
+      });
+
       return contact;
     } catch (error) {
       this.logger.error(`Error creating contact: ${error.message}`);
@@ -109,7 +128,7 @@ export class ContactsService {
   /**
    * Get all contacts with pagination and optional search
    * Contacts are global - any sender can message any contact
-   * 
+   *
    * @param userId - User ID to verify sender access
    * @param page - Page number (1-indexed)
    * @param limit - Items per page
@@ -213,12 +232,13 @@ export class ContactsService {
    * Update a contact
    */
   async update(
+    userId: number,
     contactId: string,
     updateContactDto: UpdateContactDto,
   ): Promise<Contact> {
     try {
       // Verify contact exists
-      await this.findOne(contactId);
+      const existing = await this.findOne(contactId);
 
       const updateData: Record<string, unknown> = {
         updatedAt: new Date(),
@@ -256,6 +276,22 @@ export class ContactsService {
 
       this.logger.log(`Contact updated: ${contactId}`);
 
+      await this.auditWriteService.logContactUpdated({
+        userId,
+        entityId: contactId,
+        entityName:
+          `${updated.firstName || ''} ${updated.lastName || ''}`.trim(),
+        changes: this.auditWriteService.buildChanges(existing, updated, [
+          'firstName',
+          'lastName',
+          'email',
+          'phoneNumber',
+          'countryCode',
+          'avatar',
+          'language',
+        ]),
+      });
+
       return updated;
     } catch (error) {
       this.logger.error(`Error updating contact: ${error.message}`);
@@ -266,10 +302,10 @@ export class ContactsService {
   /**
    * Soft delete a contact (mark as inactive)
    */
-  async delete(contactId: string): Promise<void> {
+  async delete(userId: number, contactId: string): Promise<void> {
     try {
       // Verify contact exists
-      await this.findOne(contactId);
+      const existing = await this.findOne(contactId);
 
       const result = await db
         .update(contacts)
@@ -285,6 +321,14 @@ export class ContactsService {
       }
 
       this.logger.log(`Contact deleted: ${contactId}`);
+
+      await this.auditWriteService.logContactDeleted({
+        userId,
+        entityId: contactId,
+        entityName:
+          `${existing.firstName || ''} ${existing.lastName || ''}`.trim(),
+        metadata: { phoneNumber: existing.phoneNumber },
+      });
     } catch (error) {
       this.logger.error(`Error deleting contact: ${error.message}`);
       throw error;
@@ -296,7 +340,7 @@ export class ContactsService {
    * @param contactIds - Array of contact IDs to delete
    * @returns Number of contacts deleted
    */
-  async bulkDelete(contactIds: string[]): Promise<number> {
+  async bulkDelete(userId: number, contactIds: string[]): Promise<number> {
     if (!contactIds || contactIds.length === 0) {
       return 0;
     }
@@ -318,6 +362,13 @@ export class ContactsService {
 
       const deletedCount = result.length;
       this.logger.log(`Bulk deleted ${deletedCount} contacts`);
+
+      await this.auditWriteService.logContactsBulkDeleted({
+        userId,
+        count: deletedCount,
+        metadata: { contactIds },
+      });
+
       return deletedCount;
     } catch (error) {
       this.logger.error(`Error bulk deleting contacts: ${error.message}`);

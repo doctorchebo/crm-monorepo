@@ -1,3 +1,4 @@
+import { AuditModule } from '@modules/audit/audit.module';
 import { CatalogModule } from '@modules/catalog/catalog.module';
 import { KnowledgeBaseModule } from '@modules/knowledge-base/knowledge-base.module';
 import { LabelsModule } from '@modules/labels/labels.module';
@@ -68,6 +69,7 @@ import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
     ImportJobsModule,
     ProfilePictureModule,
     CatalogModule,
+    AuditModule,
     DatabaseModule,
   ],
   controllers: [AppController],

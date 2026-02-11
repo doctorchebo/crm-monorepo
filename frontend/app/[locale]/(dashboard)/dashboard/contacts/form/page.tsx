@@ -1,5 +1,6 @@
 "use client";
 
+import { EntityAuditHistoryPanel } from "@/components/audit";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CountryCodeSelect } from "@/components/ui/country-code-select";
@@ -10,7 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useNotification } from "@/hooks/use-notification";
 import { backendApi, CreateContactDto } from "@/lib/api/endpoints";
 import { extractPhoneNumberParts } from "@/lib/utils/phone-number";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, History } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
@@ -67,6 +68,7 @@ function ContactFormContent() {
 
   const [isLoading, setIsLoading] = useState(false);
   const [isContactLoading, setIsContactLoading] = useState(isEdit);
+  const [showHistory, setShowHistory] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     firstName: "",
@@ -183,7 +185,7 @@ function ContactFormContent() {
         await backendApi.contacts.create(createPayload);
         addNotification(
           `Contact ${createPayload.firstName} created successfully!`,
-          "success"
+          "success",
         );
       }
 
@@ -248,6 +250,17 @@ function ContactFormContent() {
           <h1 className="text-3xl font-bold tracking-tight">{pageTitle}</h1>
           <p className="text-muted-foreground mt-2">{t("description")}</p>
         </div>
+        {isEdit && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto gap-2"
+            onClick={() => setShowHistory(true)}
+          >
+            <History className="h-4 w-4" />
+            {t("history")}
+          </Button>
+        )}
       </div>
 
       <Card>
@@ -338,6 +351,16 @@ function ContactFormContent() {
           </form>
         </CardContent>
       </Card>
+
+      {isEdit && contactId && (
+        <EntityAuditHistoryPanel
+          open={showHistory}
+          onOpenChange={setShowHistory}
+          entityType="contact"
+          entityId={contactId}
+          entityName={formData.firstName}
+        />
+      )}
     </div>
   );
 }

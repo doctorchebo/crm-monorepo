@@ -159,9 +159,16 @@ export class TemplatesController {
    * Body: { templateIds: string[] }
    */
   @Post('bulk-delete')
-  async bulkDelete(@Body() body: { templateIds: string[] }) {
+  async bulkDelete(
+    @Body() body: { templateIds: string[] },
+    @Request() req: any,
+  ) {
+    const userId = req.user?.userId;
     const { templateIds } = body;
-    const deletedCount = await this.templatesService.bulkDelete(templateIds);
+    const deletedCount = await this.templatesService.bulkDelete(
+      userId,
+      templateIds,
+    );
     return { success: true, deletedCount };
   }
 
@@ -352,16 +359,19 @@ export class TemplatesController {
   async updateTemplate(
     @Param('id') templateId: string,
     @Body() dto: UpdateTemplateDto,
+    @Request() req: any,
   ) {
-    return await this.templatesService.updateTemplate(templateId, dto);
+    const userId = req.user?.userId;
+    return await this.templatesService.updateTemplate(userId, templateId, dto);
   }
 
   /**
    * DELETE /templates/:id - Delete template (soft delete)
    */
   @Delete(':id')
-  async deleteTemplate(@Param('id') templateId: string) {
-    return await this.templatesService.deleteTemplate(templateId);
+  async deleteTemplate(@Param('id') templateId: string, @Request() req: any) {
+    const userId = req.user?.userId;
+    return await this.templatesService.deleteTemplate(userId, templateId);
   }
 
   /**

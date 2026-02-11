@@ -2,9 +2,9 @@ import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ProfilePictureUrlService } from '@shared/services/profile-picture-url.service';
 import { S3Service } from '@shared/services/s3.service';
-import { AuditService } from '../../shared/services/audit.service';
 import { PermissionService } from '../../shared/services/permission.service';
 import { AiMemoryModule } from '../ai-memory/ai-memory.module';
+import { AuditWriteService } from '../audit/audit-write.service';
 import { TeamModule } from '../team/team.module';
 import { WhatsAppGateway } from '../whatsapp/whatsapp.gateway';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
@@ -45,7 +45,7 @@ import {
     ChatAssignmentService,
     ChatAccessService,
     PermissionService,
-    AuditService,
+    AuditWriteService,
     // Main facade service
     ChatsService,
     // Shared services

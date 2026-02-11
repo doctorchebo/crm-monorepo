@@ -36,6 +36,7 @@ import { PermissionService } from '@shared/services/permission.service';
 import { and, count, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 
+import { AuditWriteService } from '../audit/audit-write.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import {
   CatalogCollectionResponseDto,
@@ -98,6 +99,7 @@ export class CatalogService {
     private readonly whatsappService: WhatsAppService,
     private readonly permissionService: PermissionService,
     private readonly metaCommerceApi: MetaCommerceApiService,
+    private readonly auditWriteService: AuditWriteService,
   ) {
     // Initialize S3 client
     this.s3Client = new S3Client({
@@ -388,6 +390,13 @@ export class CatalogService {
       `Created catalog item ${created.id} in catalog ${catalogId}`,
     );
 
+    await this.auditWriteService.logCatalogItemCreated({
+      userId,
+      entityId: created.id,
+      entityName: created.name,
+      metadata: { catalogId },
+    });
+
     return this.formatCatalogItemResponse(created);
   }
 
@@ -492,6 +501,7 @@ export class CatalogService {
   async updateCatalogItem(
     itemId: string,
     teamId: number,
+    userId: number,
     dto: UpdateCatalogItemDto,
   ): Promise<CatalogItemResponseDto> {
     // Verify item belongs to team's catalog
@@ -540,13 +550,24 @@ export class CatalogService {
       .where(eq(catalogItems.id, itemId))
       .returning();
 
+    await this.auditWriteService.logCatalogItemUpdated({
+      userId,
+      entityId: itemId,
+      entityName: updated.name,
+      changes: dto as unknown as Record<string, { from: unknown; to: unknown }>,
+    });
+
     return this.formatCatalogItemResponse(updated);
   }
 
   /**
    * Delete a catalog item
    */
-  async deleteCatalogItem(itemId: string, teamId: number): Promise<void> {
+  async deleteCatalogItem(
+    itemId: string,
+    teamId: number,
+    userId?: number,
+  ): Promise<void> {
     // Verify item belongs to team's catalog
     const [existing] = await db
       .select()
@@ -561,6 +582,14 @@ export class CatalogService {
 
     // Delete item (cascade deletes images)
     await db.delete(catalogItems).where(eq(catalogItems.id, itemId));
+
+    if (userId) {
+      await this.auditWriteService.logCatalogItemDeleted({
+        userId,
+        entityId: itemId,
+        entityName: existing.catalog_items.name,
+      });
+    }
 
     this.logger.log(`Deleted catalog item ${itemId}`);
   }
@@ -2133,6 +2162,13 @@ export class CatalogService {
 
     this.logger.log(`Created collection ${created.id} in catalog ${catalogId}`);
 
+    await this.auditWriteService.logCollectionCreated({
+      userId,
+      entityId: created.id,
+      entityName: created.name,
+      metadata: { catalogId },
+    });
+
     return this.formatCollectionResponse(created);
   }
 
@@ -2269,7 +2305,11 @@ export class CatalogService {
   /**
    * Delete a collection
    */
-  async deleteCollection(collectionId: string, teamId: number): Promise<void> {
+  async deleteCollection(
+    collectionId: string,
+    teamId: number,
+    userId?: number,
+  ): Promise<void> {
     // Verify collection belongs to team
     const [collection] = await db
       .select()
@@ -2290,6 +2330,14 @@ export class CatalogService {
     await db
       .delete(catalogCollections)
       .where(eq(catalogCollections.id, collectionId));
+
+    if (userId) {
+      await this.auditWriteService.logCollectionDeleted({
+        userId,
+        entityId: collectionId,
+        entityName: collection.catalog_collections.name,
+      });
+    }
 
     this.logger.log(`Deleted collection ${collectionId}`);
   }
@@ -2880,6 +2928,16 @@ export class CatalogService {
     this.logger.log(
       `Bulk import complete: ${results.successCount} success, ${results.failedCount} failed`,
     );
+
+    await this.auditWriteService.logCatalogBulkImport({
+      userId,
+      entityId: catalog.id,
+      count: results.totalCount,
+      metadata: {
+        successCount: results.successCount,
+        failedCount: results.failedCount,
+      },
+    });
 
     return results;
   }

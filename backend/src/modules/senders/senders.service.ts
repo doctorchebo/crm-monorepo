@@ -8,6 +8,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
+import { AuditWriteService } from '../audit/audit-write.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { CreateSenderDto } from './dto/create-sender.dto';
 import { UpdateSenderDto } from './dto/update-sender.dto';
@@ -51,7 +52,10 @@ export interface SyncResult {
 export class SendersService {
   private readonly logger = new Logger(SendersService.name);
 
-  constructor(private readonly whatsAppService: WhatsAppService) {}
+  constructor(
+    private readonly whatsAppService: WhatsAppService,
+    private readonly auditWriteService: AuditWriteService,
+  ) {}
 
   // ==================== SYNC OPERATIONS ====================
 
@@ -296,6 +300,14 @@ export class SendersService {
     this.logger.log(
       `Created sender: ${createSenderDto.phoneNumber} (status: ${sender.status})`,
     );
+
+    await this.auditWriteService.logSenderCreated({
+      userId,
+      entityId: String(sender.id),
+      entityName: sender.displayName || sender.phoneNumber,
+      metadata: { phoneNumber: sender.phoneNumber },
+    });
+
     return sender;
   }
 
@@ -369,6 +381,18 @@ export class SendersService {
       .returning();
 
     this.logger.log(`Updated sender ${senderId}`);
+
+    await this.auditWriteService.logSenderUpdated({
+      userId,
+      entityId: String(senderId),
+      entityName: updated.displayName || updated.phoneNumber,
+      changes: this.auditWriteService.buildChanges(sender, updated, [
+        'phoneNumber',
+        'displayName',
+        'phoneNumberId',
+      ]),
+    });
+
     return updated;
   }
 
@@ -389,6 +413,14 @@ export class SendersService {
       .returning();
 
     this.logger.log(`Soft deleted sender ${senderId}`);
+
+    await this.auditWriteService.logSenderRemoved({
+      userId,
+      entityId: String(senderId),
+      entityName: deleted.displayName || deleted.phoneNumber,
+      metadata: { phoneNumber: deleted.phoneNumber },
+    });
+
     return deleted;
   }
 

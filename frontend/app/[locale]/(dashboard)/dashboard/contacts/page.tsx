@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  SectionAuditButton,
+  SectionAuditSheet,
+} from "@/components/audit/section-audit-sheet";
 import { DeleteConfirmationDialog } from "@/components/dialogs/delete-confirmation-dialog";
 import { SelectSenderModal } from "@/components/dialogs/select-sender-modal";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -85,6 +89,7 @@ export default function ContactsPage() {
   } = useDebouncedValue("", { delay: 300 });
 
   // Modal and dialog state
+  const [showAuditHistory, setShowAuditHistory] = useState(false);
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   const [senderModalOpen, setSenderModalOpen] = useState(false);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
@@ -249,6 +254,7 @@ export default function ContactsPage() {
       description={t("totalContacts", { count: total })}
       headerActions={
         <div className="flex gap-2">
+          <SectionAuditButton onClick={() => setShowAuditHistory(true)} />
           <Button
             variant="outline"
             onClick={() => router.push(`/${locale}/dashboard/contacts/import`)}
@@ -495,6 +501,12 @@ export default function ContactsPage() {
           contact={selectedContact}
         />
       )}
+
+      <SectionAuditSheet
+        open={showAuditHistory}
+        onOpenChange={setShowAuditHistory}
+        category="contacts"
+      />
     </PageLayout>
   );
 }

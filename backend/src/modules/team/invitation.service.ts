@@ -1,21 +1,21 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-  Logger,
-} from '@nestjs/common';
-import { eq, and, sql, gte } from 'drizzle-orm';
-import * as jwt from 'jsonwebtoken';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import { and, eq, gte, sql } from 'drizzle-orm';
+import * as jwt from 'jsonwebtoken';
 import { db } from '../../database/db.connection';
 import {
+  invitationRateLimits,
   invitations,
   teams,
   users,
-  invitationRateLimits,
 } from '../../database/schema';
+import { AuditWriteService } from '../audit/audit-write.service';
 import { TeamService } from './team.service';
-import { AuditService } from '../../shared/services/audit.service';
 
 // Token expiry in milliseconds (7 days)
 const INVITATION_TOKEN_EXPIRY = 7 * 24 * 60 * 60 * 1000;
@@ -74,7 +74,7 @@ export class InvitationService {
 
   constructor(
     private teamService: TeamService,
-    private auditService: AuditService,
+    private auditWriteService: AuditWriteService,
   ) {
     // Use JWT secret from environment or generate a default for dev
     this.jwtSecret = process.env.JWT_SECRET || 'invitation-secret-key';
@@ -330,13 +330,12 @@ export class InvitationService {
     });
 
     // Log the action
-    await this.auditService.logInvitationSent(
-      invitedBy,
+    await this.auditWriteService.logInvitationSent({
+      userId: invitedBy,
       teamId,
-      invitation.id.toString(),
-      email,
-      role,
-    );
+      entityId: invitation.id.toString(),
+      metadata: { email, role },
+    });
 
     this.logger.log(
       `Invitation sent to ${email} for team ${teamId} by user ${invitedBy}`,
@@ -419,11 +418,11 @@ export class InvitationService {
       .where(eq(invitations.id, invitation.id));
 
     // Log the action
-    await this.auditService.logInvitationAccepted(
+    await this.auditWriteService.logInvitationAccepted({
       userId,
-      invitation.teamId,
-      invitation.id.toString(),
-    );
+      teamId: invitation.teamId,
+      entityId: invitation.id.toString(),
+    });
 
     this.logger.log(`Invitation ${invitation.id} accepted by user ${userId}`);
   }

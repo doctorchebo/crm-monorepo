@@ -11,11 +11,12 @@ import { ConfigModule } from '@nestjs/config';
 import { ImageProcessingService } from '@shared/services/image-processing.service';
 import { S3Service } from '@shared/services/s3.service';
 import { AiMemoryModule } from '../ai-memory/ai-memory.module';
+import { AuditWriteService } from '../audit/audit-write.service';
 import { MediaCompressionModule } from '../media-compression/media-compression.module';
+import { TeamModule } from '../team/team.module';
 import { ThumbnailModule } from '../thumbnail/thumbnail.module';
 import { VideoCompressionModule } from '../video-compression/video-compression.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
-import { TeamModule } from '../team/team.module';
 import { KnowledgeBaseController } from './knowledge-base.controller';
 import { KbMediaController } from './media.controller';
 import { KnowledgeBaseRepository } from './repositories/knowledge-base.repository';
@@ -66,6 +67,8 @@ import {
     MediaDecisionAuditService,
     MediaVectorizationService,
     MediaOrchestratorService,
+    // Audit
+    AuditWriteService,
   ],
   exports: [
     KnowledgeBaseRepository,

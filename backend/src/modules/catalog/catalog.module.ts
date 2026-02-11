@@ -2,6 +2,7 @@ import { forwardRef, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { MetaCloudAPIConfigService } from '@shared/services/meta-cloud-api.config';
 import { PermissionService } from '@shared/services/permission.service';
+import { AuditWriteService } from '../audit/audit-write.service';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { CatalogController } from './catalog.controller';
 import { CatalogService } from './catalog.service';
@@ -52,6 +53,7 @@ import { MetaCommerceApiService } from './services/meta-commerce-api.service';
     MetaCloudAPIConfigService,
     MetaCommerceApiService,
     CatalogWebhookGateway,
+    AuditWriteService,
   ],
   exports: [CatalogService, CatalogWebhookGateway],
 })

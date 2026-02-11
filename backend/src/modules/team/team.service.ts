@@ -8,6 +8,7 @@ import {
 import { and, eq } from 'drizzle-orm';
 import { db } from '../../database/db.connection';
 import { chats, roles, teamMembers, teams, users } from '../../database/schema';
+import { AuditWriteService } from '../audit/audit-write.service';
 import { CreateTeamDto } from './dto/create-team.dto';
 import { RolesService } from './services/roles.service';
 
@@ -43,7 +44,10 @@ export interface TeamMemberInfo {
 export class TeamService {
   private readonly logger = new Logger(TeamService.name);
 
-  constructor(private readonly rolesService: RolesService) {}
+  constructor(
+    private readonly rolesService: RolesService,
+    private readonly auditWriteService: AuditWriteService,
+  ) {}
 
   /**
    * Create a new team
@@ -285,6 +289,14 @@ export class TeamService {
         .set({ isActive: true, role: roleName, roleId: roleId, invitedBy })
         .where(eq(teamMembers.id, existing.id));
 
+      await this.auditWriteService.logMemberAdded({
+        userId: invitedBy,
+        teamId,
+        entityId: String(userId),
+        entityName: user.name || '',
+        metadata: { role: roleName },
+      });
+
       return {
         id: existing.id,
         userId: user.id,
@@ -313,6 +325,14 @@ export class TeamService {
       `User ${userId} added to team ${teamId} as ${roleName} (RoleID: ${roleId})`,
     );
 
+    await this.auditWriteService.logMemberAdded({
+      userId: invitedBy,
+      teamId,
+      entityId: String(userId),
+      entityName: user.name || '',
+      metadata: { role: roleName },
+    });
+
     return {
       id: member.id,
       userId: user.id,
@@ -328,7 +348,11 @@ export class TeamService {
   /**
    * Remove a member from a team
    */
-  async removeMember(teamId: number, userId: number): Promise<boolean> {
+  async removeMember(
+    teamId: number,
+    userId: number,
+    actingUserId?: number,
+  ): Promise<boolean> {
     // Cannot remove the team owner
     const [team] = await db
       .select({ ownerId: teams.ownerId })
@@ -348,6 +372,21 @@ export class TeamService {
       )
       .returning();
 
+    if (result.length > 0 && actingUserId) {
+      // Get user info for the removed member
+      const [removedUser] = await db
+        .select({ name: users.name })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+      await this.auditWriteService.logMemberRemoved({
+        userId: actingUserId,
+        teamId,
+        entityId: String(userId),
+        entityName: removedUser?.name ?? '',
+      });
+    }
+
     return result.length > 0;
   }
 
@@ -358,6 +397,7 @@ export class TeamService {
     teamId: number,
     userId: number,
     newRoleOrId: string | number,
+    actingUserId?: number,
   ): Promise<TeamMemberInfo | null> {
     // Resolve Role
     let roleId: number | undefined;
@@ -395,6 +435,16 @@ export class TeamService {
       throw new ForbiddenException("Cannot change team owner's role");
     }
 
+    // Get current role before update for audit
+    const [currentMember] = await db
+      .select({ role: teamMembers.role })
+      .from(teamMembers)
+      .where(
+        and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)),
+      )
+      .limit(1);
+    const previousRole = currentMember?.role;
+
     const [member] = await db
       .update(teamMembers)
       .set({ role: roleName, roleId: roleId })
@@ -412,6 +462,16 @@ export class TeamService {
       .from(users)
       .where(eq(users.id, userId))
       .limit(1);
+
+    if (actingUserId) {
+      await this.auditWriteService.logRoleChanged({
+        userId: actingUserId,
+        teamId,
+        entityId: String(userId),
+        entityName: user?.name ?? '',
+        changes: { role: { from: previousRole ?? '', to: roleName } },
+      });
+    }
 
     return {
       id: member.id,

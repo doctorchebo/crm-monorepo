@@ -29,6 +29,7 @@ import {
   getDefaultChatStageAssignmentValues,
 } from '@shared/constants/ai-defaults';
 import { eq } from 'drizzle-orm';
+import { AuditWriteService } from '../../audit/audit-write.service';
 import { HandoffRequest, HandoffStatus, ResolveHandoffRequest } from '../types';
 import { AiConfigurationService } from './ai-configuration.service';
 import { RateLimiterService } from './rate-limiter.service';
@@ -41,6 +42,7 @@ export class HandoffService {
     private readonly rateLimiter: RateLimiterService,
     private readonly eventEmitter: EventEmitter2,
     private readonly aiConfigService: AiConfigurationService,
+    private readonly auditWriteService: AuditWriteService,
   ) {}
 
   /**
@@ -188,6 +190,19 @@ export class HandoffService {
 
       this.logger.log(`Handoff requested for chat ${chatId}: ${reason}`);
 
+      // Write to unified audit log (dual-write alongside chatStageHistory)
+      await this.auditWriteService.logHandoffRequested({
+        userId,
+        chatId,
+        description: `Handoff requested: ${reason}`,
+        metadata: {
+          handoffRequested: true,
+          pauseAi,
+          stageId: assignment.stageId,
+          messageId: request.messageId,
+        },
+      });
+
       // Get stage info if available
       let stageName = 'No Stage';
       if (updated.stageId) {
@@ -296,6 +311,20 @@ export class HandoffService {
         this.logger.log(
           `Handoff resolved for chat ${chatId} by user ${userId}`,
         );
+
+        // Write to unified audit log (dual-write alongside chatStageHistory)
+        await this.auditWriteService.logHandoffResolved({
+          userId,
+          chatId,
+          description: resolution || 'Handoff resolved',
+          metadata: {
+            handoffResolved: true,
+            resumeAi,
+            previousHandoffReason: assignment.handoffReason,
+            fromStageId: assignment.stageId,
+            toStageId: targetStageId,
+          },
+        });
 
         // Get stage info
         let stageName = 'No Stage';

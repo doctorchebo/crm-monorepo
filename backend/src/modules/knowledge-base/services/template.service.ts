@@ -16,6 +16,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { AuditWriteService } from '../../audit/audit-write.service';
 import {
   CreateTemplateDto,
   CreateTemplateFieldDto,
@@ -28,7 +29,10 @@ import { TemplateDetail, TemplateSummary } from '../types';
 export class TemplateService {
   private readonly logger = new Logger(TemplateService.name);
 
-  constructor(private readonly repository: KnowledgeBaseRepository) { }
+  constructor(
+    private readonly repository: KnowledgeBaseRepository,
+    private readonly auditWriteService: AuditWriteService,
+  ) {}
 
   /**
    * Get all templates available to a user (system + user-created)
@@ -189,6 +193,12 @@ export class TemplateService {
       })),
     );
 
+    await this.auditWriteService.logKBTemplateCreated({
+      userId,
+      entityId: template.id,
+      entityName: dto.displayName || dto.name,
+    });
+
     return this.mapToTemplateDetail(template, fields, 0, 0);
   }
 
@@ -230,6 +240,13 @@ export class TemplateService {
       await this.repository.getObjectsCountByTemplate(templateId);
     const objectsWithMediaCount =
       await this.repository.getObjectsWithMediaCountByTemplate(templateId);
+
+    await this.auditWriteService.logKBTemplateUpdated({
+      userId,
+      entityId: templateId,
+      entityName: updated!.displayName || updated!.name,
+      changes: dto as unknown as Record<string, { from: unknown; to: unknown }>,
+    });
 
     return this.mapToTemplateDetail(
       updated!,
@@ -430,6 +447,12 @@ export class TemplateService {
 
     // Delete template
     await this.repository.deleteTemplate(templateId);
+
+    await this.auditWriteService.logKBTemplateDeleted({
+      userId,
+      entityId: templateId,
+      entityName: template.displayName || template.name,
+    });
   }
 
   /**

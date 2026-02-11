@@ -1,5 +1,6 @@
 "use client";
 
+import { EntityAuditHistoryPanel } from "@/components/audit";
 import { DeleteConfirmationDialog } from "@/components/dialogs/delete-confirmation-dialog";
 import { SmartAvatar } from "@/components/smart-avatar";
 import { BulkActionBar } from "@/components/ui/bulk-action-bar";
@@ -34,7 +35,13 @@ import {
 import { useClientFilteredData } from "@/hooks/use-client-filtered-data";
 import { useNotification } from "@/hooks/use-notification";
 import { backendApi } from "@/lib/api/endpoints";
-import { Loader2, MoreVertical, PlusCircle, Trash2 } from "lucide-react";
+import {
+  History,
+  Loader2,
+  MoreVertical,
+  PlusCircle,
+  Trash2,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 import useSWR from "swr";
@@ -77,6 +84,7 @@ export function TeamMembers({ teamId }: TeamMembersProps) {
   const [inviteRole, setInviteRole] = useState("");
   const [inviteOpen, setInviteOpen] = useState(false);
   const [memberToDelete, setMemberToDelete] = useState<any | null>(null);
+  const [historyMember, setHistoryMember] = useState<any | null>(null);
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [bulkDeleteMode, setBulkDeleteMode] = useState(false);
@@ -340,6 +348,14 @@ export function TeamMembers({ teamId }: TeamMembersProps) {
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem
                             onClick={() => {
+                              setHistoryMember(member);
+                            }}
+                          >
+                            <History className="mr-2 h-4 w-4" />
+                            {t("viewHistory")}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => {
                               setBulkDeleteMode(true);
                               toggleSelect(String(member.id));
                             }}
@@ -388,6 +404,17 @@ export function TeamMembers({ teamId }: TeamMembersProps) {
         onCancel={() => setBulkDeleteDialogOpen(false)}
         isLoading={isBulkDeleting}
       />
+
+      {/* Entity Audit History */}
+      {historyMember && (
+        <EntityAuditHistoryPanel
+          open={!!historyMember}
+          onOpenChange={(open) => !open && setHistoryMember(null)}
+          entityType="team_member"
+          entityId={String(historyMember.id)}
+          entityName={getUserDisplayName(historyMember)}
+        />
+      )}
     </div>
   );
 }

@@ -261,8 +261,13 @@ export type ChatLock = typeof chatLocks.$inferSelect;
 export type NewChatLock = typeof chatLocks.$inferInsert;
 
 /**
- * Activity Logs table - comprehensive audit trail for all system actions
- * No frontend-only logging allowed - all logged server-side
+ * Activity Logs table - unified audit trail for ALL system actions
+ *
+ * This is the SINGLE SOURCE OF TRUTH for audit logging across the application.
+ * All modules write here via AuditWriteService. No frontend-only logging allowed.
+ *
+ * Categories: pipeline, contacts, templates, team, catalog, senders, labels,
+ *             knowledge_base, import, settings, auth
  */
 export const activityLogs = pgTable(
   'activity_logs',
@@ -274,14 +279,21 @@ export const activityLogs = pgTable(
     teamId: integer('team_id').references(() => teams.id, {
       onDelete: 'set null',
     }),
-    entityType: varchar('entity_type', { length: 50 }), // 'chat', 'message', 'team', 'invitation', etc.
+    category: varchar('category', { length: 50 }), // High-level section: 'pipeline', 'contacts', 'team', etc.
+    entityType: varchar('entity_type', { length: 50 }), // 'chat', 'contact', 'template', 'team_member', etc.
     entityId: text('entity_id'), // ID of the affected entity
-    action: varchar('action', { length: 50 }), // 'lock_acquired', 'message_sent', 'stage_moved', etc.
-    metadata: jsonb('metadata').default({}), // Additional context
+    entityName: varchar('entity_name', { length: 255 }), // Denormalized display name at time of action
+    action: varchar('action', { length: 50 }), // 'contact_created', 'template_deleted', 'role_changed', etc.
+    description: text('description'), // Human-readable summary of the action
+    userName: varchar('user_name', { length: 255 }), // Denormalized user name at time of action
+    metadata: jsonb('metadata').default({}), // Additional structured context
+    changes: jsonb('changes'), // Changed fields diff: { field: { from: old, to: new } }
+    chatId: varchar('chat_id'), // Associated chat ID (FK managed at DB level, defined after chats table)
     ipAddress: varchar('ip_address', { length: 45 }),
     createdAt: timestamp('created_at').defaultNow(),
   },
   (table) => ({
+    // Single-column indexes (existing, kept for backward compatibility)
     entityTypeIndex: index('idx_activity_logs_entity_type').on(
       table.entityType,
     ),
@@ -290,6 +302,17 @@ export const activityLogs = pgTable(
     teamIdIndex: index('idx_activity_logs_team_id').on(table.teamId),
     userIdIndex: index('idx_activity_logs_user_id').on(table.userId),
     createdAtIndex: index('idx_activity_logs_created_at').on(table.createdAt),
+    // Composite indexes for primary query patterns
+    teamCategoryCreatedIndex: index(
+      'idx_activity_logs_team_category_created',
+    ).on(table.teamId, table.category, table.createdAt),
+    teamUserCreatedIndex: index('idx_activity_logs_team_user_created').on(
+      table.teamId,
+      table.userId,
+      table.createdAt,
+    ),
+    categoryIndex: index('idx_activity_logs_category').on(table.category),
+    chatIdIndex: index('idx_activity_logs_chat_id').on(table.chatId),
   }),
 );
 

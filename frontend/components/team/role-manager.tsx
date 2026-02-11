@@ -1,9 +1,11 @@
 "use client";
 
+import { EntityAuditHistoryPanel } from "@/components/audit";
 import { useClientFilteredData } from "@/hooks/use-client-filtered-data";
 import { useNotification } from "@/hooks/use-notification";
 import {
   Check,
+  History,
   MoreVertical,
   Pencil,
   Plus,
@@ -61,8 +63,8 @@ import {
   getTeamRoles,
   updateTeamRole,
 } from "@/app/[locale]/(dashboard)/dashboard/team/actions";
-import { groupPermissions } from "./role-utils";
 import { Checkbox } from "@radix-ui/react-checkbox";
+import { groupPermissions } from "./role-utils";
 
 // --- Types ---
 
@@ -94,6 +96,7 @@ export function RoleManager({ teamId }: RoleManagerProps) {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [roleToEdit, setRoleToEdit] = useState<Role | null>(null);
   const [roleToDelete, setRoleToDelete] = useState<Role | null>(null);
+  const [historyRole, setHistoryRole] = useState<Role | null>(null);
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
@@ -302,6 +305,7 @@ export function RoleManager({ teamId }: RoleManagerProps) {
                 onToggleSelect={() => toggleSelect(String(role.id))}
                 onEdit={() => setRoleToEdit(role)}
                 onDelete={() => setRoleToDelete(role)}
+                onViewHistory={() => setHistoryRole(role)}
                 t={t}
               />
             ))}
@@ -372,6 +376,17 @@ export function RoleManager({ teamId }: RoleManagerProps) {
         onCancel={() => setBulkDeleteDialogOpen(false)}
         isLoading={isBulkDeleting}
       />
+
+      {/* Entity Audit History */}
+      {historyRole && (
+        <EntityAuditHistoryPanel
+          open={!!historyRole}
+          onOpenChange={(open) => !open && setHistoryRole(null)}
+          entityType="custom_role"
+          entityId={String(historyRole.id)}
+          entityName={historyRole.name}
+        />
+      )}
     </div>
   );
 }
@@ -384,6 +399,7 @@ function RoleCard({
   onToggleSelect,
   onEdit,
   onDelete,
+  onViewHistory,
   t,
 }: {
   role: Role;
@@ -391,6 +407,7 @@ function RoleCard({
   onToggleSelect: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  onViewHistory: () => void;
   t: any;
 }) {
   const isOwner = role.name === "Owner";
@@ -439,6 +456,10 @@ function RoleCard({
               <DropdownMenuItem onClick={onEdit}>
                 <Pencil className="mr-2 h-4 w-4" />
                 {t("edit")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onViewHistory}>
+                <History className="mr-2 h-4 w-4" />
+                {t("viewHistory")}
               </DropdownMenuItem>
               {canDelete && (
                 <>

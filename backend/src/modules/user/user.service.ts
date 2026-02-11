@@ -2,9 +2,10 @@ import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { desc, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db } from '../../database/db.connection';
-import { activityLogs, users } from '../../database/schema';
+import { users } from '../../database/schema';
+import { AuditQueryService } from '../audit/audit-query.service';
 import { UpdateUserDto } from './dto/update-user.dto';
 
 @Injectable()
@@ -12,7 +13,10 @@ export class UserService {
   private readonly s3Client: S3Client;
   private readonly bucketName: string;
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly auditQueryService: AuditQueryService,
+  ) {
     const region = this.configService.get<string>('AWS_REGION', 'us-east-1');
     this.bucketName = this.configService.get<string>(
       'AWS_S3_BUCKET_NAME',
@@ -124,20 +128,14 @@ export class UserService {
   }
 
   async getActivityLogs(userId: number) {
-    const results = await db
-      .select()
-      .from(activityLogs)
-      .leftJoin(users, eq(activityLogs.userId, users.id))
-      .where(eq(activityLogs.userId, userId))
-      .orderBy(desc(activityLogs.createdAt))
-      .limit(20);
+    const result = await this.auditQueryService.getAuditLogs(userId, 1, 20);
 
-    return results.map((row) => ({
-      id: row.activity_logs.id,
-      action: row.activity_logs.action,
-      timestamp: row.activity_logs.createdAt,
-      ipAddress: row.activity_logs.ipAddress,
-      userName: row.users?.name,
+    return result.items.map((entry) => ({
+      id: entry.id,
+      action: entry.action,
+      timestamp: entry.createdAt,
+      ipAddress: entry.ipAddress,
+      userName: entry.userName,
     }));
   }
 }

@@ -451,7 +451,12 @@ export class CatalogController {
     @Body() dto: UpdateCatalogItemDto,
   ): Promise<CatalogItemResponseDto> {
     const teamId = await this.catalogService.getUserTeamId(req.user.userId);
-    return this.catalogService.updateCatalogItem(itemId, teamId, dto);
+    return this.catalogService.updateCatalogItem(
+      itemId,
+      teamId,
+      req.user.userId,
+      dto,
+    );
   }
 
   @Delete('items/:itemId')
@@ -465,7 +470,11 @@ export class CatalogController {
     @Param('itemId', ParseUUIDPipe) itemId: string,
   ): Promise<void> {
     const teamId = await this.catalogService.getUserTeamId(req.user.userId);
-    return this.catalogService.deleteCatalogItem(itemId, teamId);
+    return this.catalogService.deleteCatalogItem(
+      itemId,
+      teamId,
+      req.user.userId,
+    );
   }
 
   @Post('items/submit-for-review')
@@ -821,7 +830,11 @@ export class CatalogController {
     @Param('collectionId', ParseUUIDPipe) collectionId: string,
   ): Promise<void> {
     const teamId = await this.catalogService.getUserTeamId(req.user.userId);
-    return this.catalogService.deleteCollection(collectionId, teamId);
+    return this.catalogService.deleteCollection(
+      collectionId,
+      teamId,
+      req.user.userId,
+    );
   }
 
   // ==================== Send Catalog Items ====================

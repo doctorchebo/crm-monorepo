@@ -2,7 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '../../../database/db.connection';
 import { chats, users } from '../../../database/schema';
-import { AuditService } from '../../../shared/services/audit.service';
+import { AuditWriteService } from '../../audit/audit-write.service';
 
 export interface ChatAssignment {
   chatId: string;
@@ -28,7 +28,7 @@ export interface ChatAssignment {
 export class ChatAssignmentService {
   private readonly logger = new Logger(ChatAssignmentService.name);
 
-  constructor(private auditService: AuditService) {}
+  constructor(private auditWriteService: AuditWriteService) {}
 
   /**
    * Assign a chat to a user
@@ -74,13 +74,13 @@ export class ChatAssignmentService {
 
     // Log the action
     if (chat.teamId) {
-      await this.auditService.logChatAssigned(
-        assignedBy,
-        chat.teamId,
+      await this.auditWriteService.logChatAssigned({
+        userId: assignedBy,
+        teamId: chat.teamId,
         chatId,
         assigneeId,
-        assignedBy,
-      );
+        assigneeName: assignee.name ?? undefined,
+      });
     }
 
     this.logger.log(

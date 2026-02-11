@@ -7,9 +7,12 @@
 
 "use client";
 
+import {
+  SectionAuditButton,
+  SectionAuditSheet,
+} from "@/components/audit/section-audit-sheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { PageLayout } from "@/components/ui/page-layout";
 import {
   Card,
   CardContent,
@@ -17,6 +20,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { PageLayout } from "@/components/ui/page-layout";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   knowledgeBaseApi,
@@ -36,6 +40,7 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 import useSWR from "swr";
 
 // ==================== Sub-components ====================
@@ -67,8 +72,9 @@ function StatCard({ title, value, description, icon, trend }: StatCardProps) {
         )}
         {trend && (
           <p
-            className={`text-xs mt-1 flex items-center ${trend.isPositive ? "text-green-600" : "text-red-600"
-              }`}
+            className={`text-xs mt-1 flex items-center ${
+              trend.isPositive ? "text-green-600" : "text-red-600"
+            }`}
           >
             <TrendingUp
               className={`h-3 w-3 mr-1 ${!trend.isPositive && "rotate-180"}`}
@@ -140,8 +146,9 @@ function TemplateDistribution({
                 return (
                   <div
                     key={item.templateId}
-                    className={`${colors[index % colors.length]
-                      } transition-all`}
+                    className={`${
+                      colors[index % colors.length]
+                    } transition-all`}
                     style={{ width: `${percentage}%` }}
                     title={`${item.templateName}: ${item.count}`}
                   />
@@ -153,8 +160,9 @@ function TemplateDistribution({
               {data.map((item, index) => (
                 <div key={item.templateId} className="flex items-center gap-2">
                   <div
-                    className={`h-3 w-3 rounded-full ${colors[index % colors.length]
-                      }`}
+                    className={`h-3 w-3 rounded-full ${
+                      colors[index % colors.length]
+                    }`}
                   />
                   <span className="text-sm truncate flex-1">
                     {item.templateName}
@@ -252,7 +260,7 @@ function RecentActivity({
                 className="flex items-center gap-3 cursor-pointer hover:bg-muted/50 -mx-2 px-2 py-1 rounded-md transition-colors"
                 onClick={() =>
                   router.push(
-                    `/dashboard/knowledge-base/objects/${item.objectId}`
+                    `/dashboard/knowledge-base/objects/${item.objectId}`,
                   )
                 }
               >
@@ -283,13 +291,14 @@ export function KnowledgeBaseDashboard() {
   const router = useRouter();
   const t = useTranslations("knowledgeBase.dashboard");
   const tCommon = useTranslations("knowledgeBase.common");
+  const [showAuditHistory, setShowAuditHistory] = useState(false);
 
   const {
     data: stats,
     isLoading,
     mutate,
   } = useSWR<KnowledgeBaseStats>("knowledge-base-stats", () =>
-    knowledgeBaseApi.getStats()
+    knowledgeBaseApi.getStats(),
   );
 
   const handleRefresh = () => {
@@ -317,6 +326,7 @@ export function KnowledgeBaseDashboard() {
       description={t("description")}
       headerActions={
         <div className="flex items-center gap-2">
+          <SectionAuditButton onClick={() => setShowAuditHistory(true)} />
           <Button variant="outline" size="sm" onClick={handleRefresh}>
             <RefreshCw className="h-4 w-4 mr-2" />
             {t("refresh")}
@@ -340,7 +350,6 @@ export function KnowledgeBaseDashboard() {
       }
       className="space-y-6"
     >
-
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {isLoading ? (
@@ -465,7 +474,11 @@ export function KnowledgeBaseDashboard() {
         ) : null}
       </div>
 
-
+      <SectionAuditSheet
+        open={showAuditHistory}
+        onOpenChange={setShowAuditHistory}
+        category="knowledge_base"
+      />
     </PageLayout>
   );
 }

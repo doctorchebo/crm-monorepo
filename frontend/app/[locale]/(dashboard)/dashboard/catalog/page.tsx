@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  SectionAuditButton,
+  SectionAuditSheet,
+} from "@/components/audit/section-audit-sheet";
 import { CatalogBulkImportModal } from "@/components/catalog/catalog-bulk-import-modal";
 import { CatalogItemCard } from "@/components/catalog/catalog-item-card";
 import { CatalogItemDetailDrawer } from "@/components/catalog/catalog-item-detail-drawer";
@@ -143,6 +147,9 @@ export default function CatalogPage() {
 
   // Bulk import modal
   const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
+
+  // Audit history
+  const [showAuditHistory, setShowAuditHistory] = useState(false);
 
   // Bulk delete state
   const [bulkDeleteIds, setBulkDeleteIds] = useState<Set<string>>(new Set());
@@ -474,6 +481,7 @@ export default function CatalogPage() {
               </>
             ) : (
               <>
+                <SectionAuditButton onClick={() => setShowAuditHistory(true)} />
                 <Button
                   variant="outline"
                   size="sm"
@@ -669,6 +677,12 @@ export default function CatalogPage() {
         onConfirm={handleBulkDelete}
         onCancel={() => setBulkDeleteDialogOpen(false)}
         isLoading={isBulkDeleting}
+      />
+
+      <SectionAuditSheet
+        open={showAuditHistory}
+        onOpenChange={setShowAuditHistory}
+        category="catalog"
       />
     </PageLayout>
   );

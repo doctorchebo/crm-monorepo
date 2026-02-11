@@ -22,6 +22,7 @@ import {
   isNotNull,
   or,
 } from 'drizzle-orm';
+import { AuditWriteService } from '../../audit/audit-write.service';
 import {
   CreateTemplateDto,
   CreateTemplateLocaleDto,
@@ -68,6 +69,7 @@ export class TemplatesService {
     private validatorService: TemplateValidatorService,
     private renderService: TemplateRenderService,
     private metaProvider: MetaCloudApiProvider,
+    private readonly auditWriteService: AuditWriteService,
   ) {}
 
   /**
@@ -107,7 +109,15 @@ export class TemplatesService {
       });
     }
 
-    return this.getTemplate(templateId);
+    const created = await this.getTemplate(templateId);
+
+    await this.auditWriteService.logTemplateCreated({
+      userId,
+      entityId: templateId,
+      entityName: created.displayName || created.name,
+    });
+
+    return created;
   }
 
   /**
@@ -233,7 +243,7 @@ export class TemplatesService {
    * @param templateIds - Array of template IDs to delete
    * @returns Number of templates deleted
    */
-  async bulkDelete(templateIds: string[]): Promise<number> {
+  async bulkDelete(userId: number, templateIds: string[]): Promise<number> {
     if (!templateIds || templateIds.length === 0) {
       return 0;
     }
@@ -313,6 +323,16 @@ export class TemplatesService {
       this.logger.log(
         `Bulk deleted ${deletedCount} templates (${processedTemplateNames.size} notified to Meta)`,
       );
+
+      // Log each template deletion for audit
+      for (const t of templatesToDelete) {
+        await this.auditWriteService.logTemplateDeleted({
+          userId,
+          entityId: t.id,
+          entityName: t.displayName || t.name,
+        });
+      }
+
       return deletedCount;
     } catch (error) {
       this.logger.error(`Error bulk deleting templates: ${error.message}`);
@@ -324,7 +344,11 @@ export class TemplatesService {
    * Update template metadata
    * If displayName is updated and name is not provided, auto-regenerates the name
    */
-  async updateTemplate(templateId: string, dto: UpdateTemplateDto) {
+  async updateTemplate(
+    userId: number,
+    templateId: string,
+    dto: UpdateTemplateDto,
+  ) {
     const template = await this.getTemplate(templateId);
 
     // Build update object
@@ -359,14 +383,23 @@ export class TemplatesService {
       .set(updateData)
       .where(eq(templates.id, templateId));
 
-    return this.getTemplate(templateId);
+    const updated = await this.getTemplate(templateId);
+
+    await this.auditWriteService.logTemplateUpdated({
+      userId,
+      entityId: templateId,
+      entityName: updated.displayName || updated.name,
+      changes: dto as unknown as Record<string, { from: unknown; to: unknown }>,
+    });
+
+    return updated;
   }
 
   /**
    * Delete template (soft delete via isActive flag)
    * Also notifies Meta API for templates that have been submitted
    */
-  async deleteTemplate(templateId: string) {
+  async deleteTemplate(userId: number, templateId: string) {
     const template = await this.getTemplate(templateId); // Verify exists
 
     // Check if template has any locale submitted to Meta
@@ -398,6 +431,12 @@ export class TemplatesService {
         updatedAt: new Date(),
       })
       .where(eq(templates.id, templateId));
+
+    await this.auditWriteService.logTemplateDeleted({
+      userId,
+      entityId: templateId,
+      entityName: template.displayName || template.name,
+    });
 
     return { success: true };
   }

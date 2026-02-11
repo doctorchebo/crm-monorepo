@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
+import { AuditWriteService } from '../audit/audit-write.service';
 import { AuthController } from './auth.controller';
 import { JwtAuthGuard } from './auth.guard';
 import { AuthService } from './auth.service';
@@ -42,6 +43,7 @@ import { RefreshJwtStrategy } from './strategies/refresh.strategy';
     RefreshJwtStrategy,
     JwtAuthGuard,
     RefreshJwtGuard,
+    AuditWriteService,
   ],
   exports: [JwtAuthGuard, RefreshJwtGuard],
 })

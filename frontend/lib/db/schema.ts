@@ -1,14 +1,14 @@
+import { relations } from "drizzle-orm";
 import {
+  boolean,
+  integer,
   pgTable,
+  primaryKey,
   serial,
-  varchar,
   text,
   timestamp,
-  integer,
-  boolean,
-  primaryKey,
+  varchar,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
@@ -84,13 +84,20 @@ export const teamMembers = pgTable("team_members", {
 
 export const activityLogs = pgTable("activity_logs", {
   id: serial("id").primaryKey(),
-  teamId: integer("team_id")
-    .notNull()
-    .references(() => teams.id),
+  teamId: integer("team_id").references(() => teams.id),
   userId: integer("user_id").references(() => users.id),
-  action: text("action").notNull(),
-  timestamp: timestamp("timestamp").notNull().defaultNow(),
+  category: varchar("category", { length: 50 }),
+  entityType: varchar("entity_type", { length: 50 }),
+  entityId: text("entity_id"),
+  entityName: varchar("entity_name", { length: 255 }),
+  action: varchar("action", { length: 50 }),
+  description: text("description"),
+  userName: varchar("user_name", { length: 255 }),
+  metadata: jsonb("metadata").default({}),
+  changes: jsonb("changes"),
+  chatId: varchar("chat_id"),
   ipAddress: varchar("ip_address", { length: 45 }),
+  createdAt: timestamp("created_at").defaultNow(),
 });
 
 export const invitations = pgTable("invitations", {

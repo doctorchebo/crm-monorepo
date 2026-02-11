@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  SectionAuditButton,
+  SectionAuditSheet,
+} from "@/components/audit/section-audit-sheet";
 import { RoleManager } from "@/components/team/role-manager";
 import { TeamMembers } from "@/components/team/team-members";
 import { TeamMetrics } from "@/components/team/team-metrics";
@@ -11,6 +15,7 @@ import { useAuthProtection } from "@/hooks/use-auth";
 import { backendApi } from "@/lib/api/endpoints";
 import { Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { useState } from "react";
 import useSWR from "swr";
 
 export default function TeamCenterPage() {
@@ -61,8 +66,15 @@ export default function TeamCenterPage() {
     );
   }
 
+  const [showAuditHistory, setShowAuditHistory] = useState(false);
+
   return (
-    <PageLayout title={t("title") || "Team Center"}>
+    <PageLayout
+      title={t("title") || "Team Center"}
+      headerActions={
+        <SectionAuditButton onClick={() => setShowAuditHistory(true)} />
+      }
+    >
       <Tabs defaultValue="workload" className="space-y-4">
         <TabsList>
           <TabsTrigger value="workload">{t("workload")}</TabsTrigger>
@@ -87,6 +99,12 @@ export default function TeamCenterPage() {
           <TeamMetrics teamId={teamId} />
         </TabsContent>
       </Tabs>
+
+      <SectionAuditSheet
+        open={showAuditHistory}
+        onOpenChange={setShowAuditHistory}
+        category="team"
+      />
     </PageLayout>
   );
 }

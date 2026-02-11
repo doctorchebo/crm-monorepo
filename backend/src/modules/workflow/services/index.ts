@@ -3,7 +3,6 @@
  * Re-exports all services for easier importing
  */
 
-export * from './activity-log.service';
 export * from './handoff.service';
 export * from './llm.service';
 export * from './policy-simulation.service';

@@ -1,19 +1,19 @@
 import {
-  Injectable,
-  NotFoundException,
-  ForbiddenException,
   ConflictException,
+  ForbiddenException,
+  Injectable,
   Logger,
+  NotFoundException,
 } from '@nestjs/common';
-import { eq, and, inArray } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from '../../../database/db.connection';
 import {
-  roles,
   permissions,
   rolePermissions,
+  roles,
   teamMembers,
-  teams,
 } from '../../../database/schema';
+import { AuditWriteService } from '../../audit/audit-write.service';
 
 export interface CreateRoleDto {
   name: string;
@@ -30,6 +30,8 @@ export interface UpdateRoleDto {
 @Injectable()
 export class RolesService {
   private readonly logger = new Logger(RolesService.name);
+
+  constructor(private readonly auditWriteService: AuditWriteService) {}
 
   /**
    * Get all roles for a team
@@ -72,7 +74,7 @@ export class RolesService {
   /**
    * Create a new custom role
    */
-  async createRole(teamId: number, dto: CreateRoleDto) {
+  async createRole(teamId: number, dto: CreateRoleDto, userId?: number) {
     // Check for duplicate name in team
     const existing = await db.query.roles.findFirst({
       where: and(eq(roles.teamId, teamId), eq(roles.name, dto.name)),
@@ -100,13 +102,29 @@ export class RolesService {
       await this.assignPermissions(newRole.id, dto.ids_permissions);
     }
 
-    return this.getRole(newRole.id, teamId);
+    const created = await this.getRole(newRole.id, teamId);
+
+    if (userId) {
+      await this.auditWriteService.logCustomRoleCreated({
+        userId,
+        teamId,
+        entityId: String(newRole.id),
+        entityName: dto.name,
+      });
+    }
+
+    return created;
   }
 
   /**
    * Update a role (permissions, name, description)
    */
-  async updateRole(teamId: number, roleId: number, dto: UpdateRoleDto) {
+  async updateRole(
+    teamId: number,
+    roleId: number,
+    dto: UpdateRoleDto,
+    userId?: number,
+  ) {
     const role = await this.getRole(roleId, teamId);
 
     if (role.isSystem && dto.name) {
@@ -144,13 +162,28 @@ export class RolesService {
       }
     }
 
-    return this.getRole(roleId, teamId);
+    const updated = await this.getRole(roleId, teamId);
+
+    if (userId) {
+      await this.auditWriteService.logCustomRoleUpdated({
+        userId,
+        teamId,
+        entityId: String(roleId),
+        entityName: updated.name,
+        changes: dto as unknown as Record<
+          string,
+          { from: unknown; to: unknown }
+        >,
+      });
+    }
+
+    return updated;
   }
 
   /**
    * Delete a custom role
    */
-  async deleteRole(teamId: number, roleId: number) {
+  async deleteRole(teamId: number, roleId: number, userId?: number) {
     const role = await this.getRole(roleId, teamId);
 
     if (role.isSystem) {
@@ -167,6 +200,15 @@ export class RolesService {
       throw new ConflictException(
         'Cannot delete role that is assigned to members. Reassign them first.',
       );
+    }
+
+    if (userId) {
+      await this.auditWriteService.logCustomRoleDeleted({
+        userId,
+        teamId,
+        entityId: String(roleId),
+        entityName: role.name,
+      });
     }
 
     await db.delete(roles).where(eq(roles.id, roleId));
