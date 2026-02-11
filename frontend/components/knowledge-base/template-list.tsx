@@ -44,7 +44,6 @@ import {
 import {
   Bed,
   Briefcase,
-  CheckSquare,
   Copy,
   Edit,
   FileText,
@@ -79,7 +78,6 @@ interface TemplateCardProps {
   isSelected: boolean;
   bulkDeleteMode: boolean;
   onToggleSelect: (id: string) => void;
-  onSelectForDeletion: (template: KbObjectTemplate) => void;
   onDuplicate: (template: KbObjectTemplate) => void;
   onDelete: (template: KbObjectTemplate) => void;
   t: ReturnType<typeof useTranslations<"knowledgeBase.templates.list">>;
@@ -90,7 +88,6 @@ function TemplateCard({
   isSelected,
   bulkDeleteMode,
   onToggleSelect,
-  onSelectForDeletion,
   onDuplicate,
   onDelete,
   t,
@@ -182,12 +179,6 @@ function TemplateCard({
                   >
                     <Trash2 className="h-4 w-4 mr-2" />
                     {t("deleteTemplate")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => onSelectForDeletion(template)}
-                  >
-                    <CheckSquare className="h-4 w-4 mr-2" />
-                    {t("selectForDeletion")}
                   </DropdownMenuItem>
                 </>
               )}
@@ -612,12 +603,11 @@ export function TemplateList() {
                       isSelected={selectedIds.has(template.id)}
                       bulkDeleteMode={bulkDeleteMode}
                       onToggleSelect={toggleSelect}
-                      onSelectForDeletion={(tmpl) => {
+                      onDuplicate={setDuplicateTemplate}
+                      onDelete={(tmpl) => {
                         setBulkDeleteMode(true);
                         toggleSelect(tmpl.id);
                       }}
-                      onDuplicate={setDuplicateTemplate}
-                      onDelete={setDeleteTemplate}
                       t={t}
                     />
                   ))}

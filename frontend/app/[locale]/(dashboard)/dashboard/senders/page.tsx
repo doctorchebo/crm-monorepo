@@ -65,6 +65,7 @@ export default function SendersPage() {
   const [verifyingId, setVerifyingId] = useState<number | null>(null);
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [bulkDeleteMode, setBulkDeleteMode] = useState(false);
 
   // Fetch senders
   const {
@@ -221,6 +222,7 @@ export default function SendersPage() {
         addNotification(t("bulkDeleteFailed", { count: failed }), "error");
       }
       clearSelection();
+      setBulkDeleteMode(false);
       mutate();
     } catch {
       addNotification(t("bulkDeleteFailed", { count: selectedCount }), "error");
@@ -423,11 +425,16 @@ export default function SendersPage() {
       </Card>
 
       {/* Bulk Action Bar */}
-      <BulkActionBar
-        selectedCount={selectedCount}
-        onClearSelection={clearSelection}
-        onDelete={() => setBulkDeleteDialogOpen(true)}
-      />
+      {bulkDeleteMode && (
+        <BulkActionBar
+          selectedCount={selectedCount}
+          onClearSelection={() => {
+            clearSelection();
+            setBulkDeleteMode(false);
+          }}
+          onDelete={() => setBulkDeleteDialogOpen(true)}
+        />
+      )}
 
       {/* Senders Table */}
       <Card className="overflow-hidden">
@@ -466,13 +473,15 @@ export default function SendersPage() {
             <table className="w-full">
               <thead className="border-b bg-muted/50">
                 <tr>
-                  <th className="px-4 py-3 text-left w-10">
-                    <Checkbox
-                      checked={isAllSelected}
-                      onCheckedChange={toggleSelectAll}
-                      aria-label={tCommon("selectAll")}
-                    />
-                  </th>
+                  {bulkDeleteMode && (
+                    <th className="px-4 py-3 text-left w-10">
+                      <Checkbox
+                        checked={isAllSelected}
+                        onCheckedChange={toggleSelectAll}
+                        aria-label={tCommon("selectAll")}
+                      />
+                    </th>
+                  )}
                   <th className="px-6 py-3 text-left font-semibold">
                     {t("phoneNumber")}
                   </th>
@@ -496,13 +505,17 @@ export default function SendersPage() {
                     key={sender.id}
                     className="border-b hover:bg-muted/50 transition-colors"
                   >
-                    <td className="px-4 py-4 w-10">
-                      <Checkbox
-                        checked={selectedIds.has(String(sender.id))}
-                        onCheckedChange={() => toggleSelect(String(sender.id))}
-                        aria-label={`Select ${sender.displayName || sender.phoneNumber}`}
-                      />
-                    </td>
+                    {bulkDeleteMode && (
+                      <td className="px-4 py-4 w-10">
+                        <Checkbox
+                          checked={selectedIds.has(String(sender.id))}
+                          onCheckedChange={() =>
+                            toggleSelect(String(sender.id))
+                          }
+                          aria-label={`Select ${sender.displayName || sender.phoneNumber}`}
+                        />
+                      </td>
+                    )}
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
                         <div className="h-10 w-10 rounded-full bg-green-100 dark:bg-green-900 flex items-center justify-center">
@@ -611,7 +624,10 @@ export default function SendersPage() {
                             {tCommon("edit")}
                           </DropdownMenuItem>
                           <DropdownMenuItem
-                            onClick={() => handleDeleteClick(sender)}
+                            onClick={() => {
+                              setBulkDeleteMode(true);
+                              toggleSelect(String(sender.id));
+                            }}
                             className="text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400 focus:bg-red-50 dark:focus:bg-red-900/20"
                           >
                             {tCommon("delete")}

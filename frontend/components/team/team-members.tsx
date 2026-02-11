@@ -34,13 +34,7 @@ import {
 import { useClientFilteredData } from "@/hooks/use-client-filtered-data";
 import { useNotification } from "@/hooks/use-notification";
 import { backendApi } from "@/lib/api/endpoints";
-import {
-  CheckSquare,
-  Loader2,
-  MoreVertical,
-  PlusCircle,
-  Trash2,
-} from "lucide-react";
+import { Loader2, MoreVertical, PlusCircle, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 import useSWR from "swr";
@@ -345,20 +339,14 @@ export function TeamMembers({ teamId }: TeamMembersProps) {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem
-                            onClick={() => setMemberToDelete(member)}
-                            className="text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400 focus:bg-red-50 dark:focus:bg-red-900/20"
-                          >
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            {t("remove")}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
                             onClick={() => {
                               setBulkDeleteMode(true);
                               toggleSelect(String(member.id));
                             }}
+                            className="text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400 focus:bg-red-50 dark:focus:bg-red-900/20"
                           >
-                            <CheckSquare className="mr-2 h-4 w-4" />
-                            {t("selectForRemoval")}
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            {t("remove")}
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>

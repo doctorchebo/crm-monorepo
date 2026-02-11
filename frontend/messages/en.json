@@ -1198,7 +1198,8 @@
     "bulkDeleteTitle": "Delete Senders",
     "bulkDeleteDescription": "Are you sure you want to delete {count, plural, =1 {# sender} other {# senders}}? This action cannot be undone.",
     "bulkDeleteSuccess": "{count, plural, =1 {# sender} other {# senders}} deleted successfully",
-    "bulkDeleteFailed": "Failed to delete {count, plural, =1 {# sender} other {# senders}}"
+    "bulkDeleteFailed": "Failed to delete {count, plural, =1 {# sender} other {# senders}}",
+    "selectForDeletion": "Select for deletion"
   },
   "templates": {
     "title": "Templates",
