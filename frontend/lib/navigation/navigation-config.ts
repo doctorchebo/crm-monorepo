@@ -4,8 +4,8 @@ import {
   Bot,
   FileText,
   GitBranch,
-  Home,
   Layers,
+  LayoutDashboard,
   LayoutGrid,
   MessageSquare,
   Package,
@@ -43,8 +43,8 @@ export interface NavItem {
 export const navigationConfig: NavItem[] = [
   {
     id: "home",
-    labelKey: "dashboard.home",
-    icon: Home,
+    labelKey: "dashboard.dashboard",
+    icon: LayoutDashboard,
     href: "/dashboard",
   },
   {

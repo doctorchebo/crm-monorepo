@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { JwtPayload } from '@shared/types';
 import { PermissionService } from '../../shared/services/permission.service';
+import { ProfilePictureUrlService } from '../../shared/services/profile-picture-url.service';
 import { JwtAuthGuard } from '../auth/auth.guard';
 import { CreateTeamDto } from './dto/create-team.dto';
 import { InvitationService } from './invitation.service';
@@ -26,6 +27,7 @@ export class TeamController {
     private readonly invitationService: InvitationService,
     private readonly permissionService: PermissionService,
     private readonly rolesService: RolesService,
+    private readonly profilePictureUrlService: ProfilePictureUrlService,
   ) {}
 
   @Post()
@@ -52,7 +54,12 @@ export class TeamController {
 
   @Get(':id/members')
   async getMembers(@Param('id', ParseIntPipe) id: number) {
-    return this.teamService.getMembers(id);
+    const members = await this.teamService.getMembers(id);
+    return this.profilePictureUrlService.transformArrayWithUrls(
+      members,
+      'profilePictureThumbnailKey',
+      'profilePictureUrl',
+    );
   }
 
   @Get(':id/metrics')

@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/sidebar";
 import { useTeam } from "@/hooks/use-team";
 import { clearUserProfile, useUser } from "@/hooks/use-user";
-import { LogOut, Settings } from "lucide-react";
+import { CreditCard, LogOut, Settings } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -147,6 +147,15 @@ export function SidebarUserProfile() {
                     </span>
                   </div>
                 </div>
+                <DropdownMenuSeparator />
+                {/* Manage Subscription */}
+                <DropdownMenuItem
+                  onClick={() => router.push("/subscription")}
+                  className="cursor-pointer"
+                >
+                  <CreditCard className="mr-2 h-4 w-4" />
+                  <span>{t("manageSubscription")}</span>
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 {/* Settings */}
                 <DropdownMenuItem

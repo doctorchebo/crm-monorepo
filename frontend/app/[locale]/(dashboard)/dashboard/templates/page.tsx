@@ -6,6 +6,7 @@ import {
   type TemplateCardData,
   type TemplateLocaleData,
 } from "@/components/templates/template-card";
+import { BulkActionBar } from "@/components/ui/bulk-action-bar";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { PageLayout } from "@/components/ui/page-layout";
@@ -32,7 +33,7 @@ import {
   BulkSyncResult,
   TemplateSyncResult,
 } from "@/lib/api/endpoints";
-import { Loader2, Plus, RefreshCw, Trash2, X } from "lucide-react";
+import { Loader2, Plus, RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
@@ -439,36 +440,14 @@ export default function TemplatesPage() {
       </div>
 
       {/* Bulk Actions Bar */}
-      {selectedCount > 0 && (
-        <div className="flex items-center justify-between p-2 bg-muted/50 rounded-lg border animate-in fade-in slide-in-from-top-1">
-          <div className="flex items-center gap-4 px-2">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={clearSelection}
-              className="h-8 w-8 text-muted-foreground hover:text-foreground"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-            <span className="text-sm font-medium">
-              {t("selectedCount", { count: selectedCount }) ||
-                `${selectedCount} selected`}
-            </span>
-          </div>
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={() => setBulkDeleteDialogOpen(true)}
-            className="h-8"
-          >
-            <Trash2 className="h-4 w-4 mr-2" />
-            {tCommon("delete")}
-          </Button>
-        </div>
-      )}
+      <BulkActionBar
+        selectedCount={selectedCount}
+        onClearSelection={clearSelection}
+        onDelete={() => setBulkDeleteDialogOpen(true)}
+      />
 
       {/* Templates Grid */}
-      <div>
+      <div className="pt-2">
         {isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {[1, 2, 3, 4, 5, 6].map((i) => (

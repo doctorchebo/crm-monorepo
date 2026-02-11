@@ -7,6 +7,7 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
+import { BulkActionBar } from "@/components/ui/bulk-action-bar";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -15,6 +16,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -30,9 +32,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Pagination } from "@/components/ui/pagination";
+import { SearchInput } from "@/components/ui/search-input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useClientFilteredData } from "@/hooks/use-client-filtered-data";
 import {
   knowledgeBaseApi,
   type KbObjectTemplate,
@@ -40,6 +44,7 @@ import {
 import {
   Bed,
   Briefcase,
+  CheckSquare,
   Copy,
   Edit,
   FileText,
@@ -48,14 +53,14 @@ import {
   Layers,
   MoreHorizontal,
   Plus,
-  Search,
   ShoppingBag,
   Trash2,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import useSWR from "swr";
+import { Input } from "../ui/input";
 
 // Icon mapping for template icons
 const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -71,6 +76,10 @@ const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
 
 interface TemplateCardProps {
   template: KbObjectTemplate;
+  isSelected: boolean;
+  bulkDeleteMode: boolean;
+  onToggleSelect: (id: string) => void;
+  onSelectForDeletion: (template: KbObjectTemplate) => void;
   onDuplicate: (template: KbObjectTemplate) => void;
   onDelete: (template: KbObjectTemplate) => void;
   t: ReturnType<typeof useTranslations<"knowledgeBase.templates.list">>;
@@ -78,6 +87,10 @@ interface TemplateCardProps {
 
 function TemplateCard({
   template,
+  isSelected,
+  bulkDeleteMode,
+  onToggleSelect,
+  onSelectForDeletion,
   onDuplicate,
   onDelete,
   t,
@@ -86,10 +99,19 @@ function TemplateCard({
   const Icon = template.icon ? iconMap[template.icon] || Layers : Layers;
 
   return (
-    <Card className="group hover:shadow-md transition-shadow">
+    <Card
+      className={`group hover:shadow-md transition-shadow ${isSelected ? "ring-2 ring-primary" : ""}`}
+    >
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
+            {bulkDeleteMode && !template.isSystem && (
+              <Checkbox
+                checked={isSelected}
+                onCheckedChange={() => onToggleSelect(template.id)}
+                aria-label={`Select ${template.displayName}`}
+              />
+            )}
             <div
               className="h-10 w-10 rounded-lg flex items-center justify-center"
               style={{ backgroundColor: `${template.color}20` }}
@@ -129,7 +151,7 @@ function TemplateCard({
               <DropdownMenuItem
                 onClick={() =>
                   router.push(
-                    `/dashboard/knowledge-base/templates/${template.id}`
+                    `/dashboard/knowledge-base/templates/${template.id}`,
                   )
                 }
               >
@@ -144,7 +166,7 @@ function TemplateCard({
               <DropdownMenuItem
                 onClick={() =>
                   router.push(
-                    `/dashboard/knowledge-base/objects/new?templateId=${template.id}`
+                    `/dashboard/knowledge-base/objects/new?templateId=${template.id}`,
                   )
                 }
               >
@@ -156,10 +178,16 @@ function TemplateCard({
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     onClick={() => onDelete(template)}
-                    className="text-destructive focus:text-destructive"
+                    className="text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400 focus:bg-red-50 dark:focus:bg-red-900/20"
                   >
                     <Trash2 className="h-4 w-4 mr-2" />
                     {t("deleteTemplate")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => onSelectForDeletion(template)}
+                  >
+                    <CheckSquare className="h-4 w-4 mr-2" />
+                    {t("selectForDeletion")}
                   </DropdownMenuItem>
                 </>
               )}
@@ -336,14 +364,16 @@ function DeleteDialog({
 export function TemplateList() {
   const router = useRouter();
   const t = useTranslations("knowledgeBase.templates.list");
+  const tCommon = useTranslations("knowledgeBase.common");
   const tCategories = useTranslations("knowledgeBase.templates.categories");
 
-  const [searchQuery, setSearchQuery] = useState("");
   const [duplicateTemplate, setDuplicateTemplate] =
     useState<KbObjectTemplate | null>(null);
   const [deleteTemplate, setDeleteTemplate] = useState<KbObjectTemplate | null>(
-    null
+    null,
   );
+  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
+  const [bulkDeleteMode, setBulkDeleteMode] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
   const {
@@ -351,27 +381,63 @@ export function TemplateList() {
     isLoading,
     mutate,
   } = useSWR<KbObjectTemplate[]>("knowledge-base-templates", () =>
-    knowledgeBaseApi.listTemplates()
+    knowledgeBaseApi.listTemplates(),
   );
 
-  const filteredTemplates = templates?.filter((template) => {
-    if (!searchQuery) return true;
-    const query = searchQuery.toLowerCase();
-    return (
-      template.displayName.toLowerCase().includes(query) ||
-      template.name.toLowerCase().includes(query) ||
-      template.description?.toLowerCase().includes(query) ||
-      template.category?.toLowerCase().includes(query)
-    );
+  const templateSearchFn = useCallback(
+    (template: KbObjectTemplate, query: string) => {
+      const q = query.toLowerCase();
+      return (
+        template.displayName.toLowerCase().includes(q) ||
+        template.name.toLowerCase().includes(q) ||
+        template.description?.toLowerCase().includes(q) ||
+        template.category?.toLowerCase().includes(q) ||
+        false
+      );
+    },
+    [],
+  );
+
+  const getTemplateId = useCallback(
+    (template: KbObjectTemplate) => template.id,
+    [],
+  );
+
+  const {
+    items: paginatedTemplates,
+    searchQuery: search,
+    setSearchQuery: setSearch,
+    page,
+    setPage,
+    pageSize,
+    setPageSize,
+    totalPages,
+    selectedIds,
+    selectedCount,
+    isAllSelected,
+    toggleSelect,
+    toggleSelectAll,
+    clearSelection,
+  } = useClientFilteredData<KbObjectTemplate>({
+    data: templates || [],
+    searchFn: templateSearchFn,
+    initialPageSize: 12,
+    pageSizeOptions: [12, 24, 48],
+    getItemId: getTemplateId,
   });
 
-  // Group templates by category
-  const groupedTemplates = filteredTemplates?.reduce((acc, template) => {
-    const category = template.category || "other";
-    if (!acc[category]) acc[category] = [];
-    acc[category].push(template);
-    return acc;
-  }, {} as Record<string, KbObjectTemplate[]>);
+  // Group paginated templates by category
+  const groupedTemplates = useMemo(() => {
+    return paginatedTemplates.reduce(
+      (acc, template) => {
+        const category = template.category || "other";
+        if (!acc[category]) acc[category] = [];
+        acc[category].push(template);
+        return acc;
+      },
+      {} as Record<string, KbObjectTemplate[]>,
+    );
+  }, [paginatedTemplates]);
 
   const handleDuplicate = async (name: string) => {
     if (!duplicateTemplate) return;
@@ -401,6 +467,28 @@ export function TemplateList() {
     }
   };
 
+  const handleBulkDelete = async () => {
+    if (selectedCount === 0) return;
+    setIsProcessing(true);
+    try {
+      const ids = Array.from(selectedIds).filter((id) => {
+        const template = templates?.find((t) => t.id === id);
+        return template && !template.isSystem;
+      });
+      await Promise.allSettled(
+        ids.map((id) => knowledgeBaseApi.deleteTemplate(id)),
+      );
+      await mutate();
+      clearSelection();
+      setBulkDeleteMode(false);
+      setBulkDeleteDialogOpen(false);
+    } catch (error) {
+      console.error("Failed to bulk delete templates:", error);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const formatCategoryName = (category: string) => {
     // Try to get translation, fall back to formatted category name
     const knownCategories = [
@@ -414,12 +502,12 @@ export function TemplateList() {
     if (knownCategories.includes(category)) {
       return tCategories(
         category as
-        | "real_estate"
-        | "services"
-        | "ecommerce"
-        | "hospitality"
-        | "support"
-        | "other"
+          | "real_estate"
+          | "services"
+          | "ecommerce"
+          | "hospitality"
+          | "support"
+          | "other",
       );
     }
     return category.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -441,16 +529,45 @@ export function TemplateList() {
         </Button>
       </div>
 
-      {/* Search */}
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder={t("searchPlaceholder")}
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="pl-10"
+      {/* Search and Pagination */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="w-full sm:max-w-md">
+          <SearchInput
+            placeholder={t("searchPlaceholder")}
+            value={search}
+            onChange={setSearch}
+          />
+        </div>
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          onPageChange={setPage}
+          pageSize={pageSize}
+          onPageSizeChange={setPageSize}
+          pageSizeOptions={[12, 24, 48]}
+          translations={{
+            page: t("pagination.page", { current: page, total: totalPages }),
+            previous: t("pagination.previous"),
+            next: t("pagination.next"),
+            first: t("pagination.first"),
+            last: t("pagination.last"),
+            rowsPerPage: t("pagination.rowsPerPage"),
+          }}
+          compact
         />
       </div>
+
+      {/* Bulk Actions */}
+      {bulkDeleteMode && (
+        <BulkActionBar
+          selectedCount={selectedCount}
+          onClearSelection={() => {
+            clearSelection();
+            setBulkDeleteMode(false);
+          }}
+          onDelete={() => setBulkDeleteDialogOpen(true)}
+        />
+      )}
 
       {/* Templates Grid */}
       {isLoading ? (
@@ -459,15 +576,15 @@ export function TemplateList() {
             <TemplateCardSkeleton key={i} />
           ))}
         </div>
-      ) : !filteredTemplates?.length ? (
+      ) : !paginatedTemplates.length ? (
         <Card className="py-12">
           <CardContent className="flex flex-col items-center justify-center text-center">
             <Layers className="h-12 w-12 text-muted-foreground mb-4" />
             <h3 className="text-lg font-medium">{t("noTemplatesFound")}</h3>
             <p className="text-sm text-muted-foreground mt-1 mb-4">
-              {searchQuery ? t("tryDifferentSearch") : t("noTemplatesHint")}
+              {search ? t("tryDifferentSearch") : t("noTemplatesHint")}
             </p>
-            {!searchQuery && (
+            {!search && (
               <Button
                 onClick={() =>
                   router.push("/dashboard/knowledge-base/templates/new")
@@ -492,6 +609,13 @@ export function TemplateList() {
                     <TemplateCard
                       key={template.id}
                       template={template}
+                      isSelected={selectedIds.has(template.id)}
+                      bulkDeleteMode={bulkDeleteMode}
+                      onToggleSelect={toggleSelect}
+                      onSelectForDeletion={(tmpl) => {
+                        setBulkDeleteMode(true);
+                        toggleSelect(tmpl.id);
+                      }}
                       onDuplicate={setDuplicateTemplate}
                       onDelete={setDeleteTemplate}
                       t={t}
@@ -499,7 +623,7 @@ export function TemplateList() {
                   ))}
                 </div>
               </div>
-            )
+            ),
           )}
         </div>
       )}
@@ -521,6 +645,39 @@ export function TemplateList() {
         isLoading={isProcessing}
         t={t}
       />
+
+      {/* Bulk Delete Dialog */}
+      <Dialog
+        open={bulkDeleteDialogOpen}
+        onOpenChange={setBulkDeleteDialogOpen}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("bulkDeleteDialog.title")}</DialogTitle>
+            <DialogDescription>
+              {t("bulkDeleteDialog.description", { count: selectedCount })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setBulkDeleteDialogOpen(false)}
+              disabled={isProcessing}
+            >
+              {tCommon("cancel")}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleBulkDelete}
+              disabled={isProcessing}
+            >
+              {isProcessing
+                ? t("bulkDeleteDialog.deleting")
+                : tCommon("delete")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

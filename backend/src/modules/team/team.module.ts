@@ -1,11 +1,12 @@
 import { Module } from '@nestjs/common';
-import { TeamController } from './team.controller';
-import { InvitationController } from './invitation.controller';
-import { TeamService } from './team.service';
-import { InvitationService } from './invitation.service';
 import { AuditService } from '../../shared/services/audit.service';
 import { PermissionService } from '../../shared/services/permission.service';
+import { ProfilePictureUrlService } from '../../shared/services/profile-picture-url.service';
+import { InvitationController } from './invitation.controller';
+import { InvitationService } from './invitation.service';
 import { RolesService } from './services/roles.service';
+import { TeamController } from './team.controller';
+import { TeamService } from './team.service';
 
 @Module({
   controllers: [TeamController, InvitationController],
@@ -14,6 +15,7 @@ import { RolesService } from './services/roles.service';
     InvitationService,
     AuditService,
     PermissionService,
+    ProfilePictureUrlService,
     RolesService,
   ],
   exports: [TeamService, InvitationService, PermissionService, RolesService],

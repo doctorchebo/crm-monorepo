@@ -2,8 +2,8 @@
 
 import { DeleteConfirmationDialog } from "@/components/dialogs/delete-confirmation-dialog";
 import { Badge } from "@/components/ui/badge";
+import { BulkActionBar } from "@/components/ui/bulk-action-bar";
 import { Button } from "@/components/ui/button";
-import { PageLayout } from "@/components/ui/page-layout";
 import {
   Card,
   CardContent,
@@ -11,6 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,7 +19,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
+import { PageLayout } from "@/components/ui/page-layout";
+import { Pagination } from "@/components/ui/pagination";
+import { SearchInput } from "@/components/ui/search-input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Tooltip,
@@ -26,6 +29,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useClientFilteredData } from "@/hooks/use-client-filtered-data";
 import { useNotification } from "@/hooks/use-notification";
 import { backendApi, type Sender, type WabaInfo } from "@/lib/api/endpoints";
 import {
@@ -42,10 +46,8 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useParams, useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import useSWR from "swr";
-import { SearchInput } from "@/components/ui/search-input";
-import { useDebouncedValue } from "@/hooks/use-debounced-value";
 
 export default function SendersPage() {
   const router = useRouter();
@@ -55,18 +57,14 @@ export default function SendersPage() {
   const tCommon = useTranslations("common");
   const { addNotification } = useNotification();
 
-  const {
-    value: searchQuery,
-    debouncedValue: debouncedSearch,
-    setValue: setSearchQuery,
-  } = useDebouncedValue("", { delay: 300 });
-
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [senderToDelete, setSenderToDelete] = useState<Sender | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [refreshingId, setRefreshingId] = useState<number | null>(null);
   const [verifyingId, setVerifyingId] = useState<number | null>(null);
+  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
   // Fetch senders
   const {
@@ -84,17 +82,44 @@ export default function SendersPage() {
     async () => {
       const result = await backendApi.senders.getWabaInfo();
       return result;
-    }
+    },
   );
 
-  const filteredSenders = useMemo(() => {
-    return (senders as Sender[]).filter(
-      (sender: Sender) =>
-        sender.phoneNumber.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
-        sender.displayName?.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
-        sender.verifiedName?.toLowerCase().includes(debouncedSearch.toLowerCase())
-    );
-  }, [senders, debouncedSearch]);
+  const senderSearchFn = useCallback(
+    (sender: Sender, query: string) =>
+      sender.phoneNumber.toLowerCase().includes(query) ||
+      (sender.displayName?.toLowerCase().includes(query) ?? false) ||
+      (sender.verifiedName?.toLowerCase().includes(query) ?? false),
+    [],
+  );
+
+  const getSenderId = useCallback((sender: Sender) => String(sender.id), []);
+
+  const {
+    searchQuery,
+    setSearchQuery,
+    isSearchPending,
+    items: paginatedSenders,
+    filteredTotal,
+    page,
+    pageSize,
+    totalPages,
+    pageSizeOptions,
+    setPage,
+    setPageSize,
+    selectedIds,
+    selectedCount,
+    isAllSelected,
+    toggleSelect,
+    toggleSelectAll,
+    clearSelection,
+  } = useClientFilteredData<Sender>({
+    data: senders as Sender[],
+    searchFn: senderSearchFn,
+    getItemId: getSenderId,
+    initialPageSize: 10,
+    pageSizeOptions: [10, 25, 50],
+  });
 
   // Sync from WABA
   const handleSync = async () => {
@@ -106,7 +131,7 @@ export default function SendersPage() {
           created: result.created.length,
           updated: result.updated.length,
         }),
-        "success"
+        "success",
       );
       mutate();
     } catch (err) {
@@ -160,9 +185,9 @@ export default function SendersPage() {
       await backendApi.senders.delete(Number(senderToDelete.id));
       addNotification(
         `${senderToDelete.displayName || senderToDelete.phoneNumber} ${t(
-          "deletedSuccessfully"
+          "deletedSuccessfully",
         )}`,
-        "success"
+        "success",
       );
       mutate();
       setDeleteDialogOpen(false);
@@ -172,6 +197,36 @@ export default function SendersPage() {
       addNotification(t("failedToDelete"), "error");
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  // Bulk delete handler
+  const handleBulkDelete = async () => {
+    setIsBulkDeleting(true);
+    try {
+      const results = await Promise.allSettled(
+        Array.from(selectedIds).map((id) =>
+          backendApi.senders.delete(Number(id)),
+        ),
+      );
+      const succeeded = results.filter((r) => r.status === "fulfilled").length;
+      const failed = selectedIds.size - succeeded;
+      if (succeeded > 0) {
+        addNotification(
+          t("bulkDeleteSuccess", { count: succeeded }),
+          "success",
+        );
+      }
+      if (failed > 0) {
+        addNotification(t("bulkDeleteFailed", { count: failed }), "error");
+      }
+      clearSelection();
+      mutate();
+    } catch {
+      addNotification(t("bulkDeleteFailed", { count: selectedCount }), "error");
+    } finally {
+      setIsBulkDeleting(false);
+      setBulkDeleteDialogOpen(false);
     }
   };
 
@@ -297,7 +352,6 @@ export default function SendersPage() {
       }
       className="space-y-4"
     >
-
       {/* WABA Info Card */}
       <Card>
         <CardHeader className="pb-3">
@@ -348,13 +402,32 @@ export default function SendersPage() {
 
       {/* Search Bar */}
       <Card className="p-4">
-        <SearchInput
-          placeholder={t("searchPlaceholder")}
-          value={searchQuery}
-          onChange={setSearchQuery}
-          className="w-full"
-        />
+        <div className="flex flex-col sm:flex-row gap-4 justify-between items-end sm:items-center">
+          <SearchInput
+            placeholder={t("searchPlaceholder")}
+            value={searchQuery}
+            onChange={setSearchQuery}
+            isLoading={isSearchPending}
+            className="w-full sm:max-w-xs"
+          />
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            pageSize={pageSize}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={pageSizeOptions}
+            compact
+          />
+        </div>
       </Card>
+
+      {/* Bulk Action Bar */}
+      <BulkActionBar
+        selectedCount={selectedCount}
+        onClearSelection={clearSelection}
+        onDelete={() => setBulkDeleteDialogOpen(true)}
+      />
 
       {/* Senders Table */}
       <Card className="overflow-hidden">
@@ -364,7 +437,7 @@ export default function SendersPage() {
             <Skeleton className="h-12 w-full" />
             <Skeleton className="h-12 w-full" />
           </div>
-        ) : filteredSenders.length === 0 ? (
+        ) : paginatedSenders.length === 0 ? (
           <div className="flex flex-col items-center justify-center p-8 text-center">
             <Phone className="h-12 w-12 text-muted-foreground mb-4" />
             <h3 className="text-lg font-medium mb-2">{t("noSenders")}</h3>
@@ -393,6 +466,13 @@ export default function SendersPage() {
             <table className="w-full">
               <thead className="border-b bg-muted/50">
                 <tr>
+                  <th className="px-4 py-3 text-left w-10">
+                    <Checkbox
+                      checked={isAllSelected}
+                      onCheckedChange={toggleSelectAll}
+                      aria-label={tCommon("selectAll")}
+                    />
+                  </th>
                   <th className="px-6 py-3 text-left font-semibold">
                     {t("phoneNumber")}
                   </th>
@@ -411,11 +491,18 @@ export default function SendersPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredSenders.map((sender: Sender) => (
+                {paginatedSenders.map((sender: Sender) => (
                   <tr
                     key={sender.id}
                     className="border-b hover:bg-muted/50 transition-colors"
                   >
+                    <td className="px-4 py-4 w-10">
+                      <Checkbox
+                        checked={selectedIds.has(String(sender.id))}
+                        onCheckedChange={() => toggleSelect(String(sender.id))}
+                        aria-label={`Select ${sender.displayName || sender.phoneNumber}`}
+                      />
+                    </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
                         <div className="h-10 w-10 rounded-full bg-green-100 dark:bg-green-900 flex items-center justify-center">
@@ -427,7 +514,7 @@ export default function SendersPage() {
                               {sender.phoneNumber}
                             </span>
                             {getVerificationBadge(
-                              sender.codeVerificationStatus
+                              sender.codeVerificationStatus,
                             )}
                             {sender.isOfficialBusinessAccount && (
                               <TooltipProvider>
@@ -517,7 +604,7 @@ export default function SendersPage() {
                           <DropdownMenuItem
                             onClick={() =>
                               router.push(
-                                `/${locale}/dashboard/senders/${sender.id}/edit`
+                                `/${locale}/dashboard/senders/${sender.id}/edit`,
                               )
                             }
                           >
@@ -525,7 +612,7 @@ export default function SendersPage() {
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() => handleDeleteClick(sender)}
-                            className="text-red-600 dark:text-red-400"
+                            className="text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400 focus:bg-red-50 dark:focus:bg-red-900/20"
                           >
                             {tCommon("delete")}
                           </DropdownMenuItem>
@@ -554,6 +641,16 @@ export default function SendersPage() {
           setDeleteDialogOpen(false);
           setSenderToDelete(null);
         }}
+      />
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <DeleteConfirmationDialog
+        isOpen={bulkDeleteDialogOpen}
+        title={t("bulkDeleteTitle")}
+        description={t("bulkDeleteDescription", { count: selectedCount })}
+        isLoading={isBulkDeleting}
+        onConfirm={handleBulkDelete}
+        onCancel={() => setBulkDeleteDialogOpen(false)}
       />
     </PageLayout>
   );

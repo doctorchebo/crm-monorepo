@@ -7,8 +7,10 @@ import { CatalogItemFormModal } from "@/components/catalog/catalog-item-form-mod
 import { CatalogSendToContactsModal } from "@/components/catalog/catalog-send-to-contacts-modal";
 import { SenderCatalogManager } from "@/components/catalog/sender-catalog-manager";
 import { DeleteConfirmationDialog } from "@/components/dialogs/delete-confirmation-dialog";
+import { BulkActionBar } from "@/components/ui/bulk-action-bar";
 import { Button } from "@/components/ui/button";
 import { PageLayout } from "@/components/ui/page-layout";
+import { Pagination } from "@/components/ui/pagination";
 import { SearchInput } from "@/components/ui/search-input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -119,8 +121,10 @@ export default function CatalogPage() {
   } = useDebouncedValue("", { delay: 300 });
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(12);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
+  const pageSizeOptions = [12, 24, 48];
 
   // Modals
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
@@ -140,11 +144,16 @@ export default function CatalogPage() {
   // Bulk import modal
   const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
 
+  // Bulk delete state
+  const [bulkDeleteIds, setBulkDeleteIds] = useState<Set<string>>(new Set());
+  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+
   // Build query params based on filters
   const getQueryParams = useCallback(() => {
     const params: Record<string, string> = {
       page: page.toString(),
-      limit: "20",
+      limit: pageSize.toString(),
     };
 
     if (debouncedSearch) {
@@ -158,7 +167,7 @@ export default function CatalogPage() {
     }
 
     return params;
-  }, [page, debouncedSearch, activeTab]);
+  }, [page, pageSize, debouncedSearch, activeTab]);
 
   // Fetch catalog items
   const fetchItems = useCallback(async () => {
@@ -257,6 +266,61 @@ export default function CatalogPage() {
       setIsDeleting(false);
       setDeleteItem(null);
     }
+  };
+
+  // Handle bulk delete
+  const handleBulkDelete = async () => {
+    if (bulkDeleteIds.size === 0) return;
+    setIsBulkDeleting(true);
+    try {
+      const results = await Promise.allSettled(
+        Array.from(bulkDeleteIds).map((id) =>
+          backendApi.catalog.deleteItem(id),
+        ),
+      );
+      const succeeded = results.filter((r) => r.status === "fulfilled").length;
+      const failed = bulkDeleteIds.size - succeeded;
+      if (succeeded > 0) {
+        addNotification(
+          t("bulkDeleteSuccess", { count: succeeded }),
+          "success",
+        );
+      }
+      if (failed > 0) {
+        addNotification(t("bulkDeleteFailed", { count: failed }), "error");
+      }
+      setBulkDeleteIds(new Set());
+      fetchItems();
+    } catch {
+      addNotification(
+        t("bulkDeleteFailed", { count: bulkDeleteIds.size }),
+        "error",
+      );
+    } finally {
+      setIsBulkDeleting(false);
+      setBulkDeleteDialogOpen(false);
+    }
+  };
+
+  // Bulk delete selection handlers
+  const toggleBulkDeleteSelect = (id: string) => {
+    setBulkDeleteIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handlePageSizeChange = (newSize: number) => {
+    setPageSize(newSize);
+    setPage(1);
+    setBulkDeleteIds(new Set());
+  };
+
+  const handlePageChange = (newPage: number) => {
+    setPage(newPage);
+    setBulkDeleteIds(new Set());
   };
 
   // Handle submit items for Meta review
@@ -452,9 +516,9 @@ export default function CatalogPage() {
 
       {/* Only show item management when a catalog is linked */}
       {linkedCatalogId && (
-        <>
+        <div className="space-y-4 mt-4">
           {/* Filters and search */}
-          <div className="flex flex-col sm:flex-row gap-4 mb-6 mt-6">
+          <div className="flex flex-col sm:flex-row gap-4">
             <SearchInput
               placeholder={t("searchItems")}
               value={searchQuery}
@@ -477,6 +541,13 @@ export default function CatalogPage() {
               {t("totalItems", { count: totalItems })}
             </div>
           </div>
+
+          {/* Bulk Delete Bar */}
+          <BulkActionBar
+            selectedCount={bulkDeleteIds.size}
+            onClearSelection={() => setBulkDeleteIds(new Set())}
+            onDelete={() => setBulkDeleteDialogOpen(true)}
+          />
 
           {/* Items grid */}
           {isLoading ? (
@@ -511,44 +582,36 @@ export default function CatalogPage() {
                     onView={() => handleViewItem(item)}
                     onEdit={() => handleEditItem(item)}
                     onDelete={() => setDeleteItem(item)}
-                    selectable={isSelectionMode}
-                    selected={selectedItemIds.has(item.id)}
-                    onSelect={(selected) => handleItemSelect(item.id, selected)}
+                    selectable={isSelectionMode || bulkDeleteIds.size > 0}
+                    selected={
+                      isSelectionMode
+                        ? selectedItemIds.has(item.id)
+                        : bulkDeleteIds.has(item.id)
+                    }
+                    onSelect={(selected) => {
+                      if (isSelectionMode) {
+                        handleItemSelect(item.id, selected);
+                      } else {
+                        toggleBulkDeleteSelect(item.id);
+                      }
+                    }}
                   />
                 ))}
               </div>
 
               {/* Pagination */}
-              {totalPages > 1 && (
-                <div className="flex justify-center mt-6">
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={page === 1}
-                      onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    >
-                      Previous
-                    </Button>
-                    <span className="text-sm text-muted-foreground">
-                      Page {page} of {totalPages}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={page === totalPages}
-                      onClick={() =>
-                        setPage((p) => Math.min(totalPages, p + 1))
-                      }
-                    >
-                      Next
-                    </Button>
-                  </div>
-                </div>
-              )}
+              <Pagination
+                page={page}
+                totalPages={totalPages}
+                onPageChange={handlePageChange}
+                pageSize={pageSize}
+                onPageSizeChange={handlePageSizeChange}
+                pageSizeOptions={pageSizeOptions}
+                compact
+              />
             </>
           )}
-        </>
+        </div>
       )}
 
       {/* Form Modal */}
@@ -596,6 +659,16 @@ export default function CatalogPage() {
         open={isBulkImportOpen}
         onOpenChange={setIsBulkImportOpen}
         onSuccess={fetchItems}
+      />
+
+      {/* Bulk Delete Confirmation */}
+      <DeleteConfirmationDialog
+        isOpen={bulkDeleteDialogOpen}
+        title={t("bulkDeleteTitle")}
+        description={t("bulkDeleteDescription", { count: bulkDeleteIds.size })}
+        onConfirm={handleBulkDelete}
+        onCancel={() => setBulkDeleteDialogOpen(false)}
+        isLoading={isBulkDeleting}
       />
     </PageLayout>
   );

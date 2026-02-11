@@ -11,36 +11,25 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import { PageLayout } from "@/components/ui/page-layout";
 import { Pagination } from "@/components/ui/pagination";
+import { SearchInput } from "@/components/ui/search-input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuthProtection } from "@/hooks/use-auth";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useNotification } from "@/hooks/use-notification";
 import { usePaginatedData } from "@/hooks/use-paginated-data";
 import { backendApi, Contact } from "@/lib/api/endpoints";
-import {
-  MoreVertical,
-  Phone,
-  Plus,
-  Search,
-  Trash2,
-  Upload,
-  X,
-} from "lucide-react";
+import { MoreVertical, Phone, Plus, Trash2, Upload, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
-import { SearchInput } from "@/components/ui/search-input";
-import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { useMemo, useState } from "react";
 
 interface Sender {
   id: number;
   phoneNumber: string;
   displayName?: string;
 }
-
-
 
 function formatDateTime(dateString: string | null): string {
   if (!dateString) return "";
@@ -116,6 +105,7 @@ export default function ContactsPage() {
     page,
     pageSize,
     totalPages,
+    pageSizeOptions,
     setPage,
     setPageSize,
     selectedIds,
@@ -228,8 +218,6 @@ export default function ContactsPage() {
     selectOne(contact.contactId);
   };
 
-
-
   // Bulk delete
   const handleBulkDelete = async () => {
     if (selectedCount === 0) return;
@@ -293,6 +281,7 @@ export default function ContactsPage() {
           onPageChange={setPage}
           pageSize={pageSize}
           onPageSizeChange={setPageSize}
+          pageSizeOptions={pageSizeOptions}
           translations={{
             page: t("pagination.page", {
               current: page,
@@ -481,8 +470,6 @@ export default function ContactsPage() {
           </>
         )}
       </div>
-
-
 
       {/* Bulk Delete Confirmation Dialog */}
       <DeleteConfirmationDialog

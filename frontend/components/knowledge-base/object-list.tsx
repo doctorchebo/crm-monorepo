@@ -7,6 +7,7 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
+import { BulkActionBar } from "@/components/ui/bulk-action-bar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -25,6 +26,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Pagination } from "@/components/ui/pagination";
 import { SearchInput } from "@/components/ui/search-input";
 import {
   Select,
@@ -42,6 +44,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import {
   knowledgeBaseApi,
   type KbObject,
@@ -62,15 +65,12 @@ import {
   MoreHorizontal,
   Plus,
   RefreshCw,
-  Search,
   Trash2,
-  X,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useState } from "react";
 import useSWR from "swr";
-import { useDebouncedValue } from "@/hooks/use-debounced-value";
 
 // ==================== Sub-components ====================
 
@@ -196,6 +196,8 @@ function BulkActionDialog({
         return t("bulkDialog.archiveTitle");
       case "draft":
         return t("bulkDialog.draftTitle");
+      case "delete":
+        return t("bulkDialog.deleteTitle");
       default:
         return "";
     }
@@ -218,7 +220,11 @@ function BulkActionDialog({
           >
             {tCommon("cancel")}
           </Button>
-          <Button onClick={onConfirm} disabled={isLoading}>
+          <Button
+            variant={action === "delete" ? "destructive" : "default"}
+            onClick={onConfirm}
+            disabled={isLoading}
+          >
             {isLoading ? t("bulkDialog.processing") : t("bulkDialog.confirm")}
           </Button>
         </DialogFooter>
@@ -248,12 +254,14 @@ export function ObjectList({ templateId: initialTemplateId }: ObjectListProps) {
   } = useDebouncedValue(searchParams.get("search") || "", { delay: 300 });
 
   const [status, setStatus] = useState<ObjectStatus | "all">(
-    (searchParams.get("status") as ObjectStatus) || "all"
+    (searchParams.get("status") as ObjectStatus) || "all",
   );
   const [templateId, setTemplateId] = useState<string | "all">(
-    initialTemplateId || searchParams.get("templateId") || "all"
+    initialTemplateId || searchParams.get("templateId") || "all",
   );
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const pageSizeOptions = [10, 20, 50];
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // Dialog state
@@ -262,29 +270,43 @@ export function ObjectList({ templateId: initialTemplateId }: ObjectListProps) {
     action: string;
     open: boolean;
   }>({ action: "", open: false });
+  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
   // Fetch templates for filter dropdown
   const { data: templates } = useSWR<KbObjectTemplate[]>(
     "knowledge-base-templates",
-    () => knowledgeBaseApi.listTemplates()
+    () => knowledgeBaseApi.listTemplates(),
   );
 
   // Fetch objects with filters
   const { data, isLoading, mutate } = useSWR(
-    ["knowledge-base-objects", debouncedSearch, status, templateId, page],
+    [
+      "knowledge-base-objects",
+      debouncedSearch,
+      status,
+      templateId,
+      page,
+      pageSize,
+    ],
     () =>
       knowledgeBaseApi.listObjects({
         search: debouncedSearch || undefined,
         status: status !== "all" ? status : undefined,
         templateId: templateId !== "all" ? templateId : undefined,
         page,
-        limit: 20,
-      })
+        limit: pageSize,
+      }),
   );
 
   const objects = data?.data || [];
   const totalPages = data?.pagination?.totalPages || 1;
+
+  const handlePageSizeChange = useCallback((newSize: number) => {
+    setPageSize(newSize);
+    setPage(1);
+    setSelectedIds(new Set());
+  }, []);
 
   // Selection handlers
   const toggleSelectAll = useCallback(() => {
@@ -359,6 +381,25 @@ export function ObjectList({ templateId: initialTemplateId }: ObjectListProps) {
     }
   };
 
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    setIsProcessing(true);
+    try {
+      const ids = Array.from(selectedIds);
+      const results = await Promise.allSettled(
+        ids.map((id) => knowledgeBaseApi.deleteObject(id)),
+      );
+      const succeeded = results.filter((r) => r.status === "fulfilled").length;
+      await mutate();
+      setSelectedIds(new Set());
+      setBulkDeleteDialogOpen(false);
+    } catch (error) {
+      console.error("Failed to bulk delete objects:", error);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const handleBulkAction = async () => {
     if (selectedIds.size === 0) return;
     setIsProcessing(true);
@@ -367,7 +408,7 @@ export function ObjectList({ templateId: initialTemplateId }: ObjectListProps) {
       switch (bulkAction.action) {
         case "publish":
           await Promise.all(
-            ids.map((id) => knowledgeBaseApi.publishObject(id))
+            ids.map((id) => knowledgeBaseApi.publishObject(id)),
           );
           break;
         case "archive":
@@ -436,119 +477,22 @@ export function ObjectList({ templateId: initialTemplateId }: ObjectListProps) {
         </div>
       </div>
 
-      {/* Filters */}
-      <Card>
-        <CardContent className="pt-6">
-          <div className="flex flex-col sm:flex-row gap-4">
-            {/* Search */}
-            <div className="relative flex-1">
-              <SearchInput
-                placeholder={t("searchPlaceholder")}
-                value={search}
-                onChange={(value) => {
-                  setSearch(value);
-                  setPage(1);
-                }}
-              />
-            </div>
-
-            {/* Template Filter */}
-            <Select
-              value={templateId}
-              onValueChange={(value) => {
-                setTemplateId(value);
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="w-[180px]">
-                <Filter className="h-4 w-4 mr-2" />
-                <SelectValue placeholder={t("allTemplates")} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t("allTemplates")}</SelectItem>
-                {templates?.map((template) => (
-                  <SelectItem key={template.id} value={template.id}>
-                    {template.displayName || template.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            {/* Status Filter */}
-            <Select
-              value={status}
-              onValueChange={(value) => {
-                setStatus(value as ObjectStatus | "all");
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="w-[140px]">
-                <SelectValue placeholder={t("allStatus")} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t("allStatus")}</SelectItem>
-                <SelectItem value="draft">{t("status.draft")}</SelectItem>
-                <SelectItem value="pending">{t("status.pending")}</SelectItem>
-                <SelectItem value="indexing">{t("status.indexing")}</SelectItem>
-                <SelectItem value="indexed">{t("status.indexed")}</SelectItem>
-                <SelectItem value="error">{t("status.error")}</SelectItem>
-                <SelectItem value="archived">{t("status.archived")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Bulk Actions */}
-          {selectedIds.size > 0 && (
-            <div className="flex items-center justify-between p-2 mt-4 bg-muted/50 rounded-lg border animate-in fade-in slide-in-from-top-1">
-              <div className="flex items-center gap-4 px-2">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setSelectedIds(new Set())}
-                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-                <span className="text-sm font-medium">
-                  {selectedIds.size} selected
-                </span>
+      {isLoading ? (
+        <>
+          {/* Filter Skeleton */}
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex flex-col sm:flex-row gap-4">
+                <Skeleton className="h-10 flex-1" />
+                <Skeleton className="h-10 w-[180px]" />
+                <Skeleton className="h-10 w-[140px]" />
               </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setBulkAction({ action: "publish", open: true })}
-                >
-                  <BookOpen className="h-4 w-4 mr-2" />
-                  {t("actions.publish")}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setBulkAction({ action: "archive", open: true })}
-                >
-                  <Archive className="h-4 w-4 mr-2" />
-                  {t("actions.archive")}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setBulkAction({ action: "draft", open: true })}
-                >
-                  <Edit className="h-4 w-4 mr-2" />
-                  {t("actions.setDraft")}
-                </Button>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
 
-      {/* Table */}
-      <Card>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="p-6 space-y-4">
+          {/* Table Skeleton */}
+          <Card>
+            <CardContent className="p-6 space-y-4">
               {[...Array(5)].map((_, i) => (
                 <div key={i} className="flex items-center gap-4">
                   <Skeleton className="h-4 w-4" />
@@ -558,195 +502,313 @@ export function ObjectList({ templateId: initialTemplateId }: ObjectListProps) {
                   <Skeleton className="h-4 w-24" />
                 </div>
               ))}
-            </div>
-          ) : objects.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <FileText className="h-12 w-12 text-muted-foreground mb-4" />
-              <h3 className="text-lg font-medium">{t("noObjectsFound")}</h3>
-              <p className="text-sm text-muted-foreground mt-1 mb-4">
-                {search || status !== "all" || templateId !== "all"
-                  ? t("tryAdjustingFilters")
-                  : t("noObjectsHint")}
-              </p>
-              {!search && status === "all" && templateId === "all" && (
-                <Button
-                  onClick={() =>
-                    router.push("/dashboard/knowledge-base/objects/new")
-                  }
+            </CardContent>
+          </Card>
+        </>
+      ) : (
+        <>
+          {/* Filters */}
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex flex-col sm:flex-row gap-4">
+                {/* Search */}
+                <div className="relative flex-1">
+                  <SearchInput
+                    placeholder={t("searchPlaceholder")}
+                    value={search}
+                    onChange={(value) => {
+                      setSearch(value);
+                      setPage(1);
+                    }}
+                  />
+                </div>
+
+                {/* Template Filter */}
+                <Select
+                  value={templateId}
+                  onValueChange={(value) => {
+                    setTemplateId(value);
+                    setPage(1);
+                  }}
                 >
-                  <Plus className="h-4 w-4 mr-2" />
-                  {t("createObject")}
-                </Button>
-              )}
-            </div>
-          ) : (
-            <>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    {selectedIds.size > 0 && (
-                      <TableHead className="w-12">
-                        <Checkbox
-                          checked={
-                            selectedIds.size === objects.length &&
-                            objects.length > 0
-                          }
-                          onCheckedChange={toggleSelectAll}
-                        />
-                      </TableHead>
-                    )}
-                    <TableHead>{t("table.name")}</TableHead>
-                    <TableHead>{t("table.template")}</TableHead>
-                    <TableHead>{t("table.status")}</TableHead>
-                    <TableHead>{t("table.updated")}</TableHead>
-                    <TableHead className="w-12"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {objects.map((object) => (
-                    <TableRow
-                      key={object.id}
-                      className="cursor-pointer"
+                  <SelectTrigger className="w-[180px]">
+                    <Filter className="h-4 w-4 mr-2" />
+                    <SelectValue placeholder={t("allTemplates")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t("allTemplates")}</SelectItem>
+                    {templates?.map((template) => (
+                      <SelectItem key={template.id} value={template.id}>
+                        {template.displayName || template.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                {/* Status Filter */}
+                <Select
+                  value={status}
+                  onValueChange={(value) => {
+                    setStatus(value as ObjectStatus | "all");
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue placeholder={t("allStatus")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t("allStatus")}</SelectItem>
+                    <SelectItem value="draft">{t("status.draft")}</SelectItem>
+                    <SelectItem value="pending">
+                      {t("status.pending")}
+                    </SelectItem>
+                    <SelectItem value="indexing">
+                      {t("status.indexing")}
+                    </SelectItem>
+                    <SelectItem value="indexed">
+                      {t("status.indexed")}
+                    </SelectItem>
+                    <SelectItem value="error">{t("status.error")}</SelectItem>
+                    <SelectItem value="archived">
+                      {t("status.archived")}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Bulk Actions */}
+              <BulkActionBar
+                selectedCount={selectedIds.size}
+                onClearSelection={() => setSelectedIds(new Set())}
+                onDelete={() => setBulkDeleteDialogOpen(true)}
+                extraActions={
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
                       onClick={() =>
-                        router.push(
-                          `/dashboard/knowledge-base/objects/${object.id}`
-                        )
+                        setBulkAction({ action: "publish", open: true })
                       }
                     >
-                      {selectedIds.size > 0 && (
-                        <TableCell
-                          onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                        >
-                          <Checkbox
-                            checked={selectedIds.has(object.id)}
-                            onCheckedChange={() => toggleSelect(object.id)}
-                          />
-                        </TableCell>
-                      )}
-                      <TableCell className="font-medium">
-                        {object.name}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">
-                          {object.templateName || t("unknownTemplate")}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge
-                          status={object.status}
-                          translations={statusTranslations}
-                        />
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {formatDate(object.updatedAt)}
-                      </TableCell>
-                      <TableCell
-                        onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                      >
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0"
-                            >
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedIds(new Set([object.id]));
-                              }}
-                            >
-                              <CheckCircle2 className="h-4 w-4 mr-2" />
-                              {tCommon("select")}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() =>
-                                router.push(
-                                  `/dashboard/knowledge-base/objects/${object.id}`
-                                )
-                              }
-                            >
-                              <Edit className="h-4 w-4 mr-2" />
-                              {tCommon("edit")}
-                            </DropdownMenuItem>
-                            {object.status === "draft" && (
-                              <DropdownMenuItem
-                                onClick={() => handlePublish(object)}
-                              >
-                                <BookOpen className="h-4 w-4 mr-2" />
-                                {t("actions.publish")}
-                              </DropdownMenuItem>
-                            )}
-                            {object.status === "indexed" && (
-                              <DropdownMenuItem
-                                onClick={() => handleArchive(object)}
-                              >
-                                <Archive className="h-4 w-4 mr-2" />
-                                {t("actions.archive")}
-                              </DropdownMenuItem>
-                            )}
-                            <DropdownMenuItem
-                              onClick={() => handleReindex(object)}
-                            >
-                              <RefreshCw className="h-4 w-4 mr-2" />
-                              {t("actions.reindex")}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => handleDuplicate(object)}
-                            >
-                              <Copy className="h-4 w-4 mr-2" />
-                              {t("actions.duplicate")}
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              onClick={() => setDeleteObject(object)}
-                              className="text-destructive focus:text-destructive"
-                            >
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              {tCommon("delete")}
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                      <BookOpen className="h-4 w-4 mr-2" />
+                      {t("actions.publish")}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        setBulkAction({ action: "archive", open: true })
+                      }
+                    >
+                      <Archive className="h-4 w-4 mr-2" />
+                      {t("actions.archive")}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        setBulkAction({ action: "draft", open: true })
+                      }
+                    >
+                      <Edit className="h-4 w-4 mr-2" />
+                      {t("actions.setDraft")}
+                    </Button>
+                  </>
+                }
+              />
+            </CardContent>
+          </Card>
 
-              {/* Pagination */}
-              {totalPages > 1 && (
-                <div className="flex items-center justify-between px-6 py-4 border-t">
-                  <span className="text-sm text-muted-foreground">
-                    {t("pagination.page", { current: page, total: totalPages })}
-                  </span>
-                  <div className="flex items-center gap-2">
+          {/* Table */}
+          <Card>
+            <CardContent className="p-0">
+              {objects.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <FileText className="h-12 w-12 text-muted-foreground mb-4" />
+                  <h3 className="text-lg font-medium">{t("noObjectsFound")}</h3>
+                  <p className="text-sm text-muted-foreground mt-1 mb-4">
+                    {search || status !== "all" || templateId !== "all"
+                      ? t("tryAdjustingFilters")
+                      : t("noObjectsHint")}
+                  </p>
+                  {!search && status === "all" && templateId === "all" && (
                     <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={page <= 1}
-                      onClick={() => setPage((p) => p - 1)}
+                      onClick={() =>
+                        router.push("/dashboard/knowledge-base/objects/new")
+                      }
                     >
-                      {t("pagination.previous")}
+                      <Plus className="h-4 w-4 mr-2" />
+                      {t("createObject")}
                     </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={page >= totalPages}
-                      onClick={() => setPage((p) => p + 1)}
-                    >
-                      {t("pagination.next")}
-                    </Button>
-                  </div>
+                  )}
                 </div>
+              ) : (
+                <>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-12">
+                          <Checkbox
+                            checked={
+                              selectedIds.size === objects.length &&
+                              objects.length > 0
+                            }
+                            onCheckedChange={toggleSelectAll}
+                          />
+                        </TableHead>
+                        <TableHead>{t("table.name")}</TableHead>
+                        <TableHead>{t("table.template")}</TableHead>
+                        <TableHead>{t("table.status")}</TableHead>
+                        <TableHead>{t("table.updated")}</TableHead>
+                        <TableHead className="w-12"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {objects.map((object) => (
+                        <TableRow
+                          key={object.id}
+                          className="cursor-pointer"
+                          onClick={() =>
+                            router.push(
+                              `/dashboard/knowledge-base/objects/${object.id}`,
+                            )
+                          }
+                        >
+                          <TableCell
+                            onClick={(e: React.MouseEvent) =>
+                              e.stopPropagation()
+                            }
+                          >
+                            <Checkbox
+                              checked={selectedIds.has(object.id)}
+                              onCheckedChange={() => toggleSelect(object.id)}
+                            />
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            {object.name}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline">
+                              {object.templateName || t("unknownTemplate")}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <StatusBadge
+                              status={object.status}
+                              translations={statusTranslations}
+                            />
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {formatDate(object.updatedAt)}
+                          </TableCell>
+                          <TableCell
+                            onClick={(e: React.MouseEvent) =>
+                              e.stopPropagation()
+                            }
+                          >
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0"
+                                >
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedIds(new Set([object.id]));
+                                  }}
+                                >
+                                  <CheckCircle2 className="h-4 w-4 mr-2" />
+                                  {tCommon("select")}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() =>
+                                    router.push(
+                                      `/dashboard/knowledge-base/objects/${object.id}`,
+                                    )
+                                  }
+                                >
+                                  <Edit className="h-4 w-4 mr-2" />
+                                  {tCommon("edit")}
+                                </DropdownMenuItem>
+                                {object.status === "draft" && (
+                                  <DropdownMenuItem
+                                    onClick={() => handlePublish(object)}
+                                  >
+                                    <BookOpen className="h-4 w-4 mr-2" />
+                                    {t("actions.publish")}
+                                  </DropdownMenuItem>
+                                )}
+                                {object.status === "indexed" && (
+                                  <DropdownMenuItem
+                                    onClick={() => handleArchive(object)}
+                                  >
+                                    <Archive className="h-4 w-4 mr-2" />
+                                    {t("actions.archive")}
+                                  </DropdownMenuItem>
+                                )}
+                                <DropdownMenuItem
+                                  onClick={() => handleReindex(object)}
+                                >
+                                  <RefreshCw className="h-4 w-4 mr-2" />
+                                  {t("actions.reindex")}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => handleDuplicate(object)}
+                                >
+                                  <Copy className="h-4 w-4 mr-2" />
+                                  {t("actions.duplicate")}
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onClick={() => setDeleteObject(object)}
+                                  className="text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400 focus:bg-red-50 dark:focus:bg-red-900/20"
+                                >
+                                  <Trash2 className="h-4 w-4 mr-2" />
+                                  {tCommon("delete")}
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+
+                  {/* Pagination */}
+                  <div className="px-6 py-4 border-t">
+                    <Pagination
+                      page={page}
+                      totalPages={totalPages}
+                      onPageChange={setPage}
+                      pageSize={pageSize}
+                      onPageSizeChange={handlePageSizeChange}
+                      pageSizeOptions={pageSizeOptions}
+                      translations={{
+                        page: t("pagination.page", {
+                          current: page,
+                          total: totalPages,
+                        }),
+                        previous: t("pagination.previous"),
+                        next: t("pagination.next"),
+                        first: t("pagination.first"),
+                        last: t("pagination.last"),
+                        rowsPerPage: t("pagination.rowsPerPage"),
+                      }}
+                      compact
+                    />
+                  </div>
+                </>
               )}
-            </>
-          )}
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
+        </>
+      )}
 
       {/* Delete Dialog */}
       <DeleteDialog
@@ -754,6 +816,18 @@ export function ObjectList({ templateId: initialTemplateId }: ObjectListProps) {
         open={!!deleteObject}
         onOpenChange={(open) => !open && setDeleteObject(null)}
         onConfirm={handleDelete}
+        isLoading={isProcessing}
+        t={t}
+        tCommon={tCommon}
+      />
+
+      {/* Bulk Delete Dialog */}
+      <BulkActionDialog
+        action="delete"
+        open={bulkDeleteDialogOpen}
+        selectedCount={selectedIds.size}
+        onOpenChange={(open) => !open && setBulkDeleteDialogOpen(false)}
+        onConfirm={handleBulkDelete}
         isLoading={isProcessing}
         t={t}
         tCommon={tCommon}

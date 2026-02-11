@@ -1,6 +1,7 @@
 "use client";
 
 import { DeleteConfirmationDialog } from "@/components/dialogs/delete-confirmation-dialog";
+import { BulkActionBar } from "@/components/ui/bulk-action-bar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -11,11 +12,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import { Pagination } from "@/components/ui/pagination";
+import { SearchInput } from "@/components/ui/search-input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TemplateLibraryDialog, WorkflowIcon } from "@/components/workflow";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useNotification } from "@/hooks/use-notification";
 import { usePaginatedData } from "@/hooks/use-paginated-data";
 import { workflowBuilderApi } from "@/lib/api/workflow-builder";
@@ -29,17 +31,11 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
-  Search,
   Trash2,
-  X,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
-import { SearchInput } from "@/components/ui/search-input";
-import { useDebouncedValue } from "@/hooks/use-debounced-value";
-
-
+import { useMemo, useState } from "react";
 
 const STATUS_COLORS: Record<WorkflowStatus, string> = {
   draft:
@@ -441,7 +437,7 @@ export default function WorkflowsPage() {
           onPageChange={setPage}
           pageSize={pageSize}
           onPageSizeChange={setPageSize}
-          pageSizeOptions={[12, 24, 48]}
+          pageSizeOptions={pageSizeOptions}
           translations={{
             page: t("pagination.page", { current: page, total: totalPages }),
             previous: t("pagination.previous"),
@@ -455,45 +451,11 @@ export default function WorkflowsPage() {
       </div>
 
       {/* Bulk Actions Bar */}
-      {selectedCount > 0 && (
-        <div className="flex items-center justify-between p-2 bg-muted/50 rounded-lg border animate-in fade-in slide-in-from-top-1">
-          <div className="flex items-center gap-4 px-2">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={clearSelection}
-              className="h-8 w-8 text-muted-foreground hover:text-foreground"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-            <span className="text-sm font-medium">
-              {t("selectedCount", { count: selectedCount })}
-            </span>
-          </div>
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={() => setBulkDeleteDialogOpen(true)}
-            className="h-8"
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
-        </div>
-      )}
-
-      {/* Select All Header (shown when in selection mode) */}
-      {selectedCount > 0 && workflows.length > 0 && (
-        <div className="flex items-center gap-3 px-3 py-2 border-b">
-          <Checkbox
-            checked={isAllSelected}
-            onCheckedChange={toggleSelectAll}
-            aria-label="Select all workflows"
-          />
-          <span className="text-sm text-muted-foreground">
-            {t("selectAll")}
-          </span>
-        </div>
-      )}
+      <BulkActionBar
+        selectedCount={selectedCount}
+        onClearSelection={clearSelection}
+        onDelete={() => setBulkDeleteDialogOpen(true)}
+      />
 
       {/* Workflow Grid */}
       {isLoading ? (

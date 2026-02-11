@@ -1,8 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useTranslations } from "next-intl";
-import useSWR, { mutate } from "swr";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -10,6 +9,15 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Pagination } from "@/components/ui/pagination";
+import { SearchInput } from "@/components/ui/search-input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -18,18 +26,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Loader2, UserMinus } from "lucide-react";
+import { useClientFilteredData } from "@/hooks/use-client-filtered-data";
 import { useNotification } from "@/hooks/use-notification";
 import { backendApi } from "@/lib/api/endpoints";
+import { Loader2, UserMinus } from "lucide-react";
+import { useTranslations } from "next-intl";
+import { useState } from "react";
+import useSWR, { mutate } from "swr";
 
 interface TeamWorkloadProps {
   teamId: number;
@@ -43,23 +46,55 @@ interface ChatAssignment {
   participantName?: string;
 }
 
+const chatSearchFn = (chat: ChatAssignment, query: string): boolean => {
+  const name = (chat.participantName || "").toLowerCase();
+  const phone = (chat.participantPhone || "").toLowerCase();
+  const assignee = (chat.assignedToName || "").toLowerCase();
+  return (
+    name.includes(query) || phone.includes(query) || assignee.includes(query)
+  );
+};
+
 export function TeamWorkload({ teamId }: TeamWorkloadProps) {
   const t = useTranslations("team");
   const tCommon = useTranslations("common");
   const { addNotification } = useNotification();
   const [processingId, setProcessingId] = useState<string | null>(null);
 
-  // Fetch ALL team chats (assigned + unassigned)
-  const { data: allChats, error: chatsError, mutate: refreshChats } = useSWR<ChatAssignment[]>(
-    ['team-all-chats', teamId],
-    () => backendApi.chats.getAllForTeam(teamId.toString()) as Promise<ChatAssignment[]>
+  const {
+    data: allChats,
+    error: chatsError,
+    mutate: refreshChats,
+  } = useSWR<ChatAssignment[]>(
+    ["team-all-chats", teamId],
+    () =>
+      backendApi.chats.getAllForTeam(teamId.toString()) as Promise<
+        ChatAssignment[]
+      >,
   );
 
-  // Fetch team members for dropdown
   const { data: members, error: membersError } = useSWR<any[]>(
-    ['team-members', teamId],
-    () => backendApi.team.getMembers(teamId.toString()) as Promise<any[]>
+    ["team-members", teamId],
+    () => backendApi.team.getMembers(teamId.toString()) as Promise<any[]>,
   );
+
+  const {
+    searchQuery,
+    setSearchQuery,
+    isSearchPending,
+    items: paginatedChats,
+    filteredTotal,
+    page,
+    pageSize,
+    totalPages,
+    pageSizeOptions,
+    setPage,
+    setPageSize,
+  } = useClientFilteredData({
+    data: allChats,
+    searchFn: chatSearchFn,
+    initialPageSize: 10,
+  });
 
   const handleAssign = async (chatId: string, userId: string) => {
     try {
@@ -68,7 +103,7 @@ export function TeamWorkload({ teamId }: TeamWorkloadProps) {
 
       addNotification(t("assignSuccess"), "success");
       refreshChats();
-      mutate(['team-metrics', teamId]);
+      mutate(["team-metrics", teamId]);
     } catch (error) {
       addNotification(t("assignFailed"), "error");
     } finally {
@@ -83,7 +118,7 @@ export function TeamWorkload({ teamId }: TeamWorkloadProps) {
 
       addNotification(t("unassignSuccess"), "success");
       refreshChats();
-      mutate(['team-metrics', teamId]);
+      mutate(["team-metrics", teamId]);
     } catch (error) {
       addNotification(t("unassignFailed"), "error");
     } finally {
@@ -95,24 +130,37 @@ export function TeamWorkload({ teamId }: TeamWorkloadProps) {
     return <div className="text-red-500">{tCommon("error")}</div>;
   }
 
-  const unassignedCount = allChats?.filter(c => !c.assignedTo).length ?? 0;
-  const assignedCount = allChats?.filter(c => c.assignedTo).length ?? 0;
+  const unassignedCount = allChats?.filter((c) => !c.assignedTo).length ?? 0;
+  const assignedCount = allChats?.filter((c) => c.assignedTo).length ?? 0;
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center gap-4">
+        <SearchInput
+          value={searchQuery}
+          onChange={setSearchQuery}
+          isLoading={isSearchPending}
+          placeholder={t("searchChats")}
+          className="w-full max-w-sm"
+        />
+      </div>
+
       <Card>
         <CardHeader>
           <CardTitle>{t("allChats")}</CardTitle>
           <CardDescription>
-            {t("chatAssignment")} • {assignedCount} {t("assigned")}, {unassignedCount} {t("unassigned")}
+            {t("chatAssignment")} • {assignedCount} {t("assigned")},{" "}
+            {unassignedCount} {t("unassigned")}
           </CardDescription>
         </CardHeader>
         <CardContent>
           {!allChats ? (
-            <div className="flex justify-center p-4"><Loader2 className="animate-spin" /></div>
-          ) : allChats.length === 0 ? (
+            <div className="flex justify-center p-4">
+              <Loader2 className="animate-spin" />
+            </div>
+          ) : paginatedChats.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
-              {t("noChats")}
+              {searchQuery ? t("noSearchResults") : t("noChats")}
             </div>
           ) : (
             <Table>
@@ -124,7 +172,7 @@ export function TeamWorkload({ teamId }: TeamWorkloadProps) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {allChats.map((chat) => (
+                {paginatedChats.map((chat) => (
                   <TableRow key={chat.chatId}>
                     <TableCell>
                       <div className="flex flex-col">
@@ -140,9 +188,14 @@ export function TeamWorkload({ teamId }: TeamWorkloadProps) {
                     </TableCell>
                     <TableCell>
                       {chat.assignedTo ? (
-                        <span className="font-medium">{chat.assignedToName}</span>
+                        <span className="font-medium">
+                          {chat.assignedToName}
+                        </span>
                       ) : (
-                        <Badge variant="outline" className="text-muted-foreground">
+                        <Badge
+                          variant="outline"
+                          className="text-muted-foreground"
+                        >
                           {t("unassigned")}
                         </Badge>
                       )}
@@ -152,14 +205,23 @@ export function TeamWorkload({ teamId }: TeamWorkloadProps) {
                         <Select
                           disabled={processingId === chat.chatId}
                           value={chat.assignedTo?.toString() ?? ""}
-                          onValueChange={(val) => handleAssign(chat.chatId, val)}
+                          onValueChange={(val) =>
+                            handleAssign(chat.chatId, val)
+                          }
                         >
                           <SelectTrigger className="w-[180px]">
-                            <SelectValue placeholder={chat.assignedTo ? t("reassign") : t("assign")} />
+                            <SelectValue
+                              placeholder={
+                                chat.assignedTo ? t("reassign") : t("assign")
+                              }
+                            />
                           </SelectTrigger>
                           <SelectContent>
-                            {members?.map(m => (
-                              <SelectItem key={m.userId} value={m.userId.toString()}>
+                            {members?.map((m) => (
+                              <SelectItem
+                                key={m.userId}
+                                value={m.userId.toString()}
+                              >
                                 {m.userName || m.userEmail}
                               </SelectItem>
                             ))}
@@ -176,7 +238,9 @@ export function TeamWorkload({ teamId }: TeamWorkloadProps) {
                             <UserMinus className="h-4 w-4" />
                           </Button>
                         )}
-                        {processingId === chat.chatId && <Loader2 className="h-4 w-4 animate-spin" />}
+                        {processingId === chat.chatId && (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -186,6 +250,15 @@ export function TeamWorkload({ teamId }: TeamWorkloadProps) {
           )}
         </CardContent>
       </Card>
+
+      <Pagination
+        page={page}
+        totalPages={totalPages}
+        onPageChange={setPage}
+        pageSize={pageSize}
+        onPageSizeChange={setPageSize}
+        pageSizeOptions={pageSizeOptions}
+      />
     </div>
   );
 }

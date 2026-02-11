@@ -30,6 +30,7 @@ export interface TeamMemberInfo {
   roleId?: number | null; // Added roleId support
   joinedAt: Date | null;
   isActive: boolean;
+  profilePictureThumbnailKey?: string | null;
 }
 
 /**
@@ -438,6 +439,7 @@ export class TeamService {
         isActive: teamMembers.isActive,
         userName: users.name,
         userEmail: users.email,
+        profilePictureThumbnailKey: users.profilePictureThumbnailKey,
         customRoleName: roles.name, // Join with roles to get custom name
       })
       .from(teamMembers)
@@ -459,6 +461,7 @@ export class TeamService {
       roleId: m.roleId,
       joinedAt: m.joinedAt,
       isActive: m.isActive ?? true,
+      profilePictureThumbnailKey: m.profilePictureThumbnailKey,
     }));
   }
 

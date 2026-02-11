@@ -384,7 +384,10 @@ export function TemplateCard({
             {isSyncable && onSyncStatus && <DropdownMenuSeparator />}
 
             {/* Delete option */}
-            <DropdownMenuItem onClick={onDelete} className="text-red-600">
+            <DropdownMenuItem
+              onClick={onDelete}
+              className="text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400 focus:bg-red-50 dark:focus:bg-red-900/20"
+            >
               <Trash2 className="h-4 w-4 mr-2" />
               {tCommon("delete")}
             </DropdownMenuItem>

@@ -17,7 +17,8 @@
     "apply": "Aplicar",
     "ok": "OK",
     "selectAll": "Seleccionar todo",
-    "deselectAll": "Deseleccionar todo"
+    "deselectAll": "Deseleccionar todo",
+    "selected": "{count, plural, =1 {# elemento} other {# elementos}} seleccionados"
   },
   "header": {
     "pricing": "Precios",
@@ -32,10 +33,14 @@
   "sidebar": {
     "freePlan": "Gratis",
     "loading": "Cargando...",
-    "user": "Usuario"
+    "user": "Usuario",
+    "manageSubscription": "Gestionar Suscripción",
+    "backToDashboard": "Volver al Panel",
+    "choosePlan": "Elige el plan que mejor funcione para tu equipo"
   },
   "dashboard": {
     "home": "Inicio",
+    "dashboard": "Panel",
     "chats": "Chats",
     "contacts": "Contactos",
     "templates": "Plantillas",
@@ -55,7 +60,8 @@
     "navigation": "Navegación",
     "settings": "Configuración",
     "settingsAi": "IA",
-    "settingsChats": "Chats"
+    "settingsChats": "Chats",
+    "dashboardWelcome": "Bienvenido a tu panel"
   },
   "chats": {
     "title": "Chats",
@@ -562,6 +568,10 @@
     "deleteItem": "Eliminar Artículo",
     "deleteItemConfirmation": "¿Estás seguro de que quieres eliminar este artículo? Esta acción no se puede deshacer.",
     "itemDeleted": "Artículo eliminado exitosamente",
+    "bulkDeleteTitle": "Eliminar Artículos",
+    "bulkDeleteDescription": "¿Estás seguro de que quieres eliminar {count, plural, =1 {# artículo} other {# artículos}}? Esta acción no se puede deshacer.",
+    "bulkDeleteSuccess": "{count, plural, =1 {# artículo} other {# artículos}} eliminados exitosamente",
+    "bulkDeleteFailed": "Error al eliminar {count, plural, =1 {# artículo} other {# artículos}}",
     "itemCreated": "Artículo creado exitosamente",
     "itemCreatedAndSubmitted": "Artículo creado y enviado para aprobación",
     "itemUpdated": "Artículo actualizado exitosamente",
@@ -878,6 +888,14 @@
     "invitationSent": "¡Invitación enviada! El invitado recibirá un correo electrónico en breve.",
     "invitationFailed": "Error al enviar la invitación. Por favor, intenta de nuevo.",
     "invitationEmailSent": "Se ha enviado un correo electrónico a {email}",
+    "memberRemoved": "Miembro eliminado exitosamente",
+    "memberRemoveFailed": "Error al eliminar miembro",
+    "removeMemberTitle": "Eliminar Miembro",
+    "removeMemberDescription": "¿Estás seguro de que quieres eliminar a {name} del equipo?",
+    "bulkRemoveTitle": "Eliminar Miembros",
+    "bulkRemoveDescription": "¿Estás seguro de que quieres eliminar {count, plural, =1 {# miembro} other {# miembros}} del equipo?",
+    "bulkRemoveSuccess": "{count, plural, =1 {# miembro} other {# miembros}} eliminados exitosamente",
+    "bulkRemoveFailed": "Error al eliminar {count, plural, =1 {# miembro} other {# miembros}}",
     "roleManager": {
       "title": "Roles y Permisos",
       "subtitle": "Gestiona niveles de acceso y permisos para los miembros de tu equipo.",
@@ -914,8 +932,12 @@
       "notifications": {
         "created": "Rol creado exitosamente",
         "updated": "Rol actualizado exitosamente",
-        "deleted": "Rol eliminado exitosamente"
-      }
+        "deleted": "Rol eliminado exitosamente",
+        "bulkDeleted": "{count, plural, =1 {# rol} other {# roles}} eliminados exitosamente",
+        "bulkDeleteFailed": "Error al eliminar {count, plural, =1 {# rol} other {# roles}}"
+      },
+      "bulkDeleteTitle": "Eliminar Roles",
+      "bulkDeleteDescription": "¿Estás seguro de que quieres eliminar {count, plural, =1 {# rol} other {# roles}}? Esta acción no se puede deshacer."
     },
     "metrics": "Métricas",
     "workload": "Carga de Trabajo",
@@ -943,7 +965,11 @@
     "assignFailed": "Error al asignar chat",
     "noChats": "No se encontraron chats",
     "selectRole": "Seleccionar un rol",
-    "actions": "Acciones"
+    "actions": "Acciones",
+    "searchMembers": "Buscar miembros...",
+    "searchChats": "Buscar chats...",
+    "noSearchResults": "Sin resultados",
+    "deleteTitle": "¿Estás seguro?"
   },
   "general": {
     "title": "Configuración General",
@@ -1076,7 +1102,9 @@
     "emailSupport": "Soporte por Correo Electrónico",
     "everythingInBase": "Todo en Base, y:",
     "earlyAccess": "Acceso Anticipado a Nuevas Funciones",
-    "supportSlack": "Soporte 24/7 + Acceso Slack"
+    "supportSlack": "Soporte 24/7 + Acceso Slack",
+    "getStarted": "Comenzar",
+    "loading": "Cargando..."
   },
   "senders": {
     "title": "Números de Remitentes",
@@ -1148,7 +1176,11 @@
     "qualityHigh": "Alta",
     "qualityMedium": "Media",
     "qualityLow": "Baja",
-    "qualityUnknown": "Desconocida"
+    "qualityUnknown": "Desconocida",
+    "bulkDeleteTitle": "Eliminar Remitentes",
+    "bulkDeleteDescription": "¿Estás seguro de que quieres eliminar {count, plural, =1 {# remitente} other {# remitentes}}? Esta acción no se puede deshacer.",
+    "bulkDeleteSuccess": "{count, plural, =1 {# remitente} other {# remitentes}} eliminados exitosamente",
+    "bulkDeleteFailed": "Error al eliminar {count, plural, =1 {# remitente} other {# remitentes}}"
   },
   "templates": {
     "title": "Plantillas",
@@ -1631,6 +1663,19 @@
           "delete": "Eliminar",
           "deleting": "Eliminando..."
         },
+        "bulkDeleteDialog": {
+          "title": "Eliminar Plantillas",
+          "description": "¿Estás seguro de que quieres eliminar {count, plural, =1 {# plantilla} other {# plantillas}}? Esta acción no se puede deshacer.",
+          "deleting": "Eliminando..."
+        },
+        "pagination": {
+          "page": "Página {current} de {total}",
+          "previous": "Anterior",
+          "next": "Siguiente",
+          "first": "Primera",
+          "last": "Última",
+          "rowsPerPage": "Por página"
+        },
         "categories": {
           "real_estate": "Bienes Raíces",
           "services": "Servicios",
@@ -1681,7 +1726,10 @@
       "pagination": {
         "page": "Página {current} de {total}",
         "previous": "Anterior",
-        "next": "Siguiente"
+        "next": "Siguiente",
+        "first": "Primera",
+        "last": "Última",
+        "rowsPerPage": "Filas por página"
       },
       "deleteDialog": {
         "title": "Eliminar Objeto",
@@ -1693,6 +1741,7 @@
         "publishTitle": "Publicar Objetos",
         "archiveTitle": "Archivar Objetos",
         "draftTitle": "Marcar Objetos como Borrador",
+        "deleteTitle": "Eliminar Objetos",
         "description": "¿Estás seguro de que quieres {action} {count} objetos seleccionados?",
         "confirm": "Confirmar",
         "processing": "Procesando..."

@@ -1,0 +1,122 @@
+import { checkoutAction } from "@/lib/payments/actions";
+import { getStripePrices, getStripeProducts } from "@/lib/payments/stripe";
+import { ArrowLeft, Check } from "lucide-react";
+import { getTranslations } from "next-intl/server";
+import Link from "next/link";
+import { SubscriptionSubmitButton } from "./submit-button";
+
+export const revalidate = 3600;
+
+export default async function SubscriptionPage() {
+  const t = await getTranslations("pricing");
+  const tSidebar = await getTranslations("sidebar");
+  const [prices, products] = await Promise.all([
+    getStripePrices(),
+    getStripeProducts(),
+  ]);
+
+  const basePlan = products.find((product) => product.name === "Base");
+  const plusPlan = products.find((product) => product.name === "Plus");
+
+  const basePrice = prices.find((price) => price.productId === basePlan?.id);
+  const plusPrice = prices.find((price) => price.productId === plusPlan?.id);
+
+  return (
+    <main className="min-h-screen bg-background">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="mb-8">
+          <Link
+            href="/dashboard"
+            className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            {tSidebar("backToDashboard")}
+          </Link>
+        </div>
+
+        <div className="text-center mb-12">
+          <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+            {tSidebar("manageSubscription")}
+          </h1>
+          <p className="mt-4 text-lg text-muted-foreground">
+            {tSidebar("choosePlan")}
+          </p>
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-8 max-w-xl mx-auto">
+          <PricingCard
+            name={basePlan?.name || "Base"}
+            price={basePrice?.unitAmount || 800}
+            interval={basePrice?.interval || "month"}
+            trialDays={basePrice?.trialPeriodDays || 7}
+            features={[
+              t("unlimitedUsage"),
+              t("unlimitedMembers"),
+              t("emailSupport"),
+            ]}
+            priceId={basePrice?.id}
+            t={t}
+          />
+          <PricingCard
+            name={plusPlan?.name || "Plus"}
+            price={plusPrice?.unitAmount || 1200}
+            interval={plusPrice?.interval || "month"}
+            trialDays={plusPrice?.trialPeriodDays || 7}
+            features={[
+              t("everythingInBase"),
+              t("earlyAccess"),
+              t("supportSlack"),
+            ]}
+            priceId={plusPrice?.id}
+            t={t}
+          />
+        </div>
+      </div>
+    </main>
+  );
+}
+
+function PricingCard({
+  name,
+  price,
+  interval,
+  trialDays,
+  features,
+  priceId,
+  t,
+}: {
+  name: string;
+  price: number;
+  interval: string;
+  trialDays: number;
+  features: string[];
+  priceId?: string;
+  t: Awaited<ReturnType<typeof getTranslations>>;
+}) {
+  return (
+    <div className="pt-6">
+      <h2 className="text-2xl font-medium text-foreground mb-2">{name}</h2>
+      <p className="text-sm text-muted-foreground mb-4">
+        {t("withTrial")} {trialDays} {t("dayFreeTrial")}
+      </p>
+      <p className="text-4xl font-medium text-foreground mb-6">
+        ${price / 100}{" "}
+        <span className="text-xl font-normal text-muted-foreground">
+          {t("perUserMonth")}
+        </span>
+      </p>
+      <ul className="space-y-4 mb-8">
+        {features.map((feature, index) => (
+          <li key={index} className="flex items-start">
+            <Check className="h-5 w-5 text-orange-500 mr-2 mt-0.5 flex-shrink-0" />
+            <span className="text-muted-foreground">{feature}</span>
+          </li>
+        ))}
+      </ul>
+      <form action={checkoutAction}>
+        <input type="hidden" name="priceId" value={priceId} />
+        <SubscriptionSubmitButton />
+      </form>
+    </div>
+  );
+}
