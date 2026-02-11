@@ -758,15 +758,11 @@ export class TemplateApprovalService {
       );
     }
 
-    // Reconcile status and active version
-    await this.reconcileLocaleStatus(localeData.id);
+    // Update activeVersion if the template was approved
+    await this.updateActiveVersion(localeData.id);
 
-    // Fetch the updated locale to get the final status for the event emission
-    const updatedLocale = await db.query.templateLocales.findFirst({
-      where: eq(templateLocales.id, localeData.id),
-    });
-
-    const finalStatus = updatedLocale?.approvalStatus || newStatus || 'draft';
+    // The final status is what Meta told us via the webhook - this is the source of truth
+    const finalStatus = newStatus;
 
     this.logger.log(
       `✅ Updated template ${localeData.id} (${payload.messageTemplateName}) status to ${finalStatus}`,
@@ -941,8 +937,8 @@ export class TemplateApprovalService {
               ),
             );
 
-          // Reconcile locale status to ensure consistency based on all versions
-          await this.reconcileLocaleStatus(localeData.id);
+          // Update activeVersion if a version was just approved
+          await this.updateActiveVersion(localeData.id);
 
           this.logger.log(
             `✅ Synced ${localeData.template?.name} (${localeData.locale}): ${result.previousStatus} → ${statusResult.status}`,
@@ -1084,9 +1080,8 @@ export class TemplateApprovalService {
           ),
         );
 
-      // Reconcile locale status to ensure consistency based on all versions
-      // This handles setting activeVersion if approved, etc.
-      await this.reconcileLocaleStatus(localeData.id);
+      // Update activeVersion if a version was just approved
+      await this.updateActiveVersion(localeData.id);
 
       // Emit WebSocket event for real-time UI updates if status changed
       if (result.statusChanged) {
@@ -1154,54 +1149,52 @@ export class TemplateApprovalService {
   }
 
   /**
-   * Reconcile the locale status with its versions.
-   * Ensures that the locale status matches the state of its versions.
-   * This acts as a single source of truth repair mechanism.
+   * Update the active version for a locale based on its approved versions.
+   *
+   * IMPORTANT: This method only updates `activeVersion`, NOT `approvalStatus`.
+   * The `approvalStatus` should ONLY be set from Meta's API response to maintain
+   * Meta as the single source of truth for approval status.
+   *
+   * When to call this:
+   * - After a version status changes to 'approved'
+   * - During sync when Meta confirms approval
    */
-  async reconcileLocaleStatus(localeId: string): Promise<void> {
-    // Fetch all versions for this locale
+  async updateActiveVersion(localeId: string): Promise<void> {
+    // Fetch all versions for this locale to find the latest approved one
     const versions = await db.query.templateVersions.findMany({
       where: eq(templateVersions.localeId, localeId),
       orderBy: [desc(templateVersions.versionNumber)],
     });
 
+    // Find the latest approved version
     const approvedVersion = versions.find((v) => v.status === 'approved');
-    const pendingVersion = versions.find(
-      (v) => v.status === 'pending_approval',
-    );
-    const rejectedVersion = versions.find((v) => v.status === 'rejected');
 
-    let newStatus = 'draft';
-    let newActiveVersion: number | null = null;
+    // Only update activeVersion, never approvalStatus
+    // approvalStatus is managed by Meta API sync only
+    const newActiveVersion = approvedVersion?.versionNumber ?? null;
 
-    if (approvedVersion) {
-      newStatus = 'approved';
-      newActiveVersion = approvedVersion.versionNumber;
-    } else if (pendingVersion) {
-      newStatus = 'pending';
-    } else if (rejectedVersion) {
-      // Only set as rejected if we don't have an older approved version
-      // (Though if we had an approved version, we would have matched the first if block)
-      // Wait, if we have v2 Rejected and v1 Approved.
-      // The approvedVersion check finds v1. So status becomes Approved. Correct.
-      // If we have v2 Rejected and v1 Draft.
-      // approvedVersion is undefined. pendingVersion is undefined.
-      // rejectedVersion is v2. Status becomes Rejected. Correct.
-      newStatus = 'rejected';
-    }
-
-    // Update locale
     await db
       .update(templateLocales)
       .set({
-        approvalStatus: newStatus,
         activeVersion: newActiveVersion,
         updatedAt: new Date(),
       })
       .where(eq(templateLocales.id, localeId));
 
     this.logger.log(
-      `Reconciled locale ${localeId}: status=${newStatus}, activeVersion=${newActiveVersion}`,
+      `Updated locale ${localeId} activeVersion to ${newActiveVersion}`,
     );
+  }
+
+  /**
+   * @deprecated Use updateActiveVersion instead.
+   * This method incorrectly overwrote approvalStatus from version-derived state,
+   * conflicting with Meta API as the source of truth.
+   *
+   * Kept for backward compatibility but should be removed in future versions.
+   */
+  async reconcileLocaleStatus(localeId: string): Promise<void> {
+    // Now just delegates to updateActiveVersion
+    await this.updateActiveVersion(localeId);
   }
 }

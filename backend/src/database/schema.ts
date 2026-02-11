@@ -651,6 +651,9 @@ export type Template = typeof templates.$inferSelect;
 export type NewTemplate = typeof templates.$inferInsert;
 
 // Template Locales - multi-language, multi-platform variants
+// Contains the SOURCE OF TRUTH for:
+// - approvalStatus: Current Meta approval status (only updated from Meta API)
+// - metaTemplateId: Meta's template ID for this name+language combination
 export const templateLocales = pgTable(
   'template_locales',
   {
@@ -665,10 +668,10 @@ export const templateLocales = pgTable(
     footer: text('footer'), // Optional footer text
     exampleVars: jsonb('example_vars').default({}), // Example values for preview: {"customer_name": "John", ...}
     activeVersion: integer('active_version').default(1), // Current approved version
-    // Meta Cloud API approval fields
+    // Meta Cloud API approval fields - SOURCE OF TRUTH for current approval state
     category: varchar('category', { length: 50 }).default('utility'), // 'authentication', 'marketing', 'utility'
-    approvalStatus: varchar('approval_status', { length: 20 }).default('draft'), // 'draft', 'pending', 'approved', 'rejected', 'paused', 'disabled', 'appeal_requested'
-    metaTemplateId: varchar('meta_template_id', { length: 100 }), // Template ID from Meta after submission
+    approvalStatus: varchar('approval_status', { length: 20 }).default('draft'), // SOURCE OF TRUTH - Only updated from Meta API
+    metaTemplateId: varchar('meta_template_id', { length: 100 }), // SOURCE OF TRUTH - Meta's template ID for this name+language
     rejectionReason: text('rejection_reason'), // Reason if rejected
     qualityRating: varchar('quality_rating', { length: 20 }).default('pending'), // 'pending', 'high', 'medium', 'low'
     submittedAt: timestamp('submitted_at'), // When submitted for approval
@@ -752,6 +755,8 @@ export type VariableDefinition = typeof variableDefinitions.$inferSelect;
 export type NewVariableDefinition = typeof variableDefinitions.$inferInsert;
 
 // Template Versions - versioning and provider submission status
+// Template Versions - versioning and historical submission tracking
+// NOTE: Approval status source of truth is template_locales.approvalStatus, NOT this status
 export const templateVersions = pgTable(
   'template_versions',
   {
@@ -764,8 +769,8 @@ export const templateVersions = pgTable(
       .references(() => templateLocales.id, { onDelete: 'cascade' }),
     versionNumber: integer('version_number').notNull(),
     content: jsonb('content').notNull(), // Provider-transformed content with numbered placeholders and metadata
-    status: varchar('status', { length: 20 }).default('draft'), // 'draft', 'submitted', 'approved', 'rejected', 'disabled'
-    providerId: varchar('provider_id'), // Provider-specific template ID
+    status: varchar('status', { length: 20 }).default('draft'), // Historical status: 'draft', 'pending_approval', 'approved', 'rejected', 'disabled'
+    providerId: varchar('provider_id'), // @deprecated - Use templateLocales.metaTemplateId instead
     providerName: varchar('provider_name', { length: 50 }), // 'twilio', 'meta', etc
     providerResponse: jsonb('provider_response'), // Full provider API response (for debugging rejections)
     platforms: jsonb('platforms').default(['whatsapp']), // Array of platforms this version supports

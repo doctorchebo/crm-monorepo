@@ -880,29 +880,6 @@ export class TemplateVersionService {
   }
 
   /**
-   * Update the locale's activeVersion and approvalStatus fields when a version is approved
-   */
-  private async setLocaleActiveVersion(
-    versionId: string,
-    versionNumber: number,
-  ): Promise<void> {
-    const version = await db.query.templateVersions.findFirst({
-      where: eq(templateVersions.id, versionId),
-    });
-
-    if (version) {
-      await db
-        .update(templateLocales)
-        .set({
-          activeVersion: versionNumber,
-          approvalStatus: 'approved',
-          updatedAt: new Date(),
-        })
-        .where(eq(templateLocales.id, version.localeId));
-    }
-  }
-
-  /**
    * Map database version to VersionDetails
    */
   private mapToVersionDetails(

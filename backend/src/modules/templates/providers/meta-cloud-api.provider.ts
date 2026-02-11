@@ -463,12 +463,31 @@ export class MetaCloudApiProvider implements IMessagingProvider {
       const responseData = await response.json();
 
       if (!response.ok) {
+        // Handle specific Meta API errors
+        const errorCode = responseData.error?.code;
+        const errorMessage =
+          responseData.error?.message || 'Failed to get template status';
+
+        // Error code 100: Object doesn't exist or no permissions
+        // This typically means the template was deleted from Meta's side
+        if (errorCode === 100) {
+          this.logger.warn(
+            `Template ${templateId} not found in Meta. It may have been deleted or permissions revoked.`,
+          );
+          // Return a disabled status to indicate the template is no longer valid
+          return {
+            status: TemplateApprovalStatus.DISABLED,
+            qualityRating: TemplateQualityRating.PENDING,
+            rejectionReason:
+              'Template not found in Meta. It may have been deleted.',
+            providerResponse: responseData,
+          };
+        }
+
         this.logger.error(
           `Failed to get template status: ${JSON.stringify(responseData)}`,
         );
-        throw new Error(
-          responseData.error?.message || 'Failed to get template status',
-        );
+        throw new Error(errorMessage);
       }
 
       const rawStatus = responseData.status;
