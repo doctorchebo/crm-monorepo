@@ -56,7 +56,6 @@
     "team": "Equipo",
     "general": "General",
     "activity": "Actividad",
-    "auditHistory": "Historial de Auditoría",
     "security": "Seguridad",
     "navigation": "Navegación",
     "settings": "Configuración",
@@ -984,23 +983,6 @@
     "enterEmail": "Ingresa tu correo electrónico",
     "saveChanges": "Guardar Cambios",
     "saving": "Guardando..."
-  },
-  "activity": {
-    "title": "Registro de Actividad",
-    "recentActivity": "Actividad Reciente",
-    "noActivity": "Sin actividad aún",
-    "noActivityDesc": "Cuando realices acciones como iniciar sesión o actualizar tu cuenta, aparecerán aquí.",
-    "signUp": "Te registraste",
-    "signIn": "Iniciaste sesión",
-    "signOut": "Cerraste sesión",
-    "updatePassword": "Cambiaste tu contraseña",
-    "deleteAccount": "Eliminaste tu cuenta",
-    "updateAccount": "Actualizaste tu cuenta",
-    "createTeam": "Creaste un nuevo equipo",
-    "removeTeamMember": "Eliminaste un miembro del equipo",
-    "inviteTeamMember": "Invitaste a un miembro del equipo",
-    "acceptInvitation": "Aceptaste una invitación",
-    "unknownAction": "Se produjo una acción desconocida"
   },
   "security": {
     "title": "Configuración de Seguridad",
@@ -2408,7 +2390,7 @@
     "to": "Hasta"
   },
   "audit": {
-    "title": "Historial de Auditoría",
+    "title": "Actividad",
     "description": "Seguimiento de todas las acciones realizadas por los miembros del equipo en la aplicación",
     "noHistory": "Sin historial de auditoría",
     "noHistoryDesc": "Las entradas de auditoría aparecerán aquí a medida que los miembros del equipo realicen acciones",

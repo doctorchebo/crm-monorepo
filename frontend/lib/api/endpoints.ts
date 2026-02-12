@@ -889,7 +889,6 @@ export const backendApi = {
   user: {
     getProfile: (): Promise<UserProfileDto> => apiClient.get("/users/profile"),
     updateProfile: (data: any) => apiClient.patch("/users/profile", data),
-    getActivity: () => apiClient.get("/users/activity"),
   },
 
   // Profile Picture endpoints

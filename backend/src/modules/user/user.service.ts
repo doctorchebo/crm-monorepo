@@ -5,7 +5,6 @@ import { ConfigService } from '@nestjs/config';
 import { eq } from 'drizzle-orm';
 import { db } from '../../database/db.connection';
 import { users } from '../../database/schema';
-import { AuditQueryService } from '../audit/audit-query.service';
 import { UpdateUserDto } from './dto/update-user.dto';
 
 @Injectable()
@@ -13,10 +12,7 @@ export class UserService {
   private readonly s3Client: S3Client;
   private readonly bucketName: string;
 
-  constructor(
-    private readonly configService: ConfigService,
-    private readonly auditQueryService: AuditQueryService,
-  ) {
+  constructor(private readonly configService: ConfigService) {
     const region = this.configService.get<string>('AWS_REGION', 'us-east-1');
     this.bucketName = this.configService.get<string>(
       'AWS_S3_BUCKET_NAME',
@@ -125,17 +121,5 @@ export class UserService {
     }
 
     return { success: true };
-  }
-
-  async getActivityLogs(userId: number) {
-    const result = await this.auditQueryService.getAuditLogs(userId, 1, 20);
-
-    return result.items.map((entry) => ({
-      id: entry.id,
-      action: entry.action,
-      timestamp: entry.createdAt,
-      ipAddress: entry.ipAddress,
-      userName: entry.userName,
-    }));
   }
 }

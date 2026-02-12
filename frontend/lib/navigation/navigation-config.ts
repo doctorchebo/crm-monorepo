@@ -1,5 +1,4 @@
 import {
-  Activity,
   BookOpen,
   Bot,
   FileText,
@@ -174,16 +173,10 @@ export const navigationConfig: NavItem[] = [
   },
   {
     id: "audit",
-    labelKey: "dashboard.auditHistory",
+    labelKey: "dashboard.activity",
     icon: History,
     href: "/dashboard/audit",
     requiredRoles: ["owner", "admin"],
-  },
-  {
-    id: "activity",
-    labelKey: "dashboard.activity",
-    icon: Activity,
-    href: "/dashboard/activity",
   },
 ];
 

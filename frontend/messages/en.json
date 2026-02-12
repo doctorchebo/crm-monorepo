@@ -68,7 +68,6 @@
     "team": "Team",
     "general": "General",
     "activity": "Activity",
-    "auditHistory": "Audit History",
     "security": "Security",
     "navigation": "Navigation",
     "settings": "Settings",
@@ -1002,23 +1001,6 @@
     "enterEmail": "Enter your email",
     "saveChanges": "Save Changes",
     "saving": "Saving..."
-  },
-  "activity": {
-    "title": "Activity Log",
-    "recentActivity": "Recent Activity",
-    "noActivity": "No activity yet",
-    "noActivityDesc": "When you perform actions like signing in or updating your account, they'll appear here.",
-    "signUp": "You signed up",
-    "signIn": "You signed in",
-    "signOut": "You signed out",
-    "updatePassword": "You changed your password",
-    "deleteAccount": "You deleted your account",
-    "updateAccount": "You updated your account",
-    "createTeam": "You created a new team",
-    "removeTeamMember": "You removed a team member",
-    "inviteTeamMember": "You invited a team member",
-    "acceptInvitation": "You accepted an invitation",
-    "unknownAction": "Unknown action occurred"
   },
   "security": {
     "title": "Security Settings",
@@ -2491,7 +2473,7 @@
     "to": "To"
   },
   "audit": {
-    "title": "Audit History",
+    "title": "Activity",
     "description": "Track all actions performed by team members across the application",
     "noHistory": "No audit history",
     "noHistoryDesc": "Audit entries will appear here as team members perform actions",

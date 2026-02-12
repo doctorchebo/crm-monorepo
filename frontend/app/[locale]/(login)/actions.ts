@@ -6,7 +6,7 @@ import {
 } from "@/lib/auth/middleware";
 import { comparePasswords, hashPassword, setSession } from "@/lib/auth/session";
 import { db } from "@/lib/db/drizzle";
-import { getUser, getUserWithTeam } from "@/lib/db/queries";
+import { getUserWithTeam } from "@/lib/db/queries";
 import {
   activityLogs,
   ActivityType,
@@ -25,20 +25,50 @@ import { and, eq, sql } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { z } from "zod";
 
+/** Derive audit metadata from an ActivityType so every frontend-originated
+ *  record matches the format the backend AuditWriteService produces. */
+function getAuditMeta(type: ActivityType): {
+  category: string;
+  entityType: string;
+} {
+  switch (type) {
+    case ActivityType.SIGN_UP:
+    case ActivityType.SIGN_IN:
+    case ActivityType.SIGN_OUT:
+    case ActivityType.UPDATE_PASSWORD:
+    case ActivityType.DELETE_ACCOUNT:
+    case ActivityType.UPDATE_ACCOUNT:
+      return { category: "auth", entityType: "user" };
+    case ActivityType.CREATE_TEAM:
+    case ActivityType.REMOVE_TEAM_MEMBER:
+    case ActivityType.INVITE_TEAM_MEMBER:
+    case ActivityType.ACCEPT_INVITATION:
+      return { category: "team", entityType: "team_member" };
+    default:
+      return { category: "other", entityType: "user" };
+  }
+}
+
 async function logActivity(
   teamId: number | null | undefined,
   userId: number,
   type: ActivityType,
-  ipAddress?: string,
+  options?: { ipAddress?: string; userName?: string | null },
 ) {
   if (teamId === null || teamId === undefined) {
     return;
   }
+  const { category, entityType } = getAuditMeta(type);
   const newActivity: NewActivityLog = {
     teamId,
     userId,
     action: type,
-    ipAddress: ipAddress || "",
+    category,
+    entityType,
+    entityId: String(userId),
+    userName: options?.userName ?? null,
+    ipAddress: options?.ipAddress ?? null,
+    description: type.replace(/_/g, " "),
   };
   await db.insert(activityLogs).values(newActivity);
 }
@@ -210,10 +240,9 @@ export const signIn = validatedAction(signInSchema, async (data, formData) => {
 
   console.log("[SignIn] All cookies set successfully");
 
-  await Promise.all([
-    setSession(foundUser),
-    logActivity(foundTeam?.id, foundUser.id, ActivityType.SIGN_IN),
-  ]);
+  // Audit for sign-in is already recorded by the backend during authenticateWithBackend().
+  // No local logActivity call needed — avoids duplicate/malformed ghost records.
+  await setSession(foundUser);
 
   const redirectTo = formData.get("redirect") as string | null;
   if (redirectTo === "checkout") {
@@ -296,7 +325,14 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
         .set({ status: "accepted" })
         .where(eq(invitations.id, invitation.id));
 
-      await logActivity(teamId, createdUser.id, ActivityType.ACCEPT_INVITATION);
+      await logActivity(
+        teamId,
+        createdUser.id,
+        ActivityType.ACCEPT_INVITATION,
+        {
+          userName: createdUser.email,
+        },
+      );
 
       [createdTeam] = await db
         .select()
@@ -325,7 +361,9 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
     teamId = createdTeam.id;
     userRole = "owner";
 
-    await logActivity(teamId, createdUser.id, ActivityType.CREATE_TEAM);
+    await logActivity(teamId, createdUser.id, ActivityType.CREATE_TEAM, {
+      userName: createdUser.email,
+    });
   }
 
   const newTeamMember: NewTeamMember = {
@@ -407,7 +445,9 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
 
   await Promise.all([
     db.insert(teamMembers).values(newTeamMember),
-    logActivity(teamId, createdUser.id, ActivityType.SIGN_UP),
+    logActivity(teamId, createdUser.id, ActivityType.SIGN_UP, {
+      userName: createdUser.email,
+    }),
     setSession(createdUser),
   ]);
 
@@ -472,7 +512,9 @@ export const updatePassword = validatedActionWithUser(
         .update(users)
         .set({ passwordHash: newPasswordHash })
         .where(eq(users.id, user.id)),
-      logActivity(userWithTeam?.teamId, user.id, ActivityType.UPDATE_PASSWORD),
+      logActivity(userWithTeam?.teamId, user.id, ActivityType.UPDATE_PASSWORD, {
+        userName: user.name,
+      }),
     ]);
 
     return {
@@ -504,6 +546,7 @@ export const deleteAccount = validatedActionWithUser(
       userWithTeam?.teamId,
       user.id,
       ActivityType.DELETE_ACCOUNT,
+      { userName: user.name },
     );
 
     // Soft delete
@@ -573,7 +616,9 @@ export const updateAccount = validatedActionWithUser(
 
     await Promise.all([
       db.update(users).set({ name, email }).where(eq(users.id, user.id)),
-      logActivity(userWithTeam?.teamId, user.id, ActivityType.UPDATE_ACCOUNT),
+      logActivity(userWithTeam?.teamId, user.id, ActivityType.UPDATE_ACCOUNT, {
+        userName: user.name,
+      }),
     ]);
 
     return { name, success: "Account updated successfully." };
@@ -607,6 +652,7 @@ export const removeTeamMember = validatedActionWithUser(
       userWithTeam.teamId,
       user.id,
       ActivityType.REMOVE_TEAM_MEMBER,
+      { userName: user.name },
     );
 
     return { success: "Team member removed successfully" };
@@ -677,23 +723,23 @@ export const inviteTeamMember = validatedActionWithUser(
  * Calls backend to clear JWT cookies and logs the sign-out activity
  */
 export async function signOut() {
-  try {
-    // Log activity before clearing session
-    const user = await getUser();
-    if (user) {
-      const userWithTeam = await getUserWithTeam(user.id);
-      await logActivity(userWithTeam?.teamId, user.id, ActivityType.SIGN_OUT);
-    }
+  const cookieJar = await cookies();
 
+  // Read the JWT before clearing anything — the backend uses it to identify
+  // the user and record the sign-out in the audit log.
+  const jwtToken = cookieJar.get("jwt_token")?.value;
+
+  try {
     const backendUrl =
       process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
-    // Call backend logout endpoint to clear HTTP-only cookies
     const response = await fetch(`${backendUrl}/auth/logout`, {
       method: "POST",
-      credentials: "include", // Send cookies with request
       headers: {
         "Content-Type": "application/json",
+        // Forward the JWT so the backend can log the sign-out audit entry.
+        // decode() on the backend side works even if the token is expired.
+        ...(jwtToken && { Authorization: `Bearer ${jwtToken}` }),
       },
     });
 
@@ -707,7 +753,6 @@ export async function signOut() {
   }
 
   // Clear all cookies
-  const cookieJar = await cookies();
   cookieJar.delete("session");
   cookieJar.delete("jwt_token");
   cookieJar.delete("jwt_refresh_token");

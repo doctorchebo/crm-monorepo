@@ -458,6 +458,35 @@ export class AuthService {
     };
   }
 
+  /**
+   * Logout: decode the JWT (even if expired) to identify the user and log the sign-out.
+   * Returns the userId if successfully identified, or null.
+   */
+  async logout(token: string): Promise<number | null> {
+    try {
+      // decode() does NOT verify expiration — works for expired access tokens too
+      const decoded = this.jwtService.decode(token) as { sub?: number } | null;
+      const userId = decoded?.sub;
+
+      if (userId) {
+        await this.auditService.logAuthAction({
+          userId,
+          action: 'sign_out',
+        });
+        this.logger.log(
+          `[Auth Service] Sign-out audit logged for user ID: ${userId}`,
+        );
+        return userId;
+      }
+    } catch (error) {
+      this.logger.warn(
+        '[Auth Service] Could not decode JWT for sign-out audit:',
+        error,
+      );
+    }
+    return null;
+  }
+
   async validateUser(email: string, password: string) {
     // TODO: Implement user validation logic
     // Fetch user from database and validate password

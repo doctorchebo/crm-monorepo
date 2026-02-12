@@ -125,8 +125,23 @@ export class AuthController {
    * Clears JWT cookies by setting them with blank value and immediate expiry
    */
   @Post('logout')
-  async logout(@Res() res: any) {
+  async logout(@Req() req: any, @Res() res: any) {
     this.logger.log('[Auth Controller] Logout request');
+
+    // Try to identify the user from the Authorization header for audit logging.
+    // The frontend forwards the JWT even if expired — decode() handles that.
+    try {
+      const authHeader = req.headers?.authorization;
+      if (authHeader?.startsWith('Bearer ')) {
+        const token = authHeader.substring(7);
+        await this.authService.logout(token);
+      }
+    } catch (error) {
+      this.logger.warn(
+        '[Auth Controller] Could not log sign-out audit:',
+        error,
+      );
+    }
 
     // Clear JWT tokens by setting them with empty values and maxAge: 0
     res.cookie('jwt_token', '', {
