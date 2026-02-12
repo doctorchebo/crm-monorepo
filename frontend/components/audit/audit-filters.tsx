@@ -127,7 +127,9 @@ const CategoryMultiSelect = memo(function CategoryMultiSelect({
                 return (
                   <CommandItem
                     key={category}
+                    value={category}
                     onSelect={() => toggleCategory(category)}
+                    className="cursor-pointer"
                   >
                     <div
                       className={cn(

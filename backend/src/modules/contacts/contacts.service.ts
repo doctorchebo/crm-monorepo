@@ -363,11 +363,34 @@ export class ContactsService {
       const deletedCount = result.length;
       this.logger.log(`Bulk deleted ${deletedCount} contacts`);
 
-      await this.auditWriteService.logContactsBulkDeleted({
-        userId,
-        count: deletedCount,
-        metadata: { contactIds },
-      });
+      if (deletedCount === 1) {
+        // Single contact — log as individual deletion with name
+        const c = result[0];
+        const contactName =
+          `${c.firstName || ''} ${c.lastName || ''}`.trim() ||
+          c.phoneNumber ||
+          c.contactId;
+        await this.auditWriteService.logContactDeleted({
+          userId,
+          entityId: c.contactId,
+          entityName: contactName,
+          metadata: { phoneNumber: c.phoneNumber },
+        });
+      } else if (deletedCount > 1) {
+        // True bulk — include names so the audit entry is useful
+        const contactNames = result.map((c) => {
+          const name =
+            `${c.firstName || ''} ${c.lastName || ''}`.trim() ||
+            c.phoneNumber ||
+            c.contactId;
+          return name;
+        });
+        await this.auditWriteService.logContactsBulkDeleted({
+          userId,
+          count: deletedCount,
+          metadata: { contactIds, contactNames },
+        });
+      }
 
       return deletedCount;
     } catch (error) {

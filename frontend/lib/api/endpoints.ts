@@ -3554,6 +3554,7 @@ export type AuditAction =
   | "import_started"
   | "import_completed"
   | "import_rolled_back"
+  | "import_deleted"
   // Settings
   | "setting_changed"
   // Auth

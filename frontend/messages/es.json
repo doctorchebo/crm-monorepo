@@ -2545,6 +2545,8 @@
       "contact_updated": "Contacto \"{name}\" actualizado",
       "contact_deleted": "Contacto \"{name}\" eliminado",
       "contacts_bulk_deleted": "{count} contactos eliminados en masa",
+      "contacts_bulk_deleted_named": "{count} contactos eliminados: {names}",
+      "contacts_bulk_deleted_named_more": "Contactos eliminados: {names} y {remaining} más",
 
       "template_created": "Plantilla \"{name}\" creada",
       "template_updated": "Plantilla \"{name}\" actualizada",
@@ -2599,6 +2601,8 @@
       "import_completed": "Importación de contactos completada",
       "import_completed_count": "Importación de {count} contactos completada",
       "import_rolled_back": "Importación de contactos revertida",
+      "import_deleted": "Importación eliminada",
+      "import_deleted_named": "Importación \"{name}\" eliminada",
 
       "setting_changed": "Configuración \"{name}\" cambiada",
 

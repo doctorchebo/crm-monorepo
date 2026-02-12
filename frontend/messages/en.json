@@ -2628,6 +2628,8 @@
       "contact_updated": "Updated contact \"{name}\"",
       "contact_deleted": "Deleted contact \"{name}\"",
       "contacts_bulk_deleted": "Bulk deleted {count} contacts",
+      "contacts_bulk_deleted_named": "Deleted {count} contacts: {names}",
+      "contacts_bulk_deleted_named_more": "Deleted contacts: {names} and {remaining} more",
 
       "template_created": "Created template \"{name}\"",
       "template_updated": "Updated template \"{name}\"",
@@ -2682,6 +2684,8 @@
       "import_completed": "Completed contact import",
       "import_completed_count": "Completed import of {count} contacts",
       "import_rolled_back": "Rolled back contact import",
+      "import_deleted": "Deleted import job",
+      "import_deleted_named": "Deleted import job \"{name}\"",
 
       "setting_changed": "Changed setting \"{name}\"",
 

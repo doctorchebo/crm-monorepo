@@ -1315,6 +1315,25 @@ export class AuditWriteService {
     });
   }
 
+  async logImportDeleted(params: {
+    userId: number;
+    userName?: string;
+    teamId?: number;
+    entityId: string;
+    entityName?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<void> {
+    await this.log({
+      ...params,
+      category: 'import',
+      entityType: 'import_job',
+      action: 'import_deleted',
+      description: params.entityName
+        ? `Deleted import job "${params.entityName}"`
+        : `Deleted import job ${params.entityId}`,
+    });
+  }
+
   // ==========================================================================
   // Settings
   // ==========================================================================

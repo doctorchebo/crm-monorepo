@@ -134,10 +134,25 @@ function buildDescription(
       return t("contact_updated", { name });
     case "contact_deleted":
       return t("contact_deleted", { name });
-    case "contacts_bulk_deleted":
-      return t("contacts_bulk_deleted", {
-        count: Number(meta.count ?? 0),
-      });
+    case "contacts_bulk_deleted": {
+      const count = Number(meta.count ?? 0);
+      const names = Array.isArray(meta.contactNames)
+        ? (meta.contactNames as string[])
+        : [];
+      if (names.length > 0) {
+        // Show first few names, then "and N more" if list is long
+        const maxShow = 5;
+        const shown = names.slice(0, maxShow).join(", ");
+        if (names.length > maxShow) {
+          return t("contacts_bulk_deleted_named_more", {
+            names: shown,
+            remaining: names.length - maxShow,
+          });
+        }
+        return t("contacts_bulk_deleted_named", { names: shown, count });
+      }
+      return t("contacts_bulk_deleted", { count });
+    }
 
     // -- Templates ----------------------------------------------------------
     case "template_created":
@@ -260,6 +275,8 @@ function buildDescription(
     }
     case "import_rolled_back":
       return t("import_rolled_back");
+    case "import_deleted":
+      return name ? t("import_deleted_named", { name }) : t("import_deleted");
 
     // -- Settings -----------------------------------------------------------
     case "setting_changed":

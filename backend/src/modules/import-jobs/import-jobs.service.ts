@@ -415,13 +415,9 @@ export class ImportJobsService {
     await db.delete(importJobs).where(eq(importJobs.id, jobId));
     this.logger.log(`Deleted import job ${jobId}`);
 
-    await this.auditService.log({
+    await this.auditService.logImportDeleted({
       userId,
-      category: 'import',
-      action: 'import_started',
-      entityType: 'import_job',
       entityId: jobId,
-      description: `Deleted import job ${jobId}`,
     });
   }
 

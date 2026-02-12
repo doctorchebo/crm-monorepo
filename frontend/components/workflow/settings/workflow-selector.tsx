@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { Check, ChevronsUpDown, Loader2 } from 'lucide-react';
-import * as React from 'react';
+import { Check, ChevronsUpDown, Loader2 } from "lucide-react";
+import * as React from "react";
 
-import { Button } from '@/components/ui/button';
+import { Button } from "@/components/ui/button";
 import {
   Command,
   CommandEmpty,
@@ -11,16 +11,16 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-} from '@/components/ui/command';
+} from "@/components/ui/command";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from '@/components/ui/popover';
-import { workflowBuilderApi } from '@/lib/api/workflow-builder';
-import { cn } from '@/lib/utils';
-import useSWR from 'swr';
-import { useTranslations } from 'next-intl';
+} from "@/components/ui/popover";
+import { workflowBuilderApi } from "@/lib/api/workflow-builder";
+import { cn } from "@/lib/utils";
+import { useTranslations } from "next-intl";
+import useSWR from "swr";
 
 interface WorkflowSelectorProps {
   value: string | null;
@@ -37,18 +37,18 @@ export function WorkflowSelector({
   placeholder,
   className,
 }: WorkflowSelectorProps) {
-  const t = useTranslations('workflow.common');
+  const t = useTranslations("workflow.common");
   const [open, setOpen] = React.useState(false);
 
   const { data: workflows, isLoading } = useSWR(
-    ['workflows', 'active'],
+    ["workflows", "active"],
     async () => {
       const { workflows } = await workflowBuilderApi.list({
-        status: 'active' as any,
+        status: "active" as any,
         limit: 100,
       });
       return workflows;
-    }
+    },
   );
 
   const selectedWorkflow = workflows?.find((w) => w.id === value);
@@ -61,13 +61,13 @@ export function WorkflowSelector({
           role="combobox"
           aria-expanded={open}
           disabled={disabled || isLoading}
-          className={cn('w-full justify-between', className)}
+          className={cn("w-full justify-between", className)}
         >
           {selectedWorkflow ? (
             <span className="truncate">{selectedWorkflow.name}</span>
           ) : (
             <span className="text-muted-foreground">
-              {isLoading ? t('loading') : placeholder || t('select_workflow')}
+              {isLoading ? t("loading") : placeholder || t("select_workflow")}
             </span>
           )}
           {isLoading ? (
@@ -79,9 +79,9 @@ export function WorkflowSelector({
       </PopoverTrigger>
       <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
         <Command>
-          <CommandInput placeholder={t('search_workflows')} />
+          <CommandInput placeholder={t("search_workflows")} />
           <CommandList>
-            <CommandEmpty>{t('no_workflows_found')}</CommandEmpty>
+            <CommandEmpty>{t("no_workflows_found")}</CommandEmpty>
             <CommandGroup>
               <CommandItem
                 value="none"
@@ -89,22 +89,21 @@ export function WorkflowSelector({
                   onChange(null);
                   setOpen(false);
                 }}
-                disabled={false} // Always enabled
-                className="cursor-pointer text-muted-foreground italic data-[disabled]:pointer-events-auto data-[disabled]:opacity-100"
+                className="cursor-pointer text-muted-foreground italic"
               >
                 <Check
                   className={cn(
-                    'mr-2 h-4 w-4',
-                     !value ? 'opacity-100' : 'opacity-0'
+                    "mr-2 h-4 w-4",
+                    !value ? "opacity-100" : "opacity-0",
                   )}
                 />
-                {t('none')}
+                {t("none")}
               </CommandItem>
               {workflows?.map((workflow) => (
                 <CommandItem
                   key={workflow.id}
-                  value={`${workflow.name}-${workflow.id}`} // Composite value for uniqueness and search
-                  className="cursor-pointer data-[disabled]:pointer-events-auto data-[disabled]:opacity-100" // Override cmdk disabled state
+                  value={`${workflow.name}-${workflow.id}`}
+                  className="cursor-pointer"
                   onSelect={() => {
                     onChange(workflow.id);
                     setOpen(false);
@@ -112,8 +111,8 @@ export function WorkflowSelector({
                 >
                   <Check
                     className={cn(
-                      'mr-2 h-4 w-4',
-                      value === workflow.id ? 'opacity-100' : 'opacity-0'
+                      "mr-2 h-4 w-4",
+                      value === workflow.id ? "opacity-100" : "opacity-0",
                     )}
                   />
                   {workflow.name}
