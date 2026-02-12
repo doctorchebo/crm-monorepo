@@ -2,6 +2,7 @@ import { db } from '@database/db.connection';
 import { Injectable, Logger } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 import * as schema from '../../database/schema';
+import { AuditWriteService } from '../audit/audit-write.service';
 import {
   DEFAULT_NOTIFICATION_SETTINGS,
   NotificationSettingKey,
@@ -13,6 +14,8 @@ import {
 @Injectable()
 export class SettingsService {
   private readonly logger = new Logger(SettingsService.name);
+
+  constructor(private readonly auditWriteService: AuditWriteService) {}
 
   /**
    * Get a single setting value for a user
@@ -151,6 +154,9 @@ export class SettingsService {
   ): Promise<NotificationSettingsResponse> {
     this.logger.log(`Updating notification settings for user ${userId}`);
 
+    // Capture current values for change tracking
+    const before = await this.getNotificationSettings(userId);
+
     const updates: Record<string, unknown> = {};
 
     if (dto.browserNotificationsEnabled !== undefined) {
@@ -175,7 +181,23 @@ export class SettingsService {
     }
 
     // Return the updated settings
-    return this.getNotificationSettings(userId);
+    const after = await this.getNotificationSettings(userId);
+
+    // Audit the change
+    const changes = this.auditWriteService.buildChanges(
+      before as unknown as Record<string, unknown>,
+      after as unknown as Record<string, unknown>,
+    );
+    if (changes && Object.keys(changes).length > 0) {
+      await this.auditWriteService.logSettingChanged({
+        userId,
+        entityId: 'notification_settings',
+        entityName: 'Notification Settings',
+        changes,
+      });
+    }
+
+    return after;
   }
 
   /**

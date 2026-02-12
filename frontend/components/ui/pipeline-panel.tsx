@@ -236,8 +236,12 @@ export const PipelinePanel = memo(function PipelinePanel({
         await backendApi.stages.transitionChat({
           chatId,
           toStageId: stageId,
-          reason: "Manual transition from chat pipeline view",
-          metadata: { manual: true, source: "pipeline_panel" },
+          reason: "pipeline_manual",
+          metadata: {
+            manual: true,
+            source: "pipeline_panel",
+            reasonKey: "pipeline_manual",
+          },
         });
 
         setCurrentStageId(stageId);

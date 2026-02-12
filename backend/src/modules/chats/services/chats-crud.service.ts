@@ -10,6 +10,7 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { and, desc, eq, or, sql } from 'drizzle-orm';
+import { AuditWriteService } from '../../audit/audit-write.service';
 import { CreateChatDto } from '../dto/create-chat.dto';
 import { UpdateChatDto } from '../dto/update-chat.dto';
 
@@ -25,6 +26,7 @@ export class ChatsCrudService {
 
   constructor(
     private readonly chatVisibilityService: ChatVisibilityService,
+    private readonly auditWriteService: AuditWriteService,
     @Inject(forwardRef(() => WorkflowAssignmentService))
     private readonly workflowAssignmentService: WorkflowAssignmentService,
   ) {}
@@ -203,6 +205,17 @@ export class ChatsCrudService {
         .returning();
 
       this.logger.log(`Chat created: ${chatId} for sender ${finalSenderId}`);
+
+      await this.auditWriteService.logChatCreated({
+        userId,
+        chatId,
+        entityName: createChatDto.participantName ?? undefined,
+        metadata: {
+          participantPhone: createChatDto.participantPhone,
+          businessPhone: createChatDto.businessPhone,
+        },
+      });
+
       return chat;
     } catch (error) {
       this.logger.error(`Error creating chat: ${error.message}`);

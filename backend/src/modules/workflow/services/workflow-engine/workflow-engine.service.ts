@@ -387,6 +387,8 @@ export class WorkflowEngineService implements OnModuleInit {
               ruleId: ruleResult.bestMatch.ruleId,
               messageId: input.messageId,
               classification,
+              reasonKey: 'rule_matched',
+              ruleName: ruleResult.bestMatch.ruleName,
             },
           );
 
@@ -1056,6 +1058,7 @@ export class WorkflowEngineService implements OnModuleInit {
       await this.stageService.transitionChat(chatId, userId, stageId, reason, {
         manual: true,
         triggeredBy: 'user',
+        reasonKey: 'pipeline_manual',
       });
       return true;
     } catch (error) {
@@ -1104,6 +1107,7 @@ export class WorkflowEngineService implements OnModuleInit {
         'Workflow initialized',
         {
           isInitial: true,
+          reasonKey: 'workflow_initialized',
           ...options?.metadata,
         },
       );

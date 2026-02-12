@@ -43,6 +43,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { and, asc, desc, eq, ilike, inArray, sql, SQL } from 'drizzle-orm';
+import { AuditWriteService } from '../../audit/audit-write.service';
 import {
   BulkUpdateNodePositionsDto,
   CreateConnectionDto,
@@ -71,6 +72,8 @@ import type { WorkflowDefinition } from '../types/workflow-builder.types';
 @Injectable()
 export class WorkflowBuilderService {
   private readonly logger = new Logger(WorkflowBuilderService.name);
+
+  constructor(private readonly auditWriteService: AuditWriteService) {}
 
   // ============================================================================
   // Team Access Validation
@@ -564,6 +567,14 @@ export class WorkflowBuilderService {
         },
       })
       .returning();
+
+    await this.auditWriteService.logSettingChanged({
+      userId,
+      teamId: parsedTeamId,
+      entityId: `team_workflow_settings_${parsedTeamId}`,
+      entityName: 'Default Workflow',
+      changes: { defaultWorkflowId: { from: null, to: defaultWorkflowId } },
+    });
 
     return settings;
   }

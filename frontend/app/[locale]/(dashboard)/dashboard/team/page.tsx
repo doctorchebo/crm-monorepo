@@ -24,6 +24,8 @@ export default function TeamCenterPage() {
   // Protect route
   useAuthProtection();
 
+  const [showAuditHistory, setShowAuditHistory] = useState(false);
+
   // Fetch user's teams to get the current team ID
   // We use the centralized backendApi which handles auth cookies
   const {
@@ -65,8 +67,6 @@ export default function TeamCenterPage() {
       </PageLayout>
     );
   }
-
-  const [showAuditHistory, setShowAuditHistory] = useState(false);
 
   return (
     <PageLayout

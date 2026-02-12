@@ -2839,7 +2839,7 @@ export const backendApi = {
       activityTypes?: string[];
       entityType?: string;
       chatId?: string;
-    }): Promise<PaginatedActivityResponse> => {
+    }): Promise<PaginatedAuditResponse> => {
       const searchParams = new URLSearchParams();
       if (params.page) searchParams.append("page", params.page.toString());
       if (params.pageSize)
@@ -3330,68 +3330,6 @@ export interface GlobalStageHistoryEntry {
   createdAt: string;
 }
 
-/**
- * Activity log types for unified activity tracking
- */
-export type ActivityType =
-  | "stage_created"
-  | "stage_updated"
-  | "stage_deleted"
-  | "stage_reordered"
-  | "stage_default_changed"
-  | "chat_transitioned"
-  | "handoff_requested"
-  | "handoff_resolved"
-  | "ai_paused"
-  | "ai_resumed";
-
-/**
- * Unified activity log entry that includes:
- * - Stage CRUD operations
- * - Chat stage transitions
- */
-export interface ActivityLogEntry {
-  id: string;
-  activityType: ActivityType;
-  entityType: string;
-  entityId: string;
-  entityName: string | null;
-  chatId: string | null;
-  // Chat transition fields
-  participantName: string | null;
-  participantPhone: string | null;
-  fromStageId: string | null;
-  fromStageName: string | null;
-  fromStageColor: string | null;
-  toStageId: string | null;
-  toStageName: string | null;
-  toStageColor: string | null;
-  triggerType: string | null;
-  // User info
-  userId: number | null;
-  userName: string | null;
-  // Details
-  description: string | null;
-  reason: string | null;
-  metadata: Record<string, unknown> | null;
-  previousState: Record<string, unknown> | null;
-  newState: Record<string, unknown> | null;
-  // Timestamp
-  createdAt: string;
-}
-
-/**
- * Paginated activity response
- */
-export interface PaginatedActivityResponse {
-  items: ActivityLogEntry[];
-  total: number;
-  page: number;
-  pageSize: number;
-  totalPages: number;
-  hasMore: boolean;
-}
-
 export interface WorkflowSummary {
   totalChats: number;
   stageDistribution: Array<{
@@ -3556,6 +3494,9 @@ export type AuditAction =
   | "message_deleted"
   | "message_edited"
   | "note_added"
+  | "note_deleted"
+  | "chat_created"
+  | "chat_deleted"
   | "lock_acquired"
   | "lock_released"
   | "lock_force_released"

@@ -11,13 +11,24 @@
 // ============================================================================
 
 import { db } from '@database/db.connection';
-import { activityLogs } from '@database/schema';
+import { activityLogs, teamMembers } from '@database/schema';
 import { Injectable, Logger } from '@nestjs/common';
+import { and, eq } from 'drizzle-orm';
 import { AuditAction, CreateAuditEntryParams } from './audit.types';
 
 @Injectable()
 export class AuditWriteService {
   private readonly logger = new Logger(AuditWriteService.name);
+
+  // Simple in-memory cache for userId → { teamId, userName } to avoid
+  // repeated DB lookups within the same request cycle. Entries expire
+  // after 60 seconds to keep the cache fresh without adding complexity.
+  private readonly userInfoCache = new Map<
+    number,
+    { teamId: number | null; userName: string | null; expiresAt: number }
+  >();
+
+  private static readonly CACHE_TTL_MS = 60_000; // 60 seconds
 
   // ==========================================================================
   // Core write method
@@ -25,19 +36,31 @@ export class AuditWriteService {
 
   /**
    * Log a single audit entry. Never throws — errors are caught and logged.
+   *
+   * Auto-resolves `teamId` and `userName` from the database if not provided
+   * but `userId` is available. This ensures entries are always properly
+   * scoped to a team without requiring every caller to look up the team.
    */
   async log(params: CreateAuditEntryParams): Promise<void> {
     try {
+      // Auto-resolve teamId and userName when missing
+      let { teamId, userName } = params;
+      if (params.userId && (teamId === undefined || !userName)) {
+        const info = await this.resolveUserInfo(params.userId);
+        if (teamId === undefined) teamId = info.teamId ?? undefined;
+        if (!userName) userName = info.userName ?? undefined;
+      }
+
       await db.insert(activityLogs).values({
         userId: params.userId,
-        teamId: params.teamId,
+        teamId,
         category: params.category,
         entityType: params.entityType,
         entityId: params.entityId,
         entityName: params.entityName,
         action: params.action,
         description: params.description,
-        userName: params.userName,
+        userName,
         metadata: params.metadata ?? {},
         changes: params.changes,
         chatId: params.chatId,
@@ -49,6 +72,62 @@ export class AuditWriteService {
         `Failed to write audit entry [${params.action}] on ${params.entityType}:${params.entityId}: ${error.message}`,
         error.stack,
       );
+    }
+  }
+
+  // ==========================================================================
+  // User info resolution (private, cached)
+  // ==========================================================================
+
+  /**
+   * Resolve a user's teamId and display name from the database.
+   * Results are cached for 60 seconds to avoid repeated lookups.
+   */
+  private async resolveUserInfo(
+    userId: number,
+  ): Promise<{ teamId: number | null; userName: string | null }> {
+    const now = Date.now();
+    const cached = this.userInfoCache.get(userId);
+    if (cached && cached.expiresAt > now) {
+      return { teamId: cached.teamId, userName: cached.userName };
+    }
+
+    try {
+      const membership = await db.query.teamMembers.findFirst({
+        where: and(
+          eq(teamMembers.userId, userId),
+          eq(teamMembers.isActive, true),
+        ),
+        with: {
+          user: {
+            columns: { name: true },
+          },
+        },
+      });
+
+      const result = {
+        teamId: membership?.teamId ?? null,
+        userName: membership?.user?.name ?? null,
+      };
+
+      this.userInfoCache.set(userId, {
+        ...result,
+        expiresAt: now + AuditWriteService.CACHE_TTL_MS,
+      });
+
+      // Evict stale entries periodically (keep cache bounded)
+      if (this.userInfoCache.size > 200) {
+        for (const [key, val] of this.userInfoCache) {
+          if (val.expiresAt <= now) this.userInfoCache.delete(key);
+        }
+      }
+
+      return result;
+    } catch (err) {
+      this.logger.debug(
+        `Could not resolve user info for userId=${userId}: ${(err as Error).message}`,
+      );
+      return { teamId: null, userName: null };
     }
   }
 
@@ -308,6 +387,104 @@ export class AuditWriteService {
       chatId: params.chatId,
       description: params.isAi ? 'AI sent a message' : 'Sent a message',
       metadata: { ...params.metadata, chatId: params.chatId },
+    });
+  }
+
+  async logNoteCreated(params: {
+    userId: number;
+    userName?: string;
+    teamId?: number;
+    chatId: string;
+    entityId: string;
+    entityName?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<void> {
+    await this.log({
+      userId: params.userId,
+      userName: params.userName,
+      teamId: params.teamId,
+      category: 'pipeline',
+      entityType: 'note',
+      entityId: params.entityId,
+      entityName: params.entityName,
+      action: 'note_added',
+      chatId: params.chatId,
+      description: 'Note added',
+      metadata: { ...params.metadata, chatId: params.chatId },
+    });
+  }
+
+  async logNoteDeleted(params: {
+    userId: number;
+    userName?: string;
+    teamId?: number;
+    chatId: string;
+    entityId: string;
+    entityName?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<void> {
+    await this.log({
+      userId: params.userId,
+      userName: params.userName,
+      teamId: params.teamId,
+      category: 'pipeline',
+      entityType: 'note',
+      entityId: params.entityId,
+      entityName: params.entityName,
+      action: 'note_deleted',
+      chatId: params.chatId,
+      description: 'Note deleted',
+      metadata: { ...params.metadata, chatId: params.chatId },
+    });
+  }
+
+  async logChatCreated(params: {
+    userId: number;
+    userName?: string;
+    teamId?: number;
+    chatId: string;
+    entityName?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<void> {
+    await this.log({
+      userId: params.userId,
+      userName: params.userName,
+      teamId: params.teamId,
+      category: 'pipeline',
+      entityType: 'chat',
+      entityId: params.chatId,
+      entityName: params.entityName,
+      action: 'chat_created',
+      chatId: params.chatId,
+      description: params.entityName
+        ? `Created chat with ${params.entityName}`
+        : 'Chat created',
+      metadata: params.metadata,
+    });
+  }
+
+  async logChatDeleted(params: {
+    userId: number;
+    userName?: string;
+    teamId?: number;
+    chatId: string;
+    entityName?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<void> {
+    await this.log({
+      userId: params.userId,
+      userName: params.userName,
+      teamId: params.teamId,
+      category: 'pipeline',
+      entityType: 'chat',
+      entityId: params.chatId,
+      entityName: params.entityName,
+      action: 'chat_deleted',
+      chatId: params.chatId,
+      description: params.entityName
+        ? `Deleted chat with ${params.entityName}`
+        : 'Chat deleted',
+      metadata: params.metadata,
     });
   }
 

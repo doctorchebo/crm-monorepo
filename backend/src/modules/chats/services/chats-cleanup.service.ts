@@ -9,7 +9,7 @@ import {
   teamMembers,
 } from '@database/schema';
 import {
-  BadRequestException,
+  ForbiddenException,
   forwardRef,
   Inject,
   Injectable,
@@ -21,6 +21,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { S3Service } from '@shared/services/s3.service';
 import { and, count, desc, eq, ilike, or, sql, SQL } from 'drizzle-orm';
 import { AiMemoryService } from '../../ai-memory/services/ai-memory.service';
+import { AuditWriteService } from '../../audit/audit-write.service';
 import {
   CHAT_EVENTS,
   ChatDeletedPayload,
@@ -30,6 +31,7 @@ import {
   SearchChatsResponse,
   SearchChatsResult,
 } from '../dto/search-chats.dto';
+import { ChatAccessService } from './chat-access.service';
 import { ChatVisibilityService } from './chat-visibility.service';
 import type { IChatUpdateGateway } from './chat.types';
 import { CHAT_UPDATE_GATEWAY } from './chat.types';
@@ -50,6 +52,8 @@ export class ChatsCleanupService {
     private readonly s3Service: S3Service,
     private readonly aiMemoryService: AiMemoryService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly chatAccessService: ChatAccessService,
+    private readonly auditWriteService: AuditWriteService,
     @Inject(forwardRef(() => ChatVisibilityService))
     private readonly chatVisibilityService: ChatVisibilityService,
     @Optional()
@@ -79,8 +83,23 @@ export class ChatsCleanupService {
   async deleteChat(chatId: string, userId: number): Promise<void> {
     try {
       const chat = await this.crudService.findOne(chatId);
-      if (chat.userId !== userId) {
-        throw new BadRequestException('Chat does not belong to this user');
+
+      // Use ChatAccessService for role-aware authorization:
+      // - Owner/Admin: can delete any chat in their team
+      // - Agent: can only delete chats assigned to them
+      const access = await this.chatAccessService.checkChatAccess(
+        userId,
+        chatId,
+      );
+      if (!access.hasAccess) {
+        throw new ForbiddenException(
+          access.reason || 'You do not have access to this chat',
+        );
+      }
+      if (!access.isAdminOrOwner && chat.userId !== userId) {
+        throw new ForbiddenException(
+          'You can only delete chats that belong to you',
+        );
       }
 
       this.logger.log(`Starting deletion of chat ${chatId}`);
@@ -160,6 +179,17 @@ export class ChatsCleanupService {
 
       await db.delete(chats).where(eq(chats.chatId, chatId));
       this.logger.log(`Deleted chat ${chatId}`);
+
+      // Audit the chat deletion
+      await this.auditWriteService.logChatDeleted({
+        userId,
+        chatId,
+        entityName: chat.participantName ?? undefined,
+        metadata: {
+          participantPhone: chat.participantPhone,
+          isOwnerAction: access.isAdminOrOwner && chat.userId !== userId,
+        },
+      });
 
       // Emit WebSocket event for real-time UI updates
       if (this.chatUpdateGateway?.emitChatDeleted) {

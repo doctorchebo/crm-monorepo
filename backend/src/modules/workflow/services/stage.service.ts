@@ -706,6 +706,11 @@ export class StageService {
 
     // Write to unified audit log (dual-write alongside chatStageHistory)
     const userInfo = await this.getUserInfo(userId);
+
+    // Resolve stage names for locale-aware frontend descriptions
+    const toStage = await this.getStageById(toStageId);
+    const fromStage = fromStageId ? await this.getStageById(fromStageId) : null;
+
     await this.auditWriteService.logChatTransitioned({
       userId,
       userName: userInfo.name || undefined,
@@ -714,7 +719,9 @@ export class StageService {
       description: reason,
       metadata: {
         fromStageId: fromStageId || null,
+        fromStageName: fromStage?.name || null,
         toStageId,
+        toStageName: toStage?.name || null,
         triggerType: metadata?.manual ? 'human' : 'system',
         ...(metadata || {}),
       },

@@ -102,8 +102,12 @@ export const StageAssignmentModal = memo(function StageAssignmentModal({
       await backendApi.stages.transitionChat({
         chatId,
         toStageId: selectedStageId,
-        reason: "Stage assignment from modal",
-        metadata: { manual: true, source: "stage_assignment_modal" },
+        reason: "modal_assignment",
+        metadata: {
+          manual: true,
+          source: "stage_assignment_modal",
+          reasonKey: "modal_assignment",
+        },
       });
 
       addNotification(t("movedTo", { stageName: targetStage.name }), "success");

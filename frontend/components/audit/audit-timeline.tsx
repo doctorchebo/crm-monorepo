@@ -32,6 +32,7 @@ import type {
   AuditCategory,
   AuditEntry,
 } from "@/lib/api/endpoints";
+import { formatAuditDescription } from "@/lib/audit-description";
 import { cn } from "@/lib/utils";
 import {
   AlertCircle,
@@ -433,26 +434,46 @@ const AuditChangesDetail = memo(function AuditChangesDetail({
             {t("entry.changes")}
           </p>
           <div className="space-y-1">
-            {Object.entries(changes).map(([field, change]) => (
-              <div
-                key={field}
-                className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs"
-              >
-                <span className="font-medium text-foreground">{field}</span>
-                <span className="text-muted-foreground">
-                  {t("entry.changedFrom")}
-                </span>
-                <code className="px-1 py-0.5 rounded bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-400 text-[11px]">
-                  {formatChangeValue(change.from)}
-                </code>
-                <span className="text-muted-foreground">
-                  {t("entry.changedTo")}
-                </span>
-                <code className="px-1 py-0.5 rounded bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400 text-[11px]">
-                  {formatChangeValue(change.to)}
-                </code>
-              </div>
-            ))}
+            {Object.entries(changes).map(([field, change]) => {
+              const isValidChange =
+                change &&
+                typeof change === "object" &&
+                "from" in change &&
+                "to" in change;
+              if (!isValidChange) {
+                return (
+                  <div
+                    key={field}
+                    className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs"
+                  >
+                    <span className="font-medium text-foreground">{field}</span>
+                    <code className="px-1 py-0.5 rounded bg-muted text-[11px]">
+                      {formatChangeValue(change)}
+                    </code>
+                  </div>
+                );
+              }
+              return (
+                <div
+                  key={field}
+                  className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs"
+                >
+                  <span className="font-medium text-foreground">{field}</span>
+                  <span className="text-muted-foreground">
+                    {t("entry.changedFrom")}
+                  </span>
+                  <code className="px-1 py-0.5 rounded bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-400 text-[11px]">
+                    {formatChangeValue(change.from)}
+                  </code>
+                  <span className="text-muted-foreground">
+                    {t("entry.changedTo")}
+                  </span>
+                  <code className="px-1 py-0.5 rounded bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400 text-[11px]">
+                    {formatChangeValue(change.to)}
+                  </code>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -503,6 +524,10 @@ export interface AuditTimelineItemProps {
   showEntityName?: boolean;
   /** Callback when entity is clicked */
   onEntityClick?: (entityType: string, entityId: string) => void;
+  /** Callback to make the whole item clickable (e.g. navigate to chat) */
+  onClick?: () => void;
+  /** Compact mode for sidebar/sheet contexts — hides expandable details */
+  compact?: boolean;
 }
 
 export const AuditTimelineItem = memo(function AuditTimelineItem({
@@ -510,9 +535,12 @@ export const AuditTimelineItem = memo(function AuditTimelineItem({
   showCategory = true,
   showEntityName = true,
   onEntityClick,
+  onClick,
+  compact = false,
 }: AuditTimelineItemProps) {
   const t = useTranslations("audit");
   const tCategories = useTranslations("audit.categories");
+  const tActions = useTranslations("audit.actions");
   const [isExpanded, setIsExpanded] = useState(false);
 
   const iconConfig = getIconConfig(entry.action, entry.category);
@@ -525,7 +553,25 @@ export const AuditTimelineItem = memo(function AuditTimelineItem({
   const isEntityClickable = onEntityClick && entry.entityType && entry.entityId;
 
   return (
-    <div className="flex gap-3 p-3 rounded-lg border bg-card">
+    <div
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={
+        onClick
+          ? (e: React.KeyboardEvent) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
+      className={cn(
+        "flex gap-3 p-3 rounded-lg border bg-card text-left w-full",
+        onClick && "hover:bg-accent/50 transition-colors cursor-pointer",
+      )}
+    >
       {/* Icon circle */}
       <div
         className={cn(
@@ -564,12 +610,15 @@ export const AuditTimelineItem = memo(function AuditTimelineItem({
           )}
         </div>
 
-        {/* Description */}
-        {entry.description && (
-          <p className="text-sm text-foreground leading-snug">
-            {entry.description}
-          </p>
-        )}
+        {/* Description — locale-aware, generated from action + metadata */}
+        {(() => {
+          const description = formatAuditDescription(entry, tActions);
+          return description ? (
+            <p className="text-sm text-foreground leading-snug">
+              {description}
+            </p>
+          ) : null;
+        })()}
 
         {/* Meta row: user, time */}
         <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
@@ -602,13 +651,14 @@ export const AuditTimelineItem = memo(function AuditTimelineItem({
           </TooltipProvider>
         </div>
 
-        {/* Expandable details */}
-        {hasDetails && (
+        {/* Expandable details — hidden in compact mode */}
+        {!compact && hasDetails && (
           <Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
             <CollapsibleTrigger asChild>
               <button
                 type="button"
                 className="flex items-center gap-1 mt-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                onClick={(e) => e.stopPropagation()}
               >
                 {isExpanded ? (
                   <ChevronDown className="h-3 w-3" />
@@ -763,3 +813,4 @@ export {
   formatRelativeTime,
   getIconConfig,
 };
+export type { IconConfig };

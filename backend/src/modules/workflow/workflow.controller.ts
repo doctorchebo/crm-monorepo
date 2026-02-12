@@ -230,6 +230,7 @@ export class WorkflowController {
           userId,
           dto.toStageId,
           dto.reason || 'Bulk transition',
+          { reasonKey: 'bulk_transition', manual: true },
         ),
       ),
     );
@@ -294,6 +295,7 @@ export class WorkflowController {
         entityType: entityType as AuditEntityType | undefined,
         startDate: parsedStartDate,
         endDate: parsedEndDate,
+        chatId: chatId || undefined,
       },
     );
   }

@@ -13,6 +13,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { and, asc, desc, eq, gt, ilike, isNull, lt, SQL } from 'drizzle-orm';
+import { AuditWriteService } from '../audit/audit-write.service';
 import { ChatAccessService } from '../chats/services/chat-access.service';
 import { CreateNoteDto } from './dto/create-note.dto';
 import { ChatNotesResponseDto, NoteResponseDto } from './dto/note-response.dto';
@@ -79,6 +80,7 @@ export class NotesService {
   constructor(
     private readonly notesGateway: NotesGateway,
     private readonly chatAccessService: ChatAccessService,
+    private readonly auditWriteService: AuditWriteService,
   ) {}
 
   /**
@@ -192,8 +194,29 @@ export class NotesService {
           : undefined,
       };
 
+      // Audit the note creation
+      const targetChatId =
+        createdNote.chatId || createdNote.messageId
+          ? ((
+              await db.query.messages.findFirst({
+                where: eq(messages.messageId, createdNote.messageId!),
+              })
+            )?.chatId ?? undefined)
+          : undefined;
+
+      if (targetChatId) {
+        await this.auditWriteService.logNoteCreated({
+          userId: createdNote.userId,
+          chatId: targetChatId,
+          entityId: createdNote.id.toString(),
+          metadata: {
+            messageId: createdNote.messageId,
+            notePreview: createdNote.note.substring(0, 100),
+          },
+        });
+      }
+
       // Emit WebSocket event for real-time updates
-      const targetChatId = createdNote.chatId;
       if (targetChatId) {
         try {
           this.notesGateway.emitNoteCreated(targetChatId, response);
@@ -404,6 +427,28 @@ export class NotesService {
       await db.delete(notesTable).where(eq(notesTable.id, noteId));
 
       this.logger.log(`Note ${noteId} deleted by user ${userId}`);
+
+      // Audit the note deletion
+      const chatIdForAudit =
+        note.chatId ??
+        (note.messageId
+          ? ((
+              await db.query.messages.findFirst({
+                where: eq(messages.messageId, note.messageId),
+              })
+            )?.chatId ?? undefined)
+          : undefined);
+      if (chatIdForAudit) {
+        await this.auditWriteService.logNoteDeleted({
+          userId,
+          chatId: chatIdForAudit,
+          entityId: noteId.toString(),
+          metadata: {
+            messageId: note.messageId,
+            notePreview: note.note.substring(0, 100),
+          },
+        });
+      }
 
       // Emit WebSocket event for real-time updates
       if (note.chatId) {

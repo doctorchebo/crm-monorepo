@@ -21,7 +21,7 @@ export default function AuditHistoryPage() {
           <AlertDescription>{t("ownActivityOnly")}</AlertDescription>
         </Alert>
       )}
-      <div className="h-[calc(100vh-280px)]">
+      <div className="h-[calc(100vh-200px)]">
         <AuditLogPanel showHeader={true} asCard={true} />
       </div>
     </PageLayout>

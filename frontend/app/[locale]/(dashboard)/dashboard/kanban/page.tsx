@@ -605,7 +605,13 @@ export default function KanbanPage() {
       await backendApi.stages.transitionChat({
         chatId,
         toStageId,
-        reason: t("chatMovedReason", { stageName }),
+        reason: "kanban_drag",
+        metadata: {
+          manual: true,
+          source: "kanban",
+          reasonKey: "kanban_drag",
+          toStageName: stageName,
+        },
       });
       addNotification(t("chatMoved", { stageName }), "success");
     } catch {

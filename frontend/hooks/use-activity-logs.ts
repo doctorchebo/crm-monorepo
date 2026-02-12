@@ -16,9 +16,9 @@
 "use client";
 
 import type {
-  ActivityLogEntry,
-  ActivityType,
-  PaginatedActivityResponse,
+  AuditAction,
+  AuditEntry,
+  PaginatedAuditResponse,
 } from "@/lib/api/endpoints";
 import { backendApi } from "@/lib/api/endpoints";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -30,7 +30,7 @@ export interface DateRange {
 }
 
 export interface ActivityLogsFilters {
-  activityTypes?: ActivityType[];
+  activityTypes?: AuditAction[];
   entityType?: string;
   entityId?: string;
   chatId?: string;
@@ -76,7 +76,7 @@ export interface UseActivityLogsOptions {
 
 export interface UseActivityLogsReturn {
   // Data
-  items: ActivityLogEntry[];
+  items: AuditEntry[];
   total: number;
   isLoading: boolean;
   error: Error | undefined;
@@ -100,7 +100,7 @@ export interface UseActivityLogsReturn {
   setFilters: (filters: ActivityLogsFilters) => void;
   setDateRange: (range: DateRange) => void;
   clearDateRange: () => void;
-  setActivityTypes: (types: ActivityType[]) => void;
+  setActivityTypes: (types: AuditAction[]) => void;
   clearFilters: () => void;
 
   // Actions
@@ -166,7 +166,7 @@ export function useActivityLogs(
   );
 
   // Fetcher function
-  const fetcher = useCallback(async (): Promise<PaginatedActivityResponse> => {
+  const fetcher = useCallback(async (): Promise<PaginatedAuditResponse> => {
     return backendApi.stages.getActivityLogs({
       page,
       pageSize,
@@ -179,7 +179,7 @@ export function useActivityLogs(
   }, [page, pageSize, filters]);
 
   // Fetch data with SWR
-  const { data, isLoading, error, mutate } = useSWR<PaginatedActivityResponse>(
+  const { data, isLoading, error, mutate } = useSWR<PaginatedAuditResponse>(
     swrKey,
     fetcher,
     {
@@ -239,7 +239,7 @@ export function useActivityLogs(
     }));
   }, []);
 
-  const setActivityTypes = useCallback((types: ActivityType[]) => {
+  const setActivityTypes = useCallback((types: AuditAction[]) => {
     setFiltersState((prev) => ({
       ...prev,
       activityTypes: types.length > 0 ? types : undefined,
