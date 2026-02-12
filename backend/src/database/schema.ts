@@ -660,6 +660,7 @@ export const templates = pgTable(
     name: varchar('name').notNull(), // Meta-compliant name (lowercase, underscores, e.g., 'invoice_ready')
     displayName: varchar('display_name').notNull(), // User-friendly display name (e.g., 'Invoice Ready')
     description: text('description'), // Template description
+    source: varchar('source', { length: 20 }).default('custom').notNull(), // 'custom' (user-created) or 'library' (adopted from Meta Template Library)
     isVisible: boolean('is_visible').default(true), // Whether template is visible in UI
     isActive: boolean('is_active').default(true), // Soft delete flag
     createdAt: timestamp('created_at').defaultNow(),
@@ -710,6 +711,9 @@ export const templateLocales = pgTable(
     parameterFormat: varchar('parameter_format', { length: 20 }).default(
       'named',
     ), // 'named' or 'positional'
+    // Meta Template Library fields
+    libraryTemplateName: varchar('library_template_name', { length: 255 }), // Original Meta library template name (e.g., 'delivery_update_1') — used to detect duplicates
+    bodyParamTypes: jsonb('body_param_types'), // Parameter type constraints from Meta's library (e.g., ["TEXT", "AMOUNT", "DATE"]) — enforced at send time
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
   },
@@ -719,6 +723,7 @@ export const templateLocales = pgTable(
     approvalStatusIndex: index().on(table.approvalStatus),
     metaTemplateIdIndex: index().on(table.metaTemplateId),
     headerFormatIndex: index().on(table.headerFormat),
+    libraryTemplateNameIndex: index().on(table.libraryTemplateName),
   }),
 );
 

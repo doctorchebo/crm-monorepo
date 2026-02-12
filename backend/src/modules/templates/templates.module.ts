@@ -14,6 +14,7 @@ import {
   ComponentTransformerService,
   MediaUploadService,
   TemplateApprovalService,
+  TemplateLibraryService,
   TemplateParserService,
   TemplateRenderService,
   TemplatesService,
@@ -47,6 +48,7 @@ import {
     VariableResolutionService,
     TemplateApprovalService,
     TemplateVersionService,
+    TemplateLibraryService,
 
     // Enhanced Template Services
     ComponentTransformerService,
@@ -79,6 +81,8 @@ import {
     ComponentTransformerService,
     MediaUploadService,
     ComponentsValidatorService,
+    // Template Library
+    TemplateLibraryService,
   ],
 })
 export class TemplatesModule {}

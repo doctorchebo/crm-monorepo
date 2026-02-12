@@ -21,15 +21,18 @@ import { asc, eq } from 'drizzle-orm';
 import { JwtAuthGuard } from '../auth/auth.guard';
 import { TeamService } from '../team/team.service';
 import {
+  AdoptLibraryTemplateDto,
   CreateTemplateDto,
   CreateTemplateLocaleDto,
   SubmitTemplateDto,
+  TemplateLibraryFiltersDto,
   TestTemplateDto,
   UpdateTemplateDto,
 } from './dto';
 import { MessagingProviderFactory, TemplateApprovalStatus } from './providers';
 import { MediaUploadService } from './services/media-upload.service';
 import { TemplateApprovalService } from './services/template-approval.service';
+import { TemplateLibraryService } from './services/template-library.service';
 import {
   TemplateVersionService,
   VersionContent,
@@ -48,6 +51,7 @@ export class TemplatesController {
     private versionService: TemplateVersionService,
     private providerFactory: MessagingProviderFactory,
     private teamService: TeamService,
+    private templateLibraryService: TemplateLibraryService,
   ) {}
 
   // ==================== Variable Definitions (must be before :id routes) ====================
@@ -97,6 +101,66 @@ export class TemplatesController {
       valid: results.every((r) => r.isValid),
       results,
     };
+  }
+
+  // ==================== Template Library ====================
+
+  /**
+   * GET /templates/library - Browse Meta's Template Library
+   * Returns pre-approved templates that can be adopted instantly.
+   * Supports filtering by search, topic, use case, industry, and language.
+   */
+  @Get('library')
+  async browseLibrary(
+    @Request() req: any,
+    @Query() filters: TemplateLibraryFiltersDto,
+  ) {
+    const userId = req.user?.userId;
+    const teams = await this.teamService.getUserTeams(userId);
+    const targetId = teams[0]?.ownerId || userId;
+
+    // Strip empty string values from query params
+    const cleanFilters: Record<string, string> = {};
+    for (const [key, value] of Object.entries(filters)) {
+      if (value !== undefined && value !== '') {
+        cleanFilters[key] = value;
+      }
+    }
+
+    return await this.templateLibraryService.browseLibrary(
+      Object.keys(cleanFilters).length > 0 ? cleanFilters : undefined,
+      targetId,
+    );
+  }
+
+  /**
+   * POST /templates/library/adopt - Adopt a template from Meta's Template Library
+   * Creates a real template in the system that is instantly APPROVED.
+   * No Meta review is needed — library templates are pre-approved.
+   */
+  @Post('library/adopt')
+  async adoptLibraryTemplate(
+    @Request() req: any,
+    @Body() dto: AdoptLibraryTemplateDto,
+  ) {
+    const userId = req.user?.userId;
+    if (!userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    const teams = await this.teamService.getUserTeams(userId);
+    const targetId = teams[0]?.ownerId || userId;
+
+    return await this.templateLibraryService.adoptTemplate(dto, targetId);
+  }
+
+  /**
+   * GET /templates/library/filters - Get available filter options
+   * Returns the lists of topics, use cases, and industries for the filter dropdowns.
+   */
+  @Get('library/filters')
+  getLibraryFilters() {
+    return this.templateLibraryService.getFilterOptions();
   }
 
   // ==================== Template CRUD ====================

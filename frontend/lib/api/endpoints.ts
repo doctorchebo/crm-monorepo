@@ -860,6 +860,175 @@ export interface TemplateVersionInfo {
   canEditDraft: boolean;
 }
 
+// ==================== Template Library Types ====================
+
+/**
+ * Topics available in Meta's Template Library for filtering
+ */
+export type TemplateLibraryTopic =
+  | "ACCOUNT_UPDATE"
+  | "CUSTOMER_FEEDBACK"
+  | "ORDER_MANAGEMENT"
+  | "PAYMENTS";
+
+/**
+ * Use cases available in Meta's Template Library for filtering
+ */
+export type TemplateLibraryUseCase =
+  | "ACCOUNT_CREATION_CONFIRMATION"
+  | "AUTO_PAY_REMINDER"
+  | "DELIVERY_CONFIRMATION"
+  | "DELIVERY_FAILED"
+  | "DELIVERY_UPDATE"
+  | "FEEDBACK_SURVEY"
+  | "FRAUD_ALERT"
+  | "LOW_BALANCE_WARNING"
+  | "ORDER_ACTION_NEEDED"
+  | "ORDER_CONFIRMATION"
+  | "ORDER_DELAY"
+  | "ORDER_OR_TRANSACTION_CANCEL"
+  | "ORDER_PICK_UP"
+  | "PAYMENT_ACTION_REQUIRED"
+  | "PAYMENT_CONFIRMATION"
+  | "PAYMENT_DUE_REMINDER"
+  | "PAYMENT_OVERDUE"
+  | "PAYMENT_REJECT_FAIL"
+  | "PAYMENT_SCHEDULED"
+  | "RECEIPT_ATTACHMENT"
+  | "RETURN_CONFIRMATION"
+  | "SHIPMENT_CONFIRMATION"
+  | "STATEMENT_ATTACHMENT"
+  | "STATEMENT_AVAILABLE"
+  | "TRANSACTION_ALERT";
+
+/**
+ * Industries available in Meta's Template Library for filtering
+ */
+export type TemplateLibraryIndustry = "E_COMMERCE" | "FINANCIAL_SERVICES";
+
+/**
+ * Parameter types for library template body parameters.
+ * Used for send-time validation.
+ */
+export type TemplateLibraryParamType =
+  | "TEXT"
+  | "AMOUNT"
+  | "DATE"
+  | "PHONE_NUMBER"
+  | "EMAIL"
+  | "NUMBER"
+  | "ADDRESS";
+
+/**
+ * Filters for browsing the Meta Template Library
+ */
+export interface TemplateLibraryFilters {
+  search?: string;
+  topic?: TemplateLibraryTopic;
+  usecase?: TemplateLibraryUseCase;
+  industry?: TemplateLibraryIndustry;
+  language?: string;
+}
+
+/**
+ * A single template from Meta's Template Library catalog.
+ * These are pre-approved templates that can be adopted instantly.
+ */
+export interface TemplateLibraryTemplate {
+  name: string;
+  language: string;
+  category: string;
+  topic: string;
+  usecase: string;
+  industry: string[];
+  header?: string;
+  body: string;
+  body_params: string[];
+  body_param_types: TemplateLibraryParamType[];
+  footer?: string;
+  buttons?: Array<{
+    type: string;
+    text?: string;
+    url?: string;
+    phone_number?: string;
+  }>;
+}
+
+/**
+ * Library template enriched with adoption status.
+ * Indicates whether a library template has already been adopted.
+ */
+export interface TemplateLibraryTemplateWithStatus extends TemplateLibraryTemplate {
+  adopted: boolean;
+  adoptedTemplateId?: string;
+}
+
+/**
+ * Result of browsing the Template Library
+ */
+export interface TemplateLibraryBrowseResult {
+  templates: TemplateLibraryTemplateWithStatus[];
+  totalCount: number;
+}
+
+/**
+ * Button input for adopting a library template with URL buttons.
+ * When a library template has a URL button with a suffix, the adopter
+ * provides the actual URL.
+ */
+export interface LibraryTemplateButtonInput {
+  type: "URL";
+  url: {
+    suffix: string;
+  };
+}
+
+/**
+ * Optional body configuration flags for library template adoption.
+ * These add extra content to the template body (e.g., contact number, security tips).
+ */
+export interface LibraryTemplateBodyInput {
+  add_contact_number?: boolean;
+  add_learn_more_link?: boolean;
+  add_security_recommendation?: boolean;
+  add_track_package_link?: boolean;
+  code_expiration_minutes?: number;
+}
+
+/**
+ * Request payload for adopting a template from Meta's Template Library
+ */
+export interface AdoptLibraryTemplateRequest {
+  displayName: string;
+  language: string;
+  libraryTemplateName: string;
+  buttonInputs?: LibraryTemplateButtonInput[];
+  bodyInputs?: LibraryTemplateBodyInput;
+}
+
+/**
+ * Result of adopting a template from Meta's Template Library
+ */
+export interface AdoptTemplateResult {
+  templateId: string;
+  localeId: string;
+  name: string;
+  displayName: string;
+  approvalStatus: string;
+  metaTemplateId?: string;
+}
+
+/**
+ * Filter options returned by the library/filters endpoint.
+ * Provides enum values for populating filter dropdowns.
+ */
+export interface TemplateLibraryFilterOptions {
+  topics: Array<{ value: string; label: string }>;
+  useCases: Array<{ value: string; label: string }>;
+  industries: Array<{ value: string; label: string }>;
+  paramTypes: Array<{ value: string; label: string }>;
+}
+
 export const backendApi = {
   baseUrl: process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001",
 
@@ -2314,6 +2483,43 @@ export const backendApi = {
       apiClient.delete(
         `/templates/${templateId}/locales/${localeId}/media/${mediaId}`,
       ),
+
+    // ==================== Template Library ====================
+
+    /**
+     * Browse Meta's Template Library
+     * Returns pre-approved templates that can be adopted instantly.
+     * Supports filtering by search, topic, use case, industry, and language.
+     */
+    browseLibrary: (
+      filters?: TemplateLibraryFilters,
+    ): Promise<TemplateLibraryBrowseResult> => {
+      const params = new URLSearchParams();
+      if (filters?.search) params.append("search", filters.search);
+      if (filters?.topic) params.append("topic", filters.topic);
+      if (filters?.usecase) params.append("usecase", filters.usecase);
+      if (filters?.industry) params.append("industry", filters.industry);
+      if (filters?.language) params.append("language", filters.language);
+      const qs = params.toString();
+      return apiClient.get(`/templates/library${qs ? `?${qs}` : ""}`);
+    },
+
+    /**
+     * Adopt a template from Meta's Template Library
+     * Creates a real template in the system that is instantly APPROVED.
+     * No Meta review is needed — library templates are pre-approved.
+     */
+    adoptFromLibrary: (
+      data: AdoptLibraryTemplateRequest,
+    ): Promise<AdoptTemplateResult> =>
+      apiClient.post("/templates/library/adopt", data),
+
+    /**
+     * Get available filter options for the Template Library
+     * Returns lists of topics, use cases, and industries for filter dropdowns.
+     */
+    getLibraryFilters: (): Promise<TemplateLibraryFilterOptions> =>
+      apiClient.get("/templates/library/filters"),
   },
 
   // Notes endpoints

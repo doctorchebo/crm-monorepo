@@ -547,7 +547,14 @@ export class VariableResolutionService {
       }
     }
 
-    const allErrors = [...resolution.errors, ...requiredErrors];
+    // Validate parameter types for library templates
+    const typeErrors = this.validateParameterTypes(
+      resolution.resolved,
+      locale.bodyParamTypes as string[] | null,
+      locale.parameterFormat,
+    );
+
+    const allErrors = [...resolution.errors, ...requiredErrors, ...typeErrors];
     const hasBlockingErrors = requiredErrors.length > 0;
 
     // Render template with resolved variables
@@ -568,6 +575,118 @@ export class VariableResolutionService {
       unresolvedVariables: resolution.unresolved,
       errors: allErrors,
     };
+  }
+
+  // ==================== Parameter Type Validation ====================
+
+  /**
+   * Validation patterns for Meta's Template Library parameter types.
+   * These are soft validations — they produce warnings but don't block sending.
+   *
+   * The bodyParamTypes array on template_locales stores the expected type
+   * for each positional parameter: e.g., ["TEXT", "AMOUNT", "DATE"]
+   */
+  private static readonly PARAM_TYPE_VALIDATORS: Record<
+    string,
+    { pattern: RegExp; description: string }
+  > = {
+    TEXT: {
+      pattern: /^.+$/s,
+      description: 'Any non-empty text',
+    },
+    AMOUNT: {
+      // Matches: 100, 100.00, 1,000.00, $100, USD 100, 100 USD, etc.
+      pattern:
+        /^[\$€£¥₹]?\s*[\d,]+\.?\d*\s*[A-Z]{0,3}$|^[A-Z]{3}\s*[\d,]+\.?\d*$/i,
+      description: 'A monetary amount (e.g., "100.00", "$50", "USD 1,000")',
+    },
+    DATE: {
+      // Matches: 2026-01-15, 01/15/2026, Jan 15 2026, January 15, 2026, 15-01-2026, etc.
+      pattern:
+        /^\d{4}[-/]\d{1,2}[-/]\d{1,2}$|^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$|^[A-Za-z]+\.?\s+\d{1,2},?\s*\d{0,4}$|^\d{1,2}\s+[A-Za-z]+\.?\s*\d{0,4}$/,
+      description: 'A date (e.g., "2026-01-15", "Jan 15, 2026", "15/01/2026")',
+    },
+    PHONE_NUMBER: {
+      // Matches: +1234567890, (123) 456-7890, 123-456-7890, etc.
+      pattern: /^\+?[\d\s().-]{7,20}$/,
+      description: 'A phone number (e.g., "+1234567890", "(123) 456-7890")',
+    },
+    EMAIL: {
+      pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+      description: 'An email address (e.g., "user@example.com")',
+    },
+    NUMBER: {
+      // Matches: 42, 3.14, 1,000, -5, etc.
+      pattern: /^-?[\d,]+\.?\d*$/,
+      description: 'A number (e.g., "42", "3.14", "1,000")',
+    },
+    ADDRESS: {
+      // Any non-empty string with at least one space (basic address heuristic)
+      pattern: /^.{5,}$/,
+      description: 'An address (at least 5 characters)',
+    },
+  };
+
+  /**
+   * Validate resolved variable values against their expected parameter types
+   * from Meta's Template Library.
+   *
+   * Only applies to library templates (parameterFormat === 'positional').
+   * Returns warning-level errors that don't block sending but inform the user.
+   *
+   * @param resolved - Map of variable name → resolved value
+   * @param bodyParamTypes - Array of Meta param types from template_locales (e.g., ["TEXT", "AMOUNT", "DATE"])
+   * @param parameterFormat - 'positional' for library templates, 'named' for custom
+   */
+  validateParameterTypes(
+    resolved: Record<string, string>,
+    bodyParamTypes: string[] | null | undefined,
+    parameterFormat: string | null | undefined,
+  ): VariableError[] {
+    // Only validate library templates with positional parameters
+    if (
+      !bodyParamTypes ||
+      bodyParamTypes.length === 0 ||
+      parameterFormat !== 'positional'
+    ) {
+      return [];
+    }
+
+    const errors: VariableError[] = [];
+
+    for (let i = 0; i < bodyParamTypes.length; i++) {
+      const paramType = bodyParamTypes[i];
+      const varName = String(i + 1); // Positional variables: "1", "2", "3"
+      const value = resolved[varName];
+
+      // Skip unresolved variables (handled by required-var checks)
+      if (value === undefined || value === null || value === '') {
+        continue;
+      }
+
+      const validator =
+        VariableResolutionService.PARAM_TYPE_VALIDATORS[paramType];
+      if (!validator) {
+        // Unknown param type — skip validation
+        continue;
+      }
+
+      if (!validator.pattern.test(value.trim())) {
+        errors.push({
+          variable: varName,
+          message: `Parameter {{${varName}}} expects ${validator.description}, but received: "${value.length > 50 ? value.substring(0, 50) + '...' : value}"`,
+          type: 'validation_failed',
+        });
+      }
+    }
+
+    if (errors.length > 0) {
+      this.logger.warn(
+        `Parameter type validation warnings for positional template: ${errors.length} issue(s)`,
+      );
+    }
+
+    return errors;
   }
 
   /**

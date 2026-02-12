@@ -940,6 +940,9 @@ export class TemplateApprovalService {
           // Update activeVersion if a version was just approved
           await this.updateActiveVersion(localeData.id);
 
+          console.log('template status: ' + JSON.stringify(statusResult, null, 2));
+
+
           this.logger.log(
             `✅ Synced ${localeData.template?.name} (${localeData.locale}): ${result.previousStatus} → ${statusResult.status}`,
           );

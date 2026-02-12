@@ -6,11 +6,14 @@ import { TemplateParserService } from '../services/template-parser.service';
 import { TemplateCategory as InternalCategory } from '../types';
 import {
   ConvertedTemplate,
+  CreateFromLibraryRequest,
   EnhancedTemplateSubmissionRequest,
   IMessagingProvider,
   TemplateApprovalStatus,
   TemplateCategory,
   TemplateComponent,
+  TemplateLibraryFilters,
+  TemplateLibraryResult,
   TemplateQualityRating,
   TemplateSendRequest,
   TemplateSendResult,
@@ -649,6 +652,199 @@ export class MetaCloudApiProvider implements IMessagingProvider {
       return {
         success: false,
         status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  // ==================== Template Library Methods ====================
+
+  /**
+   * Browse available templates from Meta's Template Library
+   *
+   * Calls: GET /message_template_library (root-level, not WABA-scoped)
+   * Supports filtering by search, topic, usecase, industry, language
+   *
+   * @see https://developers.facebook.com/documentation/business-messaging/whatsapp/templates/template-library
+   */
+  async getTemplateLibrary(
+    filters?: TemplateLibraryFilters,
+  ): Promise<TemplateLibraryResult> {
+    try {
+      const accessToken = this.getAccessToken();
+
+      // Build query params from filters
+      const params = new URLSearchParams();
+      if (filters?.search) {
+        params.append('search', filters.search);
+      }
+      if (filters?.topic) {
+        params.append('topic', filters.topic);
+      }
+      if (filters?.usecase) {
+        params.append('usecase', filters.usecase);
+      }
+      if (filters?.industry) {
+        params.append('industry', filters.industry);
+      }
+      if (filters?.language) {
+        params.append('language', filters.language);
+      }
+      // Request a large page to minimize round-trips (library is relatively small)
+      params.append('limit', '100');
+
+      const queryString = params.toString();
+      // message_template_library is a root-level Graph API endpoint (not WABA-scoped).
+      // It returns the global catalog of pre-approved templates available to all accounts.
+      const url = `${this.baseUrl}/${this.apiVersion}/message_template_library${queryString ? `?${queryString}` : ''}`;
+
+      this.logger.log(
+        `Fetching Template Library from Meta Cloud API with filters: ${JSON.stringify(filters || {})}`,
+      );
+
+      const response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        this.logger.error(
+          `Meta Template Library API error: ${JSON.stringify(responseData)}`,
+        );
+        return {
+          success: false,
+          templates: [],
+          error:
+            responseData.error?.message || 'Failed to fetch Template Library',
+        };
+      }
+
+      const templates = (responseData.data || []).map((t: any) => ({
+        name: t.name,
+        language: t.language,
+        category: t.category,
+        topic: t.topic || '',
+        usecase: t.usecase || '',
+        industry: t.industry || [],
+        header: t.header || undefined,
+        body: t.body || '',
+        body_params: t.body_params || [],
+        body_param_types: t.body_param_types || [],
+        footer: t.footer || undefined,
+        buttons: t.buttons || undefined,
+      }));
+
+      this.logger.log(
+        `Fetched ${templates.length} templates from Meta Template Library`,
+      );
+
+      return {
+        success: true,
+        templates,
+        paging: responseData.paging,
+      };
+    } catch (error) {
+      this.logger.error(`Failed to fetch Template Library: ${error.message}`);
+      return {
+        success: false,
+        templates: [],
+        error: error.message,
+      };
+    }
+  }
+
+  /**
+   * Create a template from Meta's Template Library
+   *
+   * Calls: POST /{WABA_ID}/message_templates with library_template_name
+   * Library templates are instantly APPROVED (no review needed)
+   *
+   * @see https://developers.facebook.com/documentation/business-messaging/whatsapp/templates/template-library
+   */
+  async createFromLibrary(
+    request: CreateFromLibraryRequest,
+  ): Promise<TemplateSubmissionResult> {
+    try {
+      const wabaId = this.getWabaId();
+      const accessToken = this.getAccessToken();
+      const url = `${this.baseUrl}/${this.apiVersion}/${wabaId}/message_templates`;
+
+      // Build the payload per Meta's Template Library API spec
+      const payload: Record<string, any> = {
+        name: request.name,
+        language: request.language,
+        category: 'UTILITY', // Template Library only supports UTILITY and AUTHENTICATION
+        library_template_name: request.libraryTemplateName,
+      };
+
+      // Add button inputs if provided (required for templates with URL/phone buttons)
+      if (request.buttonInputs && request.buttonInputs.length > 0) {
+        payload.library_template_button_inputs = JSON.stringify(
+          request.buttonInputs,
+        );
+      }
+
+      // Add body inputs if provided (optional flags like add_contact_number, etc.)
+      if (request.bodyInputs) {
+        payload.library_template_body_inputs = JSON.stringify(
+          request.bodyInputs,
+        );
+      }
+
+      this.logger.log(
+        `Creating template '${request.name}' from library template '${request.libraryTemplateName}'`,
+      );
+      this.logger.debug(`Payload: ${JSON.stringify(payload)}`);
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        this.logger.error(
+          `Meta Template Library creation error: ${JSON.stringify(responseData)}`,
+        );
+        const errorMessage = this.parseMetaError(responseData);
+        return {
+          success: false,
+          status: TemplateApprovalStatus.DRAFT,
+          error: errorMessage,
+          providerResponse: responseData,
+        };
+      }
+
+      this.logger.log(
+        `Library template created successfully. ID: ${responseData.id}, Status: ${responseData.status}`,
+      );
+
+      // Library templates are instantly approved
+      const status =
+        META_STATUS_MAP[responseData.status] || TemplateApprovalStatus.APPROVED;
+
+      return {
+        success: true,
+        providerId: responseData.id,
+        status,
+        message: 'Template created from library — instantly approved',
+        providerResponse: responseData,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Failed to create template from library: ${error.message}`,
+      );
+      return {
+        success: false,
+        status: TemplateApprovalStatus.DRAFT,
         error: error.message,
       };
     }

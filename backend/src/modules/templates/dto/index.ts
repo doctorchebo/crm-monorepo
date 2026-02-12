@@ -6,5 +6,6 @@ export * from './template-button.dto';
 export * from './template-components.dto';
 export * from './template-footer.dto';
 export * from './template-header.dto';
+export * from './template-library.dto';
 export * from './test-template.dto';
 export * from './update-template.dto';

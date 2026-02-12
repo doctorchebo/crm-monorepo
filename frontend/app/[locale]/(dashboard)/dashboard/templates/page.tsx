@@ -5,6 +5,7 @@ import {
   SectionAuditSheet,
 } from "@/components/audit/section-audit-sheet";
 import { DeleteConfirmationDialog } from "@/components/dialogs/delete-confirmation-dialog";
+import { TemplateLibraryBrowser } from "@/components/templates/library";
 import {
   TemplateCard,
   type TemplateCardData,
@@ -17,6 +18,7 @@ import { PageLayout } from "@/components/ui/page-layout";
 import { Pagination } from "@/components/ui/pagination";
 import { SearchInput } from "@/components/ui/search-input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Tooltip,
   TooltipContent,
@@ -37,10 +39,12 @@ import {
   BulkSyncResult,
   TemplateSyncResult,
 } from "@/lib/api/endpoints";
-import { Loader2, Plus, RefreshCw } from "lucide-react";
+import { Library, Loader2, Plus, RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
+
+type TemplateTab = "my-templates" | "library";
 
 /**
  * Template interface matching the API response
@@ -57,8 +61,12 @@ interface TemplateFilters {
 export default function TemplatesPage() {
   const router = useRouter();
   const t = useTranslations("templates");
+  const tLib = useTranslations("templates.library");
   const tCommon = useTranslations("common");
   const { addNotification } = useNotification();
+
+  // Tab state
+  const [activeTab, setActiveTab] = useState<TemplateTab>("my-templates");
 
   // Protect this route - redirect to login if token is missing or expired
   useAuthProtection();
@@ -413,138 +421,163 @@ export default function TemplatesPage() {
       }
       className="space-y-6"
     >
-      {/* Search and Pagination Controls */}
-      <div className="flex flex-col sm:flex-row gap-4 justify-between items-end sm:items-center">
-        <div className="relative w-full sm:w-auto sm:min-w-[300px]">
-          <SearchInput
-            placeholder={t("searchPlaceholder") || "Search templates..."}
-            value={searchQuery}
-            onChange={setSearchQuery}
+      {/* Tabs: My Templates / Template Library */}
+      <Tabs
+        value={activeTab}
+        onValueChange={(v) => setActiveTab(v as TemplateTab)}
+        className="w-full"
+      >
+        <TabsList>
+          <TabsTrigger value="my-templates">
+            {tLib("myTemplatesTab")}
+          </TabsTrigger>
+          <TabsTrigger value="library" className="gap-1.5">
+            <Library className="h-4 w-4" />
+            {tLib("tabLabel")}
+          </TabsTrigger>
+        </TabsList>
+
+        {/* My Templates Tab */}
+        <TabsContent value="my-templates" className="space-y-6 mt-4">
+          {/* Search and Pagination Controls */}
+          <div className="flex flex-col sm:flex-row gap-4 justify-between items-end sm:items-center">
+            <div className="relative w-full sm:w-auto sm:min-w-[300px]">
+              <SearchInput
+                placeholder={t("searchPlaceholder") || "Search templates..."}
+                value={searchQuery}
+                onChange={setSearchQuery}
+              />
+            </div>
+
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              onPageChange={setPage}
+              pageSize={pageSize}
+              onPageSizeChange={setPageSize}
+              pageSizeOptions={[12, 24, 48]}
+              translations={{
+                page: t("pagination.page", {
+                  current: page,
+                  total: totalPages,
+                }),
+                previous: t("pagination.previous"),
+                next: t("pagination.next"),
+                first: t("pagination.first"),
+                last: t("pagination.last"),
+                rowsPerPage: t("pagination.rowsPerPage"),
+              }}
+              compact
+            />
+          </div>
+
+          {/* Bulk Actions Bar */}
+          <BulkActionBar
+            selectedCount={selectedCount}
+            onClearSelection={clearSelection}
+            onDelete={() => setBulkDeleteDialogOpen(true)}
           />
-        </div>
 
-        <Pagination
-          page={page}
-          totalPages={totalPages}
-          onPageChange={setPage}
-          pageSize={pageSize}
-          onPageSizeChange={setPageSize}
-          pageSizeOptions={[12, 24, 48]}
-          translations={{
-            page: t("pagination.page", {
-              current: page,
-              total: totalPages,
-            }),
-            previous: t("pagination.previous"),
-            next: t("pagination.next"),
-            first: t("pagination.first"),
-            last: t("pagination.last"),
-            rowsPerPage: t("pagination.rowsPerPage"),
-          }}
-          compact
-        />
-      </div>
-
-      {/* Bulk Actions Bar */}
-      <BulkActionBar
-        selectedCount={selectedCount}
-        onClearSelection={clearSelection}
-        onDelete={() => setBulkDeleteDialogOpen(true)}
-      />
-
-      {/* Templates Grid */}
-      <div className="pt-2">
-        {isLoading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {[1, 2, 3, 4, 5, 6].map((i) => (
-              <Skeleton key={i} className="h-64 w-full rounded-lg" />
-            ))}
-          </div>
-        ) : templates.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-64 text-center">
-            <p className="text-gray-600 mb-4">
-              {searchQuery
-                ? t("noResults") || "No templates found"
-                : t("noTemplates") || "No templates yet"}
-            </p>
-            {!searchQuery && (
-              <Button
-                onClick={() => router.push(`/dashboard/templates/new`)}
-                variant="outline"
-              >
-                {t("createFirst") || "Create your first template"}
-              </Button>
-            )}
-          </div>
-        ) : (
-          <>
-            {/* Select All Header - visible in selection mode */}
-            {selectedCount > 0 && (
-              <div className="flex items-center gap-3 px-3 py-2 border-b mb-4">
-                <Checkbox
-                  checked={isAllSelected}
-                  onCheckedChange={toggleSelectAll}
-                  aria-label={t("selectAll") || "Select all templates"}
-                />
-                <span className="text-sm text-muted-foreground">
-                  {t("selectAll") || "Select all"}
-                </span>
+          {/* Templates Grid */}
+          <div className="pt-2">
+            {isLoading ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {[1, 2, 3, 4, 5, 6].map((i) => (
+                  <Skeleton key={i} className="h-64 w-full rounded-lg" />
+                ))}
               </div>
-            )}
+            ) : templates.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-64 text-center">
+                <p className="text-gray-600 mb-4">
+                  {searchQuery
+                    ? t("noResults") || "No templates found"
+                    : t("noTemplates") || "No templates yet"}
+                </p>
+                {!searchQuery && (
+                  <Button
+                    onClick={() => router.push(`/dashboard/templates/new`)}
+                    variant="outline"
+                  >
+                    {t("createFirst") || "Create your first template"}
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <>
+                {/* Select All Header - visible in selection mode */}
+                {selectedCount > 0 && (
+                  <div className="flex items-center gap-3 px-3 py-2 border-b mb-4">
+                    <Checkbox
+                      checked={isAllSelected}
+                      onCheckedChange={toggleSelectAll}
+                      aria-label={t("selectAll") || "Select all templates"}
+                    />
+                    <span className="text-sm text-muted-foreground">
+                      {t("selectAll") || "Select all"}
+                    </span>
+                  </div>
+                )}
 
-            {/* Templates Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {templates.map((template) => (
-                <div key={template.id} className="relative group">
-                  {/* Selection Checkbox - visible in selection mode */}
-                  {selectedCount > 0 && (
-                    <div
-                      className="absolute top-2 left-2 z-10"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <Checkbox
-                        checked={selectedIds.has(template.id)}
-                        onCheckedChange={() => toggleSelect(template.id)}
-                        aria-label={`Select ${template.displayName || template.name}`}
-                        className="bg-background"
+                {/* Templates Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {templates.map((template) => (
+                    <div key={template.id} className="relative group">
+                      {/* Selection Checkbox - visible in selection mode */}
+                      {selectedCount > 0 && (
+                        <div
+                          className="absolute top-2 left-2 z-10"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <Checkbox
+                            checked={selectedIds.has(template.id)}
+                            onCheckedChange={() => toggleSelect(template.id)}
+                            aria-label={`Select ${template.displayName || template.name}`}
+                            className="bg-background"
+                          />
+                        </div>
+                      )}
+                      <TemplateCard
+                        template={template}
+                        onClick={() => handleEdit(template.id)}
+                        onLocaleClick={(locale) =>
+                          handleEdit(template.id, locale.locale)
+                        }
+                        onDelete={() => handleDeleteClick(template)}
+                        onSyncStatus={(locale) =>
+                          handleSyncSingleTemplate(template, locale)
+                        }
+                        isSyncing={syncingTemplateId === template.id}
+                        canSyncStatus={canSyncStatus}
+                        isSelectable={selectedCount > 0}
                       />
                     </div>
-                  )}
-                  <TemplateCard
-                    template={template}
-                    onClick={() => handleEdit(template.id)}
-                    onLocaleClick={(locale) =>
-                      handleEdit(template.id, locale.locale)
-                    }
-                    onDelete={() => handleDeleteClick(template)}
-                    onSyncStatus={(locale) =>
-                      handleSyncSingleTemplate(template, locale)
-                    }
-                    isSyncing={syncingTemplateId === template.id}
-                    canSyncStatus={canSyncStatus}
-                    isSelectable={selectedCount > 0}
-                  />
+                  ))}
                 </div>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
+              </>
+            )}
+          </div>
 
-      {/* Bulk Delete Confirmation Dialog */}
-      <DeleteConfirmationDialog
-        isOpen={bulkDeleteDialogOpen}
-        title={t("bulkDeleteTitle") || "Delete Templates"}
-        description={
-          t("bulkDeleteDescription", { count: selectedCount }) ||
-          `Are you sure you want to delete ${selectedCount} template${
-            selectedCount !== 1 ? "s" : ""
-          }? This action cannot be undone.`
-        }
-        onConfirm={handleBulkDelete}
-        onCancel={() => setBulkDeleteDialogOpen(false)}
-        isLoading={isDeleting}
-      />
+          {/* Bulk Delete Confirmation Dialog */}
+          <DeleteConfirmationDialog
+            isOpen={bulkDeleteDialogOpen}
+            title={t("bulkDeleteTitle") || "Delete Templates"}
+            description={
+              t("bulkDeleteDescription", { count: selectedCount }) ||
+              `Are you sure you want to delete ${selectedCount} template${
+                selectedCount !== 1 ? "s" : ""
+              }? This action cannot be undone.`
+            }
+            onConfirm={handleBulkDelete}
+            onCancel={() => setBulkDeleteDialogOpen(false)}
+            isLoading={isDeleting}
+          />
+        </TabsContent>
+
+        {/* Template Library Tab */}
+        <TabsContent value="library" className="mt-4">
+          <TemplateLibraryBrowser />
+        </TabsContent>
+      </Tabs>
 
       <SectionAuditSheet
         open={showAuditHistory}

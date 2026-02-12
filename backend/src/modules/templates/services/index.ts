@@ -1,6 +1,7 @@
 export * from './component-transformer.service';
 export * from './media-upload.service';
 export * from './template-approval.service';
+export * from './template-library.service';
 export * from './template-parser.service';
 export * from './template-render.service';
 export * from './template-validator.service';
