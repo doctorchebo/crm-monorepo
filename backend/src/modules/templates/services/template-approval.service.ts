@@ -497,19 +497,55 @@ export class TemplateApprovalService {
       throw new NotFoundException(`Locale ${locale} not found for template`);
     }
 
-    // Check if already submitted or approved
-    const currentStatus = localeData.approvalStatus as TemplateApprovalStatus;
-    if (currentStatus === TemplateApprovalStatus.PENDING) {
+    // Version-aware submission checks:
+    // Instead of checking locale-level approvalStatus (which reflects the active version),
+    // we check the actual version statuses to determine if submission is allowed.
+    const pendingVersion = await db.query.templateVersions.findFirst({
+      where: and(
+        eq(templateVersions.templateId, templateId),
+        eq(templateVersions.localeId, localeData.id),
+        eq(templateVersions.status, 'pending_approval'),
+      ),
+      orderBy: [desc(templateVersions.versionNumber)],
+    });
+
+    if (pendingVersion) {
       throw new BadRequestException(
-        'Template is already pending approval. Please wait for the current review to complete.',
+        'A version is already pending approval. Please wait for the current review to complete.',
       );
     }
 
-    if (currentStatus === TemplateApprovalStatus.APPROVED) {
+    const draftVersion = await db.query.templateVersions.findFirst({
+      where: and(
+        eq(templateVersions.templateId, templateId),
+        eq(templateVersions.localeId, localeData.id),
+        eq(templateVersions.status, 'draft'),
+      ),
+      orderBy: [desc(templateVersions.versionNumber)],
+    });
+
+    if (!draftVersion) {
+      // No draft version exists — check if the template is already approved
+      const currentStatus = localeData.approvalStatus as TemplateApprovalStatus;
+      if (currentStatus === TemplateApprovalStatus.APPROVED) {
+        throw new BadRequestException(
+          'Template is already approved. Create a new version if you need to make changes.',
+        );
+      }
       throw new BadRequestException(
-        'Template is already approved. Create a new version if you need to make changes.',
+        'No draft version found to submit for approval.',
       );
     }
+
+    const hasApprovedActiveVersion =
+      localeData.activeVersion != null && localeData.activeVersion > 0;
+
+    this.logger.log(
+      `Submitting draft version ${draftVersion.versionNumber} for template '${template.name}' (locale: ${locale})` +
+        (hasApprovedActiveVersion
+          ? ` — active version ${localeData.activeVersion} remains approved`
+          : ''),
+    );
 
     // Validate for Meta approval
     const validation = await this.validateForApproval(templateId, locale);
@@ -575,8 +611,11 @@ export class TemplateApprovalService {
       `Submitting template '${template.name}' (locale: ${locale}) to ${providerName} with category: ${category}`,
     );
 
-    // Determine if this is an enhanced template (has components) or legacy
-    const components = localeData.components as TemplateComponentsDto | null;
+    // Use the draft version's content as the authoritative source for submission.
+    // While syncContentToLocale keeps locale in sync, the version is the source of truth.
+    const draftContent = draftVersion.content as Record<string, any> | null;
+    const components = (draftContent?.components ??
+      localeData.components) as TemplateComponentsDto | null;
     const isEnhancedTemplate = !!components;
 
     let result;
@@ -603,12 +642,28 @@ export class TemplateApprovalService {
         };
       }
 
-      result = await provider.submitEnhancedTemplate({
+      const submissionRequest = {
         templateName: template.name,
         locale: localeData.locale,
         category,
         components,
-      });
+      };
+
+      // If the template already exists on Meta (has a metaTemplateId), use the
+      // edit endpoint. Otherwise, create a new template. This is essential for
+      // submitting new versions of already-approved templates.
+      const existingMetaId = localeData.metaTemplateId;
+      if (existingMetaId && provider.editEnhancedTemplate) {
+        this.logger.log(
+          `Template already exists on Meta (ID: ${existingMetaId}). Using edit endpoint.`,
+        );
+        result = await provider.editEnhancedTemplate(
+          existingMetaId,
+          submissionRequest,
+        );
+      } else {
+        result = await provider.submitEnhancedTemplate(submissionRequest);
+      }
     } else {
       // Legacy template submission (backward compatible)
       this.logger.log(
@@ -621,56 +676,51 @@ export class TemplateApprovalService {
       );
     }
 
-    // Update template locale with submission result
+    // Update template locale with submission result.
+    // When an active approved version exists (e.g. v1 approved, submitting v2),
+    // preserve the locale's approvalStatus so the template still appears "approved"
+    // in the UI. Only update approval status for first-time submissions.
+    const localeUpdateData: Record<string, any> = {
+      metaTemplateId: result.providerId,
+      metaResponse: result.providerResponse,
+      submittedAt: new Date(),
+      updatedAt: new Date(),
+      category,
+    };
+
+    if (!hasApprovedActiveVersion) {
+      localeUpdateData.approvalStatus = result.status;
+    }
+
     await db
       .update(templateLocales)
-      .set({
-        approvalStatus: result.status,
-        metaTemplateId: result.providerId,
-        metaResponse: result.providerResponse,
-        submittedAt: new Date(),
-        updatedAt: new Date(),
-        // Update category in case it was changed
-        category,
-      })
+      .set(localeUpdateData)
       .where(eq(templateLocales.id, localeData.id));
 
-    // Also update the draft version status (the latest draft for this locale)
-    // This ensures the version history shows the correct status
-    const draftVersion = await db.query.templateVersions.findFirst({
-      where: and(
-        eq(templateVersions.templateId, templateId),
-        eq(templateVersions.localeId, localeData.id),
-        eq(templateVersions.status, 'draft'),
-      ),
-      orderBy: [desc(templateVersions.versionNumber)],
-    });
+    // Update the draft version status — draftVersion was resolved earlier
+    const versionStatus =
+      result.status === TemplateApprovalStatus.PENDING
+        ? 'pending_approval'
+        : result.status === TemplateApprovalStatus.APPROVED
+          ? 'approved'
+          : result.status === TemplateApprovalStatus.REJECTED
+            ? 'rejected'
+            : 'draft';
 
-    if (draftVersion) {
-      const versionStatus =
-        result.status === TemplateApprovalStatus.PENDING
-          ? 'pending_approval'
-          : result.status === TemplateApprovalStatus.APPROVED
-            ? 'approved'
-            : result.status === TemplateApprovalStatus.REJECTED
-              ? 'rejected'
-              : 'draft';
+    await db
+      .update(templateVersions)
+      .set({
+        status: versionStatus,
+        providerId: result.providerId,
+        providerName: providerName,
+        providerResponse: result.providerResponse,
+        updatedAt: new Date(),
+      })
+      .where(eq(templateVersions.id, draftVersion.id));
 
-      await db
-        .update(templateVersions)
-        .set({
-          status: versionStatus,
-          providerId: result.providerId,
-          providerName: providerName,
-          providerResponse: result.providerResponse,
-          updatedAt: new Date(),
-        })
-        .where(eq(templateVersions.id, draftVersion.id));
-
-      this.logger.log(
-        `Updated version ${draftVersion.id} status to ${versionStatus}`,
-      );
-    }
+    this.logger.log(
+      `Updated version ${draftVersion.id} (v${draftVersion.versionNumber}) status to ${versionStatus}`,
+    );
 
     if (result.success) {
       this.logger.log(
@@ -716,10 +766,25 @@ export class TemplateApprovalService {
     const qualityRating = (localeData.qualityRating ||
       'pending') as TemplateQualityRating;
 
-    // Determine if template can be submitted or resubmitted
-    const canSubmit =
-      status === TemplateApprovalStatus.DRAFT ||
-      status === TemplateApprovalStatus.REJECTED;
+    // Version-aware submission check:
+    // Even when locale status is "approved" (from active version), submission is allowed
+    // if there's a draft version ready to submit.
+    const hasDraftVersion = await db.query.templateVersions.findFirst({
+      where: and(
+        eq(templateVersions.templateId, templateId),
+        eq(templateVersions.localeId, localeData.id),
+        eq(templateVersions.status, 'draft'),
+      ),
+    });
+    const hasPendingVersion = await db.query.templateVersions.findFirst({
+      where: and(
+        eq(templateVersions.templateId, templateId),
+        eq(templateVersions.localeId, localeData.id),
+        eq(templateVersions.status, 'pending_approval'),
+      ),
+    });
+
+    const canSubmit = !!hasDraftVersion && !hasPendingVersion;
     const canResubmit =
       status === TemplateApprovalStatus.REJECTED ||
       status === TemplateApprovalStatus.DISABLED;

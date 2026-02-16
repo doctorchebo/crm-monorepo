@@ -720,6 +720,10 @@ export function componentsToDto(
     } else if (isLocationHeader(components.header)) {
       dto.header = {
         format: "LOCATION",
+        latitude: components.header.latitude,
+        longitude: components.header.longitude,
+        name: components.header.name,
+        address: components.header.address,
       };
     }
   }

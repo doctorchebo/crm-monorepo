@@ -375,6 +375,16 @@ export interface IMessagingProvider {
   ): Promise<TemplateSubmissionResult>;
 
   /**
+   * Edit an existing template on the provider (for submitting new versions
+   * of templates that already exist remotely).
+   * Falls back to submitEnhancedTemplate if not implemented.
+   */
+  editEnhancedTemplate?(
+    providerTemplateId: string,
+    request: EnhancedTemplateSubmissionRequest,
+  ): Promise<TemplateSubmissionResult>;
+
+  /**
    * Get the current status of a template
    */
   getTemplateStatus(templateId: string): Promise<TemplateStatusResult>;

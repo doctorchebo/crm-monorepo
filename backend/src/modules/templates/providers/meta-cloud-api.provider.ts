@@ -417,6 +417,86 @@ export class MetaCloudApiProvider implements IMessagingProvider {
   }
 
   /**
+   * Edit an existing template on Meta (for submitting new versions).
+   * Uses POST /{template_id} instead of POST /{waba_id}/message_templates.
+   * The edit endpoint only accepts `category` and `components` — no name/language.
+   */
+  async editEnhancedTemplate(
+    metaTemplateId: string,
+    request: EnhancedTemplateSubmissionRequest,
+  ): Promise<TemplateSubmissionResult> {
+    try {
+      const internalCategory = request.category as unknown as InternalCategory;
+
+      const transformed = this.componentTransformer.transform(
+        request.templateName,
+        request.locale,
+        request.components,
+        internalCategory,
+      );
+
+      const accessToken = this.getAccessToken();
+
+      // Edit endpoint: POST /{template_id}
+      const url = `${this.baseUrl}/${this.apiVersion}/${metaTemplateId}`;
+
+      // For edit, only send category + components (no name/language)
+      const editPayload = {
+        category: transformed.providerPayload.category,
+        components: transformed.providerPayload.components,
+      };
+
+      this.logger.log(
+        `Editing existing template '${request.templateName}' (Meta ID: ${metaTemplateId})`,
+      );
+      this.logger.debug(`Edit payload: ${JSON.stringify(editPayload)}`);
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(editPayload),
+      });
+
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        this.logger.error(
+          `Meta API edit error: ${JSON.stringify(responseData)}`,
+        );
+        const errorMessage = this.parseMetaError(responseData);
+        return {
+          success: false,
+          status: TemplateApprovalStatus.DRAFT,
+          error: errorMessage,
+          providerResponse: responseData,
+        };
+      }
+
+      this.logger.log(
+        `Template edited successfully. ID: ${responseData.id || metaTemplateId}`,
+      );
+
+      return {
+        success: true,
+        providerId: responseData.id || metaTemplateId,
+        status: TemplateApprovalStatus.PENDING,
+        message: 'Template edit submitted for review',
+        providerResponse: responseData,
+      };
+    } catch (error) {
+      this.logger.error(`Failed to edit template: ${error.message}`);
+      return {
+        success: false,
+        status: TemplateApprovalStatus.DRAFT,
+        error: error.message,
+      };
+    }
+  }
+
+  /**
    * Parse Meta API error response into user-friendly message
    */
   private parseMetaError(responseData: any): string {

@@ -121,10 +121,22 @@ export interface DocumentHeader extends BaseHeader {
 }
 
 /**
- * Location header - coordinates provided at send time
+ * Location header - coordinates set at template creation time
+ * and used to pre-populate send fields.
+ *
+ * Per Meta docs, location values are provided when sending the template,
+ * but we store defaults so the user doesn't have to re-enter them each time.
  */
 export interface LocationHeader extends BaseHeader {
   format: HeaderFormat.LOCATION;
+  /** Latitude in decimal degrees (e.g. 37.4421) */
+  latitude?: number;
+  /** Longitude in decimal degrees (e.g. -122.1616) */
+  longitude?: number;
+  /** Human-readable location name (e.g. "Philz Coffee") */
+  name?: string;
+  /** Street address (e.g. "101 Forest Ave, Palo Alto, CA 94301") */
+  address?: string;
 }
 
 /**

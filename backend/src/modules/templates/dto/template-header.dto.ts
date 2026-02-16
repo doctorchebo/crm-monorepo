@@ -73,4 +73,40 @@ export class TemplateHeaderDto {
   @IsString()
   @MaxLength(255)
   filename?: string;
+
+  // ── Location header fields ─────────────────────────────────────────
+  // Stored at template creation time so they pre-populate the send modal.
+  // At send time the values are passed as header parameters to Meta.
+
+  /**
+   * Latitude in decimal degrees (e.g. 37.4421)
+   */
+  @ValidateIf((o) => o.format === HeaderFormat.LOCATION)
+  @IsOptional()
+  latitude?: number;
+
+  /**
+   * Longitude in decimal degrees (e.g. -122.1616)
+   */
+  @ValidateIf((o) => o.format === HeaderFormat.LOCATION)
+  @IsOptional()
+  longitude?: number;
+
+  /**
+   * Human-readable location name (e.g. "Philz Coffee")
+   */
+  @ValidateIf((o) => o.format === HeaderFormat.LOCATION)
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  name?: string;
+
+  /**
+   * Street address (e.g. "101 Forest Ave, Palo Alto, CA 94301")
+   */
+  @ValidateIf((o) => o.format === HeaderFormat.LOCATION)
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  address?: string;
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import LocationPicker, { type LocationData } from "@/components/location/location-picker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -195,22 +196,6 @@ const MEDIA_HEADER_VAR_NAMES = new Set([
 function isMediaHeaderVariable(name: string): boolean {
   return MEDIA_HEADER_VAR_NAMES.has(name);
 }
-
-/** Pretty labels for header variable inputs */
-const HEADER_VAR_LABELS: Record<string, string> = {
-  header_location_latitude: "Latitude",
-  header_location_longitude: "Longitude",
-  header_location_name: "Location Name",
-  header_location_address: "Address",
-};
-
-/** Placeholder text for header variable inputs */
-const HEADER_VAR_PLACEHOLDERS: Record<string, string> = {
-  header_location_latitude: "e.g. 37.7749",
-  header_location_longitude: "e.g. -122.4194",
-  header_location_name: "e.g. San Francisco Office",
-  header_location_address: "e.g. 123 Market St, SF, CA",
-};
 
 // ============================================================================
 // Sub-component: Variable Source Selector
@@ -943,6 +928,51 @@ export function TemplateSendModal({
     [],
   );
 
+  // ── LocationPicker integration ──────────────────────────────────────
+  // Batch-update all 4 location header variables when the user picks a
+  // location via the interactive map or search.
+  const handleLocationPickerChange = useCallback((loc: LocationData) => {
+    setVariableStates((prev) => {
+      const updates: Record<string, string> = {
+        header_location_latitude: String(loc.latitude),
+        header_location_longitude: String(loc.longitude),
+        header_location_name: loc.name ?? "",
+        header_location_address: loc.address ?? "",
+      };
+      const next = prev.map((vs) =>
+        vs.name in updates
+          ? {
+              ...vs,
+              freeformValue: updates[vs.name],
+              sourceMode: "freeform" as SourceMode,
+            }
+          : vs,
+      );
+      variableStatesRef.current = next;
+      return next;
+    });
+    // Trigger a debounced resolve so the preview updates
+    clearTimeout(freeformTimerRef.current);
+    freeformTimerRef.current = setTimeout(
+      () => doResolveRef.current?.(),
+      RESOLVE_DEBOUNCE_MS,
+    );
+  }, []);
+
+  /** Derive LocationPicker's `value` from the current variable states */
+  const locationPickerValue = useMemo<Partial<LocationData>>(() => {
+    const getVal = (name: string) =>
+      variableStates.find((v) => v.name === name)?.freeformValue || "";
+    const lat = parseFloat(getVal("header_location_latitude"));
+    const lng = parseFloat(getVal("header_location_longitude"));
+    return {
+      latitude: isNaN(lat) ? undefined : lat,
+      longitude: isNaN(lng) ? undefined : lng,
+      name: getVal("header_location_name") || undefined,
+      address: getVal("header_location_address") || undefined,
+    };
+  }, [variableStates]);
+
   /** Send the template */
   const handleSend = useCallback(async () => {
     if (!template || !selectedLocale) return;
@@ -1151,71 +1181,16 @@ export function TemplateSendModal({
                   <MapPin className="h-4 w-4 text-muted-foreground" />
                   <h4 className="text-sm font-medium">Location</h4>
                 </div>
-                <div className="rounded-lg border overflow-hidden">
-                  {/* Live map preview */}
-                  {headerPreviewProps && (
-                    <div className="px-3 pt-3 pb-1">
-                      <TemplateHeaderMedia
-                        {...headerPreviewProps}
-                        variant="preview"
-                      />
-                    </div>
-                  )}
-                  {/* Coordinate and address inputs */}
-                  <div className="p-3 space-y-2">
-                    <div className="grid grid-cols-2 gap-2">
-                      {locationVars
-                        .filter(
-                          (vs) =>
-                            vs.name === "header_location_latitude" ||
-                            vs.name === "header_location_longitude",
-                        )
-                        .map((vs) => (
-                          <div key={vs.name}>
-                            <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
-                              {HEADER_VAR_LABELS[vs.name]}
-                            </label>
-                            <Input
-                              value={vs.freeformValue}
-                              onChange={(e) =>
-                                handleVariableChange(vs.name, {
-                                  freeformValue: e.target.value,
-                                })
-                              }
-                              placeholder={HEADER_VAR_PLACEHOLDERS[vs.name]}
-                              className="h-7 text-xs"
-                            />
-                          </div>
-                        ))}
-                    </div>
-                    {locationVars
-                      .filter(
-                        (vs) =>
-                          vs.name === "header_location_name" ||
-                          vs.name === "header_location_address",
-                      )
-                      .map((vs) => (
-                        <div key={vs.name}>
-                          <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
-                            {HEADER_VAR_LABELS[vs.name]}{" "}
-                            <span className="font-normal text-muted-foreground/60">
-                              (optional)
-                            </span>
-                          </label>
-                          <Input
-                            value={vs.freeformValue}
-                            onChange={(e) =>
-                              handleVariableChange(vs.name, {
-                                freeformValue: e.target.value,
-                              })
-                            }
-                            placeholder={HEADER_VAR_PLACEHOLDERS[vs.name]}
-                            className="h-7 text-xs"
-                          />
-                        </div>
-                      ))}
-                  </div>
-                </div>
+                <LocationPicker
+                  value={locationPickerValue}
+                  onChange={handleLocationPickerChange}
+                  mapHeight="h-48"
+                  showOptionalFields={true}
+                  showSearch={true}
+                  showCurrentLocation={true}
+                  showCoordinates={false}
+                  size="sm"
+                />
               </div>
             )}
 

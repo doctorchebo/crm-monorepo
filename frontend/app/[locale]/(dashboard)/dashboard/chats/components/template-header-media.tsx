@@ -25,7 +25,7 @@ import {
   MapPin,
   Video,
 } from "lucide-react";
-import { memo, useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -60,17 +60,136 @@ export interface TemplateHeaderMediaProps {
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
-/** Build an OpenStreetMap static tile URL for a map preview */
-function buildStaticMapUrl(
-  lat: number,
-  lng: number,
-  width = 400,
-  height = 200,
-  zoom = 15,
-): string {
-  // Use OpenStreetMap's tile layer via a static image proxy.
-  // This is the most reliable free option that doesn't require API keys.
-  return `https://staticmap.openstreetmap.de/staticmap.php?center=${lat},${lng}&zoom=${zoom}&size=${width}x${height}&markers=${lat},${lng},red-pushpin`;
+/**
+ * Convert lat/lng + zoom to OSM tile coordinates.
+ * Returns the tile x/y *and* the pixel offset of the point within that tile.
+ */
+function latLngToTile(lat: number, lng: number, zoom: number) {
+  const n = Math.pow(2, zoom);
+  const xTile = Math.floor(((lng + 180) / 360) * n);
+  const latRad = (lat * Math.PI) / 180;
+  const yTile = Math.floor(
+    ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n,
+  );
+  // Pixel offset within the 256×256 tile
+  const xPixel = Math.floor((((lng + 180) / 360) * n - xTile) * 256);
+  const yPixel = Math.floor(
+    (((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) *
+      n -
+      yTile) *
+      256,
+  );
+  return { xTile, yTile, xPixel, yPixel };
+}
+
+/**
+ * Inline static map preview using raw OSM tile URLs.
+ * Renders a 3×2 tile grid (768×512) centred on the coordinate, clipped to the
+ * container size, with a CSS pin marker. No external static-map service needed.
+ */
+function StaticMapPreview({
+  lat,
+  lng,
+  alt,
+  className,
+  onError,
+}: {
+  lat: number;
+  lng: number;
+  alt: string;
+  className?: string;
+  onError?: () => void;
+}) {
+  const zoom = 15;
+  const tileSize = 256;
+  const cols = 3; // tiles horizontally
+  const rows = 2; // tiles vertically
+
+  const { xTile, yTile, xPixel, yPixel } = useMemo(
+    () => latLngToTile(lat, lng, zoom),
+    [lat, lng],
+  );
+
+  // Offset so the target point is centred in the visible area.
+  // The grid is cols*256 × rows*256.  We want (xPixel, yPixel) of the
+  // centre tile (index 1,0 in a 3×2 grid) to land at container centre.
+  // Container will be w-full × h-32 (128px). Grid = 768×512.
+  const gridW = cols * tileSize;
+  const gridH = rows * tileSize;
+  // Centre tile is at col=1, row=0 ⇒ pixel origin (256, 0) within grid.
+  const pointInGridX = tileSize + xPixel; // col-offset + intra-tile
+  const pointInGridY = 0 + yPixel;
+
+  // We want pointInGrid to sit at 50% of the container.
+  // Use CSS translate to shift the grid so the point is centred.
+  const translateX = -(pointInGridX - gridW / 2);
+  const translateY = -(pointInGridY - gridH / 2);
+
+  // Build tile URLs — 3 columns × 2 rows centred on the target tile
+  const tiles: { x: number; y: number; url: string }[] = [];
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const tx = xTile + col - 1; // col offset: -1, 0, +1
+      const ty = yTile + row; // row offset: 0, +1
+      tiles.push({
+        x: col * tileSize,
+        y: row * tileSize,
+        url: `https://tile.openstreetmap.org/${zoom}/${tx}/${ty}.png`,
+      });
+    }
+  }
+
+  const [hasError, setHasError] = useState(false);
+  const handleTileError = useCallback(() => {
+    setHasError(true);
+    onError?.();
+  }, [onError]);
+
+  if (hasError) return null; // let parent show fallback
+
+  return (
+    <div
+      className={cn("relative overflow-hidden", className)}
+      style={{ minHeight: 128 }}
+      role="img"
+      aria-label={alt}
+    >
+      {/* Tile grid */}
+      <div
+        className="absolute"
+        style={{
+          width: gridW,
+          height: gridH,
+          left: "50%",
+          top: "50%",
+          transform: `translate(${translateX - gridW / 2}px, ${translateY - gridH / 2}px)`,
+        }}
+      >
+        {tiles.map((t) => (
+          <img
+            key={`${t.x}-${t.y}`}
+            src={t.url}
+            alt=""
+            draggable={false}
+            loading="lazy"
+            onError={handleTileError}
+            style={{
+              position: "absolute",
+              left: t.x,
+              top: t.y,
+              width: tileSize,
+              height: tileSize,
+            }}
+          />
+        ))}
+      </div>
+
+      {/* Centre pin marker */}
+      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-full z-10 pointer-events-none">
+        <MapPin className="h-7 w-7 text-red-500 drop-shadow-md fill-red-500/30" />
+      </div>
+    </div>
+  );
 }
 
 /** Validate that a URL looks usable for an <img>/<video> src */
@@ -308,12 +427,12 @@ export const TemplateHeaderMedia = memo(function TemplateHeaderMedia({
             rel="noopener noreferrer"
             className="block relative group cursor-pointer"
           >
-            <img
-              src={buildStaticMapUrl(lat!, lng!)}
+            <StaticMapPreview
+              lat={lat!}
+              lng={lng!}
               alt={locationName || "Location"}
-              className="w-full h-32 object-cover"
+              className="w-full h-32"
               onError={handleMapError}
-              loading="lazy"
             />
             {/* Hover overlay */}
             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
