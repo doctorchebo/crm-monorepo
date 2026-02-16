@@ -12,8 +12,8 @@
  */
 
 import { backendApi, PinnedMessageResponse } from "@/lib/api/endpoints";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { io, Socket } from "socket.io-client";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Socket } from "socket.io-client";
 import type { Message, PinDuration } from "../types";
 
 interface PinAddedEvent extends PinnedMessageResponse {
@@ -32,6 +32,8 @@ interface UsePinsOptions {
   chatId: string | null;
   /** Whether the hook is enabled */
   enabled?: boolean;
+  /** Shared socket instance from useChatNotifications (avoids duplicate connections) */
+  socket?: Socket | null;
 }
 
 interface UsePinsReturn {
@@ -77,25 +79,35 @@ interface UsePinsReturn {
  * Hook to manage pinned messages with real-time updates
  */
 export function usePins(options: UsePinsOptions): UsePinsReturn {
-  const { chatId, enabled = true } = options;
+  const { chatId, enabled = true, socket } = options;
 
-  const socketRef = useRef<Socket | null>(null);
   const [pinnedMessages, setPinnedMessages] = useState<PinnedMessageResponse[]>(
     [],
   );
   const [currentPinIndex, setCurrentPinIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
-  const [isConnected, setIsConnected] = useState(false);
 
-  // Memoized set of pinned message IDs
-  const pinnedMessageIds = new Set(pinnedMessages.map((p) => p.messageId));
+  // Use a ref for chatId in socket handlers to prevent stale closures
+  const chatIdRef = useRef<string | null>(chatId);
+  useEffect(() => {
+    chatIdRef.current = chatId;
+  }, [chatId]);
 
-  // Pin count info
-  const pinCount = {
-    count: pinnedMessages.length,
-    maxPins: 3,
-    canPinMore: pinnedMessages.length < 3,
-  };
+  // Memoized set of pinned message IDs — only recreated when pinnedMessages changes
+  const pinnedMessageIds = useMemo(
+    () => new Set(pinnedMessages.map((p) => p.messageId)),
+    [pinnedMessages],
+  );
+
+  // Pin count info — memoized to avoid object recreation
+  const pinCount = useMemo(
+    () => ({
+      count: pinnedMessages.length,
+      maxPins: 3,
+      canPinMore: pinnedMessages.length < 3,
+    }),
+    [pinnedMessages.length],
+  );
 
   // Load pinned messages for a chat
   const loadPinnedMessages = useCallback(async (chatIdToLoad: string) => {
@@ -126,42 +138,21 @@ export function usePins(options: UsePinsOptions): UsePinsReturn {
     loadPinnedMessages(chatId);
   }, [chatId, enabled, loadPinnedMessages]);
 
-  // Connect to WebSocket for real-time updates
+  // Derive isConnected from the shared socket
+  const isConnected = !!socket?.connected;
+
+  // Listen for pin events on the shared socket
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !socket) return;
 
-    const socket = io(
-      process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001",
-      {
-        transports: ["websocket", "polling"],
-        reconnection: true,
-        reconnectionAttempts: 10,
-        reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
-      },
-    );
-
-    socketRef.current = socket;
-
-    socket.on("connect", () => {
-      setIsConnected(true);
-    });
-
-    socket.on("disconnect", (reason) => {
-      setIsConnected(false);
-    });
-
-    // Handle pin added
-    socket.on("pin:added", (event: PinAddedEvent) => {
-      // Only update if it's for our current chat
-      if (event.chatId !== chatId) return;
+    const handlePinAdded = (event: PinAddedEvent) => {
+      const currentChatId = chatIdRef.current;
+      if (event.chatId !== currentChatId) return;
 
       setPinnedMessages((prev) => {
-        // Check if already exists
         const exists = prev.some((p) => p.messageId === event.messageId);
         if (exists) return prev;
 
-        // Add new pin, sort by pinnedAt
         const updated = [...prev, event].sort(
           (a, b) =>
             new Date(a.pinnedAt).getTime() - new Date(b.pinnedAt).getTime(),
@@ -169,31 +160,30 @@ export function usePins(options: UsePinsOptions): UsePinsReturn {
 
         return updated;
       });
-    });
+    };
 
-    // Handle pin removed
-    socket.on("pin:removed", (event: PinRemovedEvent) => {
-      // Only update if it's for our current chat
-      if (event.chatId !== chatId) return;
+    const handlePinRemoved = (event: PinRemovedEvent) => {
+      const currentChatId = chatIdRef.current;
+      if (event.chatId !== currentChatId) return;
 
       setPinnedMessages((prev) => {
         const updated = prev.filter((p) => p.messageId !== event.messageId);
         return updated;
       });
 
-      // Adjust current index if needed
       setCurrentPinIndex((prev) =>
         Math.min(prev, Math.max(0, pinnedMessages.length - 2)),
       );
-    });
+    };
+
+    socket.on("pin:added", handlePinAdded);
+    socket.on("pin:removed", handlePinRemoved);
 
     return () => {
-      // Firefox fix: Only disconnect if connection is open
-      if (socket.connected) {
-        socket.disconnect();
-      }
+      socket.off("pin:added", handlePinAdded);
+      socket.off("pin:removed", handlePinRemoved);
     };
-  }, [enabled, chatId]);
+  }, [enabled, socket, pinnedMessages.length]);
 
   // Pin a message
   const pinMessage = useCallback(

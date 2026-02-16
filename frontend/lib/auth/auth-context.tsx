@@ -172,24 +172,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let mounted = true;
 
     const checkAuth = async () => {
-      console.debug("[AuthContext] Starting initial authentication check");
-
       // Check token status using tracking cookies
       const isAccessValid = TokenManager.isAccessTokenValid();
       const isRefreshValid = TokenManager.isRefreshTokenValid();
       const hasTrackingCookies = TokenManager.hasTrackingCookies();
 
-      console.debug("[AuthContext] Token status:", {
-        accessTokenValid: isAccessValid,
-        refreshTokenValid: isRefreshValid,
-        hasTrackingCookies,
-      });
-
       // Case 1: Access token is valid - user is authenticated
       if (isAccessValid) {
-        console.debug(
-          "[AuthContext] Access token is valid, user is authenticated",
-        );
         if (mounted) {
           setState({
             status: "authenticated",
@@ -206,10 +195,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Case 2: Access token expired but refresh token is valid - attempt silent refresh
       // This is the "next day" scenario
       if (isRefreshValid) {
-        console.debug(
-          "[AuthContext] Access token expired but refresh token valid - attempting silent refresh",
-        );
-
         const success = await attemptSilentRefresh();
         if (success && mounted) {
           setState({
@@ -227,10 +212,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // This happens if the tracking cookies were deleted but the actual tokens still exist
       // Attempt a "blind" refresh to see if the server recognizes our HTTP-only refresh token
       if (!hasTrackingCookies) {
-        console.debug(
-          "[AuthContext] No tracking cookies found - attempting blind refresh in case HTTP-only cookies exist",
-        );
-
         const success = await attemptSilentRefresh();
         if (success && mounted) {
           setState({
@@ -245,9 +226,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       // Case 4: No valid tokens and refresh failed - user needs to log in
-      console.debug(
-        "[AuthContext] No valid tokens or refresh failed - user is unauthenticated",
-      );
       if (mounted) {
         setState({
           status: "unauthenticated",

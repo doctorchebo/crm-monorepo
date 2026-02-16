@@ -272,12 +272,13 @@ export class TokenManager {
 
   /**
    * Start automatic token refresh checking
-   * Refreshes token before it expires to prevent interruptions
+   * Refreshes token before it expires to prevent interruptions.
+   * Idempotent: calling multiple times will NOT create duplicate intervals.
    */
   static startAutoRefreshCheck(): void {
-    // Clear any existing interval
+    // Already running — no-op to prevent duplicate intervals
     if (this.refreshCheckInterval) {
-      clearInterval(this.refreshCheckInterval);
+      return;
     }
 
     // Check every 30 seconds if refresh is needed
@@ -286,34 +287,19 @@ export class TokenManager {
 
       // If token expires in less than threshold, refresh it
       if (timeRemaining > 0 && timeRemaining <= REFRESH_THRESHOLD_SECONDS) {
-        console.debug(
-          "[TokenManager] Auto-refreshing token due to expiration threshold",
-          {
-            timeRemaining,
-            threshold: REFRESH_THRESHOLD_SECONDS,
-          },
-        );
-
-        const success = await this.refreshAccessToken();
-        if (!success) {
-          console.error("[TokenManager] Auto-refresh failed");
-        }
+        await this.refreshAccessToken();
       }
 
       // If token is already expired but refresh token is valid, attempt refresh
       if (this.isAccessTokenExpired() && this.isRefreshTokenValid()) {
-        console.warn("[TokenManager] Access token expired, attempting refresh");
         const success = await this.refreshAccessToken();
         if (!success) {
-          console.error(
+          console.warn(
             "[TokenManager] Could not refresh expired token - user may need to re-login",
           );
-          // Don't automatically redirect here - let the component handle it
         }
       }
     }, 30000); // Check every 30 seconds
-
-    console.debug("[TokenManager] Auto-refresh check started");
   }
 
   /**

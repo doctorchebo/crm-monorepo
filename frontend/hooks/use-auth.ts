@@ -35,38 +35,26 @@ export function useAuthProtection() {
   const router = useRouter();
   const { status, isLoading, isAuthenticated } = useAuthContext();
   const hasRedirected = useRef(false);
+  const hasStartedRefresh = useRef(false);
 
   useEffect(() => {
     // Don't do anything while loading - AuthContext is checking/refreshing tokens
     if (isLoading || status === "loading") {
-      console.debug(
-        "[useAuthProtection] Waiting for auth check to complete...",
-      );
       return;
     }
 
     // Only redirect once to prevent multiple redirects
     if (!isAuthenticated && !hasRedirected.current) {
       hasRedirected.current = true;
-      console.log(
-        "[useAuthProtection] User not authenticated after auth check, redirecting to login",
-      );
       router.push("/sign-in");
       return;
     }
 
-    // User is authenticated - ensure auto-refresh is running
-    if (isAuthenticated) {
-      console.debug(
-        "[useAuthProtection] User authenticated, starting auto-refresh",
-      );
+    // User is authenticated - ensure auto-refresh is running (once)
+    if (isAuthenticated && !hasStartedRefresh.current) {
+      hasStartedRefresh.current = true;
       TokenManager.startAutoRefreshCheck();
     }
-
-    return () => {
-      // Don't stop auto-refresh on unmount - it should persist during the session
-      // This is handled by logout action
-    };
   }, [status, isLoading, isAuthenticated, router]);
 
   // Return loading state so components can show a loading indicator

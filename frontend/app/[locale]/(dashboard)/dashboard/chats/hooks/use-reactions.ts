@@ -14,7 +14,7 @@
 
 import { backendApi } from "@/lib/api/endpoints";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { io, Socket } from "socket.io-client";
+import { Socket } from "socket.io-client";
 import type { MessageReaction } from "../types";
 
 interface ReactionAddedEvent {
@@ -57,6 +57,8 @@ interface UseReactionsOptions {
   enabled?: boolean;
   /** Current chat ID (for filtering customer reactions) */
   chatId?: string;
+  /** Shared socket instance from useChatNotifications (avoids duplicate connections) */
+  socket?: Socket | null;
 }
 
 /**
@@ -100,16 +102,20 @@ interface UseReactionsReturn {
 export function useReactions(
   options: UseReactionsOptions = {},
 ): UseReactionsReturn {
-  const { currentUserId, currentUserName, enabled = true, chatId } = options;
+  const {
+    currentUserId,
+    currentUserName,
+    enabled = true,
+    chatId,
+    socket,
+  } = options;
 
-  const socketRef = useRef<Socket | null>(null);
   const [reactionsMap, setReactionsMap] = useState<ReactionsMap>({});
   const [customerReactionsMap, setCustomerReactionsMap] =
     useState<CustomerReactionsMap>({});
   const [animatingReactionIds, setAnimatingReactionIds] = useState<Set<string>>(
     new Set(),
   );
-  const [isConnected, setIsConnected] = useState(false);
 
   // Track loaded message IDs to avoid re-fetching
   const loadedMessageIdsRef = useRef<Set<string>>(new Set());
@@ -118,6 +124,7 @@ export function useReactions(
   // This prevents stale closures in socket event handlers
   const chatIdRef = useRef<string | undefined>(chatId);
   const currentUserIdRef = useRef<number | undefined>(currentUserId);
+  const reactionsMapRef = useRef<ReactionsMap>(reactionsMap);
 
   // Keep refs in sync with props
   useEffect(() => {
@@ -128,49 +135,26 @@ export function useReactions(
     currentUserIdRef.current = currentUserId;
   }, [currentUserId]);
 
-  // Connect to WebSocket for real-time updates
   useEffect(() => {
-    if (!enabled) return;
+    reactionsMapRef.current = reactionsMap;
+  }, [reactionsMap]);
 
-    console.log("[useReactions] Connecting to WebSocket...");
+  // Derive isConnected from the shared socket
+  const isConnected = !!socket?.connected;
 
-    const socket = io(
-      process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001",
-      {
-        transports: ["websocket", "polling"],
-        reconnection: true,
-        reconnectionAttempts: 10,
-        reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
-      },
-    );
-
-    socketRef.current = socket;
-
-    socket.on("connect", () => {
-      console.log("[useReactions] Connected");
-      setIsConnected(true);
-    });
-
-    socket.on("disconnect", (reason) => {
-      console.log("[useReactions] Disconnected:", reason);
-      setIsConnected(false);
-    });
+  // Listen for reaction events on the shared socket
+  useEffect(() => {
+    if (!enabled || !socket) return;
 
     // Handle reaction added/updated
-    socket.on("reaction:added", (event: ReactionAddedEvent) => {
-      console.log("[useReactions] Reaction added:", event);
-
+    const handleReactionAdded = (event: ReactionAddedEvent) => {
       // Skip if this is our own reaction (we already applied optimistically)
-      // Use ref to get current value to avoid stale closure
       if (event.userId === currentUserIdRef.current) {
         return;
       }
 
       setReactionsMap((prev) => {
         const messageReactions = prev[event.messageId] || [];
-
-        // Check if this user already has a reaction
         const existingIndex = messageReactions.findIndex(
           (r) => r.userId === event.userId,
         );
@@ -205,16 +189,11 @@ export function useReactions(
         return { ...prev, [event.messageId]: updated };
       });
 
-      // Trigger animation
       triggerAnimation(event.messageId);
-    });
+    };
 
     // Handle reaction removed
-    socket.on("reaction:removed", (event: ReactionRemovedEvent) => {
-      console.log("[useReactions] Reaction removed:", event);
-
-      // Skip if this is our own reaction (we already applied optimistically)
-      // Use ref to get current value to avoid stale closure
+    const handleReactionRemoved = (event: ReactionRemovedEvent) => {
       if (event.userId === currentUserIdRef.current) {
         return;
       }
@@ -229,29 +208,22 @@ export function useReactions(
 
         return { ...prev, [event.messageId]: updated };
       });
-    });
+    };
 
     // Handle customer reaction (from WhatsApp user)
-    // These are different from CRM user reactions - they come from the contact
-    socket.on("customer-reaction", (event: CustomerReactionEvent) => {
-      // Use ref to get current chatId to avoid stale closure
+    const handleCustomerReaction = (event: CustomerReactionEvent) => {
       const currentChatId = chatIdRef.current;
 
-      // Only process reactions for the current chat
-      // Use ref value to get the current chatId (not stale closure)
       if (currentChatId && event.chatId !== currentChatId) {
         return;
       }
 
       if (event.action === "removed" || !event.emoji) {
-        // Customer removed their reaction
         setCustomerReactionsMap((prev) => ({
           ...prev,
           [event.messageId]: null,
         }));
       } else {
-        // Customer added/updated their reaction
-        // At this point, event.emoji is guaranteed to be non-null
         const emoji = event.emoji;
         setCustomerReactionsMap((prev) => ({
           ...prev,
@@ -263,37 +235,58 @@ export function useReactions(
           },
         }));
 
-        // Trigger animation
         triggerAnimation(event.messageId);
       }
-    });
+    };
+
+    socket.on("reaction:added", handleReactionAdded);
+    socket.on("reaction:removed", handleReactionRemoved);
+    socket.on("customer-reaction", handleCustomerReaction);
 
     return () => {
-      // Firefox fix: Only disconnect if connection is open
-      if (socket.connected) {
-        socket.disconnect();
-      }
+      socket.off("reaction:added", handleReactionAdded);
+      socket.off("reaction:removed", handleReactionRemoved);
+      socket.off("customer-reaction", handleCustomerReaction);
     };
-  }, [enabled]); // Only depend on enabled - use refs for other values to avoid stale closures
+  }, [enabled, socket]); // Only depend on enabled and socket identity
 
   /**
-   * Trigger pop animation for a message's reaction
+   * Trigger pop animation for a message's reaction.
+   * Uses a ref to track active timers so they can be cleaned up.
    */
+  const animationTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map(),
+  );
+
   const triggerAnimation = useCallback((messageId: string) => {
+    // Clear any existing timer for this message to avoid duplicates
+    const existingTimer = animationTimersRef.current.get(messageId);
+    if (existingTimer) clearTimeout(existingTimer);
+
     setAnimatingReactionIds((prev) => {
       const updated = new Set(prev);
       updated.add(messageId);
       return updated;
     });
 
-    // Clear animation after it completes
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      animationTimersRef.current.delete(messageId);
       setAnimatingReactionIds((prev) => {
         const updated = new Set(prev);
         updated.delete(messageId);
         return updated;
       });
-    }, 350); // Match CSS animation duration + buffer
+    }, 350);
+
+    animationTimersRef.current.set(messageId, timer);
+  }, []);
+
+  // Cleanup animation timers on unmount
+  useEffect(() => {
+    return () => {
+      animationTimersRef.current.forEach((timer) => clearTimeout(timer));
+      animationTimersRef.current.clear();
+    };
   }, []);
 
   /**
@@ -335,26 +328,27 @@ export function useReactions(
   }, []);
 
   /**
-   * Handle reaction selection (add, update, or toggle off)
+   * Handle reaction selection (add, update, or toggle off).
+   * Uses reactionsMapRef to read current state without depending on reactionsMap,
+   * preventing this callback from being recreated whenever reactions change.
    */
   const handleReactionSelect = useCallback(
     async (messageId: string, emoji: string) => {
-      if (!currentUserId) {
+      const userId = currentUserIdRef.current;
+      if (!userId) {
         console.warn("[useReactions] No currentUserId, cannot add reaction");
         return;
       }
 
-      const existingReactions = reactionsMap[messageId] || [];
-      const userReaction = existingReactions.find(
-        (r) => r.userId === currentUserId,
-      );
+      const existingReactions = reactionsMapRef.current[messageId] || [];
+      const userReaction = existingReactions.find((r) => r.userId === userId);
 
       // If clicking the same emoji, remove it
       if (userReaction?.emoji === emoji) {
         // Optimistic removal
         setReactionsMap((prev) => {
           const updated = (prev[messageId] || []).filter(
-            (r) => r.userId !== currentUserId,
+            (r) => r.userId !== userId,
           );
           return { ...prev, [messageId]: updated };
         });
@@ -378,7 +372,7 @@ export function useReactions(
       const optimisticReaction: MessageReaction = {
         id: userReaction?.id || -Date.now(),
         messageId,
-        userId: currentUserId,
+        userId,
         emoji,
         userName: currentUserName,
         createdAt: userReaction?.createdAt || new Date().toISOString(),
@@ -387,7 +381,7 @@ export function useReactions(
 
       setReactionsMap((prev) => {
         const existing = prev[messageId] || [];
-        const withoutUser = existing.filter((r) => r.userId !== currentUserId);
+        const withoutUser = existing.filter((r) => r.userId !== userId);
         return {
           ...prev,
           [messageId]: [...withoutUser, optimisticReaction],
@@ -403,9 +397,7 @@ export function useReactions(
         // Update with actual server response
         setReactionsMap((prev) => {
           const existing = prev[messageId] || [];
-          const withoutUser = existing.filter(
-            (r) => r.userId !== currentUserId,
-          );
+          const withoutUser = existing.filter((r) => r.userId !== userId);
           return {
             ...prev,
             [messageId]: [
@@ -440,7 +432,7 @@ export function useReactions(
         });
       }
     },
-    [currentUserId, currentUserName, reactionsMap, triggerAnimation],
+    [currentUserName, triggerAnimation],
   );
 
   /**

@@ -26,7 +26,7 @@ interface PaginationState {
   chatId: string | null;
 }
 
-interface UseChatStateReturn {
+export interface UseChatStateReturn {
   // Chat state
   chats: Chat[];
   setChats: React.Dispatch<React.SetStateAction<Chat[]>>;

@@ -262,6 +262,7 @@ export function useScrollToBottom(
       let safetyTimeoutId: ReturnType<typeof setTimeout> | null = null;
       let mutationObserver: MutationObserver | null = null;
       let resizeObserver: ResizeObserver | null = null;
+      let resizeRafId: number | null = null;
 
       // ============================================================
       // HELPER: Check if user is near bottom (uses shared utility)
@@ -310,6 +311,7 @@ export function useScrollToBottom(
         // Disconnect observers
         mutationObserver?.disconnect();
         resizeObserver?.disconnect();
+        if (resizeRafId !== null) cancelAnimationFrame(resizeRafId);
 
         pendingMedia.clear();
       };
@@ -630,12 +632,16 @@ export function useScrollToBottom(
 
       // Set up ResizeObserver as backup for content size changes
       // This catches cases where media dimensions change after load
-      // We scroll on ANY resize if user hasn't scrolled away - this ensures
-      // we follow content during initial load even if pushed far from bottom
+      // Throttled via rAF to prevent long-running handler violations
       resizeObserver = new ResizeObserver(() => {
         if (!isActive) return;
         if (userScrolledAwayRef.current) return;
-        doScroll();
+        if (resizeRafId !== null) return;
+        resizeRafId = requestAnimationFrame(() => {
+          resizeRafId = null;
+          if (!isActive || userScrolledAwayRef.current) return;
+          doScroll();
+        });
       });
       resizeObserver.observe(container);
 
@@ -705,9 +711,6 @@ export function useScrollToBottom(
     // Detect chat change and reset tracking
     const isNewChat = lastChatIdRef.current !== selectedChatId;
     if (isNewChat) {
-      console.log(
-        "[ScrollToBottom Effect] Chat changed, resetting tracking refs",
-      );
       lastMessageCountRef.current = 0;
       hasScrolledForChatRef.current = null;
       userScrolledAwayRef.current = false;
@@ -739,9 +742,6 @@ export function useScrollToBottom(
       shouldAutoScroll &&
       (wasAtBottom || hasActiveSession)
     ) {
-      console.log(
-        "[ScrollToBottom Effect] New message arrived, user at bottom or scroll session active, scrolling",
-      );
       scrollToBottom(false);
     }
   }, [
@@ -777,35 +777,45 @@ export function useScrollToBottom(
     const container = containerRef.current;
     if (!container) return;
 
+    let rafId: number | null = null;
+
     const handleScroll = () => {
-      const currentScrollTop = container.scrollTop;
-      const scrollHeight = container.scrollHeight;
-      const clientHeight = container.clientHeight;
-      const distanceFromBottom = scrollHeight - currentScrollTop - clientHeight;
+      // Throttle via rAF to avoid long-running scroll handlers
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
 
-      // Detect if user scrolled UP (away from bottom)
-      const scrolledUp = currentScrollTop < lastScrollTopRef.current;
+        const currentScrollTop = container.scrollTop;
+        const scrollHeight = container.scrollHeight;
+        const clientHeight = container.clientHeight;
+        const distanceFromBottom =
+          scrollHeight - currentScrollTop - clientHeight;
 
-      // If user scrolled up and is no longer near bottom, mark as scrolled away
-      if (scrolledUp && distanceFromBottom > 200) {
-        userScrolledAwayRef.current = true;
-        // Cancel any active scroll session since user wants to stay where they are
-        if (activeSessionRef.current) {
-          cancelPendingScroll();
+        // Detect if user scrolled UP (away from bottom)
+        const scrolledUp = currentScrollTop < lastScrollTopRef.current;
+
+        // If user scrolled up and is no longer near bottom, mark as scrolled away
+        if (scrolledUp && distanceFromBottom > 200) {
+          userScrolledAwayRef.current = true;
+          // Cancel any active scroll session since user wants to stay where they are
+          if (activeSessionRef.current) {
+            cancelPendingScroll();
+          }
         }
-      }
 
-      // If user is back at bottom, clear the flag
-      if (distanceFromBottom < 50) {
-        userScrolledAwayRef.current = false;
-      }
+        // If user is back at bottom, clear the flag
+        if (distanceFromBottom < 50) {
+          userScrolledAwayRef.current = false;
+        }
 
-      lastScrollTopRef.current = currentScrollTop;
+        lastScrollTopRef.current = currentScrollTop;
+      });
     };
 
     container.addEventListener("scroll", handleScroll, { passive: true });
     return () => {
       container.removeEventListener("scroll", handleScroll);
+      if (rafId !== null) cancelAnimationFrame(rafId);
     };
   }, [containerRef, cancelPendingScroll]);
 

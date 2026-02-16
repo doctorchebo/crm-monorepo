@@ -46,8 +46,9 @@ function getAudioContext(): AudioContext | null {
 
   if (!audioContext) {
     try {
-      audioContext = new (window.AudioContext ||
-        (window as any).webkitAudioContext)();
+      audioContext = new (
+        window.AudioContext || (window as any).webkitAudioContext
+      )();
     } catch (e) {
       console.debug("[NotificationSound] Web Audio API not supported");
       return null;
@@ -138,13 +139,13 @@ function playNotificationSound(volume: number): boolean {
   }
   if (!audioBuffer) {
     console.debug(
-      "[NotificationSound] ⚠️ Cannot play: audio buffer not loaded"
+      "[NotificationSound] ⚠️ Cannot play: audio buffer not loaded",
     );
     return false;
   }
   if (!isAudioUnlocked) {
     console.debug(
-      "[NotificationSound] ⚠️ Cannot play: audio not unlocked (no user interaction yet)"
+      "[NotificationSound] ⚠️ Cannot play: audio not unlocked (no user interaction yet)",
     );
     return false;
   }
@@ -202,14 +203,14 @@ async function tryImmediateUnlock(): Promise<boolean> {
 
       isAudioUnlocked = true;
       console.debug(
-        "[NotificationSound] ✅ Audio unlocked immediately (browser allowed it)"
+        "[NotificationSound] ✅ Audio unlocked immediately (browser allowed it)",
       );
       return true;
     }
   } catch (error) {
     console.debug(
       "[NotificationSound] Could not unlock audio immediately:",
-      error
+      error,
     );
   }
 
@@ -220,34 +221,22 @@ async function tryImmediateUnlock(): Promise<boolean> {
  * Set up global event listeners to unlock audio on first user interaction.
  * This is called immediately when the module loads, BEFORE React mounts,
  * so we can catch the very first click/interaction on the page.
+ *
+ * IMPORTANT: We do NOT create an AudioContext or preload audio here.
+ * Both are deferred to the first user interaction to avoid the Chrome
+ * "AudioContext was not allowed to start" warning and to reduce initial
+ * page load work.
  */
-async function setupGlobalAudioUnlock(): Promise<void> {
+function setupGlobalAudioUnlock(): void {
   if (typeof window === "undefined") return;
   if (globalListenersSetup) return;
 
   globalListenersSetup = true;
 
-  // Initialize AudioContext early
-  getAudioContext();
-
-  // Start preloading the audio buffer immediately
-  loadAudioBuffer();
-
   // If already unlocked somehow, nothing to do
-  if (isAudioUnlocked) {
-    console.debug("[NotificationSound] Audio already unlocked at module load");
-    return;
-  }
+  if (isAudioUnlocked) return;
 
-  // Try to unlock immediately - this works if page was loaded via user action
-  const immediatelyUnlocked = await tryImmediateUnlock();
-  if (immediatelyUnlocked) {
-    return;
-  }
-
-  console.debug("[NotificationSound] Setting up global audio unlock listeners");
-
-  // Unlock audio on any user interaction - using capture phase to get events first
+  // Unlock audio on any user interaction — using capture phase to get events first
   const interactionEvents = ["click", "touchstart", "keydown", "mousedown"];
 
   const handleInteraction = async () => {
@@ -256,7 +245,7 @@ async function setupGlobalAudioUnlock(): Promise<void> {
       document.removeEventListener(event, handleInteraction, true);
     });
 
-    // Unlock audio
+    // Unlock audio (creates AudioContext + preloads buffer on first interaction)
     await unlockAudio();
   };
 
@@ -276,7 +265,7 @@ export interface UseNotificationSoundOptions {
 }
 
 export function useNotificationSound(
-  options: UseNotificationSoundOptions = {}
+  options: UseNotificationSoundOptions = {},
 ) {
   const { enabled = true, volume = 0.5 } = options;
   const lastPlayedRef = useRef<number>(0);
@@ -291,7 +280,7 @@ export function useNotificationSound(
    */
   const playSound = useCallback(() => {
     console.debug(
-      `[NotificationSound] playSound called, enabled=${enabled}, isAudioUnlocked=${isAudioUnlocked}, hasBuffer=${!!audioBuffer}`
+      `[NotificationSound] playSound called, enabled=${enabled}, isAudioUnlocked=${isAudioUnlocked}, hasBuffer=${!!audioBuffer}`,
     );
 
     if (!enabled) {
@@ -306,7 +295,7 @@ export function useNotificationSound(
     // Don't debounce if the last "play" was just a queue operation
     if (timeSinceLastPlay < DEBOUNCE_TIME && lastPlayedRef.current > 0) {
       console.debug(
-        `[NotificationSound] ⏭️ Debounced, skipping (${timeSinceLastPlay}ms since last play)`
+        `[NotificationSound] ⏭️ Debounced, skipping (${timeSinceLastPlay}ms since last play)`,
       );
       return;
     }
@@ -324,14 +313,14 @@ export function useNotificationSound(
       tryImmediateUnlock().then((unlocked) => {
         if (unlocked && audioBuffer) {
           console.debug(
-            "[NotificationSound] 🔊 Late unlock succeeded, playing sound now"
+            "[NotificationSound] 🔊 Late unlock succeeded, playing sound now",
           );
           playNotificationSound(volume);
           lastPlayedRef.current = Date.now();
         } else {
           // Still can't unlock, queue for when user interacts
           console.debug(
-            "[NotificationSound] 🔔 Queuing notification sound for when user interacts"
+            "[NotificationSound] 🔔 Queuing notification sound for when user interacts",
           );
           pendingNotificationSound = true;
           pendingNotificationVolume = volume;
@@ -355,40 +344,10 @@ export function useNotificationSound(
         // Don't set lastPlayedRef - allow retry on next message
         console.debug(
           "[NotificationSound] Could not play sound (user interaction required):",
-          error.message
+          error.message,
         );
       });
   }, [enabled, volume]);
 
-  return { playSound, isUnlocked: isAudioUnlocked };
-}
-
-/**
- * Check if audio is currently unlocked
- * Exported for use by the EnableSoundsBanner component
- */
-export function getIsAudioUnlocked(): boolean {
-  return isAudioUnlocked;
-}
-
-/**
- * Check if there's a pending notification sound
- * Exported for use by the EnableSoundsBanner component
- */
-export function hasPendingNotification(): boolean {
-  return pendingNotificationSound;
-}
-
-/**
- * Manually unlock audio - called from the EnableSoundsBanner when user clicks
- * This is a user interaction, so it should work to unlock audio
- */
-export async function unlockAudioManually(): Promise<boolean> {
-  try {
-    await unlockAudio();
-    return isAudioUnlocked;
-  } catch (error) {
-    console.debug("[NotificationSound] Manual unlock failed:", error);
-    return false;
-  }
+  return { playSound };
 }

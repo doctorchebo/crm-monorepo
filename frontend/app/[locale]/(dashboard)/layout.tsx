@@ -1,6 +1,5 @@
 "use client";
 
-import { EnableSoundsBanner } from "@/components/enable-sounds-banner";
 import { ChatNotificationsProvider } from "@/hooks/use-chat-notifications";
 
 /**
@@ -8,7 +7,6 @@ import { ChatNotificationsProvider } from "@/hooks/use-chat-notifications";
  *
  * This layout provides:
  * - Chat notifications context for real-time notification handling
- * - Enable sounds banner for audio permission handling
  *
  * Note: The header has been removed from app pages.
  * - Theme and language settings are now accessible via the sidebar user profile menu
@@ -21,7 +19,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       <section className="flex flex-col h-screen">
         <div className="flex-1 overflow-auto">{children}</div>
       </section>
-      <EnableSoundsBanner />
     </ChatNotificationsProvider>
   );
 }

@@ -1,5 +1,6 @@
 export { useChatSearch } from "./use-chat-search";
 export { useChatState } from "./use-chat-state";
+export type { UseChatStateReturn } from "./use-chat-state";
 export { useContactHandlers } from "./use-contact-handlers";
 export {
   shouldShowDateSeparator,
