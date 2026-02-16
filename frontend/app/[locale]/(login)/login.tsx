@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
 import { ActionState } from "@/lib/auth/middleware";
 import { TokenManager } from "@/lib/auth/token-manager";
-import { CircleIcon, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -24,10 +24,10 @@ export function Login({ mode = "signin" }: { mode?: "signin" | "signup" }) {
     async (previousState, formData) => {
       return await (mode === "signin" ? signIn : signUp)(
         previousState,
-        formData
+        formData,
       );
     },
-    { error: "" }
+    { error: "" },
   );
 
   // Handle redirect after successful login
@@ -44,7 +44,7 @@ export function Login({ mode = "signin" }: { mode?: "signin" | "signup" }) {
       if (expiresAt?.access && expiresAt?.refresh) {
         TokenManager.storeTokenExpirationTime(
           new Date(expiresAt.access),
-          new Date(expiresAt.refresh)
+          new Date(expiresAt.refresh),
         );
         console.debug("[Login] TokenManager initialized with expiration times");
       }
@@ -60,7 +60,13 @@ export function Login({ mode = "signin" }: { mode?: "signin" | "signup" }) {
     <div className="min-h-[100dvh] flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8 bg-gray-50 dark:bg-gray-950">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
         <div className="flex justify-center">
-          <CircleIcon className="h-12 w-12 text-orange-500" />
+          <img
+            src="/logo.png"
+            alt="Wappify CRM"
+            width={48}
+            height={48}
+            className="h-12 w-12 rounded"
+          />
         </div>
         <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900 dark:text-white">
           {mode === "signin" ? t("signIn") : t("signUp")}

@@ -3,18 +3,18 @@
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
+import { backendApi } from "@/lib/api/endpoints";
 import {
   PASSWORD_REQUIREMENTS,
   getStrengthColor,
   getStrengthTextColor,
   validatePassword,
 } from "@/lib/auth/password-validation";
-import { backendApi } from "@/lib/api/endpoints";
-import { CircleIcon, Loader2, Check, X, CheckCircle } from "lucide-react";
+import { Check, CheckCircle, Loader2, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState, useEffect, Suspense } from "react";
+import { Suspense, useEffect, useState } from "react";
 
 function ResetPasswordForm() {
   const t = useTranslations();
@@ -68,7 +68,10 @@ function ResetPasswordForm() {
       }, 3000);
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "";
-      if (errorMessage.includes("invalid") || errorMessage.includes("expired")) {
+      if (
+        errorMessage.includes("invalid") ||
+        errorMessage.includes("expired")
+      ) {
         setTokenError(true);
       } else {
         setError(errorMessage || t("auth.resetFailed"));
@@ -160,7 +163,7 @@ function ResetPasswordForm() {
               <div className="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                 <div
                   className={`h-full transition-all duration-300 ${getStrengthColor(
-                    passwordValidation.strength
+                    passwordValidation.strength,
                   )}`}
                   style={{
                     width: `${(passwordValidation.score / 5) * 100}%`,
@@ -169,7 +172,7 @@ function ResetPasswordForm() {
               </div>
               <span
                 className={`text-xs font-medium ${getStrengthTextColor(
-                  passwordValidation.strength
+                  passwordValidation.strength,
                 )}`}
               >
                 {t(`security.strength.${passwordValidation.strength}`)}
@@ -197,9 +200,7 @@ function ResetPasswordForm() {
                     ) : (
                       <X className="h-3 w-3" />
                     )}
-                    <span>
-                      {t(`security.passwordRequirements.${req.key}`)}
-                    </span>
+                    <span>{t(`security.passwordRequirements.${req.key}`)}</span>
                   </div>
                 );
               })}
@@ -265,7 +266,13 @@ export default function ResetPasswordPage() {
     <div className="min-h-[100dvh] flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8 bg-gray-50 dark:bg-gray-950">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
         <div className="flex justify-center">
-          <CircleIcon className="h-12 w-12 text-orange-500" />
+          <img
+            src="/logo.png"
+            alt="Wappify CRM"
+            width={48}
+            height={48}
+            className="h-12 w-12 rounded"
+          />
         </div>
         <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900 dark:text-white">
           {t("enterNewPassword")}

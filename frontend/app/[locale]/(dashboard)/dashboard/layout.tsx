@@ -14,7 +14,6 @@ import {
 } from "@/components/ui/sidebar";
 import { AudioPlaybackProvider } from "@/lib/audio-playback-context";
 import { navigationConfig } from "@/lib/navigation";
-import { CircleIcon } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 
@@ -33,9 +32,15 @@ function DashboardSidebar() {
     <Sidebar collapsible="icon">
       <SidebarHeader className="p-4">
         <Link href="/" className="flex items-center gap-2">
-          <CircleIcon className="h-6 w-6 text-orange-500 shrink-0" />
+          <img
+            src="/logo.png"
+            alt="Wappify CRM"
+            width={24}
+            height={24}
+            className="h-6 w-6 shrink-0 rounded"
+          />
           <span className="font-semibold text-lg group-data-[collapsible=icon]:hidden">
-            ACME
+            Wappify CRM
           </span>
         </Link>
       </SidebarHeader>

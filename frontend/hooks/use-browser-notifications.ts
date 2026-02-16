@@ -69,7 +69,7 @@ export interface UseBrowserNotificationsReturn {
 }
 
 // Default notification icon (can be customized)
-const DEFAULT_ICON = "/favicon.ico";
+const DEFAULT_ICON = "/logo.png";
 
 /**
  * Check if browser supports notifications
@@ -156,7 +156,7 @@ export function useBrowserNotifications(): UseBrowserNotificationsReturn {
     useCallback(async (): Promise<NotificationPermission> => {
       if (!isSupported) {
         console.warn(
-          "[BrowserNotifications] Notifications not supported in this browser"
+          "[BrowserNotifications] Notifications not supported in this browser",
         );
         return "denied";
       }
@@ -176,14 +176,14 @@ export function useBrowserNotifications(): UseBrowserNotificationsReturn {
         console.log(
           `[BrowserNotifications] Permission ${
             newPermission === "granted" ? "✅ granted" : "❌ " + newPermission
-          }`
+          }`,
         );
 
         return newPermission;
       } catch (error) {
         console.error(
           "[BrowserNotifications] Error requesting permission:",
-          error
+          error,
         );
         return "denied";
       } finally {
@@ -199,7 +199,7 @@ export function useBrowserNotifications(): UseBrowserNotificationsReturn {
     (options: ShowNotificationOptions): Notification | null => {
       if (!isSupported || !isGranted) {
         console.debug(
-          "[BrowserNotifications] Cannot show notification - not supported or not granted"
+          "[BrowserNotifications] Cannot show notification - not supported or not granted",
         );
         return null;
       }
@@ -244,19 +244,19 @@ export function useBrowserNotifications(): UseBrowserNotificationsReturn {
         };
 
         console.debug(
-          `[BrowserNotifications] 🔔 Showing notification: ${options.title}`
+          `[BrowserNotifications] 🔔 Showing notification: ${options.title}`,
         );
 
         return notification;
       } catch (error) {
         console.error(
           "[BrowserNotifications] Error showing notification:",
-          error
+          error,
         );
         return null;
       }
     },
-    [isSupported, isGranted]
+    [isSupported, isGranted],
   );
 
   return {
@@ -296,7 +296,7 @@ export function useNotificationPermissionFlow() {
   const enableNotifications = useCallback(async (): Promise<boolean> => {
     if (!isSupported) {
       console.warn(
-        "[NotificationPermission] Browser does not support notifications"
+        "[NotificationPermission] Browser does not support notifications",
       );
       return false;
     }
@@ -309,7 +309,7 @@ export function useNotificationPermissionFlow() {
     // Already denied - user needs to change browser settings
     if (isDenied) {
       console.warn(
-        "[NotificationPermission] Permission previously denied. User must enable in browser settings."
+        "[NotificationPermission] Permission previously denied. User must enable in browser settings.",
       );
       return false;
     }
