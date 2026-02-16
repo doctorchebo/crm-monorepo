@@ -30,6 +30,7 @@
 import { SQSBatchItemFailure, SQSBatchResponse, SQSEvent } from "aws-lambda";
 import * as fs from "fs";
 import * as path from "path";
+import { applyFaststart, isFaststartCandidate } from "./faststart-processor";
 import {
   compressMedia,
   getOutputContentType,
@@ -298,6 +299,50 @@ async function processThumbnailJob(
     const extension = path.extname(inputKey) || ".bin";
     inputPath = path.join(TMP_DIR, `${jobId}-thumb-input${extension}`);
     await downloadFromS3(inputBucket, inputKey, inputPath, jobId);
+
+    // ── Video faststart optimization ────────────────────────────────
+    // If this is an MP4 video, ensure the moov atom is at the beginning
+    // of the file (faststart layout) for WhatsApp streaming playback.
+    // This is a lossless remux that replaces the original S3 file.
+    if (isFaststartCandidate(mimeType)) {
+      try {
+        const faststartResult = await applyFaststart(inputPath, TMP_DIR, jobId);
+
+        if (faststartResult.wasModified) {
+          // Upload the faststart-optimized file back to S3, replacing the original
+          await uploadToS3(
+            inputBucket,
+            inputKey,
+            faststartResult.outputPath,
+            mimeType,
+            jobId,
+          );
+
+          logger.info(
+            "Faststart file uploaded to S3, replacing original",
+            jobId,
+            {
+              bucket: inputBucket,
+              key: inputKey,
+              originalSize: faststartResult.originalSize,
+              optimizedSize: faststartResult.outputSize,
+            },
+          );
+
+          // Use the optimized file for thumbnail generation
+          inputPath = faststartResult.outputPath;
+        }
+      } catch (faststartError) {
+        // Faststart is best-effort — don't fail the thumbnail job if it fails
+        const errorMessage =
+          faststartError instanceof Error
+            ? faststartError.message
+            : String(faststartError);
+        logger.warn("Faststart optimization failed (non-fatal)", jobId, {
+          error: errorMessage,
+        });
+      }
+    }
 
     // Read the file into buffer
     const inputBuffer = fs.readFileSync(inputPath);

@@ -87,6 +87,11 @@ export class ComponentTransformerService {
 
   /**
    * Transform our template components to Meta API format
+   *
+   * IMPORTANT: Meta's API uses **per-component** variable numbering.
+   * Header {{1}} is independent of Body {{1}} — they are separate
+   * components with their own parameter arrays. Each component type
+   * MUST start its variable index at 1.
    */
   transform(
     templateName: string,
@@ -96,30 +101,24 @@ export class ComponentTransformerService {
   ): TransformResult {
     const metaComponents: MetaComponent[] = [];
     const variableMappings: VariableMapping[] = [];
-    let variableIndex = 1;
 
-    // Transform header
+    // Transform header — starts at index 1
     if (components.header) {
-      const { component, mappings, nextIndex } = this.transformHeader(
+      const { component, mappings } = this.transformHeader(
         components.header,
-        variableIndex,
+        1,
       );
       if (component) {
         metaComponents.push(component);
         variableMappings.push(...mappings);
-        variableIndex = nextIndex;
       }
     }
 
-    // Transform body (required)
-    const {
-      component: bodyComponent,
-      mappings: bodyMappings,
-      nextIndex: bodyNextIndex,
-    } = this.transformBody(components.body, variableIndex, category);
+    // Transform body (required) — starts at index 1
+    const { component: bodyComponent, mappings: bodyMappings } =
+      this.transformBody(components.body, 1, category);
     metaComponents.push(bodyComponent);
     variableMappings.push(...bodyMappings);
-    variableIndex = bodyNextIndex;
 
     // Transform footer
     if (components.footer) {
@@ -129,15 +128,14 @@ export class ComponentTransformerService {
       });
     }
 
-    // Transform buttons
+    // Transform buttons — starts at index 1
     if (components.buttons && components.buttons.length > 0) {
-      const { component, mappings, nextIndex } = this.transformButtons(
+      const { component, mappings } = this.transformButtons(
         components.buttons,
-        variableIndex,
+        1,
       );
       metaComponents.push(component);
       variableMappings.push(...mappings);
-      variableIndex = nextIndex;
     }
 
     // Transform limited time offer

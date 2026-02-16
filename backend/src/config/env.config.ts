@@ -40,10 +40,6 @@ class EnvironmentVariables {
 
   @IsString()
   @IsNotEmpty()
-  META_PHONE_NUMBER_ID: string;
-
-  @IsString()
-  @IsNotEmpty()
   META_BUSINESS_PHONE_NUMBER: string;
 
   @IsString()

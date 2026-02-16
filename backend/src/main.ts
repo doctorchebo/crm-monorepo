@@ -39,6 +39,34 @@ async function bootstrap() {
   // Knowledge Base media uploads (supports documents up to 100MB)
   app.use('/knowledge-base/media', bodyParser.json({ limit: '150mb' }));
 
+  // Middleware to capture raw body for webhook signature verification
+  // MUST be applied BEFORE the default body parser to capture the raw stream
+  // Meta Cloud API sends JSON webhooks and signs the raw body
+  app.use('/webhook/whatsapp', (req, res, next) => {
+    console.log('🔌 Raw body middleware triggered');
+    let data = '';
+    req.on('data', (chunk) => {
+      console.log('📥 Receiving chunk:', chunk.length, 'bytes');
+      data += chunk.toString();
+    });
+    req.on('end', () => {
+      console.log('✅ Body received completely:', data.length, 'bytes');
+      // Store raw body for signature verification
+      (req as any).rawBody = data;
+      try {
+        // Parse JSON body
+        req.body = JSON.parse(data);
+        console.log('✅ JSON parsed successfully');
+      } catch (e) {
+        console.log('⚠️ JSON parse failed, trying URLSearchParams');
+        // If not JSON, try form data parsing (for potential backward compatibility)
+        const params = new URLSearchParams(data);
+        req.body = Object.fromEntries(params);
+      }
+      next();
+    });
+  });
+
   // Default limit for all other routes (1MB is reasonable for most requests)
   app.use(bodyParser.json({ limit: '1mb' }));
   app.use(bodyParser.urlencoded({ extended: true, limit: '1mb' }));
@@ -70,33 +98,6 @@ async function bootstrap() {
       });
     }
     next();
-  });
-
-  // Middleware to capture raw body for webhook signature verification
-  // Meta Cloud API sends JSON webhooks and signs the raw body
-  app.use('/webhook/whatsapp', (req, res, next) => {
-    console.log('🔌 Raw body middleware triggered');
-    let data = '';
-    req.on('data', (chunk) => {
-      console.log('📥 Receiving chunk:', chunk.length, 'bytes');
-      data += chunk.toString();
-    });
-    req.on('end', () => {
-      console.log('✅ Body received completely:', data.length, 'bytes');
-      // Store raw body for signature verification
-      req.rawBody = data;
-      try {
-        // Parse JSON body
-        req.body = JSON.parse(data);
-        console.log('✅ JSON parsed successfully');
-      } catch (e) {
-        console.log('⚠️ JSON parse failed, trying URLSearchParams');
-        // If not JSON, try form data parsing (for potential backward compatibility)
-        const params = new URLSearchParams(data);
-        req.body = Object.fromEntries(params);
-      }
-      next();
-    });
   });
 
   await app.listen(process.env.PORT ?? 3001);

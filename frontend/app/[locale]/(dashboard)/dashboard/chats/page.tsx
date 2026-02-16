@@ -82,6 +82,7 @@ import {
   PinnedMessagesSection,
   PinReplaceModal,
   SelectionBanner,
+  TemplateSendModal,
   TemplatesPanel,
 } from "./components";
 import {
@@ -96,7 +97,7 @@ import {
   usePins,
   useReactions,
 } from "./hooks";
-import type { Chat, Template } from "./types";
+import type { Chat } from "./types";
 import { PinDuration } from "./types";
 import { calculateConversationWindow } from "./utils";
 
@@ -456,7 +457,7 @@ export default function ChatsPage() {
 
   // Filter templates to only show those with at least one approved locale
   const approvedTemplates = useMemo(() => {
-    return (templates as Template[]).filter((template) =>
+    return templates.filter((template) =>
       template.locales?.some((locale) => locale.approvalStatus === "approved"),
     );
   }, [templates]);
@@ -470,7 +471,7 @@ export default function ChatsPage() {
 
   // All visible templates (for the new template panel with availability logic)
   const visibleTemplates = useMemo(() => {
-    return (templates as Template[]).filter((template) => template.isVisible);
+    return templates.filter((template) => template.isVisible);
   }, [templates]);
 
   // Fetch current user on mount
@@ -542,13 +543,63 @@ export default function ChatsPage() {
     }
   }, []);
 
-  // Clear contact state when chat changes
+  // Resolve contact from chat participant phone automatically when chat changes.
+  // This ensures contactId is always available for template auto-fill,
+  // regardless of whether the sidebar is expanded.
   useEffect(() => {
     if (!chatState.selectedChatId) {
       setSelectedContactId(null);
       setCustomerLanguage(undefined);
+      return;
     }
-  }, [chatState.selectedChatId]);
+
+    // If we already have a contactId (e.g. from sidebar), skip.
+    if (selectedContactId) return;
+
+    const chat = chatState.selectedChat;
+    if (!chat?.participantPhone) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const contact = await backendApi.contacts.getByPhone(
+          chat.participantPhone,
+        );
+        if (
+          cancelled ||
+          !contact ||
+          typeof contact !== "object" ||
+          !("contactId" in contact)
+        )
+          return;
+        const id = (contact as { contactId: string }).contactId;
+        setSelectedContactId(id);
+        // Also fetch language
+        try {
+          const full = await backendApi.contacts.get(id);
+          if (
+            !cancelled &&
+            full &&
+            typeof full === "object" &&
+            "language" in full
+          ) {
+            setCustomerLanguage(
+              (full as { language?: SupportedLanguage | null }).language ||
+                undefined,
+            );
+          }
+        } catch {
+          // Language is optional
+        }
+      } catch {
+        // Contact not found — that's fine, sidebar can handle creation
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatState.selectedChatId, chatState.selectedChat?.participantPhone]);
 
   // Pin handlers
   const handlePinMessage = useCallback(
@@ -1713,6 +1764,18 @@ export default function ChatsPage() {
         isOpen={locationPickerOpen}
         onClose={() => setLocationPickerOpen(false)}
         onSend={handleLocationSend}
+      />
+
+      {/* Template Send Modal — opened when user selects a template with variables or a library template */}
+      <TemplateSendModal
+        open={!!messageHandlers.pendingTemplate}
+        template={messageHandlers.pendingTemplate}
+        contactId={selectedContactId}
+        senderId={effectiveSelectedChat?.senderId}
+        chatId={chatState.selectedChatId || undefined}
+        customerLanguage={customerLanguage}
+        onSend={messageHandlers.handleSendTemplate}
+        onClose={messageHandlers.handleCloseSendModal}
       />
     </div>
   );

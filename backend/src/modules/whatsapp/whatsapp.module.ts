@@ -7,6 +7,7 @@ import { S3Service } from '@shared/services/s3.service';
 import { AiMemoryModule } from '../ai-memory/ai-memory.module';
 import { ChatsModule } from '../chats/chats.module';
 import { TeamModule } from '../team/team.module';
+import { TemplatesModule } from '../templates/templates.module';
 import { ThumbnailQueueService } from '../thumbnail/thumbnail-queue.service';
 import { ThumbnailModule } from '../thumbnail/thumbnail.module';
 import { WorkflowModule } from '../workflow/workflow.module';
@@ -36,7 +37,6 @@ import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
  *
  * Environment Variables Required:
  * - META_WABA_ID: WhatsApp Business Account ID
- * - META_PHONE_NUMBER_ID: Phone Number ID for messaging
  * - META_ACCESS_TOKEN: Bearer token for Cloud API
  * - META_VERIFY_TOKEN: Token for webhook verification
  * - META_APP_SECRET: (Optional) For signature verification
@@ -53,6 +53,7 @@ import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
     forwardRef(() => WorkflowModule),
     TeamModule,
     forwardRef(() => ChatsModule),
+    forwardRef(() => TemplatesModule),
   ],
   controllers: [WhatsAppController, WhatsAppWebhookController, MediaController],
   providers: [

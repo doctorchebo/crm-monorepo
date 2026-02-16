@@ -97,9 +97,8 @@
     "searchTemplates": "Search templates...",
     "typeMessageOrUseTemplates": "Type a message or use templates above...",
     "noTemplatesAvailable": "No templates available. Create one in the Templates section.",
-    "templateNotApproved": "This template is not approved by Meta and cannot be used outside the 24-hour conversation window.",
+    "templateNotApproved": "This template is not approved by Meta and cannot be used. Only approved templates can be sent via WhatsApp.",
     "templateNoMatchingLocale": "This template does not have a locale matching the customer's language.",
-    "templateOutsideWindowNotApproved": "The customer's preferred language version of this template is not yet approved by Meta. Only approved templates can be used outside the 24-hour window.",
     "conversationWindowActive": "You're within the 24-hour conversation window. All templates and free-form messages are available.",
     "conversationWindowExpired": "The 24-hour conversation window has expired. Only Meta-approved templates can be used to start a new conversation.",
     "conversationWindow": {
@@ -1474,7 +1473,7 @@
       "alreadyAdopted": "Already Adopted",
       "useTemplate": "Use Template",
       "adoptTitle": "Adopt Template",
-      "adoptDescription": "This template will be created in your account as an instantly approved template. No Meta review needed.",
+      "adoptDescription": "This template will be added to your account. Most library templates are pre-approved, but some may require a brief review (up to 24 hours) for new accounts.",
       "displayNameLabel": "Display Name",
       "displayNamePlaceholder": "e.g., Order Confirmation",
       "displayNameHint": "Choose a friendly name for this template in your account",
@@ -1488,7 +1487,10 @@
       "adopting": "Adopting...",
       "confirmAdopt": "Adopt Template",
       "adoptSuccess": "Template \"{name}\" adopted successfully",
-      "adoptFailed": "Failed to adopt template"
+      "adoptFailed": "Failed to adopt template",
+      "previousPage": "Previous",
+      "nextPage": "Next",
+      "pageInfo": "Showing {count} templates"
     }
   },
   "knowledgeBase": {

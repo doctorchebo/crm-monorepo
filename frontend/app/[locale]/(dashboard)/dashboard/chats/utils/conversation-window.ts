@@ -6,8 +6,11 @@
  * According to Meta's WhatsApp Business Platform rules:
  * - A "conversation window" opens when a user sends a message to your business
  * - This window lasts for 24 hours from the user's last message
- * - Within the window: You can send any message type (free-form text, media, interactive messages)
+ * - Within the window: You can send free-form text, media, and interactive messages
  * - Outside the window: You can ONLY initiate conversations using approved templates
+ *
+ * IMPORTANT: Templates MUST be approved by Meta regardless of window status.
+ * Even within the 24-hour window, only approved templates can be sent.
  *
  * CRITICAL: Interactive messages (buttons/lists) can ONLY be sent within the 24-hour window.
  * Unlike templates, they CANNOT be used to initiate conversations.
@@ -22,7 +25,7 @@ import {
   WINDOW_SAFETY_MARGIN_MS,
   canSendInteractiveMessage,
 } from "@/lib/constants/interactive-message.constants";
-import type { Message, Template } from "../types";
+import type { Message, Template, TemplateLocale } from "../types";
 
 // ============================================================================
 // Constants (re-exported from centralized location)
@@ -94,8 +97,7 @@ export interface ConversationWindowStatus {
  */
 export type TemplateUnavailableReason =
   | "not_approved" // The template locale is not approved by Meta
-  | "no_matching_locale" // No locale matches the customer's language
-  | "outside_window_not_approved"; // Outside 24-hour window and no approved locale for customer's language
+  | "no_matching_locale"; // No locale matches the customer's language
 
 /**
  * Template availability status
@@ -173,7 +175,7 @@ export function getLastInboundMessage(messages: Message[]): Message | null {
  */
 export function calculateConversationWindow(
   messages: Message[],
-  referenceTime: Date = new Date()
+  referenceTime: Date = new Date(),
 ): ConversationWindowStatus {
   const lastInbound = getLastInboundMessage(messages);
 
@@ -190,13 +192,13 @@ export function calculateConversationWindow(
 
   // Use effective window (with safety margin) for determining if window is open
   const effectiveExpiresAt = new Date(
-    lastInboundTime.getTime() + EFFECTIVE_WINDOW_MS
+    lastInboundTime.getTime() + EFFECTIVE_WINDOW_MS,
   );
 
   // Calculate time remaining with safety margin applied
   const timeRemainingMs = Math.max(
     0,
-    effectiveExpiresAt.getTime() - referenceTime.getTime()
+    effectiveExpiresAt.getTime() - referenceTime.getTime(),
   );
   const isWithinWindow = timeRemainingMs > 0;
 
@@ -220,9 +222,9 @@ export function isLocaleApproved(locale: { approvalStatus?: string }): boolean {
 }
 
 /**
- * Type for a single template locale
+ * Re-export TemplateLocale from types for backwards compatibility
  */
-export type TemplateLocale = NonNullable<Template["locales"]>[number];
+export type { TemplateLocale };
 
 /**
  * Finds the best matching locale for a customer's preferred language
@@ -238,7 +240,7 @@ export type TemplateLocale = NonNullable<Template["locales"]>[number];
  */
 export function findBestLocale(
   template: Template,
-  customerLanguage?: string
+  customerLanguage?: string,
 ): TemplateLocale | undefined {
   const locales = template.locales;
 
@@ -268,47 +270,38 @@ export function findBestLocale(
 /**
  * Determines the availability status of a template
  *
+ * IMPORTANT: Meta requires templates to be APPROVED regardless of the 24-hour
+ * conversation window status. Unapproved templates cannot be sent even within
+ * the window. This is a Meta platform restriction.
+ *
  * Rules:
- * - WITHIN 24-hour window: ALL templates are available (any approval status)
- * - OUTSIDE 24-hour window: Only templates with an approved locale for the
- *   customer's language (or any approved locale) are available
+ * - Template must have an approved locale to be available
+ * - Customer's preferred language is used to select locale when available
+ * - Falls back to first approved locale if customer's language not available
  *
  * @param template - The template to check
- * @param windowStatus - The conversation window status
+ * @param windowStatus - The conversation window status (currently unused but kept for API compatibility)
  * @param customerLanguage - The customer's preferred language (optional)
  * @returns TemplateAvailability with availability status and reason
  */
 export function getTemplateAvailability(
   template: Template,
   windowStatus: ConversationWindowStatus,
-  customerLanguage?: string
+  customerLanguage?: string,
 ): TemplateAvailability {
   const locales = template.locales || [];
   const hasApprovedLocale = locales.some(isLocaleApproved);
-  const selectedLocale = findBestLocale(template, customerLanguage);
 
-  // Within 24-hour window: all templates are available
-  if (windowStatus.isWithinWindow) {
-    return {
-      isAvailable: true,
-      selectedLocale,
-      hasApprovedLocale,
-    };
-  }
-
-  // Outside window: need to check approval status
-  if (!selectedLocale) {
+  // If no locales exist, template is not available
+  if (locales.length === 0) {
     return {
       isAvailable: false,
       unavailableReason: "no_matching_locale",
-      hasApprovedLocale,
+      hasApprovedLocale: false,
     };
   }
 
-  // Check if the selected locale is approved
-  const isSelectedLocaleApproved = isLocaleApproved(selectedLocale);
-
-  // If customer has a preference, check if that specific locale is approved
+  // If customer has a language preference, try to find matching approved locale
   if (customerLanguage) {
     const customerLocale = locales.find((l) => l.locale === customerLanguage);
     if (customerLocale) {
@@ -319,9 +312,10 @@ export function getTemplateAvailability(
           hasApprovedLocale,
         };
       } else {
+        // Customer's locale exists but not approved
         return {
           isAvailable: false,
-          unavailableReason: "outside_window_not_approved",
+          unavailableReason: "not_approved",
           selectedLocale: customerLocale,
           hasApprovedLocale,
         };
@@ -329,7 +323,8 @@ export function getTemplateAvailability(
     }
   }
 
-  // Fallback: use first approved locale if available
+  // No customer language preference or no locale for their language
+  // Use first approved locale if available
   if (hasApprovedLocale) {
     const approvedLocale = locales.find(isLocaleApproved);
     return {
@@ -339,12 +334,13 @@ export function getTemplateAvailability(
     };
   }
 
-  // No approved locales available outside window
+  // No approved locales - template not available
+  const fallbackLocale = findBestLocale(template, customerLanguage);
   return {
     isAvailable: false,
     unavailableReason: "not_approved",
-    selectedLocale,
-    hasApprovedLocale,
+    selectedLocale: fallbackLocale,
+    hasApprovedLocale: false,
   };
 }
 
@@ -363,14 +359,14 @@ export function getTemplateAvailability(
 export function enrichTemplatesWithAvailability(
   templates: Template[],
   windowStatus: ConversationWindowStatus,
-  customerLanguage?: string
+  customerLanguage?: string,
 ): TemplateWithAvailability[] {
   return templates.map((template) => ({
     ...template,
     availability: getTemplateAvailability(
       template,
       windowStatus,
-      customerLanguage
+      customerLanguage,
     ),
   }));
 }

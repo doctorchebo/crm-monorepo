@@ -61,12 +61,28 @@ interface CacheEntry {
 }
 
 /**
+ * Pagination info for Template Library browse results
+ */
+export interface TemplateLibraryPaging {
+  /** Cursor for next page (use as 'after' param) */
+  nextCursor?: string;
+  /** Cursor for previous page (use as 'before' param) */
+  previousCursor?: string;
+  /** Whether there are more results available */
+  hasNextPage: boolean;
+  /** Whether there are previous results available */
+  hasPreviousPage: boolean;
+}
+
+/**
  * Response returned by browseLibrary() — augments Meta's catalog
  * with adoption metadata for the current user
  */
 export interface TemplateLibraryBrowseResult {
   templates: TemplateLibraryTemplateWithStatus[];
   totalCount: number;
+  /** Pagination information for cursor-based navigation */
+  paging?: TemplateLibraryPaging;
 }
 
 /**
@@ -115,7 +131,8 @@ export interface AdoptTemplateResult {
  *
  * Handles browsing Meta's Template Library catalog and adopting
  * pre-approved templates. Adopted templates are stored as regular
- * templates with `source: 'library'` and are instantly approved.
+ * templates with `source: 'library'`. These are typically pre-approved
+ * but may require review for new accounts.
  *
  * Key design decisions:
  * - In-memory cache (1h TTL) for the library catalog to avoid rate limits
@@ -142,14 +159,19 @@ export class TemplateLibraryService {
    * Browse Meta's Template Library with optional filters.
    *
    * Returns templates augmented with adoption status for the given user.
-   * Results are cached in-memory (1h TTL) to reduce Meta API calls.
+   *
+   * Pagination behavior:
+   * - If pagination params (after/before) are provided, results are fetched fresh
+   *   from Meta API and include paging cursors for navigation
+   * - If no pagination params, results may be cached (1h TTL) for performance
    */
   async browseLibrary(
     filters: TemplateLibraryFilters | undefined,
     ownerId: number,
   ): Promise<TemplateLibraryBrowseResult> {
-    // 1. Fetch library templates (cached)
-    const libraryTemplates = await this.fetchLibraryTemplates(filters);
+    // 1. Fetch library templates (may be cached if no pagination)
+    const { templates: libraryTemplates, paging } =
+      await this.fetchLibraryTemplates(filters);
 
     // 2. Get the set of library template names already adopted by this user
     const adoptedMap = await this.getAdoptedTemplateMap(ownerId);
@@ -170,45 +192,75 @@ export class TemplateLibraryService {
     return {
       templates: enriched,
       totalCount: enriched.length,
+      paging,
     };
   }
 
   /**
-   * Fetch library templates from Meta API or cache
+   * Fetch library templates from Meta API or cache.
+   * Returns both templates and pagination info.
    */
   private async fetchLibraryTemplates(
     filters?: TemplateLibraryFilters,
-  ): Promise<TemplateLibraryTemplate[]> {
-    const cacheKey = this.buildCacheKey(filters);
-    const cached = this.cache.get(cacheKey);
+  ): Promise<{
+    templates: TemplateLibraryTemplate[];
+    paging?: TemplateLibraryPaging;
+  }> {
+    // If pagination is requested, always fetch fresh from API
+    const isPaginated = !!(filters?.after || filters?.before);
 
-    if (cached && Date.now() - cached.timestamp < LIBRARY_CACHE_TTL_MS) {
-      this.logger.debug(`Template Library cache hit for key: ${cacheKey}`);
-      return cached.data;
+    if (!isPaginated) {
+      // Check cache for non-paginated requests
+      const cacheKey = this.buildCacheKey(filters);
+      const cached = this.cache.get(cacheKey);
+
+      if (cached && Date.now() - cached.timestamp < LIBRARY_CACHE_TTL_MS) {
+        this.logger.debug(`Template Library cache hit for key: ${cacheKey}`);
+        return { templates: cached.data };
+      }
     }
 
-    // Cache miss or expired — fetch from Meta
+    // Fetch from Meta API
     const result = await this.metaProvider.getTemplateLibrary(filters);
 
     if (!result.success) {
       this.logger.error(`Failed to fetch Template Library: ${result.error}`);
-      // Return stale cache if available, else throw
-      if (cached) {
-        this.logger.warn('Returning stale cache due to API error');
-        return cached.data;
+
+      // For non-paginated requests, try stale cache
+      if (!isPaginated) {
+        const cacheKey = this.buildCacheKey(filters);
+        const cached = this.cache.get(cacheKey);
+        if (cached) {
+          this.logger.warn('Returning stale cache due to API error');
+          return { templates: cached.data };
+        }
       }
+
       throw new BadRequestException(
         result.error || 'Failed to fetch Template Library from Meta',
       );
     }
 
-    // Update cache
-    this.cache.set(cacheKey, {
-      data: result.templates,
-      timestamp: Date.now(),
-    });
+    // Update cache for non-paginated requests
+    if (!isPaginated) {
+      const cacheKey = this.buildCacheKey(filters);
+      this.cache.set(cacheKey, {
+        data: result.templates,
+        timestamp: Date.now(),
+      });
+    }
 
-    return result.templates;
+    // Build pagination info from Meta's response
+    const paging: TemplateLibraryPaging | undefined = result.paging
+      ? {
+          nextCursor: result.paging.cursors?.after,
+          previousCursor: result.paging.cursors?.before,
+          hasNextPage: !!result.paging.next,
+          hasPreviousPage: !!result.paging.cursors?.before,
+        }
+      : undefined;
+
+    return { templates: result.templates, paging };
   }
 
   /**
@@ -261,9 +313,9 @@ export class TemplateLibraryService {
   /**
    * Adopt a template from Meta's Template Library.
    *
-   * This creates a real template in the system that is instantly APPROVED:
+   * This creates a real template in the system:
    * 1. Validates the template isn't already adopted
-   * 2. Calls Meta API to create the template (instantly approved)
+   * 2. Calls Meta API to create the template (may be pre-approved or require review)
    * 3. Creates template, locale, version, and variable records
    *
    * The adopted template then appears alongside custom templates in all views.
@@ -342,10 +394,16 @@ export class TemplateLibraryService {
       isEnabled: true,
     });
 
-    // 6c. Create locale record — instantly approved
+    // 6c. Create locale record
+    // IMPORTANT: Use the actual status from Meta's response - library templates may require review
+    // for new businesses or certain template types. Don't assume instant approval.
     const bodyParamTypes = libraryTemplate.body_param_types?.length
       ? libraryTemplate.body_param_types
       : null;
+
+    // Determine the actual approval status from Meta's response
+    const actualApprovalStatus = createResult.status;
+    const isApproved = actualApprovalStatus === TemplateApprovalStatus.APPROVED;
 
     await db.insert(templateLocales).values({
       id: localeId,
@@ -356,13 +414,13 @@ export class TemplateLibraryService {
       body: libraryTemplate.body,
       footer: libraryTemplate.footer || null,
       exampleVars: this.buildExampleVars(libraryTemplate),
-      activeVersion: 1,
+      activeVersion: isApproved ? 1 : null, // Only set active version if approved
       category: (libraryTemplate.category || 'utility').toLowerCase(),
-      approvalStatus: TemplateApprovalStatus.APPROVED,
+      approvalStatus: actualApprovalStatus, // Use actual status from Meta
       metaTemplateId: createResult.providerId || null,
       qualityRating: 'pending',
       submittedAt: new Date(),
-      reviewedAt: new Date(),
+      reviewedAt: isApproved ? new Date() : null, // Only set if approved
       metaResponse: createResult.providerResponse || null,
       buttons: libraryTemplate.buttons || [],
       parameterFormat: 'positional', // Library templates use positional params ({{1}}, {{2}}, etc.)
@@ -370,7 +428,7 @@ export class TemplateLibraryService {
       bodyParamTypes: bodyParamTypes,
     } as any);
 
-    // 6d. Create version record — approved from the start
+    // 6d. Create version record with appropriate status
     const versionContent = {
       header: libraryTemplate.header || null,
       body: libraryTemplate.body,
@@ -379,13 +437,22 @@ export class TemplateLibraryService {
       category: (libraryTemplate.category || 'utility').toLowerCase(),
     };
 
+    // Map approval status to version status
+    const versionStatus = isApproved
+      ? VersionStatus.APPROVED
+      : actualApprovalStatus === TemplateApprovalStatus.PENDING
+        ? VersionStatus.PENDING_APPROVAL
+        : actualApprovalStatus === TemplateApprovalStatus.REJECTED
+          ? VersionStatus.REJECTED
+          : VersionStatus.PENDING_APPROVAL; // Default to pending if unclear
+
     await db.insert(templateVersions).values({
       id: versionId,
       templateId,
       localeId,
       versionNumber: 1,
       content: versionContent,
-      status: VersionStatus.APPROVED,
+      status: versionStatus,
       providerName: 'meta',
       providerResponse: createResult.providerResponse || null,
       platforms: ['whatsapp'],
@@ -402,11 +469,16 @@ export class TemplateLibraryService {
       metadata: {
         source: 'library',
         libraryTemplateName: dto.libraryTemplateName,
+        approvalStatus: actualApprovalStatus,
       },
     });
 
+    const statusMessage = isApproved
+      ? 'instantly approved'
+      : `status: ${actualApprovalStatus} (may require review)`;
+
     this.logger.log(
-      `Template '${dto.displayName}' adopted from library template '${dto.libraryTemplateName}' — instantly approved`,
+      `Template '${dto.displayName}' adopted from library template '${dto.libraryTemplateName}' — ${statusMessage}`,
     );
 
     return {
@@ -414,7 +486,7 @@ export class TemplateLibraryService {
       localeId,
       name: metaName,
       displayName: dto.displayName,
-      approvalStatus: TemplateApprovalStatus.APPROVED,
+      approvalStatus: actualApprovalStatus, // Return actual status from Meta
       metaTemplateId: createResult.providerId,
     };
   }
@@ -461,7 +533,7 @@ export class TemplateLibraryService {
   ): Promise<TemplateLibraryTemplate> {
     // Try cache first
     const cached = await this.fetchLibraryTemplates({ language });
-    const found = cached.find(
+    const found = cached.templates.find(
       (t) => t.name === libraryTemplateName && t.language === language,
     );
 
@@ -469,7 +541,7 @@ export class TemplateLibraryService {
 
     // Try without language filter (maybe cached under different key)
     const allCached = await this.fetchLibraryTemplates(undefined);
-    const foundInAll = allCached.find(
+    const foundInAll = allCached.templates.find(
       (t) => t.name === libraryTemplateName && t.language === language,
     );
 

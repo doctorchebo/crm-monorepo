@@ -10,6 +10,7 @@ import React, { memo } from "react";
 import type { Chat, Message, MessageReaction } from "../types";
 import { DateSeparator } from "./date-separator";
 import { MessageBubble } from "./message-bubble";
+import { TemplateMessageBubble } from "./template-message-bubble";
 
 interface MessageListItemProps {
   message: Message;
@@ -281,6 +282,50 @@ export const MessageListItem = memo(function MessageListItem({
         </React.Fragment>
       );
     }
+  }
+
+  // Handle template message type
+  if (message.type === "template" && !isDeleted) {
+    return (
+      <React.Fragment key={message.messageId || message.id}>
+        {separatorDate && <DateSeparator date={separatorDate} />}
+        {renderWithSelection(
+          <div
+            ref={onSetMessageRef}
+            className={`flex ${isOutbound ? "justify-end" : "justify-start"} ${
+              isHighlighted
+                ? "bg-yellow-100 dark:bg-yellow-900/30 animate-pulse"
+                : ""
+            } transition-colors duration-500 -mx-2 px-2 rounded`}
+          >
+            <TemplateMessageBubble
+              message={message}
+              isOutbound={isOutbound}
+              isDeleted={isDeleted}
+              isHighlighted={isHighlighted}
+              timeString={timeString}
+              selectedChat={selectedChat}
+              currentUserId={currentUserId}
+              userReaction={userReaction}
+              customerReaction={customerReaction}
+              reactions={reactions}
+              reactionAnimating={reactionAnimating}
+              isPinned={isPinned}
+              isReactionDisabled={isReactionDisabled}
+              reactionDisabledTooltip={reactionDisabledTooltip}
+              isSelectionMode={isSelectionMode}
+              onReply={onReply}
+              onDelete={onDelete}
+              onScrollToMessage={onScrollToMessage}
+              onReactionSelect={onReactionSelect}
+              onPin={onPin}
+              onUnpin={onUnpin}
+              t={t}
+            />
+          </div>,
+        )}
+      </React.Fragment>
+    );
   }
 
   // Handle standard message type

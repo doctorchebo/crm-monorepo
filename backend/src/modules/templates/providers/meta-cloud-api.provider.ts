@@ -56,15 +56,35 @@ const META_LANGUAGE_CODES: Record<string, string> = {
 
 /**
  * Meta Cloud API status mapping
+ *
+ * Meta template statuses from the API:
+ * - APPROVED: Template is approved and can be sent
+ * - PENDING: Template is under review (up to 24 hours)
+ * - IN_REVIEW: Same as PENDING, used by some API versions
+ * - REJECTED: Template was rejected during review
+ * - PAUSED: Template paused due to quality issues
+ * - DISABLED: Template disabled by Meta (permanent)
+ * - FLAGGED: Template flagged for review (treated as paused)
+ * - IN_APPEAL: Appeal has been submitted
+ * - REINSTATED: Template reinstated after appeal (treated as approved)
+ * - PENDING_DELETION: Template scheduled for deletion
+ * - DELETED: Template has been deleted
+ *
+ * Note: "Active-Quality Pending" in Meta UI means the template is APPROVED
+ * but quality rating hasn't been determined yet. The status is still APPROVED.
  */
 const META_STATUS_MAP: Record<string, TemplateApprovalStatus> = {
   APPROVED: TemplateApprovalStatus.APPROVED,
   PENDING: TemplateApprovalStatus.PENDING,
+  IN_REVIEW: TemplateApprovalStatus.PENDING, // Some API versions return this
   REJECTED: TemplateApprovalStatus.REJECTED,
   PAUSED: TemplateApprovalStatus.PAUSED,
+  FLAGGED: TemplateApprovalStatus.PAUSED, // Flagged is similar to paused
   DISABLED: TemplateApprovalStatus.DISABLED,
   IN_APPEAL: TemplateApprovalStatus.APPEAL_REQUESTED,
+  REINSTATED: TemplateApprovalStatus.APPROVED, // Reinstated = approved again
   PENDING_DELETION: TemplateApprovalStatus.DISABLED,
+  DELETED: TemplateApprovalStatus.DISABLED,
 };
 
 /**
@@ -108,9 +128,9 @@ export class MetaCloudApiProvider implements IMessagingProvider {
   isConfigured(): boolean {
     const accessToken = this.configService.get('META_ACCESS_TOKEN');
     const wabaId = this.configService.get('META_WABA_ID');
-    const phoneNumberId = this.configService.get('META_PHONE_NUMBER_ID');
-
-    return !!(accessToken && wabaId && phoneNumberId);
+    // phoneNumberId is resolved per-request from the sender record,
+    // so it is NOT required at the global config level.
+    return !!(accessToken && wabaId);
   }
 
   /**
@@ -133,17 +153,6 @@ export class MetaCloudApiProvider implements IMessagingProvider {
       throw new Error('META_WABA_ID is not configured');
     }
     return wabaId;
-  }
-
-  /**
-   * Get the Phone Number ID
-   */
-  private getPhoneNumberId(): string {
-    const phoneNumberId = this.configService.get('META_PHONE_NUMBER_ID');
-    if (!phoneNumberId) {
-      throw new Error('META_PHONE_NUMBER_ID is not configured');
-    }
-    return phoneNumberId;
   }
 
   /**
@@ -448,14 +457,23 @@ export class MetaCloudApiProvider implements IMessagingProvider {
 
   /**
    * Get template status from Meta
-   */
-  /**
-   * Get template status from Meta
+   *
+   * Fetches the current status of a template from Meta's Graph API.
+   * Note: The templateId should be the message template ID returned when
+   * the template was created (stored in template_locales.meta_template_id).
+   *
+   * Returns status, quality rating, category, and full component structure.
    */
   async getTemplateStatus(templateId: string): Promise<TemplateStatusResult> {
     try {
       const accessToken = this.getAccessToken();
-      const url = `${this.baseUrl}/${this.apiVersion}/${templateId}?fields=status,quality_score,rejected_reason,category`;
+      // Request full template data including components for header format detection
+      const url = `${this.baseUrl}/${this.apiVersion}/${templateId}?fields=id,name,status,quality_score,rejected_reason,category,language,components`;
+
+      this.logger.log(
+        `Fetching template status from Meta for template ID: ${templateId}`,
+      );
+      this.logger.debug(`API URL: ${url}`);
 
       const response = await fetch(url, {
         headers: {
@@ -464,6 +482,11 @@ export class MetaCloudApiProvider implements IMessagingProvider {
       });
 
       const responseData = await response.json();
+
+      // Log the raw response for debugging
+      this.logger.log(
+        `Meta API response for template ${templateId}: ${JSON.stringify(responseData)}`,
+      );
 
       if (!response.ok) {
         // Handle specific Meta API errors
@@ -494,16 +517,25 @@ export class MetaCloudApiProvider implements IMessagingProvider {
       }
 
       const rawStatus = responseData.status;
+      this.logger.log(
+        `Template ${templateId} raw status from Meta: "${rawStatus}"`,
+      );
+
       let status = META_STATUS_MAP[rawStatus];
 
       if (!status) {
         this.logger.warn(
-          `Unknown template status received from Meta: "${rawStatus}". Defaulting to DRAFT.`,
+          `Unknown template status received from Meta: "${rawStatus}". ` +
+            `Full response: ${JSON.stringify(responseData)}. Defaulting to DRAFT.`,
         );
         // Do NOT default to PENDING as that locks the UI.
         // If it's unknown, better to show as DRAFT so user can potentially resubmit,
         // or we need a new "UNKNOWN" status. For now, DRAFT is safer than PENDING.
         status = TemplateApprovalStatus.DRAFT;
+      } else {
+        this.logger.log(
+          `Template ${templateId} status mapped: "${rawStatus}" -> "${status}"`,
+        );
       }
 
       const qualityRating = responseData.quality_score
@@ -524,11 +556,31 @@ export class MetaCloudApiProvider implements IMessagingProvider {
         }
       }
 
+      // Extract components and detect header format
+      const components = responseData.components as
+        | Array<Record<string, any>>
+        | undefined;
+      let headerFormat: string | undefined;
+
+      if (components && Array.isArray(components)) {
+        const headerComponent = components.find(
+          (c) => c.type?.toUpperCase() === 'HEADER',
+        );
+        if (headerComponent) {
+          headerFormat = headerComponent.format?.toUpperCase();
+          this.logger.debug(
+            `Template ${templateId} header format detected: ${headerFormat}`,
+          );
+        }
+      }
+
       return {
         status,
         qualityRating,
         rejectionReason: responseData.rejected_reason,
         category,
+        components,
+        headerFormat,
         providerResponse: responseData,
       };
     } catch (error) {
@@ -576,26 +628,79 @@ export class MetaCloudApiProvider implements IMessagingProvider {
 
   /**
    * Send a template message
+   *
+   * Builds the Meta API send-payload using the **Meta-registered component
+   * structure** (`locale.components`, synced from the API) as ground truth.
+   * Falls back to re-deriving from raw text fields when the synced structure
+   * is not available.
+   *
+   * For media headers (IMAGE, VIDEO, DOCUMENT), the URL/link should be
+   * provided in `request.variables`:
+   *   - header_image / header_media_url / headerImage  (IMAGE)
+   *   - header_video / header_media_url / headerVideo  (VIDEO)
+   *   - header_document_url / header_document / headerDocument  (DOCUMENT)
+   *   - header_document_filename / headerDocumentFilename   (DOCUMENT)
+   *
+   * For LOCATION headers:
+   *   - header_location_latitude / headerLocationLatitude / latitude
+   *   - header_location_longitude / headerLocationLongitude / longitude
+   *   - header_location_name / headerLocationName         (optional)
+   *   - header_location_address / headerLocationAddress   (optional)
    */
   async sendTemplateMessage(
     request: TemplateSendRequest,
   ): Promise<TemplateSendResult> {
     try {
-      const phoneNumberId = this.getPhoneNumberId();
+      if (!request.phoneNumberId) {
+        throw new Error(
+          'phoneNumberId is required. Ensure the sender record has a phoneNumberId.',
+        );
+      }
+      const phoneNumberId = request.phoneNumberId;
       const accessToken = this.getAccessToken();
       const url = `${this.baseUrl}/${this.apiVersion}/${phoneNumberId}/messages`;
 
-      const { providerBody, variableMapping } =
-        this.parserService.convertToProviderFormat(request.locale.body);
+      // ── Ground truth: Meta-registered component structure ──────────
+      const metaRegistered = request.locale.components as {
+        header?: { format?: string; text?: string; example?: any };
+        body?: { text?: string; example?: any };
+        footer?: { text?: string };
+        buttons?: Array<Record<string, any>>;
+      } | null;
 
-      // Build parameters array from variables
-      const parameters = variableMapping
-        .sort((a, b) => a.index - b.index)
-        .map(({ name }) => ({
-          type: 'text',
-          text: request.variables[name] || '',
-        }));
+      // ── Build body parameters ──────────────────────────────────────
+      const { bodyParameters, bodyDiag } = this.buildBodyParameters(
+        request,
+        metaRegistered,
+      );
 
+      // ── Assemble send-components ──────────────────────────────────
+      const components: any[] = [];
+
+      // Header
+      const headerComponent = this.buildHeaderSendComponent(
+        request,
+        metaRegistered,
+      );
+      if (headerComponent) {
+        components.push(headerComponent);
+      }
+
+      // Body
+      if (bodyParameters.length > 0) {
+        components.push({
+          type: 'body',
+          parameters: bodyParameters,
+        });
+      }
+
+      // Buttons
+      const buttonComponents = this.buildButtonComponents(request);
+      if (buttonComponents.length > 0) {
+        components.push(...buttonComponents);
+      }
+
+      // ── Build final payload ────────────────────────────────────────
       const payload = {
         messaging_product: 'whatsapp',
         recipient_type: 'individual',
@@ -606,18 +711,26 @@ export class MetaCloudApiProvider implements IMessagingProvider {
           language: {
             code: this.mapLocaleToMetaLanguage(request.language),
           },
-          components:
-            parameters.length > 0
-              ? [
-                  {
-                    type: 'body',
-                    parameters,
-                  },
-                ]
-              : undefined,
+          components: components.length > 0 ? components : undefined,
         },
       };
 
+      // ── Diagnostic logging ─────────────────────────────────────────
+      this.logger.log(
+        `[SEND-TEMPLATE] Sending "${request.templateName}" ` +
+          `(lang=${request.language}, to=${request.to})`,
+      );
+      this.logger.log(
+        `[SEND-TEMPLATE] Body diagnostics: ${JSON.stringify(bodyDiag)}`,
+      );
+      this.logger.log(
+        `[SEND-TEMPLATE] Components to send: ${JSON.stringify(components)}`,
+      );
+      this.logger.debug(
+        `[SEND-TEMPLATE] Full payload:\n${JSON.stringify(payload, null, 2)}`,
+      );
+
+      // ── Send ──────────────────────────────────────────────────────
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -631,15 +744,33 @@ export class MetaCloudApiProvider implements IMessagingProvider {
 
       if (!response.ok) {
         this.logger.error(
-          `Failed to send template message: ${JSON.stringify(responseData)}`,
+          `[SEND-TEMPLATE] Meta API ${response.status} error:\n` +
+            JSON.stringify(responseData, null, 2),
         );
+
+        // Surface the full error details for debugging
+        const metaError = responseData.error || {};
+        const details =
+          metaError.error_data?.details ||
+          metaError.error_user_msg ||
+          metaError.message ||
+          'Failed to send message';
+        const code = metaError.code ? `#${metaError.code}` : '';
+        const subcode = metaError.error_subcode
+          ? ` (subcode ${metaError.error_subcode})`
+          : '';
+
         return {
           success: false,
           status: 'failed',
-          error: responseData.error?.message || 'Failed to send message',
+          error: `${code}${subcode} ${details}`.trim(),
           providerResponse: responseData,
         };
       }
+
+      this.logger.log(
+        `[SEND-TEMPLATE] ✅ Message sent: ${responseData.messages?.[0]?.id}`,
+      );
 
       return {
         success: true,
@@ -648,13 +779,398 @@ export class MetaCloudApiProvider implements IMessagingProvider {
         providerResponse: responseData,
       };
     } catch (error) {
-      this.logger.error(`Failed to send template message: ${error.message}`);
+      this.logger.error(
+        `[SEND-TEMPLATE] Exception: ${error.message}`,
+        error.stack,
+      );
       return {
         success: false,
         status: 'failed',
         error: error.message,
       };
     }
+  }
+
+  // ==================== Send-component Builders ====================
+
+  /**
+   * Count unique template parameters in a Meta component text string.
+   *
+   * Handles both parameter formats:
+   *  - Positional: `{{1}}`, `{{2}}` (legacy / classic templates)
+   *  - Named:      `{{customer.first_name}}` (named-parameter templates)
+   *
+   * Returns the count of unique parameters and the detected format.
+   */
+  private countMetaTemplateParams(text: string): {
+    count: number;
+    format: 'positional' | 'named' | 'none';
+  } {
+    const allMatches = text.match(/\{\{([^}]+)\}\}/g);
+    if (!allMatches) return { count: 0, format: 'none' };
+
+    const uniqueParams = new Set(
+      allMatches.map((m) => m.replace(/^\{\{|\}\}$/g, '').trim()),
+    );
+    const allPositional = [...uniqueParams].every((p) => /^\d+$/.test(p));
+
+    return {
+      count: uniqueParams.size,
+      format: allPositional ? 'positional' : 'named',
+    };
+  }
+
+  /**
+   * Build the body parameter array for a template-message send request.
+   *
+   * Priority:
+   *   1. If `locale.components.body.text` (Meta-synced) is available, use its
+   *      positional param count as the authoritative expected count.
+   *   2. Otherwise, derive the count from `locale.body` via the parser.
+   *
+   * Returns the parameter array AND a diagnostics object for logging.
+   */
+  private buildBodyParameters(
+    request: TemplateSendRequest,
+    metaRegistered: {
+      body?: { text?: string };
+      [k: string]: any;
+    } | null,
+  ): {
+    bodyParameters: Array<{ type: string; text: string }>;
+    bodyDiag: Record<string, any>;
+  } {
+    // ── Tier 1: Derive variable mapping from locale.body ─────────────
+    const { variableMapping } = this.parserService.convertToProviderFormat(
+      request.locale.body || '',
+    );
+
+    const sortedMapping = [...variableMapping].sort(
+      (a, b) => a.index - b.index,
+    );
+
+    // ── Tier 2: Meta-synced body as authoritative param count ────────
+    let expectedCount = sortedMapping.length;
+    let metaBodyText: string | null = null;
+    let strategy: string = 'locale_body';
+
+    if (metaRegistered?.body?.text) {
+      metaBodyText = metaRegistered.body.text;
+      const { count: metaCount, format: metaFormat } =
+        this.countMetaTemplateParams(metaBodyText);
+
+      if (metaCount !== sortedMapping.length) {
+        this.logger.warn(
+          `[SEND-TEMPLATE] Body param count MISMATCH: ` +
+            `locale.body has ${sortedMapping.length} named var(s), ` +
+            `Meta registered ${metaCount} ${metaFormat} param(s). ` +
+            `Using Meta's count (${metaCount}). ` +
+            `locale.body="${request.locale.body}" | ` +
+            `Meta body="${metaBodyText}"`,
+        );
+        expectedCount = metaCount;
+        strategy = 'meta_components';
+      }
+    }
+
+    // ── Build the parameter array ────────────────────────────────────
+    let bodyParameters: Array<{ type: string; text: string }>;
+
+    if (sortedMapping.length > 0) {
+      // We have a named→positional mapping — use it
+      bodyParameters = sortedMapping
+        .slice(0, expectedCount)
+        .map(({ name }) => ({
+          type: 'text',
+          text: String(request.variables[name] ?? ''),
+        }));
+    } else if (expectedCount > 0) {
+      // locale.body had no variables but Meta expects params.
+      // Attempt to fill from request.variables using positional keys.
+      strategy = 'positional_fallback';
+      bodyParameters = [];
+      for (let i = 1; i <= expectedCount; i++) {
+        const value =
+          request.variables[String(i)] ?? request.variables[`{{${i}}}`] ?? '';
+        bodyParameters.push({ type: 'text', text: String(value) });
+      }
+    } else {
+      // ── Tier 3: Neither locale.body nor Meta components have info.
+      // Check if request.variables itself carries positional keys,
+      // indicating the frontend already resolved the variables.
+      const positionalKeys = Object.keys(request.variables)
+        .filter((k) => /^\d+$/.test(k))
+        .sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+
+      if (positionalKeys.length > 0) {
+        strategy = 'variables_positional';
+        expectedCount = positionalKeys.length;
+        bodyParameters = positionalKeys.map((key) => ({
+          type: 'text',
+          text: String(request.variables[key] ?? ''),
+        }));
+      } else {
+        // No body params at all — this is valid for templates without body variables
+        bodyParameters = [];
+      }
+    }
+
+    // Pad if Meta expects more params than we managed to build
+    while (bodyParameters.length < expectedCount) {
+      this.logger.warn(
+        `[SEND-TEMPLATE] Padding body param [${bodyParameters.length}] ` +
+          `with empty string — no matching variable found`,
+      );
+      bodyParameters.push({ type: 'text', text: '' });
+    }
+
+    return {
+      bodyParameters,
+      bodyDiag: {
+        strategy,
+        derivedVars: sortedMapping.map((m) => m.name),
+        expectedCount,
+        actualCount: bodyParameters.length,
+        metaBodyText,
+        localeBody: request.locale.body,
+        variableKeys: Object.keys(request.variables),
+        variableValues: Object.entries(request.variables).reduce(
+          (acc, [key, val]) => {
+            acc[key] = val ?? '<MISSING>';
+            return acc;
+          },
+          {} as Record<string, string>,
+        ),
+      },
+    };
+  }
+
+  /**
+   * Build the header send-component.
+   *
+   * Uses `metaRegistered.header` (the synced Meta structure) as ground truth
+   * to decide whether a header component is needed and what format it should
+   * use. Falls back to `locale.header` + `locale.headerFormat` when the
+   * synced structure is not available.
+   */
+  private buildHeaderSendComponent(
+    request: TemplateSendRequest,
+    metaRegistered: {
+      header?: { format?: string; text?: string };
+      [k: string]: any;
+    } | null,
+  ): Record<string, any> | null {
+    // Determine the authoritative header format
+    const headerFormat = (
+      metaRegistered?.header?.format ||
+      request.locale.headerFormat ||
+      ''
+    ).toUpperCase();
+
+    if (!headerFormat) {
+      // No header registered — skip
+      return null;
+    }
+
+    // For TEXT headers, check whether Meta's registered text has variables
+    if (headerFormat === 'TEXT') {
+      const metaHeaderText = metaRegistered?.header?.text;
+      const localeHeader = request.locale.header;
+
+      // If Meta synced a header text, check for template params there
+      if (metaHeaderText) {
+        const { count: expectedHeaderParams } =
+          this.countMetaTemplateParams(metaHeaderText);
+        if (expectedHeaderParams === 0) {
+          // Static text header — no parameters needed
+          return null;
+        }
+      }
+
+      // If the locale header has dynamic variables, build params
+      if (localeHeader && localeHeader.includes('{{')) {
+        const { variableMapping } =
+          this.parserService.convertToProviderFormat(localeHeader);
+        if (variableMapping.length > 0) {
+          const headerParams = variableMapping
+            .sort((a, b) => a.index - b.index)
+            .map(({ name }) => ({
+              type: 'text',
+              text: String(
+                request.variables[`header_${name}`] ??
+                  request.variables[name] ??
+                  '',
+              ),
+            }));
+          return { type: 'header', parameters: headerParams };
+        }
+      }
+      return null;
+    }
+
+    // For media / location headers, delegate to the existing builder
+    return this.buildMediaHeaderComponent(request, headerFormat);
+  }
+
+  /**
+   * Build media / location header components (IMAGE, VIDEO, DOCUMENT, LOCATION).
+   * Extracted from the original `buildHeaderComponent` to keep responsibilities
+   * clear: `buildHeaderSendComponent` decides *if* a header is needed,
+   * this method builds the media-specific parameter.
+   */
+  private buildMediaHeaderComponent(
+    request: TemplateSendRequest,
+    headerFormat: string,
+  ): Record<string, any> | null {
+    const { variables } = request;
+
+    switch (headerFormat) {
+      case 'IMAGE': {
+        const imageUrl =
+          variables.header_image ||
+          variables.header_media_url ||
+          variables.headerImage;
+        if (imageUrl) {
+          return {
+            type: 'header',
+            parameters: [{ type: 'image', image: { link: imageUrl } }],
+          };
+        }
+        this.logger.warn(
+          '[SEND-TEMPLATE] IMAGE header registered but no image URL provided in variables. ' +
+            'Meta may reject. Expected one of: header_image, header_media_url, headerImage',
+        );
+        return null;
+      }
+
+      case 'VIDEO': {
+        const videoUrl =
+          variables.header_video ||
+          variables.header_media_url ||
+          variables.headerVideo;
+        if (videoUrl) {
+          return {
+            type: 'header',
+            parameters: [{ type: 'video', video: { link: videoUrl } }],
+          };
+        }
+        this.logger.warn(
+          '[SEND-TEMPLATE] VIDEO header registered but no video URL provided in variables.',
+        );
+        return null;
+      }
+
+      case 'DOCUMENT': {
+        const documentUrl =
+          variables.header_document_url ||
+          variables.header_document ||
+          variables.header_media_url ||
+          variables.headerDocument;
+        const filename =
+          variables.header_document_filename ||
+          variables.headerDocumentFilename ||
+          'document.pdf';
+        if (documentUrl) {
+          return {
+            type: 'header',
+            parameters: [
+              { type: 'document', document: { link: documentUrl, filename } },
+            ],
+          };
+        }
+        this.logger.warn(
+          '[SEND-TEMPLATE] DOCUMENT header registered but no document URL provided in variables.',
+        );
+        return null;
+      }
+
+      case 'LOCATION': {
+        const latitude =
+          variables.header_location_latitude ||
+          variables.headerLocationLatitude ||
+          variables.latitude;
+        const longitude =
+          variables.header_location_longitude ||
+          variables.headerLocationLongitude ||
+          variables.longitude;
+        if (latitude && longitude) {
+          const locationParam: Record<string, any> = {
+            // Meta Cloud API expects latitude/longitude as string values
+            latitude: String(latitude),
+            longitude: String(longitude),
+          };
+          const name =
+            variables.header_location_name || variables.headerLocationName;
+          const address =
+            variables.header_location_address ||
+            variables.headerLocationAddress;
+          if (name) locationParam.name = String(name);
+          if (address) locationParam.address = String(address);
+
+          return {
+            type: 'header',
+            parameters: [
+              {
+                type: 'location',
+                location: locationParam,
+              },
+            ],
+          };
+        }
+        this.logger.warn(
+          '[SEND-TEMPLATE] LOCATION header registered but lat/lng not provided. ' +
+            `Available variable keys: ${Object.keys(variables).join(', ')}`,
+        );
+        return null;
+      }
+
+      default:
+        this.logger.debug(
+          `[SEND-TEMPLATE] Unknown header format: ${headerFormat}`,
+        );
+        return null;
+    }
+  }
+
+  /**
+   * Build button components for URL buttons with dynamic values
+   */
+  private buildButtonComponents(
+    request: TemplateSendRequest,
+  ): Array<Record<string, any>> {
+    const { locale, variables } = request;
+    const buttons = locale.buttons as Array<Record<string, any>> | null;
+    const components: Array<Record<string, any>> = [];
+
+    if (!buttons || !Array.isArray(buttons)) {
+      return components;
+    }
+
+    buttons.forEach((button, index) => {
+      if (button.type === 'URL' && button.url?.includes('{{')) {
+        // URL button with dynamic suffix
+        const dynamicSuffix =
+          variables[`button_${index}_url`] ||
+          variables[`button_url_${index}`] ||
+          variables[`button${index}Url`] ||
+          '';
+        if (dynamicSuffix) {
+          components.push({
+            type: 'button',
+            sub_type: 'url',
+            index: index,
+            parameters: [
+              {
+                type: 'text',
+                text: dynamicSuffix,
+              },
+            ],
+          });
+        }
+      }
+    });
+
+    return components;
   }
 
   // ==================== Template Library Methods ====================
@@ -690,8 +1206,17 @@ export class MetaCloudApiProvider implements IMessagingProvider {
       if (filters?.language) {
         params.append('language', filters.language);
       }
-      // Request a large page to minimize round-trips (library is relatively small)
-      params.append('limit', '100');
+
+      // Pagination parameters
+      const limit = Math.min(Math.max(filters?.limit || 25, 1), 100);
+      params.append('limit', String(limit));
+
+      if (filters?.after) {
+        params.append('after', filters.after);
+      }
+      if (filters?.before) {
+        params.append('before', filters.before);
+      }
 
       const queryString = params.toString();
       // message_template_library is a root-level Graph API endpoint (not WABA-scoped).
@@ -760,7 +1285,8 @@ export class MetaCloudApiProvider implements IMessagingProvider {
    * Create a template from Meta's Template Library
    *
    * Calls: POST /{WABA_ID}/message_templates with library_template_name
-   * Library templates are instantly APPROVED (no review needed)
+   * Library templates are typically pre-approved, but may require review
+   * for new accounts or certain template types.
    *
    * @see https://developers.facebook.com/documentation/business-messaging/whatsapp/templates/template-library
    */
@@ -827,15 +1353,16 @@ export class MetaCloudApiProvider implements IMessagingProvider {
         `Library template created successfully. ID: ${responseData.id}, Status: ${responseData.status}`,
       );
 
-      // Library templates are instantly approved
+      // Map the status from Meta's response - library templates are usually approved
+      // but may be PENDING for new accounts
       const status =
-        META_STATUS_MAP[responseData.status] || TemplateApprovalStatus.APPROVED;
+        META_STATUS_MAP[responseData.status] || TemplateApprovalStatus.PENDING;
 
       return {
         success: true,
         providerId: responseData.id,
         status,
-        message: 'Template created from library — instantly approved',
+        message: 'Template created from library',
         providerResponse: responseData,
       };
     } catch (error) {

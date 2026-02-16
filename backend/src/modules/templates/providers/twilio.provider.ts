@@ -1,9 +1,5 @@
 import { TemplateLocale } from '@database/schema';
-import {
-  Injectable,
-  InternalServerErrorException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Twilio } from 'twilio';
 import { TemplateParserService } from '../services/template-parser.service';
@@ -260,41 +256,6 @@ export class TwilioProviderAdapter implements IMessagingProvider {
         error: error.message,
       };
     }
-  }
-
-  /**
-   * Legacy method: Send test message via Twilio sandbox
-   * @deprecated Use sendTemplateMessage instead
-   */
-  async sendTestMessage(
-    to: string,
-    templateName: string,
-    variables: Record<string, any>,
-    locale: TemplateLocale,
-  ): Promise<{
-    messageSid: string;
-    status: string;
-    response: Record<string, any>;
-  }> {
-    const result = await this.sendTemplateMessage({
-      to,
-      templateName,
-      language: locale.locale,
-      variables,
-      locale,
-    });
-
-    if (!result.success) {
-      throw new InternalServerErrorException(
-        result.error || 'Failed to send test message',
-      );
-    }
-
-    return {
-      messageSid: result.messageId || '',
-      status: result.status,
-      response: result.providerResponse || {},
-    };
   }
 
   /**

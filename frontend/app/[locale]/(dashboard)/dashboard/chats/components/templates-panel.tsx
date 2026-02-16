@@ -1,6 +1,14 @@
 "use client";
 
-import { ChevronDown, Clock, Info, Loader, Search, X } from "lucide-react";
+import {
+  ChevronDown,
+  Clock,
+  Info,
+  Library,
+  Loader,
+  Search,
+  X,
+} from "lucide-react";
 import React, { memo, useCallback, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -95,8 +103,6 @@ function getUnavailableReasonKey(reason: TemplateUnavailableReason): string {
       return "templateNotApproved";
     case "no_matching_locale":
       return "templateNoMatchingLocale";
-    case "outside_window_not_approved":
-      return "templateOutsideWindowNotApproved";
     default:
       return "templateNotApproved";
   }
@@ -121,6 +127,7 @@ const TemplateButton = memo(function TemplateButton({
   }, [template, onClick, isAvailable]);
 
   const displayName = template.displayName || template.name;
+  const isLibraryTemplate = template.source === "library";
 
   // If available, render a simple button
   if (isAvailable) {
@@ -129,8 +136,11 @@ const TemplateButton = memo(function TemplateButton({
         variant="outline"
         size="sm"
         onClick={handleClick}
-        className="text-left justify-start h-auto py-1 px-2 text-xs"
+        className="text-left justify-start h-auto py-1 px-2 text-xs gap-1"
       >
+        {isLibraryTemplate && (
+          <Library className="h-3 w-3 flex-shrink-0 text-blue-500" />
+        )}
         <span className="truncate">{displayName}</span>
       </Button>
     );
@@ -149,8 +159,11 @@ const TemplateButton = memo(function TemplateButton({
             variant="outline"
             size="sm"
             disabled
-            className="text-left justify-start h-auto py-1 px-2 text-xs opacity-50 cursor-not-allowed"
+            className="text-left justify-start h-auto py-1 px-2 text-xs opacity-50 cursor-not-allowed gap-1"
           >
+            {isLibraryTemplate && (
+              <Library className="h-3 w-3 flex-shrink-0 text-blue-500" />
+            )}
             <span className="truncate">{displayName}</span>
           </Button>
         </TooltipTrigger>
@@ -179,7 +192,7 @@ const TemplateSearchInput = memo(function TemplateSearchInput({
     (e: React.ChangeEvent<HTMLInputElement>) => {
       onChange(e.target.value);
     },
-    [onChange]
+    [onChange],
   );
 
   return (
@@ -291,7 +304,7 @@ const WindowStatusIndicator = memo(function WindowStatusIndicator({
 }) {
   if (conversationWindow.isWithinWindow) {
     const timeRemaining = formatTimeRemaining(
-      conversationWindow.timeRemainingMs
+      conversationWindow.timeRemainingMs,
     );
     return (
       <TooltipProvider delayDuration={200}>
@@ -337,7 +350,7 @@ const WindowStatusIndicator = memo(function WindowStatusIndicator({
  */
 function filterTemplates<T extends Template>(
   templates: T[],
-  query: string
+  query: string,
 ): T[] {
   if (!query.trim()) {
     return templates;
@@ -416,7 +429,7 @@ export const TemplatesPanel = memo(function TemplatesPanel({
 }: TemplatesPanelProps) {
   // Collapsed state with localStorage persistence
   const [isCollapsed, setIsCollapsed] = useState(() =>
-    getInitialCollapsedState(defaultCollapsed)
+    getInitialCollapsedState(defaultCollapsed),
   );
 
   // Debounced search for performance
@@ -444,7 +457,7 @@ export const TemplatesPanel = memo(function TemplatesPanel({
         windowExpiresAt: null,
         timeRemainingMs: 0,
       },
-    [conversationWindow]
+    [conversationWindow],
   );
 
   // Enrich templates with availability information
@@ -453,21 +466,21 @@ export const TemplatesPanel = memo(function TemplatesPanel({
       enrichTemplatesWithAvailability(
         templates,
         effectiveWindowStatus,
-        customerLanguage
+        customerLanguage,
       ),
-    [templates, effectiveWindowStatus, customerLanguage]
+    [templates, effectiveWindowStatus, customerLanguage],
   );
 
   // Memoized filtered templates - only recomputes when templates or query changes
   const filteredTemplates = useMemo(
     () => filterTemplates(enrichedTemplates, searchQuery),
-    [enrichedTemplates, searchQuery]
+    [enrichedTemplates, searchQuery],
   );
 
   // Count available templates for display
   const availableCount = useMemo(
     () => enrichedTemplates.filter((t) => t.availability.isAvailable).length,
-    [enrichedTemplates]
+    [enrichedTemplates],
   );
 
   // Determine content to render
@@ -503,7 +516,7 @@ export const TemplatesPanel = memo(function TemplatesPanel({
             <ChevronDown
               className={cn(
                 "h-4 w-4 text-muted-foreground transition-transform duration-200",
-                !isCollapsed && "rotate-180"
+                !isCollapsed && "rotate-180",
               )}
             />
           </button>

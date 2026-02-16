@@ -542,6 +542,11 @@ export class TemplatesService {
       components: dto.components,
     });
 
+    // Create template_media record for media headers (IMAGE/VIDEO/DOCUMENT)
+    if (isEnhancedMode && dto.components?.header) {
+      await this.ensureMediaRecord(localeId, dto.components.header);
+    }
+
     return this.getLocale(localeId);
   }
 
@@ -687,6 +692,11 @@ export class TemplatesService {
           .set(updateValues as any)
           .where(eq(templateLocales.id, localeId));
 
+        // Upsert template_media record for media headers
+        if (isEnhancedMode && dto.components?.header) {
+          await this.ensureMediaRecord(localeId, dto.components.header);
+        }
+
         return this.getLocale(localeId);
       } else {
         // Version is immutable - cannot edit directly
@@ -724,6 +734,132 @@ export class TemplatesService {
     });
 
     return this.getLocale(localeId);
+  }
+
+  /**
+   * Ensure a template_media record exists for a locale with a media header.
+   *
+   * When templates are created/updated, the media file info lives in
+   * components.header (link, assetHandle, filename). This method creates
+   * (or updates) a template_media row so the send-time resolution and
+   * preview flows can find the S3 key for the original file.
+   */
+  private async ensureMediaRecord(
+    localeId: string,
+    header: Record<string, any>,
+  ): Promise<void> {
+    const format = (header.format || '').toUpperCase();
+    const MEDIA_FORMATS = ['IMAGE', 'VIDEO', 'DOCUMENT'];
+    if (!MEDIA_FORMATS.includes(format)) return;
+
+    const link: string | undefined = header.link;
+    const assetHandle: string | undefined = header.assetHandle;
+    const filename: string | undefined = header.filename;
+    if (!link && !assetHandle) return;
+
+    // Extract the S3 key from the presigned URL stored in components.header.link
+    let s3Key: string | null = null;
+    let originalS3Key: string | null = null;
+
+    if (link) {
+      const extractedKey = this.extractS3KeyFromUrl(link);
+      if (extractedKey) {
+        if (extractedKey.includes('_thumb')) {
+          // Thumbnail key — store as s3Key, try to derive original
+          s3Key = extractedKey;
+          const basePath = extractedKey.replace(/_thumb\.[^.]+$/, '');
+          const extMap: Record<string, string[]> = {
+            VIDEO: ['.mp4', '.mp4.mp4', '.mov'],
+            DOCUMENT: ['.pdf'],
+            IMAGE: ['.jpg', '.jpeg', '.png'],
+          };
+          // Set the first candidate as originalS3Key (will be verified at send time)
+          for (const ext of extMap[format] || []) {
+            originalS3Key = basePath + ext;
+            break; // Use first candidate
+          }
+        } else {
+          // Non-thumbnail — this IS the original
+          originalS3Key = extractedKey;
+          s3Key = extractedKey; // Will be overwritten by Lambda to thumbnail later
+        }
+      }
+    }
+
+    const mediaType = format.toLowerCase();
+
+    try {
+      // Check for existing record
+      const existing = await db.query.templateMedia.findFirst({
+        where: and(
+          eq(templateMedia.localeId, localeId),
+          eq(templateMedia.componentType, 'header'),
+        ),
+      });
+
+      if (existing) {
+        // Update existing record
+        await db
+          .update(templateMedia)
+          .set({
+            mediaType,
+            originalFilename: filename || existing.originalFilename,
+            assetHandle: assetHandle || existing.assetHandle,
+            ...(s3Key && { s3Key }),
+            ...(originalS3Key && { originalS3Key }),
+            updatedAt: new Date(),
+          })
+          .where(eq(templateMedia.id, existing.id));
+
+        this.logger.log(
+          `Updated template_media for locale ${localeId}: s3Key=${s3Key}, originalS3Key=${originalS3Key}`,
+        );
+      } else {
+        // Create new record
+        await db.insert(templateMedia).values({
+          localeId,
+          componentType: 'header',
+          mediaType,
+          originalFilename: filename,
+          assetHandle: assetHandle || undefined,
+          s3Key,
+          originalS3Key,
+          uploadStatus: 'completed',
+        });
+
+        this.logger.log(
+          `Created template_media for locale ${localeId}: s3Key=${s3Key}, originalS3Key=${originalS3Key}`,
+        );
+      }
+    } catch (error) {
+      // Non-critical — log and continue. The send-time resolution has
+      // its own fallback strategies.
+      this.logger.warn(
+        `Failed to ensure template_media record for locale ${localeId}: ${error.message}`,
+      );
+    }
+  }
+
+  /**
+   * Extract S3 object key from a presigned URL.
+   * Handles virtual-hosted-style: https://bucket.s3.region.amazonaws.com/key?params
+   */
+  private extractS3KeyFromUrl(url: string): string | null {
+    try {
+      const parsed = new URL(url);
+      let path = decodeURIComponent(parsed.pathname);
+      if (path.startsWith('/')) path = path.slice(1);
+      if (
+        parsed.hostname.startsWith('s3.') ||
+        parsed.hostname.startsWith('s3-')
+      ) {
+        const idx = path.indexOf('/');
+        if (idx > 0) path = path.slice(idx + 1);
+      }
+      return path || null;
+    } catch {
+      return null;
+    }
   }
 
   /**

@@ -220,6 +220,19 @@ export type TemplateApprovalStatusValue =
 
 /**
  * Map Meta webhook status to our internal status
+ *
+ * Meta can return these statuses:
+ * - APPROVED: Template is approved and can be sent
+ * - PENDING: Template is under review (initial submission)
+ * - IN_REVIEW: Same as PENDING (some API versions)
+ * - REJECTED: Template was rejected during review
+ * - PAUSED: Template paused due to quality issues
+ * - FLAGGED: Template flagged for review (treated as paused)
+ * - DISABLED: Template disabled by Meta
+ * - IN_APPEAL: Appeal has been submitted
+ * - REINSTATED: Template reinstated after appeal (treated as approved)
+ * - PENDING_DELETION: Template scheduled for deletion
+ * - DELETED: Template has been deleted
  */
 export function mapWebhookStatusToInternal(
   webhookStatus: string,
@@ -228,12 +241,14 @@ export function mapWebhookStatusToInternal(
     APPROVED: "approved",
     REJECTED: "rejected",
     PENDING: "pending",
+    IN_REVIEW: "pending", // Some API versions return this
     PAUSED: "paused",
-    FLAGGED: "paused",
+    FLAGGED: "paused", // Flagged is similar to paused
     DISABLED: "disabled",
     IN_APPEAL: "appeal_requested",
-    REINSTATED: "approved",
+    REINSTATED: "approved", // Reinstated = approved again
     PENDING_DELETION: "disabled",
+    DELETED: "disabled",
   };
 
   return statusMap[webhookStatus] || "draft";

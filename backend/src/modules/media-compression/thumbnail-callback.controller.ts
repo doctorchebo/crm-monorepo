@@ -226,28 +226,12 @@ export class ThumbnailCallbackController {
           height: payload.height,
         });
 
-        // For documents (PDFs), delete the original file since we only need the thumbnail
-        // For videos, KEEP the original file since the frontend needs it for playback
-        const isVideo = originalS3Key
-          ? /\.(mp4|mov|avi|webm|mkv|m4v)$/i.test(originalS3Key)
-          : false;
-
-        if (originalS3Key && !isVideo) {
-          try {
-            await this.s3Service.deleteFile(originalS3Key);
-            this.logger.log(
-              `[Thumbnail Callback] Deleted temp original file from S3: ${originalS3Key}`,
-            );
-          } catch (deleteError) {
-            this.logger.warn(
-              `[Thumbnail Callback] Failed to delete temp original file ${originalS3Key}: ${deleteError.message}`,
-            );
-          }
-        } else if (isVideo) {
-          this.logger.log(
-            `[Thumbnail Callback] Keeping temp video file for playback: ${originalS3Key}`,
-          );
-        }
+        // Original files are now kept permanently in S3 for all media types.
+        // Meta downloads them at send time via presigned URL.
+        // Only the s3Key column is updated to point to the thumbnail for UI preview.
+        this.logger.log(
+          `[Thumbnail Callback] Keeping original file in S3 for send: ${originalS3Key}`,
+        );
       } else {
         this.logger.warn(
           `[Thumbnail Callback] Temp thumbnail generation failed for ${originalS3Key}: ${payload.error}`,
@@ -275,19 +259,13 @@ export class ThumbnailCallbackController {
           `${payload.thumbnailKey} (${payload.width}x${payload.height}, time: ${payload.processingTimeMs}ms)`,
       );
 
-      // Delete the original file from S3 (Meta has it, we only need the thumbnail)
+      // Original files are kept permanently in S3 — Meta needs them at send time.
+      // The s3Key column now points to the thumbnail for UI preview;
+      // the original_s3_key column (set at upload time) retains the original path.
       if (originalS3Key) {
-        try {
-          await this.s3Service.deleteFile(originalS3Key);
-          this.logger.log(
-            `[Thumbnail Callback] Deleted original file from S3: ${originalS3Key}`,
-          );
-        } catch (deleteError) {
-          // Don't fail if cleanup fails - it's not critical
-          this.logger.warn(
-            `[Thumbnail Callback] Failed to delete original file ${originalS3Key}: ${deleteError.message}`,
-          );
-        }
+        this.logger.log(
+          `[Thumbnail Callback] Keeping original file for Meta send: ${originalS3Key}`,
+        );
       }
     } else if (payload.error) {
       // Log error - for template media, we'll keep the original file as fallback

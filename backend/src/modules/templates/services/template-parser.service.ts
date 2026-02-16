@@ -53,6 +53,18 @@ export class TemplateParserService {
   }
 
   /**
+   * Escape special regex characters in a string so it can be used
+   * as a literal match inside `new RegExp(...)`.
+   *
+   * Important for variable names that contain dots (e.g. `customer.first_name`):
+   * without escaping, the dot is treated as "any character" and can match
+   * similarly-named variables like `customer_first_name`.
+   */
+  private escapeRegex(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  /**
    * Convert friendly template to provider format
    * Replaces {{variable_name}} with {{1}}, {{2}}, etc.
    * Returns mapping for reference
@@ -65,12 +77,14 @@ export class TemplateParserService {
     const variableMapping: Array<{ name: string; index: number }> = [];
     let providerBody = body;
 
-    // Build mapping and replace in order of appearance
+    // Build mapping and replace in order of appearance.
+    // Variable names are regex-escaped so that dots, brackets, etc.
+    // are matched literally (not as wildcards).
     variables.forEach((varName, index) => {
-      const placeholder = `{{${varName}}}`;
+      const escapedPlaceholder = this.escapeRegex(`{{${varName}}}`);
       const providerPlaceholder = `{{${index + 1}}}`;
       providerBody = providerBody.replace(
-        new RegExp(placeholder, 'g'),
+        new RegExp(escapedPlaceholder, 'g'),
         providerPlaceholder,
       );
       variableMapping.push({ name: varName, index: index + 1 });
@@ -83,14 +97,18 @@ export class TemplateParserService {
   }
 
   /**
-   * Render template with variables using simple string interpolation
-   * Handles the friendly {{variable_name}} syntax
+   * Render template with variables using simple string interpolation.
+   * Handles the friendly {{variable_name}} syntax.
+   *
+   * Variable names are regex-escaped so dots (e.g. `customer.first_name`)
+   * match literally and don't act as wildcards.
    */
   renderTemplate(body: string, variables: Record<string, any>): string {
     let rendered = body;
 
     Object.entries(variables).forEach(([key, value]) => {
-      const placeholder = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
+      const escapedKey = this.escapeRegex(key);
+      const placeholder = new RegExp(`\\{\\{${escapedKey}\\}\\}`, 'g');
       rendered = rendered.replace(placeholder, String(value ?? ''));
     });
 

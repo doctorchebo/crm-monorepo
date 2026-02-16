@@ -1,20 +1,39 @@
 import { Attachment } from "@/lib/media/types";
 
+export type TemplateSource = "custom" | "library";
+export type ParameterFormat = "named" | "positional";
+
+export interface TemplateLocale {
+  id: string;
+  locale: string;
+  body: string;
+  header?: string;
+  footer?: string;
+  exampleVars?: Record<string, any>;
+  approvalStatus?: string;
+  /** Variable format: named ({{customer.name}}) or positional ({{1}}, {{2}}) */
+  parameterFormat?: ParameterFormat;
+  /** Type hints for positional parameters, e.g. ["TEXT", "AMOUNT", "DATE"] */
+  bodyParamTypes?: string[];
+  /** Header media format: TEXT, IMAGE, VIDEO, DOCUMENT, LOCATION */
+  headerFormat?: string;
+  /** Meta-synced component structure: { header, body, footer, buttons } */
+  components?: Record<string, any>;
+  /** Buttons array (quick reply, URL, phone, etc.) */
+  buttons?: Array<Record<string, any>>;
+  /** Carousel cards for carousel templates */
+  carouselCards?: Array<Record<string, any>>;
+}
+
 export interface Template {
   id: string;
   name: string;
   displayName?: string;
   description?: string;
   isVisible: boolean;
-  locales?: Array<{
-    id: string;
-    locale: string;
-    body: string;
-    header?: string;
-    footer?: string;
-    exampleVars?: Record<string, any>;
-    approvalStatus?: string;
-  }>;
+  /** Whether this template is custom-created or from the Meta Template Library */
+  source?: TemplateSource;
+  locales?: TemplateLocale[];
 }
 
 export interface Chat {
@@ -192,7 +211,7 @@ export interface LocationData {
   url?: string | null;
 }
 
-/** Metadata for interactive messages (buttons, lists, catalogs, locations) */
+/** Metadata for interactive messages (buttons, lists, catalogs, locations) and template messages */
 export interface MessageMetadata {
   /** Type of interactive message */
   interactiveType?: "button" | "list";
@@ -202,6 +221,18 @@ export interface MessageMetadata {
   catalogItems?: CatalogMessageItem[];
   /** Location data for location messages */
   location?: LocationData;
+  /** Template message fields (present when message.type === 'template') */
+  templateId?: string;
+  templateName?: string;
+  templateDisplayName?: string;
+  locale?: string;
+  variables?: Record<string, string>;
+  source?: "custom" | "library";
+  header?: string | null;
+  headerFormat?: string | null;
+  footer?: string | null;
+  buttons?: Array<Record<string, any>>;
+  components?: Record<string, any> | null;
 }
 
 /** Interactive message button */

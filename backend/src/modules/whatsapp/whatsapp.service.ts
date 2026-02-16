@@ -8,6 +8,8 @@ import {
   messages,
   senders,
   teamMembers,
+  templateLocales,
+  templateMedia,
 } from '@database/schema';
 import { MessageMemoryIntegration } from '@modules/ai-memory/services/message-memory-integration.service';
 import { RateLimiterService } from '@modules/workflow/services/rate-limiter.service';
@@ -30,6 +32,10 @@ import { withRetry } from '@shared/utils/retry.util';
 import { and, asc, desc, eq, gt, inArray, or, sql } from 'drizzle-orm';
 import { ChatVisibilityService } from '../chats/services/chat-visibility.service';
 import { reactionsGatewayInstance } from '../reactions/reactions.gateway';
+import { MessagingProviderFactory } from '../templates/providers/provider.factory';
+import { TemplateParserService } from '../templates/services/template-parser.service';
+import { TemplatesService } from '../templates/services/templates.service';
+import { VariableResolutionService } from '../templates/services/variable-resolution.service';
 import { ThumbnailQueueService } from '../thumbnail/thumbnail-queue.service';
 import {
   supportsThumbnail,
@@ -42,6 +48,7 @@ import {
   validateReplyButtonMessage,
 } from './constants';
 import { OutboundMessageDto } from './dto/outbound-message.dto';
+import { SendTemplateDto } from './dto/send-template.dto';
 import { AudioConverterService } from './services/audio-converter.service';
 import { ConversationWindowService } from './services/conversation-window.service';
 import { MediaService } from './services/media.service';
@@ -88,6 +95,10 @@ export class WhatsAppService implements OnModuleInit {
   private readonly wabaId: string | undefined;
 
   private workflowEngine: WorkflowEngineService;
+  private templatesService: TemplatesService;
+  private providerFactory: MessagingProviderFactory;
+  private variableResolutionService: VariableResolutionService;
+  private templateParserService: TemplateParserService;
 
   constructor(
     private configService: ConfigService,
@@ -130,6 +141,55 @@ export class WhatsAppService implements OnModuleInit {
     } catch (error) {
       this.logger.warn(
         'Failed to resolve WorkflowEngineService lazily - this is expected in some test environments',
+      );
+    }
+
+    // Lazy-resolve template services from TemplatesModule (imported via forwardRef)
+    this.resolveTemplateServices();
+  }
+
+  /**
+   * Resolve template-related services from the NestJS DI container.
+   * These are imported via forwardRef(() => TemplatesModule) to avoid
+   * circular dependency issues.
+   */
+  private resolveTemplateServices(): void {
+    try {
+      this.templatesService = this.moduleRef.get(TemplatesService, {
+        strict: false,
+      });
+    } catch (error) {
+      this.logger.warn(`Could not resolve TemplatesService: ${error.message}`);
+    }
+
+    try {
+      this.providerFactory = this.moduleRef.get(MessagingProviderFactory, {
+        strict: false,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Could not resolve MessagingProviderFactory: ${error.message}`,
+      );
+    }
+
+    try {
+      this.variableResolutionService = this.moduleRef.get(
+        VariableResolutionService,
+        { strict: false },
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Could not resolve VariableResolutionService: ${error.message}`,
+      );
+    }
+
+    try {
+      this.templateParserService = this.moduleRef.get(TemplateParserService, {
+        strict: false,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Could not resolve TemplateParserService: ${error.message}`,
       );
     }
   }
@@ -462,13 +522,7 @@ export class WhatsAppService implements OnModuleInit {
         throw new Error(`Sender with ID ${senderId} not found`);
       }
 
-      let phoneNumberId = senderRecord.phoneNumberId;
-      if (!phoneNumberId) {
-        // Fallback to environment variable for sandbox/testing
-        phoneNumberId =
-          this.configService.get<string>('META_PHONE_NUMBER_ID') ?? null;
-      }
-
+      const phoneNumberId = senderRecord.phoneNumberId;
       if (!phoneNumberId) {
         throw new Error(
           `Sender ${senderId} (${senderPhoneNumber}) does not have a phoneNumberId set. ` +
@@ -664,6 +718,524 @@ export class WhatsAppService implements OnModuleInit {
     } catch (error) {
       this.logger.error(`Error sending message: ${error.message}`, error);
       throw new Error(`Failed to send WhatsApp message: ${error.message}`);
+    }
+  }
+
+  /**
+   * Send a proper WhatsApp template message via Cloud API.
+   *
+   * Unlike `sendMessage()` which sends `type: 'text'` payloads, this method
+   * sends `type: 'template'` payloads. This is critical because:
+   *
+   * 1. **24-hour window bypass**: Approved templates can be sent at any time,
+   *    even outside the 24-hour conversation window.
+   * 2. **Meta compliance**: Template messages must use the template API format
+   *    to be recognized by Meta as template messages.
+   * 3. **Analytics**: Template messages are tracked separately by Meta for
+   *    quality scoring and billing.
+   *
+   * Supports both **named** variables (`customer.first_name`) from custom
+   * templates and **positional** variables (`1`, `2`) from library templates.
+   *
+   * @param dto - Template send payload with template ID, locale, and variables
+   * @param userId - The authenticated user performing the send
+   * @returns Success response with WhatsApp message ID
+   */
+  async sendTemplateMessage(
+    dto: SendTemplateDto,
+    userId?: number,
+  ): Promise<{
+    success: boolean;
+    messageId?: string;
+    to: string;
+    status: string;
+  }> {
+    try {
+      // ──────────────────────────────────────────────────────────────────
+      // 1. Validate that template services are available
+      // ──────────────────────────────────────────────────────────────────
+      if (!this.templatesService) {
+        throw new BadRequestException(
+          'Template services are not available. Cannot send template messages.',
+        );
+      }
+      if (!this.providerFactory) {
+        throw new BadRequestException(
+          'Messaging provider is not available. Cannot send template messages.',
+        );
+      }
+
+      const recipientPhone = cleanPhoneNumber(dto.to);
+
+      // ──────────────────────────────────────────────────────────────────
+      // 2. Resolve sender
+      // ──────────────────────────────────────────────────────────────────
+      const senderRecord = await db.query.senders.findFirst({
+        where: eq(senders.id, dto.senderId),
+      });
+      if (!senderRecord) {
+        throw new BadRequestException(
+          `Sender with ID ${dto.senderId} not found`,
+        );
+      }
+
+      const phoneNumberId = senderRecord.phoneNumberId;
+      if (!phoneNumberId) {
+        throw new BadRequestException(
+          `Sender ${dto.senderId} does not have a phoneNumberId configured. ` +
+            `Please verify the sender setup.`,
+        );
+      }
+
+      // ──────────────────────────────────────────────────────────────────
+      // 3. Load template + locale
+      // ──────────────────────────────────────────────────────────────────
+      const template = await this.templatesService.getTemplate(dto.templateId);
+      const localeData = template.locales?.find(
+        (l: any) => l.locale === dto.locale,
+      );
+
+      if (!localeData) {
+        throw new BadRequestException(
+          `Locale "${dto.locale}" not found for template "${template.displayName || template.name}"`,
+        );
+      }
+
+      // ──────────────────────────────────────────────────────────────────
+      // 4. Validate approval status
+      // CRITICAL: Never send non-approved templates to Meta's API. They will be
+      // rejected and could flag the account. This is a safety guardrail.
+      // ──────────────────────────────────────────────────────────────────
+      const isApproved = localeData.approvalStatus === 'approved';
+
+      if (!isApproved) {
+        const statusDisplay = localeData.approvalStatus || 'unknown';
+        this.logger.warn(
+          `Blocked attempt to send non-approved template "${template.name}" ` +
+            `(locale: ${dto.locale}, status: ${statusDisplay})`,
+        );
+        throw new BadRequestException({
+          statusCode: 400,
+          error: 'TEMPLATE_NOT_APPROVED',
+          errorCode: 'TEMPLATE_NOT_APPROVED',
+          message:
+            `Cannot send template: Template "${template.displayName || template.name}" ` +
+            `is not approved (current status: ${statusDisplay}). ` +
+            `Only approved templates can be sent via WhatsApp. ` +
+            `Please wait for the template to be approved by Meta.`,
+          templateStatus: statusDisplay,
+        });
+      }
+
+      // ──────────────────────────────────────────────────────────────────
+      // 5. Conversation window validation
+      // ──────────────────────────────────────────────────────────────────
+      const chatId =
+        dto.chatId ?? generateChatId(senderRecord.phoneNumber, recipientPhone);
+
+      // Ensure chat exists
+      const { chat } = await this.getOrCreateChat(
+        chatId,
+        senderRecord.phoneNumber,
+        recipientPhone,
+        dto.senderId,
+      );
+
+      // Check assignment restriction
+      if (userId && chat.assignedTo && chat.assignedTo !== userId) {
+        throw new ForbiddenException('Chat is assigned to another team member');
+      }
+
+      const windowValidation =
+        await this.conversationWindowService.validateTemplateMessage(
+          chatId,
+          isApproved,
+        );
+
+      if (!windowValidation.isValid) {
+        throw new BadRequestException({
+          statusCode: 400,
+          error: 'CONVERSATION_WINDOW_VIOLATION',
+          errorCode: windowValidation.errorCode,
+          message: windowValidation.errorMessage,
+          windowStatus: windowValidation.windowStatus,
+        });
+      }
+
+      // ──────────────────────────────────────────────────────────────────
+      // 6. Determine variable format and build provider variables
+      // ──────────────────────────────────────────────────────────────────
+      const isPositional = localeData.parameterFormat === 'positional';
+      let providerVariables: Record<string, string>;
+
+      if (isPositional) {
+        // Library templates: variables are already keyed by position ("1", "2")
+        // The provider expects them keyed by positional name too
+        providerVariables = dto.variables;
+      } else {
+        // Custom templates: variables are keyed by name ("customer.first_name")
+        // The parser will convert named → positional in convertToProviderFormat
+        providerVariables = dto.variables;
+      }
+
+      // ──────────────────────────────────────────────────────────────────
+      // 6.5 Resolve media header URLs from original S3 files
+      // ──────────────────────────────────────────────────────────────────
+      // The frontend passes thumbnail/preview URLs for media header variables.
+      // Meta downloads the file from the URL we provide, so we must generate
+      // a fresh presigned URL pointing to the ORIGINAL file (not the thumbnail).
+      // This runs server-side to guarantee the URL is always valid.
+      const headerFormat = (localeData.headerFormat || '').toUpperCase();
+      const MEDIA_HEADER_FORMATS = ['IMAGE', 'VIDEO', 'DOCUMENT'];
+
+      if (MEDIA_HEADER_FORMATS.includes(headerFormat)) {
+        await this.resolveOriginalMediaUrl(
+          localeData.id,
+          headerFormat,
+          providerVariables,
+        );
+      }
+
+      // ──────────────────────────────────────────────────────────────────
+      // 7. Send via Meta Cloud API provider
+      // ──────────────────────────────────────────────────────────────────
+      const provider = this.providerFactory.getDefaultProvider();
+
+      this.logger.log(
+        `[SEND-TEMPLATE] Sending "${template.name}" via ${provider.providerName}` +
+          ` | locale=${localeData.locale}` +
+          ` | phoneNumberId=${phoneNumberId}` +
+          ` | headerFormat=${localeData.headerFormat ?? 'none'}` +
+          ` | hasComponents=${!!localeData.components}` +
+          ` | parameterFormat=${localeData.parameterFormat}` +
+          ` | variables=${JSON.stringify(providerVariables)}`,
+      );
+
+      const sendResult = await provider.sendTemplateMessage({
+        to: recipientPhone,
+        templateName: template.name,
+        language: localeData.locale,
+        variables: providerVariables,
+        locale: localeData,
+        phoneNumberId,
+      });
+
+      if (!sendResult.success) {
+        this.logger.error(
+          `Failed to send template message: ${sendResult.error}`,
+        );
+        throw new BadRequestException(
+          sendResult.error || 'Failed to send template message',
+        );
+      }
+
+      const waMessageId = sendResult.messageId || `tmpl-${Date.now()}`;
+
+      // ──────────────────────────────────────────────────────────────────
+      // 8. Render the resolved body for storage/display
+      // ──────────────────────────────────────────────────────────────────
+      let resolvedBody = localeData.body;
+      if (this.templateParserService) {
+        resolvedBody = this.templateParserService.renderTemplate(
+          localeData.body,
+          dto.variables,
+        );
+      }
+
+      // Resolve header text with variables (if text header)
+      let resolvedHeader = localeData.header || null;
+      if (
+        resolvedHeader &&
+        this.templateParserService &&
+        resolvedHeader.includes('{{')
+      ) {
+        resolvedHeader = this.templateParserService.renderTemplate(
+          resolvedHeader,
+          dto.variables,
+        );
+      }
+
+      // Build complete template metadata for storage and real-time display
+      const templateMetadata: Record<string, any> = {
+        templateId: dto.templateId,
+        templateName: template.name,
+        templateDisplayName: template.displayName || template.name,
+        locale: dto.locale,
+        variables: dto.variables,
+        source: template.source || 'custom',
+        header: resolvedHeader,
+        headerFormat: localeData.headerFormat || null,
+        footer: localeData.footer || null,
+        buttons: localeData.buttons || [],
+        components: localeData.components || null,
+      };
+
+      // Store the original S3 key so the frontend can request a fresh
+      // presigned URL for document/media downloads in chat bubbles.
+      if (MEDIA_HEADER_FORMATS.includes(headerFormat)) {
+        const headerMedia = await db.query.templateMedia.findFirst({
+          where: and(
+            eq(templateMedia.localeId, localeData.id),
+            eq(templateMedia.componentType, 'header'),
+            eq(templateMedia.uploadStatus, 'completed'),
+          ),
+          columns: { originalS3Key: true, s3Key: true },
+        });
+        if (headerMedia) {
+          templateMetadata.headerMediaS3Key =
+            headerMedia.originalS3Key || headerMedia.s3Key;
+          // Store thumbnail S3 key separately so the bubble can show
+          // a poster image while the video loads.
+          if (
+            headerMedia.s3Key &&
+            headerMedia.s3Key !== headerMedia.originalS3Key
+          ) {
+            templateMetadata.headerThumbnailS3Key = headerMedia.s3Key;
+          }
+        }
+      }
+
+      // ──────────────────────────────────────────────────────────────────
+      // 9. Store outbound message with template metadata in a single insert
+      // ──────────────────────────────────────────────────────────────────
+      await this.storeOutboundMessage({
+        waMessageId,
+        chatId,
+        from: senderRecord.phoneNumber,
+        to: recipientPhone,
+        body: resolvedBody,
+        userId,
+        senderId: dto.senderId,
+        replyToMessageId: dto.replyToMessageId,
+        messageType: 'template',
+        metadata: templateMetadata,
+      });
+
+      // ──────────────────────────────────────────────────────────────────
+      // 10. Emit WebSocket event for real-time UI update
+      // ──────────────────────────────────────────────────────────────────
+      if (whatsAppGatewayInstance) {
+        whatsAppGatewayInstance.emitMessage({
+          messageId: waMessageId,
+          chatId,
+          sender: senderRecord.phoneNumber,
+          text: resolvedBody,
+          type: 'template',
+          timestamp: new Date(),
+          direction: 'outbound',
+          status: 'sent',
+          replyToMessageId: dto.replyToMessageId,
+          metadata: templateMetadata,
+        });
+      }
+
+      this.logger.log(
+        `Template message sent successfully. Template: ${template.name}, Locale: ${dto.locale}, To: ${recipientPhone}, MessageId: ${waMessageId}`,
+      );
+
+      return {
+        success: true,
+        messageId: waMessageId,
+        to: recipientPhone,
+        status: 'sent',
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error sending template message: ${error.message}`,
+        error,
+      );
+
+      // Re-throw known exceptions as-is
+      if (
+        error instanceof BadRequestException ||
+        error instanceof ForbiddenException
+      ) {
+        throw error;
+      }
+
+      throw new BadRequestException(
+        `Failed to send template message: ${error.message}`,
+      );
+    }
+  }
+
+  /**
+   * Resolve a fresh presigned URL for the original media file stored in S3.
+   *
+   * At template creation, the original file is uploaded to both Meta (for
+   * approval) and S3 (permanent storage, tracked via `originalS3Key`). The
+   * `s3Key` column is later overwritten to point at a thumbnail for UI
+   * preview.
+   *
+   * Meta downloads the file from the URL we provide each time a template
+   * message is sent, so we must supply a non-expired presigned URL that
+   * points to the original file, not the thumbnail.
+   *
+   * This method mutates `variables` in-place, replacing the media header
+   * variable with a fresh URL.
+   */
+  /**
+   * Resolves a fresh presigned URL for the original media file of a template locale.
+   *
+   * Strategy (priority order):
+   * 1. templateMedia.originalS3Key (set during upload for new templates)
+   * 2. templateMedia.s3Key that is NOT a thumbnail (legacy originals)
+   * 3. templateLocales.components.header.link — extract S3 key from stored presigned URL
+   *
+   * Each candidate is verified in S3 via HEAD before use.
+   * On first success, backfills originalS3Key for future lookups.
+   * Mutates `variables` in place with the fresh presigned URL.
+   */
+  private async resolveOriginalMediaUrl(
+    localeId: string,
+    headerFormat: string,
+    variables: Record<string, string>,
+  ): Promise<void> {
+    const HEADER_VAR_MAP: Record<string, string> = {
+      IMAGE: 'header_image',
+      VIDEO: 'header_video',
+      DOCUMENT: 'header_document',
+    };
+    const varKey = HEADER_VAR_MAP[headerFormat];
+    if (!varKey) return;
+
+    try {
+      // ── Gather candidate S3 keys ──────────────────────────────────
+      const candidateKeys: string[] = [];
+      let needsBackfill = false;
+
+      // Source 1 & 2: templateMedia records (no status filter — record may
+      // still be 'pending' if Lambda hasn't finished thumbnailing yet)
+      const mediaRecords = await db
+        .select({
+          id: templateMedia.id,
+          s3Key: templateMedia.s3Key,
+          originalS3Key: templateMedia.originalS3Key,
+        })
+        .from(templateMedia)
+        .where(
+          and(
+            eq(templateMedia.localeId, localeId),
+            eq(templateMedia.componentType, 'header'),
+          ),
+        )
+        .orderBy(desc(templateMedia.createdAt))
+        .limit(5);
+
+      for (const rec of mediaRecords) {
+        if (rec.originalS3Key) candidateKeys.push(rec.originalS3Key);
+        // s3Key that doesn't look like a thumbnail IS the original
+        if (rec.s3Key && !rec.s3Key.includes('_thumb')) {
+          candidateKeys.push(rec.s3Key);
+        }
+      }
+
+      if (mediaRecords.length > 0 && !mediaRecords[0].originalS3Key) {
+        needsBackfill = true;
+      }
+
+      // Source 3: components.header.link from the locale row
+      const [locale] = await db
+        .select({ components: templateLocales.components })
+        .from(templateLocales)
+        .where(eq(templateLocales.id, localeId))
+        .limit(1);
+
+      const headerLink = (locale?.components as Record<string, any>)?.header
+        ?.link;
+      if (typeof headerLink === 'string' && headerLink.length > 0) {
+        const extracted = this.extractS3KeyFromPresignedUrl(headerLink);
+        if (extracted) {
+          if (!extracted.includes('_thumb')) {
+            // Non-thumbnail key — use directly
+            candidateKeys.push(extracted);
+          } else {
+            // Thumbnail key — derive possible original file keys
+            // e.g. "path/file_thumb.jpg" → "path/file.mp4", "path/file.mp4.mp4"
+            const basePath = extracted.replace(/_thumb\.[^.]+$/, '');
+            const extMap: Record<string, string[]> = {
+              VIDEO: ['.mp4', '.mp4.mp4', '.mov', '.avi'],
+              DOCUMENT: ['.pdf', '.doc', '.docx'],
+              IMAGE: ['.jpg', '.jpeg', '.png', '.webp'],
+            };
+            for (const ext of extMap[headerFormat] || []) {
+              candidateKeys.push(basePath + ext);
+            }
+          }
+        }
+      }
+
+      // ── Try each candidate until one exists in S3 ─────────────────
+      const seen = new Set<string>();
+      let resolvedKey: string | null = null;
+
+      for (const key of candidateKeys) {
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (await this.s3Service.objectExists(key)) {
+          resolvedKey = key;
+          break;
+        }
+      }
+
+      if (!resolvedKey) {
+        this.logger.warn(
+          `[SEND-TEMPLATE] No original media found in S3 for locale ${localeId} ` +
+            `(format=${headerFormat}, candidates=${[...seen].join(', ') || 'none'}). ` +
+            `Sending with frontend-provided URL.`,
+        );
+        return;
+      }
+
+      // ── Generate fresh presigned URL (1 hour) ─────────────────────
+      const { url: freshUrl } =
+        await this.s3Service.generatePresignedDownloadUrl(resolvedKey, {
+          expiresIn: 3600,
+        });
+
+      variables[varKey] = freshUrl;
+
+      this.logger.log(
+        `[SEND-TEMPLATE] Resolved original media: ${resolvedKey} → fresh URL for ${varKey}`,
+      );
+
+      // Best-effort backfill originalS3Key for future sends
+      if (needsBackfill && mediaRecords.length > 0) {
+        db.update(templateMedia)
+          .set({ originalS3Key: resolvedKey })
+          .where(eq(templateMedia.id, mediaRecords[0].id))
+          .execute()
+          .catch(() => {});
+      }
+    } catch (error) {
+      this.logger.error(
+        `[SEND-TEMPLATE] Failed to resolve media URL for locale ${localeId}: ${error.message}`,
+      );
+      // Don't throw — let the send proceed with whatever URL the frontend provided.
+    }
+  }
+
+  /**
+   * Extracts the S3 object key from a presigned URL.
+   * Handles virtual-hosted-style: https://bucket.s3.region.amazonaws.com/key?params
+   * and path-style: https://s3.region.amazonaws.com/bucket/key?params
+   */
+  private extractS3KeyFromPresignedUrl(url: string): string | null {
+    try {
+      const parsed = new URL(url);
+      let path = decodeURIComponent(parsed.pathname);
+      if (path.startsWith('/')) path = path.slice(1);
+      // Path-style: hostname starts with s3. — first segment is the bucket
+      if (
+        parsed.hostname.startsWith('s3.') ||
+        parsed.hostname.startsWith('s3-')
+      ) {
+        const idx = path.indexOf('/');
+        if (idx > 0) path = path.slice(idx + 1);
+      }
+      return path || null;
+    } catch {
+      return null;
     }
   }
 
@@ -972,8 +1544,8 @@ export class WhatsAppService implements OnModuleInit {
             location: {
               latitude,
               longitude,
-              name: name || null,
-              address: address || null,
+              name: name || undefined,
+              address: address || undefined,
             },
           },
           replyToMessageId,
@@ -4255,45 +4827,54 @@ export class WhatsAppService implements OnModuleInit {
     isInteractive?: boolean;
     interactiveType?: 'button' | 'list' | 'product';
     interactiveData?: any;
+    /** Explicit message type override (e.g. 'template') */
+    messageType?: string;
+    /** Explicit metadata override (e.g. template metadata) */
+    metadata?: Record<string, any>;
   }): Promise<string> {
     try {
       const now = new Date();
 
-      // Determine message type
-      let messageType = 'text';
-      if (messageData.isInteractive) {
-        messageType = 'interactive';
-      } else if (
-        messageData.attachments &&
-        messageData.attachments.length > 0
-      ) {
-        messageType = 'media';
+      // Determine message type: explicit override > interactive > media > text
+      let messageType = messageData.messageType || 'text';
+      if (!messageData.messageType) {
+        if (messageData.isInteractive) {
+          messageType = 'interactive';
+        } else if (
+          messageData.attachments &&
+          messageData.attachments.length > 0
+        ) {
+          messageType = 'media';
+        }
+      }
+
+      // Build metadata: explicit override > interactive metadata > null
+      let metadata: Record<string, any> | null = null;
+      if (messageData.metadata) {
+        metadata = messageData.metadata;
+      } else if (messageData.isInteractive) {
+        metadata = {
+          interactiveType: messageData.interactiveType,
+          interactiveData: messageData.interactiveData,
+        };
       }
 
       await db.insert(messages).values({
         messageId: messageData.waMessageId,
         chatId: messageData.chatId,
         source: 'whatsapp',
-        sender: messageData.from, // Store the actual sender's phone number
+        sender: messageData.from,
         type: messageType,
         text: messageData.body,
         attachments: messageData.attachments || [],
         direction: 'outbound',
-        status: 'pending', // Start as pending, will update to 'sent' when Cloud API confirms
+        status: 'pending',
         timestamp: now,
         updatedAt: now,
-        // Reply fields
         replyToMessageId: messageData.replyToMessageId || null,
         replyPreview: messageData.replyPreview || null,
-        // AI generation flag for guardrails tracking
         isAiGenerated: messageData.isAiGenerated ?? false,
-        // Interactive message metadata stored in metadata jsonb
-        metadata: messageData.isInteractive
-          ? {
-              interactiveType: messageData.interactiveType,
-              interactiveData: messageData.interactiveData,
-            }
-          : null,
+        metadata,
       });
 
       this.logger.debug('Outbound message stored', messageData.waMessageId);

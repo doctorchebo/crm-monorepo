@@ -21,9 +21,19 @@ import type {
   TemplateLibraryTemplateWithStatus,
 } from "@/lib/api/endpoints";
 import { backendApi } from "@/lib/api/endpoints";
-import { Library, RotateCcw, Search, X } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Library,
+  RotateCcw,
+  Search,
+  X,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+/** Number of items to fetch per page */
+const PAGE_SIZE = 25;
 
 /**
  * Debounce a value by a specified delay
@@ -39,7 +49,7 @@ function useDebouncedValue<T>(value: T, delay: number): T {
 
 /**
  * The main Template Library browser component.
- * Displays a filterable, searchable grid of pre-approved templates
+ * Displays a filterable, searchable, paginated grid of pre-approved templates
  * from Meta's Template Library that users can adopt into their account.
  */
 export function TemplateLibraryBrowser() {
@@ -62,6 +72,12 @@ export function TemplateLibraryBrowser() {
   const [selectedIndustry, setSelectedIndustry] = useState<string>("");
   const [selectedLanguage, setSelectedLanguage] = useState<string>("");
 
+  // Pagination state
+  const [currentCursor, setCurrentCursor] = useState<string | undefined>(
+    undefined,
+  );
+  const [cursorHistory, setCursorHistory] = useState<string[]>([]);
+
   // Adopt modal state
   const [adoptTarget, setAdoptTarget] =
     useState<TemplateLibraryTemplateWithStatus | null>(null);
@@ -73,9 +89,11 @@ export function TemplateLibraryBrowser() {
   // Track if initial load happened
   const initialLoadDone = useRef(false);
 
-  // Build filters object
-  const filters = useMemo<TemplateLibraryFilters>(() => {
-    const f: TemplateLibraryFilters = {};
+  // Build filters object (without pagination - pagination is handled separately)
+  const baseFilters = useMemo<
+    Omit<TemplateLibraryFilters, "limit" | "after" | "before">
+  >(() => {
+    const f: Omit<TemplateLibraryFilters, "limit" | "after" | "before"> = {};
     if (debouncedSearch) f.search = debouncedSearch;
     if (selectedTopic) f.topic = selectedTopic as any;
     if (selectedUseCase) f.usecase = selectedUseCase as any;
@@ -89,6 +107,12 @@ export function TemplateLibraryBrowser() {
     selectedIndustry,
     selectedLanguage,
   ]);
+
+  // Reset pagination when filters change
+  useEffect(() => {
+    setCurrentCursor(undefined);
+    setCursorHistory([]);
+  }, [baseFilters]);
 
   // Fetch filter options on mount
   useEffect(() => {
@@ -108,6 +132,16 @@ export function TemplateLibraryBrowser() {
       cancelled = true;
     };
   }, []);
+
+  // Build full filters with pagination
+  const filters = useMemo<TemplateLibraryFilters>(
+    () => ({
+      ...baseFilters,
+      limit: PAGE_SIZE,
+      ...(currentCursor && { after: currentCursor }),
+    }),
+    [baseFilters, currentCursor],
+  );
 
   // Fetch library templates when filters change
   const fetchLibrary = useCallback(async () => {
@@ -153,6 +187,28 @@ export function TemplateLibraryBrowser() {
     },
     [addNotification, t, adoptTarget, fetchLibrary],
   );
+
+  // Pagination handlers
+  const handleNextPage = useCallback(() => {
+    if (result?.paging?.nextCursor) {
+      // Store current cursor in history for "previous" navigation
+      if (currentCursor) {
+        setCursorHistory((prev) => [...prev, currentCursor]);
+      } else {
+        setCursorHistory((prev) => [...prev, ""]); // Empty string = first page
+      }
+      setCurrentCursor(result.paging.nextCursor);
+    }
+  }, [result?.paging?.nextCursor, currentCursor]);
+
+  const handlePreviousPage = useCallback(() => {
+    if (cursorHistory.length > 0) {
+      const newHistory = [...cursorHistory];
+      const previousCursor = newHistory.pop();
+      setCursorHistory(newHistory);
+      setCurrentCursor(previousCursor === "" ? undefined : previousCursor);
+    }
+  }, [cursorHistory]);
 
   // Reset all filters
   const handleClearFilters = useCallback(() => {
@@ -311,15 +367,46 @@ export function TemplateLibraryBrowser() {
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {templates.map((template, index) => (
-            <LibraryTemplateCard
-              key={`${template.name}-${template.language}-${index}`}
-              template={template}
-              onAdopt={handleAdoptClick}
-            />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {templates.map((template, index) => (
+              <LibraryTemplateCard
+                key={`${template.name}-${template.language}-${index}`}
+                template={template}
+                onAdopt={handleAdoptClick}
+              />
+            ))}
+          </div>
+
+          {/* Pagination Controls */}
+          {(result?.paging?.hasNextPage || cursorHistory.length > 0) && (
+            <div className="flex items-center justify-center gap-4 pt-4 border-t">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handlePreviousPage}
+                disabled={cursorHistory.length === 0 || isLoading}
+                className="gap-1.5"
+              >
+                <ChevronLeft className="h-4 w-4" />
+                {t("previousPage")}
+              </Button>
+              <span className="text-sm text-muted-foreground">
+                {t("pageInfo", { count: templates.length })}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleNextPage}
+                disabled={!result?.paging?.hasNextPage || isLoading}
+                className="gap-1.5"
+              >
+                {t("nextPage")}
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+        </>
       )}
 
       {/* Adopt Modal */}

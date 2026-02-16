@@ -5,9 +5,11 @@ import {
   contacts,
   senders,
   templateLocales,
+  templateMedia,
   templateVariables,
 } from '@database/schema';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { S3Service } from '@shared/services/s3.service';
 import { and, eq } from 'drizzle-orm';
 
 /**
@@ -127,11 +129,26 @@ export interface ResolvedTemplate {
 export class VariableResolutionService {
   private readonly logger = new Logger(VariableResolutionService.name);
 
+  constructor(private readonly s3Service: S3Service) {}
+
   /**
-   * Parse a variable name into prefix and field
-   * e.g., "customer.first_name" -> { prefix: "customer", field: "first_name" }
+   * Parse a variable name into prefix and field.
+   *
+   * Supports two formats:
+   * - **Named**: `"customer.first_name"` → `{ prefix: "customer", field: "first_name" }`
+   * - **Positional**: `"1"`, `"2"` → `{ prefix: "positional", field: "1" }`
+   *
+   * Positional variables are used by Meta Template Library templates.
+   * They can only be resolved from explicit overrides, not from contact data.
    */
-  parseVariable(varName: string): { prefix: string; field: string } | null {
+  parseVariable(
+    varName: string,
+  ): { prefix: string; field: string; isPositional?: boolean } | null {
+    // Check for positional variable (pure numeric: "1", "2", "3", etc.)
+    if (/^\d+$/.test(varName)) {
+      return { prefix: 'positional', field: varName, isPositional: true };
+    }
+
     const parts = varName.split('.');
     if (parts.length !== 2) {
       return null;
@@ -144,19 +161,28 @@ export class VariableResolutionService {
    *
    * FLEXIBLE APPROACH: Accept any prefix.field format for custom business variables.
    * Known prefixes are resolved from system data, unknown prefixes from contact attributes.
+   *
+   * Also accepts **positional** variable names (`"1"`, `"2"`, etc.) used by
+   * Meta Template Library templates.
    */
   validateVariableName(varName: string): {
     isValid: boolean;
     error?: string;
     isCustomPrefix?: boolean;
+    isPositional?: boolean;
   } {
     const parsed = this.parseVariable(varName);
 
     if (!parsed) {
       return {
         isValid: false,
-        error: `Invalid variable format: "${varName}". Use prefix.field format (e.g., customer.first_name, promotion.end_date)`,
+        error: `Invalid variable format: "${varName}". Use prefix.field format (e.g., customer.first_name, promotion.end_date) or positional (1, 2, 3)`,
       };
+    }
+
+    // Positional variables are always valid
+    if (parsed.isPositional) {
+      return { isValid: true, isPositional: true };
     }
 
     const { prefix, field } = parsed;
@@ -333,12 +359,35 @@ export class VariableResolutionService {
   ): { value: string | null; source: string } {
     // Priority 1: Explicit overrides
     if (overrides && varName in overrides) {
-      return { value: overrides[varName], source: 'override' };
+      const overrideValue = overrides[varName];
+
+      // If the override is a variable reference like {{customer.first_name}},
+      // re-resolve it from data sources instead of returning the literal string.
+      const refMatch = overrideValue.match(/^\{\{([^}]+)\}\}$/);
+      if (refMatch) {
+        // Pass empty overrides to prevent infinite recursion
+        return this.resolveVariable(
+          refMatch[1],
+          customerData,
+          systemData,
+          chatData,
+          senderData,
+          {},
+        );
+      }
+
+      return { value: overrideValue, source: 'override' };
     }
 
     const parsed = this.parseVariable(varName);
     if (!parsed) {
       return { value: null, source: 'invalid' };
+    }
+
+    // Positional variables can ONLY be resolved from overrides.
+    // If we reach here, the override was not provided.
+    if (parsed.isPositional) {
+      return { value: null, source: 'positional_unresolved' };
     }
 
     const { prefix, field } = parsed;
@@ -489,13 +538,17 @@ export class VariableResolutionService {
   }
 
   /**
-   * Render a template with resolved variables
+   * Render a template with resolved variables.
+   *
+   * Variable names are regex-escaped so dots (e.g. `customer.first_name`)
+   * match literally and don't act as wildcards.
    */
   renderTemplate(template: string, variables: Record<string, string>): string {
     let rendered = template;
 
     Object.entries(variables).forEach(([key, value]) => {
-      const placeholder = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'g');
+      const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const placeholder = new RegExp(`\\{\\{\\s*${escapedKey}\\s*\\}\\}`, 'g');
       rendered = rendered.replace(placeholder, value);
     });
 
@@ -690,7 +743,11 @@ export class VariableResolutionService {
   }
 
   /**
-   * Get auto-fill suggestions for a template based on contact profile
+   * Get auto-fill suggestions for a template based on contact profile.
+   *
+   * IMPORTANT: Variables are extracted directly from the template body/header/footer
+   * content, NOT from the template_variables table. The body is the source of truth.
+   * This ensures the variable list always matches what's actually in the template.
    */
   async getAutoFillSuggestions(
     localeId: string,
@@ -718,11 +775,6 @@ export class VariableResolutionService {
       throw new NotFoundException(`Template locale ${localeId} not found`);
     }
 
-    // Get variable definitions
-    const variableDefs = await db.query.templateVariables.findMany({
-      where: eq(templateVariables.localeId, localeId),
-    });
-
     // Get data sources
     const customerData = await this.getCustomerData(contactId);
     const systemData = await this.getSystemData(
@@ -741,9 +793,43 @@ export class VariableResolutionService {
       source: string;
     }> = [];
 
-    for (const varDef of variableDefs) {
+    // Handle positional templates (library templates with {{1}}, {{2}}, etc.)
+    if (locale.parameterFormat === 'positional') {
+      const bodyVars = this.extractPositionalVars(locale.body);
+      const paramTypes = (locale.bodyParamTypes as string[] | null) || [];
+
+      for (const posVar of bodyVars) {
+        const typeHint = paramTypes[parseInt(posVar, 10) - 1] || 'TEXT';
+        variables.push({
+          name: posVar,
+          value: null,
+          isRequired: true,
+          source: `positional:${typeHint}`,
+        });
+        missing.push(posVar);
+      }
+
+      // Also include header variables for non-TEXT headers (media/location)
+      this.appendHeaderVariables(locale, variables, missing);
+
+      // Enrich media header variables with fresh pre-signed URLs from templateMedia
+      await this.enrichHeaderMediaVariables(locale.id, variables, missing);
+
+      return { suggestions, missing, variables };
+    }
+
+    // For named variables: extract directly from template content (source of truth)
+    const templateContent = [
+      locale.header || '',
+      locale.body || '',
+      locale.footer || '',
+    ].join('\n');
+
+    const extractedVars = this.extractNamedVariables(templateContent);
+
+    for (const varName of extractedVars) {
       const result = this.resolveVariable(
-        varDef.varName,
+        varName,
         customerData,
         systemData,
         chatData,
@@ -751,19 +837,353 @@ export class VariableResolutionService {
       );
 
       variables.push({
-        name: varDef.varName,
+        name: varName,
         value: result.value,
-        isRequired: varDef.isRequired ?? true,
+        isRequired: true, // Named variables are always required
         source: result.source,
       });
 
       if (result.value !== null && result.value !== '') {
-        suggestions[varDef.varName] = result.value;
+        suggestions[varName] = result.value;
       } else {
-        missing.push(varDef.varName);
+        missing.push(varName);
       }
     }
 
+    // Also include header variables for non-TEXT headers (media/location)
+    this.appendHeaderVariables(locale, variables, missing);
+
+    // Enrich media header variables with fresh pre-signed URLs from templateMedia
+    await this.enrichHeaderMediaVariables(locale.id, variables, missing);
+
     return { suggestions, missing, variables };
+  }
+
+  /**
+   * Append synthetic header variables for templates with non-TEXT headers.
+   * LOCATION headers need lat/lng/name/address.
+   * IMAGE/VIDEO/DOCUMENT headers need a media URL.
+   * TEXT headers with {{...}} are already captured by extractNamedVariables.
+   */
+  private appendHeaderVariables(
+    locale: any,
+    variables: Array<{
+      name: string;
+      value: string | null;
+      isRequired: boolean;
+      source: string;
+    }>,
+    missing: string[],
+  ): void {
+    const headerFormat = (locale.headerFormat || '').toUpperCase();
+    if (!headerFormat || headerFormat === 'TEXT') return;
+
+    // Check if variables already contain header entries (avoid duplicates)
+    const existingNames = new Set(variables.map((v) => v.name));
+
+    // Extract pre-existing media data from the approved template components.
+    // For IMAGE/VIDEO/DOCUMENT, the media is already baked into the template
+    // as an asset handle — the link/filename are stored in components.header.
+    const compHeader = locale.components?.header ?? {};
+    const mediaLink: string | null = compHeader.link || null;
+    const mediaFilename: string | null = compHeader.filename || null;
+
+    const headerVarDefs: Array<{
+      name: string;
+      value: string | null;
+      isRequired: boolean;
+      source: string;
+    }> = [];
+
+    switch (headerFormat) {
+      case 'LOCATION':
+        // Pre-populate from template's stored location data if available.
+        // These were set during template creation and preserved across Meta sync.
+        headerVarDefs.push(
+          {
+            name: 'header_location_latitude',
+            value:
+              compHeader.latitude != null ? String(compHeader.latitude) : null,
+            isRequired: true,
+            source: 'header:location',
+          },
+          {
+            name: 'header_location_longitude',
+            value:
+              compHeader.longitude != null
+                ? String(compHeader.longitude)
+                : null,
+            isRequired: true,
+            source: 'header:location',
+          },
+          {
+            name: 'header_location_name',
+            value: compHeader.name || null,
+            isRequired: false,
+            source: 'header:location',
+          },
+          {
+            name: 'header_location_address',
+            value: compHeader.address || null,
+            isRequired: false,
+            source: 'header:location',
+          },
+        );
+        break;
+
+      case 'IMAGE':
+        // Pre-fill from the approved template's stored media link
+        headerVarDefs.push({
+          name: 'header_image',
+          value: mediaLink,
+          isRequired: true,
+          source: 'header:image',
+        });
+        break;
+
+      case 'VIDEO':
+        headerVarDefs.push({
+          name: 'header_video',
+          value: mediaLink,
+          isRequired: true,
+          source: 'header:video',
+        });
+        break;
+
+      case 'DOCUMENT':
+        headerVarDefs.push(
+          {
+            name: 'header_document',
+            value: mediaLink,
+            isRequired: true,
+            source: 'header:document',
+          },
+          {
+            name: 'header_document_filename',
+            value: mediaFilename,
+            isRequired: false,
+            source: 'header:document',
+          },
+        );
+        break;
+    }
+
+    for (const def of headerVarDefs) {
+      if (existingNames.has(def.name)) continue;
+      variables.push({
+        name: def.name,
+        value: def.value,
+        isRequired: def.isRequired,
+        source: def.source,
+      });
+      // Only mark as missing if required AND not pre-filled
+      if (def.isRequired && !def.value) {
+        missing.push(def.name);
+      }
+    }
+  }
+
+  /**
+   * Enrich media header variables with a fresh pre-signed URL from the
+   * templateMedia table.
+   *
+   * IMPORTANT: After Lambda thumbnail generation, the templateMedia.s3Key
+   * is overwritten to point to the thumbnail image (the original file is
+   * deleted from S3). This means for ALL media types (image, video,
+   * document), s3Key resolves to a thumbnail/preview image — never the
+   * original video or PDF. The frontend uses this as a visual preview.
+   */
+  private async enrichHeaderMediaVariables(
+    localeId: string,
+    variables: Array<{
+      name: string;
+      value: string | null;
+      isRequired: boolean;
+      source: string;
+    }>,
+    missing: string[],
+  ): Promise<void> {
+    const MEDIA_VAR_NAMES = new Set([
+      'header_image',
+      'header_video',
+      'header_document',
+    ]);
+    const mediaVars = variables.filter((v) => MEDIA_VAR_NAMES.has(v.name));
+    if (mediaVars.length === 0) return;
+
+    try {
+      // No status filter — s3Key points to the thumbnail after Lambda
+      // processing regardless of uploadStatus value
+      const headerMedia = await db.query.templateMedia.findFirst({
+        where: and(
+          eq(templateMedia.localeId, localeId),
+          eq(templateMedia.componentType, 'header'),
+        ),
+        orderBy: (tm, { desc }) => [desc(tm.createdAt)],
+      });
+
+      if (!headerMedia?.s3Key) return;
+
+      const { url: freshUrl } =
+        await this.s3Service.generatePresignedDownloadUrl(headerMedia.s3Key, {
+          expiresIn: 3600,
+        });
+
+      for (const mv of mediaVars) {
+        mv.value = freshUrl;
+        const idx = missing.indexOf(mv.name);
+        if (idx !== -1) missing.splice(idx, 1);
+      }
+
+      // Also emit the filename from the media record
+      const filenameVar = variables.find(
+        (v) => v.name === 'header_document_filename',
+      );
+      if (filenameVar && !filenameVar.value && headerMedia.originalFilename) {
+        filenameVar.value = headerMedia.originalFilename;
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed to enrich media URLs for locale ${localeId}: ${error.message}`,
+      );
+    }
+  }
+
+  /**
+   * Extract named variables from template content.
+   * Matches {{category.property}} or {{simple}} syntax.
+   * e.g., "Hi {{customer.first_name}}" → ["customer.first_name"]
+   */
+  private extractNamedVariables(content: string): string[] {
+    const regex = /\{\{([^}]+)\}\}/g;
+    const vars: string[] = [];
+    let match;
+
+    while ((match = regex.exec(content)) !== null) {
+      const varName = match[1].trim();
+      // Skip positional variables (pure numbers)
+      if (/^\d+$/.test(varName)) continue;
+      if (!vars.includes(varName)) {
+        vars.push(varName);
+      }
+    }
+
+    return vars;
+  }
+
+  // ==================== Positional Variable Helpers ====================
+
+  /**
+   * Extract positional variable numbers from a template body.
+   * e.g., `"Hello {{1}}, your code is {{2}}"` → `["1", "2"]`
+   */
+  private extractPositionalVars(body: string): string[] {
+    const regex = /\{\{(\d+)\}\}/g;
+    const vars: string[] = [];
+    let match;
+    while ((match = regex.exec(body)) !== null) {
+      const num = match[1];
+      if (!vars.includes(num)) {
+        vars.push(num);
+      }
+    }
+    return vars.sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+  }
+
+  /**
+   * Resolve a positional-to-named variable mapping.
+   *
+   * The frontend sends a mapping like:
+   * ```json
+   * {
+   *   "1": { "source": "customer.first_name" },
+   *   "2": { "source": "custom.promo_code" },
+   *   "3": { "value": "SUMMER2026" }         // manual override
+   * }
+   * ```
+   *
+   * This method resolves each source variable from contact/system data,
+   * returning the final positional → value map ready for sending:
+   * ```json
+   * { "1": "John", "2": "WELCOME10", "3": "SUMMER2026" }
+   * ```
+   *
+   * If a mapping entry has `value` (manual text), it's used directly.
+   * If it has `source` (a named variable like `customer.first_name`),
+   * it's resolved from the appropriate data source.
+   *
+   * @param mapping - Map of position → { source?: string, value?: string }
+   * @param contactId - Contact to resolve variables for
+   * @param options - Optional senderId, chatId for additional data sources
+   * @returns Map of position → resolved value
+   */
+  async resolvePositionalMapping(
+    mapping: Record<string, { source?: string; value?: string }>,
+    contactId: string,
+    options?: {
+      senderId?: number;
+      chatId?: string;
+    },
+  ): Promise<{
+    resolved: Record<string, string>;
+    unresolved: string[];
+    errors: VariableError[];
+  }> {
+    // Load all data sources once
+    const customerData = await this.getCustomerData(contactId);
+    const systemData = await this.getSystemData(
+      options?.senderId,
+      options?.chatId,
+    );
+    const chatData = await this.getChatData(options?.chatId);
+    const senderData = await this.getSenderData(options?.senderId);
+
+    const resolved: Record<string, string> = {};
+    const unresolved: string[] = [];
+    const errors: VariableError[] = [];
+
+    for (const [position, entry] of Object.entries(mapping)) {
+      // Direct manual value takes priority
+      if (
+        entry.value !== undefined &&
+        entry.value !== null &&
+        entry.value !== ''
+      ) {
+        resolved[position] = entry.value;
+        continue;
+      }
+
+      // Resolve from named source variable
+      if (entry.source) {
+        const result = this.resolveVariable(
+          entry.source,
+          customerData,
+          systemData,
+          chatData,
+          senderData,
+        );
+
+        if (result.value !== null && result.value !== '') {
+          resolved[position] = result.value;
+        } else {
+          unresolved.push(position);
+          errors.push({
+            variable: position,
+            message: `Source variable "${entry.source}" for position {{${position}}} could not be resolved`,
+            type: 'missing',
+          });
+        }
+      } else {
+        // No value and no source — unresolved
+        unresolved.push(position);
+        errors.push({
+          variable: position,
+          message: `No value or source provided for position {{${position}}}`,
+          type: 'missing',
+        });
+      }
+    }
+
+    return { resolved, unresolved, errors };
   }
 }

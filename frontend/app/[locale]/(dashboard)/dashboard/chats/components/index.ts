@@ -16,4 +16,8 @@ export { PinDurationModal, PinReplaceModal } from "./pin-modals";
 export { PinnedMessagesSection } from "./pinned-messages-section";
 export { SelectionBanner } from "./selection-banner";
 export { StickyDateHeader } from "./sticky-date-header";
+export {
+  TemplateSendModal,
+  type TemplateSendPayload,
+} from "./template-send-modal";
 export { TemplatesPanel } from "./templates-panel";

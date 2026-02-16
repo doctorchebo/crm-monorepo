@@ -65,6 +65,29 @@ export class TemplateLibraryFiltersDto {
   @IsString()
   @MaxLength(10)
   language?: string;
+
+  /**
+   * Pagination: number of results per page (default: 25, max: 100)
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  limit?: number;
+
+  /**
+   * Pagination: cursor for next page (from previous response paging.cursors.after)
+   */
+  @IsOptional()
+  @IsString()
+  after?: string;
+
+  /**
+   * Pagination: cursor for previous page (from previous response paging.cursors.before)
+   */
+  @IsOptional()
+  @IsString()
+  before?: string;
 }
 
 /**
@@ -133,8 +156,9 @@ export class LibraryTemplateBodyInputDto {
 /**
  * DTO for adopting a template from Meta's Template Library.
  *
- * This creates a real template in the system that is instantly APPROVED.
- * No Meta review is needed — library templates are pre-approved.
+ * This creates a template from Meta's pre-approved library.
+ * Library templates are typically pre-approved, but may require review
+ * for new accounts or certain template types.
  */
 export class AdoptLibraryTemplateDto {
   /**

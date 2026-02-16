@@ -13,7 +13,7 @@ import {
   useState,
 } from "react";
 import { PAGE_SIZE } from "../constants";
-import type { Chat, Message, MessagesCacheEntry } from "../types";
+import type { Chat, Message, MessagesCacheEntry, Template } from "../types";
 import { scrollContainerToAbsoluteBottom } from "./scroll-utils";
 
 interface UseMessageHandlersProps {
@@ -79,6 +79,15 @@ interface UseMessageHandlersReturn {
   handleDeleteMessage: (messageId: string) => void;
   handleConfirmDeleteMessage: (messageId: string) => Promise<void>;
   handleApplyTemplate: (template: any) => Promise<void>;
+
+  // Template send modal state
+  pendingTemplate: Template | null;
+  handleSendTemplate: (payload: {
+    templateId: string;
+    locale: string;
+    variables: Record<string, string>;
+  }) => Promise<void>;
+  handleCloseSendModal: () => void;
 
   // Delete dialog state
   deleteDialogOpen: boolean;
@@ -496,6 +505,22 @@ export function useMessageHandlers(
         return;
       }
 
+      // Check if the template has variables that need mapping.
+      // If so, open the send modal instead of auto-resolving.
+      const firstLocale = template.locales[0];
+      const bodyHasVariables =
+        firstLocale?.body && /\{\{[^}]+\}\}/.test(firstLocale.body);
+      const isLibraryTemplate = template.source === "library";
+
+      // Always open modal for library templates (they need proper template send)
+      // or for any template with variables that need user input
+      if (isLibraryTemplate || bodyHasVariables) {
+        setPendingTemplate(template as Template);
+        return;
+      }
+
+      // For simple templates without variables and not from library,
+      // fall through to direct resolution (existing behavior)
       const chat = chats.find((c) => c.chatId === selectedChatId);
 
       // Smart locale selection based on customer's preferred language
@@ -597,6 +622,41 @@ export function useMessageHandlers(
       setTemplateInput(body);
     },
     [chats, selectedChatId, selectedContactId],
+  );
+
+  // Pending template for the send modal
+  const [pendingTemplate, setPendingTemplate] = useState<Template | null>(null);
+
+  // Close the template send modal
+  const handleCloseSendModal = useCallback(() => {
+    setPendingTemplate(null);
+  }, []);
+
+  // Send a template message via the dedicated send-template endpoint
+  const handleSendTemplate = useCallback(
+    async (payload: {
+      templateId: string;
+      locale: string;
+      variables: Record<string, string>;
+    }) => {
+      const chat = chats.find((c) => c.chatId === selectedChatId);
+      if (!chat || !selectedChatId) {
+        throw new Error("No chat selected");
+      }
+
+      await backendApi.whatsapp.sendTemplate({
+        to: chat.participantPhone,
+        senderId: chat.senderId,
+        templateId: payload.templateId,
+        locale: payload.locale,
+        variables: payload.variables,
+        chatId: selectedChatId,
+      });
+
+      // Close the modal on success
+      setPendingTemplate(null);
+    },
+    [chats, selectedChatId],
   );
 
   // Merge inbound WebSocket messages into the message list
@@ -943,6 +1003,9 @@ export function useMessageHandlers(
     handleDeleteMessage,
     handleConfirmDeleteMessage,
     handleApplyTemplate,
+    pendingTemplate,
+    handleSendTemplate,
+    handleCloseSendModal,
     deleteDialogOpen,
     setDeleteDialogOpen,
     deletingMessageId,

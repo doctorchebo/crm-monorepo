@@ -1,5 +1,6 @@
 import { db } from '@database/db.connection';
 import {
+  senders,
   templateTests,
   templateVersions,
   variableDefinitions,
@@ -17,6 +18,7 @@ import {
   Request,
   UseGuards,
 } from '@nestjs/common';
+import { S3Service } from '@shared/services/s3.service';
 import { asc, eq } from 'drizzle-orm';
 import { JwtAuthGuard } from '../auth/auth.guard';
 import { TeamService } from '../team/team.service';
@@ -52,9 +54,35 @@ export class TemplatesController {
     private providerFactory: MessagingProviderFactory,
     private teamService: TeamService,
     private templateLibraryService: TemplateLibraryService,
+    private s3Service: S3Service,
   ) {}
 
   // ==================== Variable Definitions (must be before :id routes) ====================
+
+  /**
+   * GET /templates/media/presigned-download-url - Get a fresh presigned URL for template media
+   *
+   * Accepts an S3 key (stored in message metadata as `headerMediaS3Key`)
+   * and returns a fresh presigned download URL. Only keys under the
+   * `templates/media/` prefix are allowed to prevent arbitrary S3 access.
+   */
+  @Get('media/presigned-download-url')
+  async getMediaPresignedDownloadUrl(@Query('s3Key') s3Key: string) {
+    if (!s3Key) {
+      throw new BadRequestException('s3Key query parameter is required');
+    }
+
+    // Security: only allow template media paths
+    if (!s3Key.startsWith('templates/media/')) {
+      throw new BadRequestException('Invalid S3 key');
+    }
+
+    const { url } = await this.s3Service.generatePresignedDownloadUrl(s3Key, {
+      expiresIn: 3600,
+    });
+
+    return { url };
+  }
 
   /**
    * GET /templates/variables/definitions - Get all available variable definitions
@@ -135,8 +163,8 @@ export class TemplatesController {
 
   /**
    * POST /templates/library/adopt - Adopt a template from Meta's Template Library
-   * Creates a real template in the system that is instantly APPROVED.
-   * No Meta review is needed — library templates are pre-approved.
+   * Creates a template from Meta's Template Library.
+   * Library templates are typically pre-approved, but may require review for new accounts.
    */
   @Post('library/adopt')
   async adoptLibraryTemplate(
@@ -601,12 +629,23 @@ export class TemplatesController {
     const provider = this.providerFactory.getDefaultProvider();
     const template = await this.templatesService.getTemplate(templateId);
 
+    // Resolve phoneNumberId from sender
+    const senderRecord = await db.query.senders.findFirst({
+      where: eq(senders.id, dto.senderId),
+    });
+    if (!senderRecord?.phoneNumberId) {
+      throw new BadRequestException(
+        `Sender ${dto.senderId} does not have a phoneNumberId configured.`,
+      );
+    }
+
     const testResult = await provider.sendTemplateMessage({
       to: dto.to,
       templateName: template.name,
       language: version.locale.locale,
       variables: dto.vars,
       locale: version.locale,
+      phoneNumberId: senderRecord.phoneNumberId,
     });
 
     // Record test

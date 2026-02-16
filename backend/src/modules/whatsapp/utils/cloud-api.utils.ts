@@ -64,7 +64,7 @@ export function getCloudAPIHeaders(
  * Build Cloud API endpoint URL
  * Includes appsecret_proof query parameter when appSecret is provided
  *
- * @param phoneNumberId - META_PHONE_NUMBER_ID
+ * @param phoneNumberId - Phone Number ID from the sender record
  * @param endpoint - API endpoint (e.g., 'messages', 'media', 'contacts')
  * @param apiVersion - Cloud API version (default: v20.0)
  * @param accessToken - Optional access token for generating appsecret_proof

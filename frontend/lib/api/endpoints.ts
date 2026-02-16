@@ -667,6 +667,52 @@ export type TemplateQualityRating = "pending" | "high" | "medium" | "low";
 
 export type TemplateCategory = "authentication" | "marketing" | "utility";
 
+/**
+ * Locale shape returned by the template list API.
+ * Matches the `templateLocales` table columns.
+ */
+export interface TemplateListLocale {
+  id: string;
+  locale: string;
+  body: string;
+  header?: string;
+  footer?: string;
+  exampleVars?: Record<string, any>;
+  approvalStatus?: string;
+  /** Variable format: named ({{customer.name}}) or positional ({{1}}, {{2}}) */
+  parameterFormat?: "named" | "positional";
+  /** Type hints for positional parameters, e.g. ["TEXT", "AMOUNT", "DATE"] */
+  bodyParamTypes?: string[];
+  type?: string;
+  category?: string;
+  metaTemplateId?: string;
+  rejectionReason?: string;
+  qualityRating?: string;
+  headerFormat?: string;
+  buttons?: any;
+  components?: any;
+  libraryTemplateName?: string;
+}
+
+/**
+ * Template shape returned by the list / listPaginated API.
+ * Matches the `templates` table columns plus relations.
+ */
+export interface TemplateListItem {
+  id: string;
+  name: string;
+  displayName?: string;
+  description?: string;
+  isVisible: boolean;
+  isActive: boolean;
+  /** Whether this template is custom-created or from the Meta Template Library */
+  source?: "custom" | "library";
+  locales: TemplateListLocale[];
+  platforms?: any[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface ValidationError {
   field: string;
   message: string;
@@ -928,6 +974,12 @@ export interface TemplateLibraryFilters {
   usecase?: TemplateLibraryUseCase;
   industry?: TemplateLibraryIndustry;
   language?: string;
+  /** Pagination: number of results per page (default: 25, max: 100) */
+  limit?: number;
+  /** Pagination: cursor for next page (from previous response) */
+  after?: string;
+  /** Pagination: cursor for previous page (from previous response) */
+  before?: string;
 }
 
 /**
@@ -964,11 +1016,27 @@ export interface TemplateLibraryTemplateWithStatus extends TemplateLibraryTempla
 }
 
 /**
+ * Pagination info for Template Library browse results
+ */
+export interface TemplateLibraryPaging {
+  /** Cursor for next page (use as 'after' param) */
+  nextCursor?: string;
+  /** Cursor for previous page (use as 'before' param) */
+  previousCursor?: string;
+  /** Whether there are more results available */
+  hasNextPage: boolean;
+  /** Whether there are previous results available */
+  hasPreviousPage: boolean;
+}
+
+/**
  * Result of browsing the Template Library
  */
 export interface TemplateLibraryBrowseResult {
   templates: TemplateLibraryTemplateWithStatus[];
   totalCount: number;
+  /** Pagination information for cursor-based navigation */
+  paging?: TemplateLibraryPaging;
 }
 
 /**
@@ -1381,6 +1449,20 @@ export const backendApi = {
       senderId?: number;
       replyToMessageId?: string;
     }) => apiClient.post("/whatsapp/send-location", data),
+    /**
+     * Send a template message via Meta Cloud API.
+     * Unlike sendMessage (plain text), this sends a proper `type: 'template'` payload
+     * that can bypass the 24-hour conversation window when approved.
+     */
+    sendTemplate: (data: {
+      to: string;
+      senderId?: number;
+      templateId: string;
+      locale: string;
+      variables: Record<string, string>;
+      chatId?: string;
+      replyToMessageId?: string;
+    }) => apiClient.post("/whatsapp/send-template", data),
     getStatus: (messageId: string) =>
       apiClient.get(`/whatsapp/status/${messageId}`),
     getDownloadUrl: (messageId: string, attachmentId: string) =>
@@ -2153,7 +2235,7 @@ export const backendApi = {
     /**
      * List templates (non-paginated, for backward compatibility)
      */
-    list: (visible?: boolean) =>
+    list: (visible?: boolean): Promise<TemplateListItem[]> =>
       apiClient.get(`/templates${visible ? "?visible=true" : ""}`),
 
     /**
@@ -2165,7 +2247,7 @@ export const backendApi = {
       search?: string;
       visible?: boolean;
     }): Promise<{
-      data: any[];
+      data: TemplateListItem[];
       pagination: {
         page: number;
         limit: number;
@@ -2220,6 +2302,17 @@ export const backendApi = {
     // Variable definitions
     getVariableDefinitions: (): Promise<VariableDefinitionsResponse> =>
       apiClient.get("/templates/variables/definitions"),
+
+    /**
+     * Get a fresh presigned download URL for template media stored in S3.
+     * Used by chat bubbles to download documents/images/videos from
+     * sent template messages whose presigned URLs have expired.
+     */
+    getMediaPresignedDownloadUrl: (s3Key: string): Promise<{ url: string }> =>
+      apiClient.get(
+        `/templates/media/presigned-download-url?s3Key=${encodeURIComponent(s3Key)}`,
+      ),
+
     // Variable resolution endpoints
     resolve: (
       templateId: string,
@@ -2489,7 +2582,8 @@ export const backendApi = {
     /**
      * Browse Meta's Template Library
      * Returns pre-approved templates that can be adopted instantly.
-     * Supports filtering by search, topic, use case, industry, and language.
+     * Supports filtering by search, topic, use case, industry, language.
+     * Supports cursor-based pagination via limit, after, and before params.
      */
     browseLibrary: (
       filters?: TemplateLibraryFilters,
@@ -2500,14 +2594,18 @@ export const backendApi = {
       if (filters?.usecase) params.append("usecase", filters.usecase);
       if (filters?.industry) params.append("industry", filters.industry);
       if (filters?.language) params.append("language", filters.language);
+      // Pagination params
+      if (filters?.limit) params.append("limit", String(filters.limit));
+      if (filters?.after) params.append("after", filters.after);
+      if (filters?.before) params.append("before", filters.before);
       const qs = params.toString();
       return apiClient.get(`/templates/library${qs ? `?${qs}` : ""}`);
     },
 
     /**
      * Adopt a template from Meta's Template Library
-     * Creates a real template in the system that is instantly APPROVED.
-     * No Meta review is needed — library templates are pre-approved.
+     * Creates a template from Meta's Template Library.
+     * Library templates are typically pre-approved, but may require review for new accounts.
      */
     adoptFromLibrary: (
       data: AdoptLibraryTemplateRequest,

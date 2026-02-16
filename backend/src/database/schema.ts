@@ -876,7 +876,8 @@ export const templateMedia = pgTable(
     mimeType: varchar('mime_type', { length: 100 }),
     assetHandle: varchar('asset_handle', { length: 500 }), // Meta's asset handle from Resumable Upload API
     assetHandleExpiresAt: timestamp('asset_handle_expires_at'), // Asset handles expire after 30 days
-    s3Key: text('s3_key'), // S3 key where the file is stored for display
+    s3Key: text('s3_key'), // S3 key for the thumbnail / preview image
+    originalS3Key: text('original_s3_key'), // S3 key for the original uploaded file (used at send time)
     cdnUrl: text('cdn_url'), // Public CDN URL for the file (for display in edit mode)
     uploadStatus: varchar('upload_status', { length: 20 }).default('pending'), // 'pending', 'uploading', 'completed', 'failed'
     errorMessage: text('error_message'),

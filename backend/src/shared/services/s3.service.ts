@@ -230,6 +230,24 @@ export class S3Service {
   }
 
   /**
+   * Check whether an object exists in S3.
+   * Returns true if the object exists, false otherwise.
+   */
+  async objectExists(key: string): Promise<boolean> {
+    try {
+      await this.s3Client.send(
+        new HeadObjectCommand({
+          Bucket: this.bucketName,
+          Key: key,
+        }),
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Delete a file from S3
    */
   async deleteFile(s3Key: string): Promise<void> {

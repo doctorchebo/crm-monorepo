@@ -53,6 +53,10 @@ export interface TemplateStatusResult {
   qualityRating?: TemplateQualityRating;
   rejectionReason?: string;
   category?: TemplateCategory;
+  /** Full component structure returned from Meta API */
+  components?: Array<Record<string, any>>;
+  /** Detected header format from components (TEXT, IMAGE, VIDEO, DOCUMENT, LOCATION) */
+  headerFormat?: string;
   providerResponse?: Record<string, any>;
 }
 
@@ -215,6 +219,12 @@ export interface TemplateLibraryFilters {
   usecase?: TemplateLibraryUseCase;
   industry?: TemplateLibraryIndustry;
   language?: string;
+  /** Pagination: number of results per page (default: 25, max: 100) */
+  limit?: number;
+  /** Pagination: cursor for next page (from previous response) */
+  after?: string;
+  /** Pagination: cursor for previous page (from previous response) */
+  before?: string;
 }
 
 /**
@@ -307,6 +317,8 @@ export interface TemplateSendRequest {
   language: string;
   variables: Record<string, any>;
   locale: TemplateLocale;
+  /** Meta Cloud API phone number ID from the sender record */
+  phoneNumberId: string;
 }
 
 /**

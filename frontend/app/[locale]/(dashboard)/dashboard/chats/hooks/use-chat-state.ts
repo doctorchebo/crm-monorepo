@@ -1515,8 +1515,14 @@ export function useChatState(): UseChatStateReturn {
 
           setShouldAutoScroll(true);
 
-          // CRITICAL: Wait for React to render the messages, then scroll to bottom
-          // We use double RAF to ensure React has flushed and the DOM is ready
+          // CRITICAL: Wait for React to render the messages, then scroll to bottom.
+          // We use double RAF to ensure React has flushed and the DOM is ready.
+          //
+          // IMPORTANT: The transition state (isScrollRestoring) is finalized INSIDE the
+          // double RAF, AFTER the scroll request. This prevents a flash where the list
+          // becomes visible (opacity: 1) before the scroll has executed. Without this,
+          // the user would see messages at the top for one frame before the scroll
+          // snaps to the bottom.
           requestAnimationFrame(() => {
             requestAnimationFrame(() => {
               // Check if user switched chats while waiting
@@ -1524,22 +1530,17 @@ export function useChatState(): UseChatStateReturn {
                 return;
               }
 
+              // Scroll to bottom FIRST (while opacity is still 0)
               scrollHelperRequestScroll(false);
 
               // Mark initial scroll as done for this chat
               initialScrollDoneRef.current.add(chatToLoad);
-            });
-          });
 
-          // Finalize transition state
-          // NOTE: onChatDidChange is NOT called here - it's handled by the
-          // State Transitions effect when it sees messages arrive
-          requestAnimationFrame(() => {
-            if (lastFetchedChatIdRef.current !== chatToLoad) {
-              return; // User switched, abort
-            }
-            isTransitioningRef.current = false;
-            setIsScrollRestoring(false);
+              // NOW finalize the transition — make the list visible.
+              // Since scrollTop was already set, the user sees content at the bottom.
+              isTransitioningRef.current = false;
+              setIsScrollRestoring(false);
+            });
           });
         }
       } catch (err) {

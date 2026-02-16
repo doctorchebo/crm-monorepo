@@ -21,7 +21,9 @@ import {
   EditMessageDto,
 } from './dto/message-edit-delete.dto';
 import { SaveNoteDto } from './dto/notes.dto';
+import { OutboundMessageDto } from './dto/outbound-message.dto';
 import { SendLocationDto } from './dto/send-location.dto';
+import { SendTemplateDto } from './dto/send-template.dto';
 import { ConversationWindowService } from './services/conversation-window.service';
 import { WhatsAppService } from './whatsapp.service';
 
@@ -228,6 +230,23 @@ export class WhatsAppController {
   }
 
   /**
+   * Send a text/media message
+   * POST /whatsapp/send
+   *
+   * Sends a free-form message (text, media, or attachments) via the Meta
+   * Cloud API.  Subject to the 24-hour conversation window — if the window
+   * is closed, use send-template instead.
+   */
+  @Post('send')
+  async sendMessage(@Body() dto: OutboundMessageDto, @Req() req: any) {
+    const userId = req.user?.userId;
+    this.logger.log(
+      `Send message to ${dto.to} from sender ${dto.senderId || 'default'}, user ${userId}`,
+    );
+    return this.whatsAppService.sendMessage(dto, userId);
+  }
+
+  /**
    * Send a location message
    * POST /whatsapp/send-location
    *
@@ -260,5 +279,28 @@ export class WhatsAppController {
       dto.replyToMessageId,
       userId,
     );
+  }
+
+  /**
+   * Send a template message
+   * POST /whatsapp/send-template
+   *
+   * Sends a proper WhatsApp template message (`type: 'template'`) via the
+   * Meta Cloud API. Unlike free-form text messages, approved template messages
+   * can bypass the 24-hour conversation window.
+   *
+   * This endpoint is used by the chat page when a user selects a template,
+   * fills in variable values via the variable mapping modal, and clicks send.
+   *
+   * Required fields: to, senderId, templateId, locale, variables
+   */
+  @Post('send-template')
+  async sendTemplate(@Body() dto: SendTemplateDto, @Req() req: any) {
+    const userId = req.user?.userId;
+    this.logger.log(
+      `Send template "${dto.templateId}" (locale: ${dto.locale}) to ${dto.to} from sender ${dto.senderId}, user ${userId}`,
+    );
+
+    return this.whatsAppService.sendTemplateMessage(dto, userId);
   }
 }
