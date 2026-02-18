@@ -473,3 +473,43 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   cooldownSeconds: 300, // 5 minutes
   maxSimilarMessages: 3,
 };
+
+// ============================================================================
+// Calendar Integration Types
+// ============================================================================
+
+/**
+ * Calendar-related context added to AI replies
+ */
+export interface CalendarAIContext {
+  /** Upcoming events for context */
+  upcomingEvents?: Array<{
+    title: string;
+    startTime: string;
+    endTime: string;
+  }>;
+  /** Available booking links */
+  bookingLinks?: Array<{
+    name: string;
+    url: string;
+  }>;
+  /** Current availability status */
+  availability?: {
+    isFree: boolean;
+    busyUntil?: string;
+  };
+}
+
+/**
+ * Result of calendar tool execution during AI reply
+ */
+export interface CalendarToolResult {
+  /** Tool that was executed */
+  toolName: string;
+  /** Whether execution was successful */
+  success: boolean;
+  /** Result data */
+  data?: unknown;
+  /** Error message if failed */
+  error?: string;
+}

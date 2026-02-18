@@ -48,6 +48,7 @@ import {
   WhatsAppMediaType,
 } from '../types';
 import { AIReplySettingsService } from './ai-reply-settings.service';
+import { CalendarChatPluginService } from './calendar-chat-plugin.service';
 import { InteractiveMessageService } from './interactive-message.service';
 import { RateLimiterService } from './rate-limiter.service';
 import { TemplateSelectorService } from './template-selector.service';
@@ -109,6 +110,8 @@ export class AIReplyService {
     private readonly mediaOrchestratorService: MediaOrchestratorService,
     @Optional()
     private readonly interactiveMessageService: InteractiveMessageService,
+    @Optional()
+    private readonly calendarPlugin: CalendarChatPluginService,
   ) {
     // Support both OPENAI_API_KEY and AI_MEMORY_PROVIDER_API_KEY for flexibility
     const apiKey =
@@ -431,8 +434,63 @@ export class AIReplyService {
       settings.recentMessagesCount,
     );
 
-    // Generate AI response
-    const generationResult = await this.generateAIResponse(context, settings);
+    // Process through calendar plugin if available
+    let calendarContext = '';
+    if (this.calendarPlugin?.isAvailable()) {
+      try {
+        // Get the last inbound message for calendar processing
+        const lastInboundMessage = context.recentMessages
+          .filter((m) => m.direction === 'inbound')
+          .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())[0];
+
+        if (lastInboundMessage?.text) {
+          const calendarResult =
+            await this.calendarPlugin.processMessageForReply(
+              {
+                message: lastInboundMessage.text,
+                userId: request.userId,
+                chatId: request.chatId,
+              },
+              context,
+            );
+
+          // If calendar fully handled the message, return the response
+          if (calendarResult.skipAiReply && calendarResult.suggestedResponse) {
+            await this.logUsage({
+              chatId: request.chatId,
+              userId: request.userId,
+              senderId: request.senderId,
+              operationType: 'generation',
+              status: 'success',
+              latencyMs: Date.now() - startTime,
+            });
+
+            return {
+              success: true,
+              analysis,
+              generatedText: calendarResult.suggestedResponse,
+            };
+          }
+
+          // Add calendar context to AI prompt
+          if (calendarResult.additionalContext) {
+            calendarContext = calendarResult.additionalContext;
+          }
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Calendar processing failed (non-critical): ${error.message}`,
+        );
+        // Continue without calendar context
+      }
+    }
+
+    // Generate AI response (with optional calendar context)
+    const generationResult = await this.generateAIResponse(
+      context,
+      settings,
+      calendarContext,
+    );
 
     if (!generationResult.success || !generationResult.generatedText) {
       return {
@@ -757,10 +815,16 @@ export class AIReplyService {
   private async generateAIResponse(
     context: AIReplyContext,
     settings: Awaited<ReturnType<typeof this.settingsService.getSettings>>,
+    calendarContext?: string,
   ): Promise<AIReplyGenerationResult> {
     try {
       // Build the user message with context
-      const userMessage = this.buildUserMessage(context, settings);
+      let userMessage = this.buildUserMessage(context, settings);
+
+      // Add calendar context if available
+      if (calendarContext) {
+        userMessage = `${calendarContext}\n\n${userMessage}`;
+      }
 
       const response = await this.openai.chat.completions.create({
         model: this.model,

@@ -198,6 +198,7 @@ interface Template {
     body: string;
     header?: string;
     footer?: string;
+    approvalStatus?: string;
   }>;
 }
 
@@ -357,10 +358,23 @@ export default function EditTemplatePage() {
               setViewedVersion(null);
             }
           } else {
-            // No versions at all - this shouldn't happen with auto v1 creation
-            // but allow editing just in case
-            setViewOnlyMode(false);
-            setViewedVersion(null);
+            // No versions at all — check locale approval status as a safety net.
+            // If the locale is approved/pending/disabled, it must remain read-only.
+            const localeData = templateData?.locales?.find(
+              (l) => l.locale === selectedLocale,
+            );
+            const localeStatus = localeData?.approvalStatus;
+            if (
+              localeStatus &&
+              ["approved", "pending", "disabled", "paused"].includes(
+                localeStatus,
+              )
+            ) {
+              setViewOnlyMode(true);
+            } else {
+              setViewOnlyMode(false);
+              setViewedVersion(null);
+            }
           }
         }
       } catch (error) {
@@ -375,7 +389,7 @@ export default function EditTemplatePage() {
         setIsLoadingVersion(false);
       }
     },
-    [templateId, selectedLocale, existingLocales, versionInfo],
+    [templateId, selectedLocale, existingLocales, versionInfo, templateData],
   );
 
   // Initial fetch on mount and locale change

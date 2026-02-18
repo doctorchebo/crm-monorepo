@@ -61,6 +61,14 @@
     "settings": "Configuración",
     "settingsAi": "IA",
     "settingsChats": "Chats",
+    "settingsWorkflow": "Flujo de Trabajo",
+    "settingsSenders": "Remitentes",
+    "calendar": "Calendario",
+    "calendarOverview": "Vista General",
+    "bookingLinks": "Enlaces de Reserva",
+    "availability": "Disponibilidad",
+    "syncedCalendars": "Calendarios Sincronizados",
+    "calendarAiSettings": "Configuración IA",
     "dashboardWelcome": "Bienvenido a tu panel"
   },
   "chats": {

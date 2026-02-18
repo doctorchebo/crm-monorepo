@@ -1,4 +1,5 @@
 import { AuditModule } from '@modules/audit/audit.module';
+import { CalendarModule } from '@modules/calendar/calendar.module';
 import { CatalogModule } from '@modules/catalog/catalog.module';
 import { KnowledgeBaseModule } from '@modules/knowledge-base/knowledge-base.module';
 import { LabelsModule } from '@modules/labels/labels.module';
@@ -70,6 +71,7 @@ import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
     ProfilePictureModule,
     CatalogModule,
     AuditModule,
+    CalendarModule,
     DatabaseModule,
   ],
   controllers: [AppController],

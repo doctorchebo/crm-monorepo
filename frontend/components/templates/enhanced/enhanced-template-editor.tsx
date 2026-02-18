@@ -327,6 +327,7 @@ export function EnhancedTemplateEditor({
       url?: string;
       error?: string;
       tempId?: string;
+      s3Key?: string;
     }> => {
       try {
         // Determine media type from file
@@ -394,6 +395,7 @@ export function EnhancedTemplateEditor({
           url: result.url,
           error: result.error,
           tempId: result.tempId,
+          s3Key: result.s3Key,
         };
       } catch (error) {
         console.error("Header media upload failed:", error);

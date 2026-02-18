@@ -14,7 +14,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { S3Service } from '@shared/services/s3.service';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 
 /**
  * Version status enum - aligned with schema and WhatsApp requirements
@@ -216,8 +216,72 @@ export class TemplateVersionService {
       }
     }
 
+    // Bootstrap versioning for templates that predate the version system.
+    // If no version records exist but the locale has been through the approval
+    // process (has a non-draft approvalStatus), auto-create a v1 version from
+    // the locale data with the matching status. This is a one-time operation
+    // that ensures the versioning system is consistent.
+    if (
+      versions.length === 0 &&
+      localeApprovalStatus &&
+      localeApprovalStatus !== 'draft'
+    ) {
+      const versionStatus =
+        this.mapApprovalStatusToVersionStatus(localeApprovalStatus);
+
+      const content: VersionContent = {
+        header: localeData.header,
+        body: localeData.body,
+        footer: localeData.footer,
+        exampleVars: (localeData.exampleVars as Record<string, string>) || {},
+        category: localeData.category || 'utility',
+        components: localeData.components as
+          | Record<string, unknown>
+          | undefined,
+      };
+
+      const versionId = crypto.randomUUID();
+      await db.insert(templateVersions).values({
+        id: versionId,
+        templateId,
+        localeId: localeData.id,
+        versionNumber: 1,
+        content,
+        status: versionStatus,
+        providerId: localeData.metaTemplateId || null,
+        providerName: 'meta',
+        platforms: ['whatsapp'],
+      });
+
+      this.logger.log(
+        `Auto-created v1 (${versionStatus}) for template ${templateId} locale ${locale} — bootstrapping versioning system`,
+      );
+
+      // Ensure locale activeVersion is set to 1 for approved templates
+      if (
+        versionStatus === VersionStatus.APPROVED &&
+        localeData.activeVersion !== 1
+      ) {
+        await db
+          .update(templateLocales)
+          .set({ activeVersion: 1, updatedAt: new Date() })
+          .where(eq(templateLocales.id, localeData.id));
+      }
+
+      // Re-fetch versions after bootstrap
+      versions = await db.query.templateVersions.findMany({
+        where: and(
+          eq(templateVersions.templateId, templateId),
+          eq(templateVersions.localeId, localeData.id),
+        ),
+        orderBy: [desc(templateVersions.versionNumber)],
+      });
+    }
+
     // Get the active version number from locale data
-    const activeVersionNumber = localeData.activeVersion;
+    const activeVersionNumber =
+      localeData.activeVersion ??
+      (localeApprovalStatus === 'approved' ? 1 : localeData.activeVersion);
 
     // Map to version details with active version context
     const allVersions: VersionDetails[] = versions.map((v) =>
@@ -921,17 +985,21 @@ export class TemplateVersionService {
   }
 
   /**
-   * Enrich version content with media thumbnail URLs from templateMedia table
+   * Enrich version content with fresh presigned media URLs.
    *
-   * When a video/document header is uploaded, the thumbnail is generated asynchronously
-   * and stored in S3. The s3Key in templateMedia is updated to point to the thumbnail.
-   * This method looks up the media record and generates a presigned URL for display.
+   * Stored `link` / `thumbnailUrl` values are presigned S3 URLs that expire.
+   * When serving version content for editing, this method looks up the
+   * corresponding `template_media` record and regenerates presigned URLs so
+   * the frontend always has valid links.
+   *
+   * For IMAGE headers  → refreshes `link` (the image URL shown to the user).
+   * For VIDEO/DOC       → refreshes both `link` (original file) and
+   *                        `thumbnailUrl` (async-generated thumbnail).
    */
   private async enrichContentWithMediaUrls(
     localeId: string,
     content: VersionContent,
   ): Promise<VersionContent> {
-    // Check if we have a media header that might need thumbnail enrichment
     const components = content.components as
       | Record<string, unknown>
       | undefined;
@@ -942,52 +1010,74 @@ export class TemplateVersionService {
     const header = components.header as Record<string, unknown>;
     const format = header.format as string;
 
-    // Only enrich for media types that have thumbnails
-    if (!['VIDEO', 'DOCUMENT'].includes(format)) {
+    // Only media formats need URL refresh
+    if (!['IMAGE', 'VIDEO', 'DOCUMENT'].includes(format)) {
       return content;
     }
 
     try {
-      // Look up the header media record for this locale
-      // Note: This query may fail if s3_key column doesn't exist (migration not run)
+      // Look up the header media record for this locale.
+      // componentType may be stored as 'header' (from ensureMediaRecord) or
+      // 'HEADER' (from uploadMedia controller). Query both to be safe.
       const headerMedia = await db.query.templateMedia.findFirst({
         where: and(
           eq(templateMedia.localeId, localeId),
-          eq(templateMedia.componentType, 'header'),
+          inArray(templateMedia.componentType, ['header', 'HEADER']),
           eq(templateMedia.uploadStatus, 'completed'),
         ),
+        orderBy: (tm, { desc }) => [desc(tm.createdAt)],
       });
 
-      if (!headerMedia?.s3Key) {
+      if (!headerMedia) {
         return content;
       }
 
-      // Generate presigned URL for the thumbnail
-      const { url: thumbnailUrl } =
-        await this.s3Service.generatePresignedDownloadUrl(headerMedia.s3Key, {
-          expiresIn: 3600, // 1 hour
-        });
+      const enrichedHeader: Record<string, unknown> = { ...header };
 
-      // Deep clone the content to avoid mutating the original
+      // Refresh the primary display URL (link).
+      // For IMAGE: s3Key points to the thumbnail (or original if no thumb).
+      // For VIDEO/DOC: originalS3Key is the original file.
+      if (format === 'IMAGE') {
+        // Images: s3Key is the thumbnail; show it as the link
+        if (headerMedia.s3Key) {
+          const { url } = await this.s3Service.generatePresignedDownloadUrl(
+            headerMedia.s3Key,
+            { expiresIn: 3600 },
+          );
+          enrichedHeader.link = url;
+        }
+      } else {
+        // VIDEO/DOCUMENT: link → original file, thumbnailUrl → thumbnail
+        if (headerMedia.originalS3Key) {
+          const { url } = await this.s3Service.generatePresignedDownloadUrl(
+            headerMedia.originalS3Key,
+            { expiresIn: 3600 },
+          );
+          enrichedHeader.link = url;
+        }
+        if (headerMedia.s3Key) {
+          const { url } = await this.s3Service.generatePresignedDownloadUrl(
+            headerMedia.s3Key,
+            { expiresIn: 3600 },
+          );
+          enrichedHeader.thumbnailUrl = url;
+        }
+      }
+
       const enrichedContent: VersionContent = {
         ...content,
         components: {
           ...components,
-          header: {
-            ...header,
-            thumbnailUrl,
-          },
+          header: enrichedHeader,
         },
       };
 
       this.logger.debug(
-        `Enriched header with thumbnail URL for locale ${localeId}`,
+        `Enriched ${format} header with fresh presigned URLs for locale ${localeId}`,
       );
 
       return enrichedContent;
     } catch (error) {
-      // Handle case where s3_key column doesn't exist (migration not run)
-      // or any other database/S3 error - just return content without enrichment
       this.logger.warn(
         `Failed to enrich content with media URLs for locale ${localeId}: ${error.message}`,
       );

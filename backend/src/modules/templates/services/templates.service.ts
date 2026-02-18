@@ -1,6 +1,7 @@
 import { db } from '@database/db.connection';
 import {
   templateLocales,
+  templateMedia,
   templatePlatforms,
   templates,
   templateVariables,
@@ -12,6 +13,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { S3Service } from '@shared/services/s3.service';
 import {
   and,
   count,
@@ -70,6 +72,7 @@ export class TemplatesService {
     private renderService: TemplateRenderService,
     private metaProvider: MetaCloudApiProvider,
     private readonly auditWriteService: AuditWriteService,
+    private readonly s3Service: S3Service,
   ) {}
 
   /**
@@ -122,6 +125,7 @@ export class TemplatesService {
 
   /**
    * Get template by ID with locales
+   * Locale components are enriched with fresh presigned S3 URLs.
    */
   async getTemplate(templateId: string) {
     const template = await db.query.templates.findFirst({
@@ -136,7 +140,16 @@ export class TemplatesService {
       throw new NotFoundException(`Template with ID ${templateId} not found`);
     }
 
-    return template;
+    // Enrich locale components with fresh presigned URLs.
+    // Stored `link` / `thumbnailUrl` values are presigned S3 URLs that expire.
+    const enrichedLocales = await Promise.all(
+      template.locales.map((locale) => this.enrichLocaleMediaUrls(locale)),
+    );
+
+    return {
+      ...template,
+      locales: enrichedLocales,
+    };
   }
 
   /**
@@ -740,9 +753,13 @@ export class TemplatesService {
    * Ensure a template_media record exists for a locale with a media header.
    *
    * When templates are created/updated, the media file info lives in
-   * components.header (link, assetHandle, filename). This method creates
-   * (or updates) a template_media row so the send-time resolution and
-   * preview flows can find the S3 key for the original file.
+   * components.header (link, assetHandle, filename, s3Key, originalS3Key).
+   * This method creates (or updates) a template_media row so the send-time
+   * resolution and preview flows can find the S3 key for the original file.
+   *
+   * S3 key resolution priority:
+   *   1. Direct s3Key/originalS3Key from header DTO (reliable, set by upload flow)
+   *   2. Extraction from presigned URL in header.link (fragile fallback)
    */
   private async ensureMediaRecord(
     localeId: string,
@@ -755,13 +772,15 @@ export class TemplatesService {
     const link: string | undefined = header.link;
     const assetHandle: string | undefined = header.assetHandle;
     const filename: string | undefined = header.filename;
-    if (!link && !assetHandle) return;
+    if (!link && !assetHandle && !header.s3Key) return;
 
-    // Extract the S3 key from the presigned URL stored in components.header.link
-    let s3Key: string | null = null;
-    let originalS3Key: string | null = null;
+    // --- Resolve S3 keys ---
+    // Priority 1: Direct keys from the header DTO (set by the upload flow)
+    let s3Key: string | null = (header.s3Key as string) || null;
+    let originalS3Key: string | null = (header.originalS3Key as string) || null;
 
-    if (link) {
+    // Priority 2: Fallback — extract from presigned URL in header.link
+    if (!s3Key && !originalS3Key && link) {
       const extractedKey = this.extractS3KeyFromUrl(link);
       if (extractedKey) {
         if (extractedKey.includes('_thumb')) {
@@ -985,5 +1004,87 @@ export class TemplatesService {
       criticalErrors: this.validatorService.getErrorsOnly(errors),
       warnings: this.validatorService.getWarningsOnly(errors),
     };
+  }
+
+  /**
+   * Enrich a locale's components with fresh presigned S3 URLs.
+   *
+   * The components may contain stale presigned URLs (stored when the draft
+   * was saved). This method looks up the corresponding `template_media`
+   * record and regenerates presigned URLs so the frontend always has valid
+   * links. Mirrors the logic in TemplateVersionService.enrichContentWithMediaUrls.
+   */
+  private async enrichLocaleMediaUrls<T extends { id: string }>(
+    locale: T,
+  ): Promise<T> {
+    const localeAny = locale as any;
+    const components = localeAny.components as
+      | Record<string, unknown>
+      | undefined;
+    if (!components?.header) {
+      return locale;
+    }
+
+    const header = components.header as Record<string, unknown>;
+    const format = header.format as string;
+
+    if (!['IMAGE', 'VIDEO', 'DOCUMENT'].includes(format)) {
+      return locale;
+    }
+
+    try {
+      const headerMedia = await db.query.templateMedia.findFirst({
+        where: and(
+          eq(templateMedia.localeId, locale.id),
+          inArray(templateMedia.componentType, ['header', 'HEADER']),
+          eq(templateMedia.uploadStatus, 'completed'),
+        ),
+        orderBy: (tm, { desc }) => [desc(tm.createdAt)],
+      });
+
+      if (!headerMedia) {
+        return locale;
+      }
+
+      const enrichedHeader: Record<string, unknown> = { ...header };
+
+      if (format === 'IMAGE') {
+        if (headerMedia.s3Key) {
+          const { url } = await this.s3Service.generatePresignedDownloadUrl(
+            headerMedia.s3Key,
+            { expiresIn: 3600 },
+          );
+          enrichedHeader.link = url;
+        }
+      } else {
+        if (headerMedia.originalS3Key) {
+          const { url } = await this.s3Service.generatePresignedDownloadUrl(
+            headerMedia.originalS3Key,
+            { expiresIn: 3600 },
+          );
+          enrichedHeader.link = url;
+        }
+        if (headerMedia.s3Key) {
+          const { url } = await this.s3Service.generatePresignedDownloadUrl(
+            headerMedia.s3Key,
+            { expiresIn: 3600 },
+          );
+          enrichedHeader.thumbnailUrl = url;
+        }
+      }
+
+      return {
+        ...locale,
+        components: {
+          ...components,
+          header: enrichedHeader,
+        },
+      } as T;
+    } catch (error) {
+      this.logger.warn(
+        `Failed to enrich locale ${locale.id} media URLs: ${error.message}`,
+      );
+      return locale;
+    }
   }
 }

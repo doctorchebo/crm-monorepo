@@ -53,6 +53,8 @@ interface ThumbnailCallbackPayload {
     chatId?: string;
     localeId?: string;
     originalS3Key?: string;
+    /** Temporary ID for WebSocket event matching (present for both temp and standard uploads) */
+    tempId?: string;
   };
 }
 
@@ -258,6 +260,26 @@ export class ThumbnailCallbackController {
         `[Thumbnail Callback] Updated template media ${mediaId} with thumbnail: ` +
           `${payload.thumbnailKey} (${payload.width}x${payload.height}, time: ${payload.processingTimeMs}ms)`,
       );
+
+      // Emit WebSocket event so the frontend can update the preview in real-time.
+      // The tempId is passed through the Lambda job for this purpose.
+      const tempId = payload.entityIds?.tempId;
+      if (tempId) {
+        const { url: thumbnailUrl } =
+          await this.s3Service.generatePresignedDownloadUrl(
+            payload.thumbnailKey,
+            { expiresIn: 3600 },
+          );
+
+        whatsAppGatewayInstance?.emitTemplateMediaThumbnailReady({
+          tempId,
+          originalS3Key: originalS3Key || '',
+          thumbnailS3Key: payload.thumbnailKey,
+          thumbnailUrl,
+          width: payload.width,
+          height: payload.height,
+        });
+      }
 
       // Original files are kept permanently in S3 — Meta needs them at send time.
       // The s3Key column now points to the thumbnail for UI preview;

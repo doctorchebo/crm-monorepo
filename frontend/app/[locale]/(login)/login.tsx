@@ -9,13 +9,12 @@ import { TokenManager } from "@/lib/auth/token-manager";
 import { Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useActionState, useEffect } from "react";
 import { signIn, signUp } from "./actions";
 
 export function Login({ mode = "signin" }: { mode?: "signin" | "signup" }) {
   const t = useTranslations("auth");
-  const router = useRouter();
   const searchParams = useSearchParams();
   const redirect = searchParams.get("redirect");
   const priceId = searchParams.get("priceId");
@@ -49,12 +48,16 @@ export function Login({ mode = "signin" }: { mode?: "signin" | "signup" }) {
         console.debug("[Login] TokenManager initialized with expiration times");
       }
 
-      // JWT tokens are already set server-side as HTTP-only cookies
-      // Redirect immediately to dashboard
-      // Middleware will allow the request because tokens exist
-      router.push("/dashboard");
+      // CRITICAL: Use window.location.href instead of router.push for login redirect.
+      // AuthProvider lives in the shared [locale]/layout.tsx, which stays mounted
+      // across (login) and (dashboard) route groups during client-side navigation.
+      // Since AuthProvider's checkAuth() only runs on mount, a router.push keeps
+      // the stale "unauthenticated" state, causing useAuthProtection() to immediately
+      // redirect back to /sign-in. A full page navigation forces AuthProvider to
+      // remount and run a fresh auth check with the newly set cookies.
+      window.location.href = "/dashboard";
     }
-  }, [state, router]);
+  }, [state]);
 
   return (
     <div className="min-h-[100dvh] flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8 bg-gray-50 dark:bg-gray-950">

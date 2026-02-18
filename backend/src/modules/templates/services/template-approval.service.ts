@@ -19,6 +19,7 @@ import {
   templateWebhookGatewayInstance,
 } from '../template.webhook.gateway';
 import { ComponentsValidatorService } from '../validators';
+import { MediaUploadService } from './media-upload.service';
 import {
   TemplateValidatorService,
   ValidationError,
@@ -123,6 +124,7 @@ export class TemplateApprovalService {
     private validatorService: TemplateValidatorService,
     private componentsValidator: ComponentsValidatorService,
     private providerFactory: MessagingProviderFactory,
+    private mediaUploadService: MediaUploadService,
   ) {}
 
   // ===========================================================================
@@ -642,6 +644,21 @@ export class TemplateApprovalService {
         };
       }
 
+      // Ensure media asset handles are valid before submitting to Meta.
+      // Asset handles from the Resumable Upload API expire after ~30 days.
+      // If the user waits before requesting approval, the handle may be stale.
+      // This re-uploads the original file from S3 to obtain a fresh handle.
+      // The method mutates `components` in-place — persist the updated handles
+      // to the draft version so future retries don't need to re-upload.
+      await this.refreshMediaAssetHandles(components, localeData.id);
+
+      // Persist refreshed asset handles back to draft version content
+      const updatedContent = { ...(draftContent || {}), components };
+      await db
+        .update(templateVersions)
+        .set({ content: updatedContent, updatedAt: new Date() })
+        .where(eq(templateVersions.id, draftVersion.id));
+
       const submissionRequest = {
         templateName: template.name,
         locale: localeData.locale,
@@ -744,6 +761,75 @@ export class TemplateApprovalService {
         message: result.error || 'Failed to submit template for approval',
         providerResponse: result.providerResponse,
       };
+    }
+  }
+
+  /**
+   * Refresh media asset handles in the components before Meta submission.
+   *
+   * Asset handles from Meta's Resumable Upload API expire after ~30 days.
+   * This method checks the header (and any carousel cards) for media formats,
+   * ensures each has a valid handle by re-uploading from S3 if needed, and
+   * updates the `assetHandle` in the components object in-place.
+   *
+   * The mutation is intentional — the caller passes `components` by reference
+   * and later submits it to Meta, so modifying it here avoids an awkward
+   * return-and-reassign pattern.
+   */
+  private async refreshMediaAssetHandles(
+    components: TemplateComponentsDto,
+    localeId: string,
+  ): Promise<void> {
+    const MEDIA_FORMATS = ['IMAGE', 'VIDEO', 'DOCUMENT'];
+
+    // Header media handle
+    if (
+      components.header &&
+      MEDIA_FORMATS.includes(components.header.format) &&
+      components.header.assetHandle
+    ) {
+      const freshHandle = await this.mediaUploadService.ensureFreshAssetHandle(
+        localeId,
+        'HEADER',
+      );
+
+      if (freshHandle && freshHandle !== components.header.assetHandle) {
+        this.logger.log(
+          `Refreshed expired header asset handle for locale ${localeId}`,
+        );
+        components.header.assetHandle = freshHandle;
+      } else if (!freshHandle) {
+        this.logger.warn(
+          `Could not refresh header asset handle for locale ${localeId}. ` +
+            `Proceeding with existing handle — Meta may reject it.`,
+        );
+      }
+    }
+
+    // Carousel card media handles
+    if (components.carousel?.cards?.length) {
+      for (let i = 0; i < components.carousel.cards.length; i++) {
+        const card = components.carousel.cards[i];
+        if (
+          card.header &&
+          MEDIA_FORMATS.includes(card.header.format) &&
+          card.header.assetHandle
+        ) {
+          const componentType = `CAROUSEL_CARD_${i}`;
+          const freshHandle =
+            await this.mediaUploadService.ensureFreshAssetHandle(
+              localeId,
+              componentType,
+            );
+
+          if (freshHandle && freshHandle !== card.header.assetHandle) {
+            this.logger.log(
+              `Refreshed expired carousel card ${i} asset handle for locale ${localeId}`,
+            );
+            card.header.assetHandle = freshHandle;
+          }
+        }
+      }
     }
   }
 

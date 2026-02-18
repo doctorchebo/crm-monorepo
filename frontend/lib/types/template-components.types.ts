@@ -40,6 +40,10 @@ export interface MediaHeader extends TemplateHeaderBase {
   thumbnailUrl?: string;
   /** Filename for documents */
   filename?: string;
+  /** S3 key for reliable media record creation (original or thumbnail) */
+  s3Key?: string;
+  /** S3 key for the original uploaded file */
+  originalS3Key?: string;
 }
 
 /** Location header */
@@ -517,6 +521,9 @@ export function dtoToComponents(
         // Thumbnail URL from backend (for video/document headers)
         thumbnailUrl: headerDto.thumbnailUrl as string | undefined,
         filename: headerDto.filename as string | undefined,
+        // S3 keys for reliable media record creation
+        s3Key: headerDto.s3Key as string | undefined,
+        originalS3Key: headerDto.originalS3Key as string | undefined,
       };
     } else if (format === "LOCATION") {
       components.header = {
@@ -716,6 +723,9 @@ export function componentsToDto(
         // For temp uploads, this is the only source. For saved media, backend may also
         // enrich from templateMedia.s3Key if available.
         thumbnailUrl: components.header.thumbnailUrl,
+        // S3 keys for reliable media record creation (avoids fragile URL parsing)
+        s3Key: components.header.s3Key,
+        originalS3Key: components.header.originalS3Key,
       };
     } else if (isLocationHeader(components.header)) {
       dto.header = {

@@ -375,7 +375,7 @@ export const TEMPLATE_LIMITS = {
   // Media
   IMAGE_MAX_SIZE_MB: 5,
   VIDEO_MAX_SIZE_MB: 16,
-  DOCUMENT_MAX_SIZE_MB: 100,
+  DOCUMENT_MAX_SIZE_MB: 10,
   SUPPORTED_IMAGE_TYPES: ['image/jpeg', 'image/png', 'image/webp'] as const,
   SUPPORTED_VIDEO_TYPES: ['video/mp4', 'video/3gpp'] as const,
   SUPPORTED_DOCUMENT_TYPES: ['application/pdf'] as const,

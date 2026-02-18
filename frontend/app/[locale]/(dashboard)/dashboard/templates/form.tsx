@@ -257,9 +257,12 @@ export function TemplateForm({
         isVisible: existingTemplate.isVisible,
       }));
 
-      // Only load locale data if NOT using version data
-      // When version data is provided, content comes from the version
-      if (!versionData) {
+      // Only load locale data if NOT using version data.
+      // In edit mode, version data (with enriched/fresh presigned URLs) will
+      // arrive shortly from fetchVersionInfo, so we should NOT load
+      // components from locale data — those may contain expired presigned
+      // URLs that trigger image load errors.
+      if (!versionData && !isEditMode) {
         // Set locale data based on controlled locale or first available
         const targetLocale =
           controlledLocale || existingTemplate.locales?.[0]?.locale || "en";
@@ -302,9 +305,46 @@ export function TemplateForm({
             components: createEmptyComponents(),
           }));
         }
+      } else if (!versionData && isEditMode) {
+        // In edit mode without version data yet: set metadata fields
+        // from locale. Also set components as a fallback — if version data
+        // arrives later (via the versionData useEffect below), it will
+        // overwrite these with fresh presigned URLs. But if no version
+        // records exist (e.g., templates approved via Meta before the
+        // versioning system), versionData will remain null and we need
+        // components populated from locale data to avoid empty fields.
+        const targetLocale =
+          controlledLocale || existingTemplate.locales?.[0]?.locale || "en";
+        const localeData = existingTemplate.locales?.find(
+          (l) => l.locale === targetLocale,
+        );
+
+        if (localeData) {
+          // Convert components from DTO format if available, otherwise create from legacy format
+          const components = (localeData as any).components
+            ? dtoToComponents(
+                (localeData as any).components as Record<string, unknown>,
+              )
+            : componentsFromLegacy(
+                localeData.header,
+                localeData.body,
+                localeData.footer,
+              );
+
+          setFormData((prev) => ({
+            ...prev,
+            selectedLocale: localeData.locale,
+            category: localeData.category || "utility",
+            header: localeData.header || "",
+            body: localeData.body || "",
+            footer: localeData.footer || "",
+            exampleVars: localeData.exampleVars || {},
+            components,
+          }));
+        }
       }
     }
-  }, [existingTemplate, versionData, controlledLocale]);
+  }, [existingTemplate, versionData, controlledLocale, isEditMode]);
 
   // Load version data when provided (takes precedence over locale data)
   useEffect(() => {

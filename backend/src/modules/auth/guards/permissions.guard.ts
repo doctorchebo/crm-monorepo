@@ -57,6 +57,13 @@ export class PermissionsGuard implements CanActivate {
       )?.toString();
     }
 
+    // For calendar routes, get teamId from user's primary team
+    if (!teamId && request.path.includes('/calendar')) {
+      teamId = (
+        await this.permissionService.getUserTeamIdOrNull(user.userId)
+      )?.toString();
+    }
+
     if (!teamId) {
       // Cannot determine context
       return false;

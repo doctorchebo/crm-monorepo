@@ -1,6 +1,7 @@
 import {
   BookOpen,
   Bot,
+  CalendarDays,
   FileText,
   GitBranch,
   History,
@@ -84,6 +85,44 @@ export const navigationConfig: NavItem[] = [
     labelKey: "dashboard.kanban",
     icon: LayoutGrid,
     href: "/dashboard/kanban",
+  },
+  {
+    id: "calendar",
+    labelKey: "dashboard.calendar",
+    icon: CalendarDays,
+    href: "/dashboard/calendar",
+    children: [
+      {
+        id: "calendar-main",
+        labelKey: "dashboard.calendarOverview",
+        icon: CalendarDays,
+        href: "/dashboard/calendar",
+      },
+      {
+        id: "calendar-booking-links",
+        labelKey: "dashboard.bookingLinks",
+        icon: CalendarDays,
+        href: "/dashboard/calendar/booking-links",
+      },
+      {
+        id: "calendar-availability",
+        labelKey: "dashboard.availability",
+        icon: CalendarDays,
+        href: "/dashboard/calendar/availability",
+      },
+      {
+        id: "calendar-sync",
+        labelKey: "dashboard.syncedCalendars",
+        icon: CalendarDays,
+        href: "/dashboard/calendar/sync",
+      },
+      {
+        id: "calendar-ai",
+        labelKey: "dashboard.calendarAiSettings",
+        icon: Bot,
+        href: "/dashboard/calendar/ai-settings",
+      },
+    ],
   },
   {
     id: "workflows",

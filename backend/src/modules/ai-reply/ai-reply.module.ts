@@ -5,6 +5,7 @@
  */
 
 import { AiMemoryModule } from '@modules/ai-memory/ai-memory.module';
+import { CalendarModule } from '@modules/calendar/calendar.module';
 import { KnowledgeBaseModule } from '@modules/knowledge-base/knowledge-base.module';
 import { TemplatesModule } from '@modules/templates/templates.module';
 import { WhatsAppModule } from '@modules/whatsapp/whatsapp.module';
@@ -15,6 +16,7 @@ import { AIReplyController } from './ai-reply.controller';
 import {
   AIReplyService,
   AIReplySettingsService,
+  CalendarChatPluginService,
   DynamicCTAGeneratorService,
   InteractiveMessageService,
   RateLimiterService,
@@ -29,11 +31,13 @@ import {
     forwardRef(() => AiMemoryModule),
     forwardRef(() => KnowledgeBaseModule),
     forwardRef(() => WorkflowModule), // For RateLimiterService dependency
+    forwardRef(() => CalendarModule), // For calendar AI integration
   ],
   controllers: [AIReplyController],
   providers: [
     AIReplyService,
     AIReplySettingsService,
+    CalendarChatPluginService,
     DynamicCTAGeneratorService,
     InteractiveMessageService,
     RateLimiterService,
@@ -42,10 +46,11 @@ import {
   exports: [
     AIReplyService,
     AIReplySettingsService,
+    CalendarChatPluginService,
     DynamicCTAGeneratorService,
     InteractiveMessageService,
     RateLimiterService,
     TemplateSelectorService,
   ],
 })
-export class AIReplyModule { }
+export class AIReplyModule {}

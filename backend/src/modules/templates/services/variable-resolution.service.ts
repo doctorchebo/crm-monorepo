@@ -988,10 +988,9 @@ export class VariableResolutionService {
    * templateMedia table.
    *
    * IMPORTANT: After Lambda thumbnail generation, the templateMedia.s3Key
-   * is overwritten to point to the thumbnail image (the original file is
-   * deleted from S3). This means for ALL media types (image, video,
-   * document), s3Key resolves to a thumbnail/preview image — never the
-   * original video or PDF. The frontend uses this as a visual preview.
+   * is overwritten to point to the thumbnail image. The original file is
+   * preserved in templateMedia.originalS3Key for send-time download by
+   * Meta's servers. The frontend uses s3Key (thumbnail) as a visual preview.
    */
   private async enrichHeaderMediaVariables(
     localeId: string,

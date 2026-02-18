@@ -15,35 +15,53 @@ import {
  * Mapped to database permission keys
  */
 export type PermissionAction =
+  // Team permissions
   | 'invite_members' // team.member.add
   | 'remove_members' // team.member.remove
   | 'change_roles' // team.member.edit
+  // Chat permissions
   | 'assign_chats' // chat.assign
   | 'take_control' // chat.assign
   | 'force_unlock' // chat.assign
   | 'send_messages' // chat.send
   | 'add_notes' // chat.view (or dedicated chat.note?)
+  | 'view_chats' // chat.view
+  | 'view_team' // team.manage
+  // Workflow permissions
   | 'move_stage' // workflow.move
   | 'edit_workflow' // workflow.manage
-  | 'view_chats' // chat.view
-  | 'view_team'; // team.manage
+  // Calendar permissions
+  | 'calendar.view' // View calendars and events
+  | 'calendar.create' // Create events and calendars
+  | 'calendar.edit' // Edit own events
+  | 'calendar.edit.all' // Edit any team event
+  | 'calendar.delete' // Delete events
+  | 'calendar.booking.manage' // Manage booking links
+  | 'calendar.sync.manage' // Connect external calendars
+  | 'calendar.ai.manage'; // Configure AI calendar access
 
 /**
  * Mapping between legacy action names and DB permission keys
+ * Note: Calendar permissions use the DB key directly (calendar.*)
  */
 const ACTION_TO_KEY: Record<string, string> = {
+  // Team actions
   invite_members: 'team.member.add',
   remove_members: 'team.member.remove',
   change_roles: 'team.member.edit',
+  // Chat actions
   assign_chats: 'chat.assign',
   take_control: 'chat.assign',
   force_unlock: 'chat.assign',
   send_messages: 'chat.send',
   add_notes: 'chat.view',
-  move_stage: 'workflow.move',
-  edit_workflow: 'workflow.manage',
   view_chats: 'chat.view',
   view_team: 'team.manage',
+  // Workflow actions
+  move_stage: 'workflow.move',
+  edit_workflow: 'workflow.manage',
+  // Calendar permissions are used with their DB keys directly (calendar.*)
+  // No mapping needed as PermissionService falls back to using the key as-is
 };
 
 export interface PermissionCheckResult {

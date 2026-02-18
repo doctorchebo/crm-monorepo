@@ -6,7 +6,7 @@ import { ImageProcessingService } from '@shared/services/image-processing.servic
 import { LambdaThumbnailService } from '@shared/services/lambda-thumbnail.service';
 import { S3Service } from '@shared/services/s3.service';
 import * as crypto from 'crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { TEMPLATE_LIMITS } from '../types';
 
 /**
@@ -198,6 +198,7 @@ export class MediaUploadService {
 
       let s3Key: string; // will point to thumbnail
       let thumbnailS3Key: string | undefined;
+      const tempId = crypto.randomBytes(8).toString('hex');
 
       if (isImage) {
         // Generate thumbnail locally for images
@@ -278,6 +279,7 @@ export class MediaUploadService {
             s3Key: originalS3Key,
             thumbnailS3Key,
             mimeType: file.mimeType,
+            tempId,
           });
         }
 
@@ -312,12 +314,16 @@ export class MediaUploadService {
           `Media uploaded successfully: ${file.filename} -> Meta: ${assetHandle}, S3: ${cdnUrl}`,
         );
 
+        // Return tempId for videos/documents so frontend can match WebSocket thumbnail events
+        const returnTempId = isVideo || isDocument ? tempId : undefined;
+
         return {
           success: true,
           assetHandle,
           mediaId: mediaRecord.id,
           url: cdnUrl,
           s3Key,
+          tempId: returnTempId,
         };
       } catch (error) {
         // Update record with failure
@@ -356,6 +362,7 @@ export class MediaUploadService {
     s3Key: string;
     thumbnailS3Key: string;
     mimeType: string;
+    tempId?: string;
   }): Promise<void> {
     if (!this.lambdaThumbnailService.isLambdaThumbnailEnabled()) {
       this.logger.warn(
@@ -372,6 +379,7 @@ export class MediaUploadService {
           s3Key: params.s3Key,
           thumbnailS3Key: params.thumbnailS3Key,
           mimeType: params.mimeType,
+          tempId: params.tempId,
         });
 
       if (jobId) {
@@ -570,10 +578,17 @@ export class MediaUploadService {
     localeId: string,
     componentType: string,
   ): Promise<string | null> {
+    // Query both cases — uploadMedia stores uppercase ('HEADER'),
+    // ensureMediaRecord stores lowercase ('header').
+    const variants = [
+      componentType,
+      componentType.toLowerCase(),
+      componentType.toUpperCase(),
+    ];
     const media = await db.query.templateMedia.findFirst({
       where: and(
         eq(templateMedia.localeId, localeId),
-        eq(templateMedia.componentType, componentType),
+        inArray(templateMedia.componentType, [...new Set(variants)]),
         eq(templateMedia.uploadStatus, 'completed'),
       ),
       orderBy: (tm, { desc }) => [desc(tm.createdAt)],
@@ -604,6 +619,107 @@ export class MediaUploadService {
   ): Promise<boolean> {
     const handle = await this.getAssetHandle(localeId, componentType);
     return handle !== null;
+  }
+
+  /**
+   * Ensure a valid (non-expired) asset handle exists for a locale's media component.
+   *
+   * If the existing handle is still valid, returns it as-is.
+   * If expired (or missing), re-uploads the original file from S3 to Meta's
+   * Resumable Upload API to obtain a fresh handle, persists it to the DB, and
+   * returns it.
+   *
+   * @returns The valid asset handle, or null if no media record / original file exists.
+   */
+  async ensureFreshAssetHandle(
+    localeId: string,
+    componentType: string,
+  ): Promise<string | null> {
+    const variants = [
+      componentType,
+      componentType.toLowerCase(),
+      componentType.toUpperCase(),
+    ];
+    const media = await db.query.templateMedia.findFirst({
+      where: and(
+        eq(templateMedia.localeId, localeId),
+        inArray(templateMedia.componentType, [...new Set(variants)]),
+        eq(templateMedia.uploadStatus, 'completed'),
+      ),
+      orderBy: (tm, { desc }) => [desc(tm.createdAt)],
+    });
+
+    if (!media) {
+      return null;
+    }
+
+    // If the handle is still valid, return it directly
+    const isExpired =
+      !media.assetHandle ||
+      !media.assetHandleExpiresAt ||
+      new Date(media.assetHandleExpiresAt) < new Date();
+
+    if (!isExpired) {
+      return media.assetHandle;
+    }
+
+    // Handle is expired — re-upload the original file from S3 to Meta
+    const originalKey = media.originalS3Key;
+    if (!originalKey) {
+      this.logger.error(
+        `Cannot refresh asset handle for ${localeId}/${componentType}: no originalS3Key`,
+      );
+      return null;
+    }
+
+    this.logger.log(
+      `Asset handle expired for ${localeId}/${componentType}. ` +
+        `Re-uploading original file from S3: ${originalKey}`,
+    );
+
+    try {
+      // Download the original file from S3
+      const fileBuffer = await this.s3Service.downloadFile(originalKey);
+      if (!fileBuffer) {
+        this.logger.error(
+          `Original file not found in S3 for ${localeId}/${componentType}: ${originalKey}`,
+        );
+        return null;
+      }
+      const mimeType = media.mimeType || 'application/octet-stream';
+
+      // Create a new Meta upload session and upload
+      const session = await this.createUploadSession(
+        fileBuffer.length,
+        mimeType,
+      );
+      const freshHandle = await this.uploadFileData(
+        session.uploadSessionId,
+        fileBuffer,
+      );
+
+      // Persist the new handle and expiration
+      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      await db
+        .update(templateMedia)
+        .set({
+          assetHandle: freshHandle,
+          assetHandleExpiresAt: expiresAt,
+          updatedAt: new Date(),
+        })
+        .where(eq(templateMedia.id, media.id));
+
+      this.logger.log(
+        `Refreshed asset handle for ${localeId}/${componentType}: ${freshHandle}`,
+      );
+
+      return freshHandle;
+    } catch (error) {
+      this.logger.error(
+        `Failed to refresh asset handle for ${localeId}/${componentType}: ${error.message}`,
+      );
+      throw error;
+    }
   }
 
   /**

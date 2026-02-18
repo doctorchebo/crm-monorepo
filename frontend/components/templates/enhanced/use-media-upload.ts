@@ -20,8 +20,8 @@ const MEDIA_CONSTRAINTS = {
   },
   DOCUMENT: {
     accept: ["application/pdf"],
-    maxSize: 100 * 1024 * 1024, // 100MB
-    maxSizeLabel: "100MB",
+    maxSize: 10 * 1024 * 1024, // 10MB
+    maxSizeLabel: "10MB",
     extensions: "PDF",
   },
 } as const;
@@ -36,6 +36,8 @@ interface UploadResult {
   error?: string;
   /** Temporary ID for matching WebSocket thumbnail events (videos/documents only) */
   tempId?: string;
+  /** S3 object key for reliable media record creation (avoids fragile URL parsing) */
+  s3Key?: string;
 }
 
 /**
@@ -151,6 +153,7 @@ export function useMediaUpload(templateId?: string, localeId?: string) {
             assetHandle: response.assetHandle,
             url: response.url,
             tempId: response.tempId,
+            s3Key: response.s3Key,
             error: response.error,
           });
 
@@ -160,6 +163,7 @@ export function useMediaUpload(templateId?: string, localeId?: string) {
             url: response.url, // URL from S3 for display
             error: response.error,
             tempId: response.tempId, // For matching WebSocket thumbnail events
+            s3Key: response.s3Key, // S3 key for media record creation
           };
 
           if (result.success) {
@@ -196,6 +200,8 @@ export function useMediaUpload(templateId?: string, localeId?: string) {
             assetHandle: response.assetHandle,
             mediaId: response.mediaId,
             url: response.url,
+            s3Key: response.s3Key,
+            tempId: response.tempId,
             error: response.error,
           });
 
@@ -205,6 +211,8 @@ export function useMediaUpload(templateId?: string, localeId?: string) {
             mediaId: response.mediaId,
             url: response.url,
             error: response.error,
+            s3Key: response.s3Key, // S3 key for media record creation
+            tempId: response.tempId, // For matching WebSocket thumbnail events
           };
 
           if (result.success) {

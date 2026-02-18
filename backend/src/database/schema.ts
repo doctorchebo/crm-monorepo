@@ -874,7 +874,7 @@ export const templateMedia = pgTable(
     originalFilename: varchar('original_filename', { length: 255 }),
     fileSizeBytes: bigint('file_size_bytes', { mode: 'number' }),
     mimeType: varchar('mime_type', { length: 100 }),
-    assetHandle: varchar('asset_handle', { length: 500 }), // Meta's asset handle from Resumable Upload API
+    assetHandle: text('asset_handle'), // Meta's asset handle from Resumable Upload API (TEXT — handle length is unbounded)
     assetHandleExpiresAt: timestamp('asset_handle_expires_at'), // Asset handles expire after 30 days
     s3Key: text('s3_key'), // S3 key for the thumbnail / preview image
     originalS3Key: text('original_s3_key'), // S3 key for the original uploaded file (used at send time)
@@ -2930,3 +2930,6 @@ export * from './workflow-builder.schema';
 
 // Export catalog schema (product catalog for WhatsApp Commerce)
 export * from './catalog.schema';
+
+// Export calendar schema (scheduling, booking, external sync)
+export * from './calendar.schema';

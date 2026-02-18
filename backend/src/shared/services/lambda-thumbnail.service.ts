@@ -153,6 +153,8 @@ export interface QueueTemplateMediaThumbnailParams {
   thumbnailS3Key?: string;
   /** S3 bucket (optional - uses default if not provided) */
   s3Bucket?: string;
+  /** Temporary ID for WebSocket event matching (frontend uses this to update UI) */
+  tempId?: string;
 }
 
 /**
@@ -507,6 +509,7 @@ export class LambdaThumbnailService implements OnModuleInit {
         mediaId: params.mediaId,
         localeId: params.localeId,
         originalS3Key: params.s3Key, // Store for cleanup after thumbnail is ready
+        ...(params.tempId && { tempId: params.tempId }),
       },
       callback: {
         type: 'webhook',

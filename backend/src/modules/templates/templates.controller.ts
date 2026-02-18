@@ -666,16 +666,10 @@ export class TemplatesController {
     };
   }
 
-  /**
-   * GET /templates/:id/versions - Get template versions and status
-   */
-  @Get(':id/versions')
-  async getTemplateVersions(@Param('id') templateId: string) {
-    return await db.query.templateVersions.findMany({
-      where: eq(templateVersions.templateId, templateId),
-      orderBy: (tv, { desc }) => [desc(tv.createdAt)],
-    });
-  }
+  // NOTE: The primary GET /templates/:id/versions endpoint is defined above
+  // in the "Version Management Endpoints" section (getVersionInfo).
+  // It enriches version content with fresh presigned media URLs.
+  // Do NOT add a duplicate route here.
 
   /**
    * Mask phone number for privacy
@@ -792,6 +786,7 @@ export class TemplatesController {
       success: true,
       assetHandle: result.assetHandle,
       url: result.url, // Public URL for display
+      s3Key: result.s3Key, // S3 key for reliable media record creation
       filename: body.filename,
       mimeType: body.mimeType,
       fileSize: buffer.length,
@@ -852,6 +847,8 @@ export class TemplatesController {
       assetHandle: result.assetHandle,
       mediaId: result.mediaId,
       url: result.url, // Public URL for display in edit mode
+      s3Key: result.s3Key, // S3 key for reliable media record creation
+      tempId: result.tempId, // Temporary ID for WebSocket thumbnail notifications
       componentType: body.componentType,
       filename: body.filename,
       mimeType: body.mimeType,

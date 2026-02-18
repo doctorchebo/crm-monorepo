@@ -175,6 +175,7 @@ export function HeaderEditor({
             assetHandle: result.assetHandle,
             url: result.url,
             filename: file.name,
+            s3Key: result.s3Key,
           } as MediaHeader);
         } else if (result.assetHandle) {
           // We have an asset handle but no URL - keep the blob URL for preview
@@ -188,6 +189,7 @@ export function HeaderEditor({
             assetHandle: result.assetHandle,
             url: localPreviewUrl, // Keep blob URL as fallback
             filename: file.name,
+            s3Key: result.s3Key,
           } as MediaHeader);
         } else if (result.error) {
           // On error, revoke blob URL and clear the header media
@@ -487,7 +489,7 @@ export function HeaderEditor({
                 <p className="text-xs text-muted-foreground">
                   {currentFormat === "IMAGE" && "JPEG or PNG, max 5MB"}
                   {currentFormat === "VIDEO" && "MP4, max 16MB"}
-                  {currentFormat === "DOCUMENT" && "PDF, max 100MB"}
+                  {currentFormat === "DOCUMENT" && "PDF, max 10MB"}
                 </p>
               </div>
             )}
