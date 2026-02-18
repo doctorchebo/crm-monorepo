@@ -371,7 +371,6 @@ export class ComponentTransformerService {
           metaButton.navigate_screen = button.navigateScreen;
           break;
 
-        case ButtonType.CATALOG:
         case ButtonType.MPM:
         case ButtonType.SPM:
           metaButton.text = button.text;
@@ -492,7 +491,6 @@ export class ComponentTransformerService {
       [ButtonType.COPY_CODE]: 'COPY_CODE',
       [ButtonType.OTP]: 'OTP',
       [ButtonType.FLOW]: 'FLOW',
-      [ButtonType.CATALOG]: 'CATALOG',
       [ButtonType.MPM]: 'MPM',
       [ButtonType.SPM]: 'SPM',
     };

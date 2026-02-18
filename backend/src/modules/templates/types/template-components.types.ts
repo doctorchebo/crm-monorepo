@@ -61,7 +61,6 @@ export enum ButtonType {
   COPY_CODE = 'COPY_CODE',
   OTP = 'OTP',
   FLOW = 'FLOW',
-  CATALOG = 'CATALOG',
   MPM = 'MPM',
   SPM = 'SPM',
 }
@@ -220,14 +219,6 @@ export interface FlowButton extends BaseButton {
 }
 
 /**
- * Catalog button - shows product catalog
- */
-export interface CatalogButton extends BaseButton {
-  type: ButtonType.CATALOG;
-  text: string;
-}
-
-/**
  * Multi-product message button
  */
 export interface MpmButton extends BaseButton {
@@ -253,7 +244,6 @@ export type TemplateButton =
   | CopyCodeButton
   | OtpButton
   | FlowButton
-  | CatalogButton
   | MpmButton
   | SpmButton;
 

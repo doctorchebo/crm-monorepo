@@ -71,7 +71,6 @@ function getButtonIcon(type: TemplateButton["type"]) {
       return Copy;
     case "FLOW":
       return Workflow;
-    case "CATALOG":
     case "MPM":
     case "SPM":
       return ShoppingBag;

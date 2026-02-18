@@ -111,7 +111,6 @@ export interface TemplateButton {
     | 'COPY_CODE'
     | 'OTP'
     | 'FLOW'
-    | 'CATALOG'
     | 'MPM'
     | 'SPM';
   text?: string;

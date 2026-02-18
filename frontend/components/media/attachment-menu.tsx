@@ -18,7 +18,6 @@ import {
   FileText,
   Image,
   MapPin,
-  Package,
   Paperclip,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -29,16 +28,13 @@ export type AttachmentType =
   | "document"
   | "camera"
   | "contact"
-  | "location"
-  | "catalog";
+  | "location";
 
 interface AttachmentMenuProps {
   onFilesSelected: (files: File[], type: AttachmentType) => void;
   onContactsClick?: () => void;
   /** Called when camera option is selected - opens camera capture panel */
   onCameraClick?: () => void;
-  /** Called when catalog option is selected - opens catalog selector */
-  onCatalogClick?: () => void;
   /** Called when location option is selected - opens location picker modal */
   onLocationClick?: () => void;
   disabled?: boolean;
@@ -48,7 +44,6 @@ export function AttachmentMenu({
   onFilesSelected,
   onContactsClick,
   onCameraClick,
-  onCatalogClick,
   onLocationClick,
   disabled = false,
 }: AttachmentMenuProps) {
@@ -96,12 +91,6 @@ export function AttachmentMenu({
         // Contact sharing - trigger the contacts modal
         if (onContactsClick) {
           onContactsClick();
-        }
-        break;
-      case "catalog":
-        // Catalog item selection
-        if (onCatalogClick) {
-          onCatalogClick();
         }
         break;
       case "location":
@@ -190,14 +179,6 @@ export function AttachmentMenu({
           >
             <MapPin className="h-5 w-5 text-foreground dark:text-white" />
             <span>{t("location")}</span>
-          </DropdownMenuItem>
-
-          <DropdownMenuItem
-            onClick={() => handleMenuItemClick("catalog")}
-            className="cursor-pointer gap-3 py-2.5"
-          >
-            <Package className="h-5 w-5 text-foreground dark:text-white" />
-            <span>{t("catalog")}</span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

@@ -63,9 +63,6 @@ interface MessageListItemProps {
   onReactionSelect?: (messageId: string, emoji: string) => void;
   onPin?: (messageId: string) => void;
   onUnpin?: (messageId: string) => void;
-  // Catalog handlers
-  onViewCatalogItem?: (item: CatalogMessageItem) => void;
-  onViewAllCatalogItems?: (items: CatalogMessageItem[]) => void;
   // Utils
   parseContactsFromMessage: (message: Message) => ReceivedContact[] | null;
   t: (key: string) => string;
@@ -104,8 +101,6 @@ export const MessageListItem = memo(function MessageListItem({
   onReactionSelect,
   onPin,
   onUnpin,
-  onViewCatalogItem,
-  onViewAllCatalogItems,
   parseContactsFromMessage,
   t,
 }: MessageListItemProps) {
@@ -247,37 +242,6 @@ export const MessageListItem = memo(function MessageListItem({
                 isHighlighted={isHighlighted}
               />
             </div>,
-          )}
-        </React.Fragment>
-      );
-    }
-  }
-
-  // Handle catalog/product message type
-  if (
-    (message.type === "catalog" || message.type === "product") &&
-    !isDeleted
-  ) {
-    const catalogItems = message.metadata?.catalogItems;
-    if (catalogItems && catalogItems.length > 0) {
-      return (
-        <React.Fragment key={message.messageId || message.id}>
-          {separatorDate && <DateSeparator date={separatorDate} />}
-          {renderWithSelection(
-            <CatalogMessageBubble
-              items={catalogItems}
-              isOutbound={isOutbound}
-              timestamp={message.timestamp}
-              messageId={message.messageId}
-              status={message.status}
-              deliveredAt={message.deliveredAt}
-              readAt={message.readAt}
-              onViewItem={onViewCatalogItem}
-              onViewAll={onViewAllCatalogItems}
-              onReply={onReply}
-              onDelete={onDelete}
-              isHighlighted={isHighlighted}
-            />,
           )}
         </React.Fragment>
       );

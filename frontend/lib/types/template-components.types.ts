@@ -4,7 +4,7 @@
  * These types mirror the backend DTO structure for template components.
  * They support all Meta Cloud API template features including:
  * - Text/Media headers (image, video, document, location)
- * - Interactive buttons (URL, phone, quick reply, copy code, flow, catalog)
+ * - Interactive buttons (URL, phone, quick reply, copy code, flow)
  * - Carousel cards
  * - Limited time offers
  * - Authentication templates with OTP
@@ -82,7 +82,6 @@ export type ButtonType =
   | "QUICK_REPLY"
   | "COPY_CODE"
   | "FLOW"
-  | "CATALOG"
   | "MPM" // Multi-product message
   | "SPM" // Single product message
   | "OTP"; // One-time password
@@ -125,11 +124,6 @@ export interface FlowButton extends TemplateButtonBase {
   navigateScreen?: string;
 }
 
-/** Catalog button */
-export interface CatalogButton extends TemplateButtonBase {
-  type: "CATALOG";
-}
-
 /** Multi-product message button */
 export interface MpmButton extends TemplateButtonBase {
   type: "MPM";
@@ -156,7 +150,6 @@ export type TemplateButton =
   | QuickReplyButton
   | CopyCodeButton
   | FlowButton
-  | CatalogButton
   | MpmButton
   | SpmButton
   | OtpButton;

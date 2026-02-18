@@ -1,7 +1,6 @@
 "use client";
 
 import { AITypingIndicator } from "@/components/ai-typing-indicator";
-import { CatalogMessageItem } from "@/components/catalog";
 import { Attachment } from "@/lib/media/types";
 import { ReceivedContact } from "@/lib/types/contact-message.types";
 import { getDateKey } from "@/lib/utils/date-formatter";
@@ -188,9 +187,6 @@ interface MessagesListProps {
   selectedMessageIds?: Set<string>;
   onToggleSelection?: (messageId: string) => void;
   isAITyping?: boolean;
-  // Catalog
-  handleViewCatalogItem?: (item: CatalogMessageItem) => void;
-  handleViewAllCatalogItems?: (items: CatalogMessageItem[]) => void;
 }
 
 export function MessagesList({
@@ -227,8 +223,6 @@ export function MessagesList({
   selectedMessageIds,
   onToggleSelection,
   isAITyping,
-  handleViewCatalogItem,
-  handleViewAllCatalogItems,
 }: MessagesListProps) {
   // Determine if reactions should be disabled (outside 24-hour window)
   // This logic is now moved into the map function for each message
@@ -500,8 +494,6 @@ export function MessagesList({
                 onReactionSelect={handleReactionSelect}
                 onPin={handlePinMessage}
                 onUnpin={handleUnpinMessage}
-                onViewCatalogItem={handleViewCatalogItem}
-                onViewAllCatalogItems={handleViewAllCatalogItems}
                 parseContactsFromMessage={parseContactsFromMessage}
                 t={t}
               />

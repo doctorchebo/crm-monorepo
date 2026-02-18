@@ -27,7 +27,6 @@ import {
   MessageCircle,
   Phone,
   Plus,
-  ShoppingBag,
   Trash2,
   Workflow,
 } from "lucide-react";
@@ -97,14 +96,6 @@ const BUTTON_TYPE_OPTIONS: Array<{
     allowedCategories: ["utility", "marketing"],
     maxCount: 1,
   },
-  {
-    value: "CATALOG",
-    label: "View Catalog",
-    icon: ShoppingBag,
-    description: "Open product catalog",
-    allowedCategories: ["marketing"],
-    maxCount: 1,
-  },
 ];
 
 /**
@@ -149,7 +140,6 @@ function createButton(type: ButtonType): TemplateButton {
  * - Phone number buttons (1)
  * - Copy code buttons (1)
  * - Flow buttons (1)
- * - Catalog buttons (1)
  *
  * Meta constraints:
  * - Quick replies cannot be mixed with other button types

@@ -266,7 +266,7 @@ export type NewChatLock = typeof chatLocks.$inferInsert;
  * This is the SINGLE SOURCE OF TRUTH for audit logging across the application.
  * All modules write here via AuditWriteService. No frontend-only logging allowed.
  *
- * Categories: pipeline, contacts, templates, team, catalog, senders, labels,
+ * Categories: pipeline, contacts, templates, team, senders, labels,
  *             knowledge_base, import, settings, auth
  */
 export const activityLogs = pgTable(
@@ -629,12 +629,6 @@ export const senders = pgTable(
     isOfficialBusinessAccount: boolean('is_official_business_account').default(
       false,
     ), // OBA status (blue checkmark)
-    // Commerce settings - linked to phone number via Meta API
-    // See: https://developers.facebook.com/documentation/business-messaging/whatsapp/reference/whatsapp-business-phone-number/commerce-settings-api
-    isCatalogEnabled: boolean('is_catalog_enabled').default(false), // Whether catalog is visible for this number
-    isCartEnabled: boolean('is_cart_enabled').default(false), // Whether shopping cart is enabled
-    linkedCatalogId: varchar('linked_catalog_id', { length: 100 }), // Meta catalog ID linked to this phone number
-    commerceSettingsSyncedAt: timestamp('commerce_settings_synced_at'), // Last sync with Meta commerce settings
     lastUsedAt: timestamp('last_used_at'), // When this sender was last used
     registeredAt: timestamp('registered_at'), // When the phone number was registered with Meta
     createdAt: timestamp('created_at').defaultNow(),
@@ -2927,9 +2921,6 @@ export * from './ai-context.schema';
 
 // Export workflow builder schema (visual canvas-based automation)
 export * from './workflow-builder.schema';
-
-// Export catalog schema (product catalog for WhatsApp Commerce)
-export * from './catalog.schema';
 
 // Export calendar schema (scheduling, booking, external sync)
 export * from './calendar.schema';

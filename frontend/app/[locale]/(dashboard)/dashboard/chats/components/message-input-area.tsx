@@ -34,8 +34,6 @@ interface MessageInputAreaProps {
   onFilesSelected: (files: File[], type: AttachmentType) => void;
   onContactsClick: () => void;
   onCameraClick: () => void;
-  onCatalogClick?: () => void;
-  /** Called when location option is selected - opens location picker modal */
   onLocationClick?: () => void;
   /**
    * Conversation window status - determines if free-form messaging is allowed
@@ -60,7 +58,6 @@ export function MessageInputArea({
   onFilesSelected,
   onContactsClick,
   onCameraClick,
-  onCatalogClick,
   onLocationClick,
   conversationWindow,
 }: MessageInputAreaProps) {
@@ -211,7 +208,6 @@ export function MessageInputArea({
               onFilesSelected={onFilesSelected}
               onContactsClick={onContactsClick}
               onCameraClick={onCameraClick}
-              onCatalogClick={onCatalogClick}
               onLocationClick={onLocationClick}
               disabled={isUploading || isOutsideConversationWindow}
             />

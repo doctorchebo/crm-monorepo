@@ -190,10 +190,9 @@ export class ButtonValidatorService {
       case ButtonType.FLOW:
         errors.push(...this.validateFlowButton(button, fieldPrefix));
         break;
-      case ButtonType.CATALOG:
       case ButtonType.MPM:
       case ButtonType.SPM:
-        errors.push(...this.validateCatalogButton(button, fieldPrefix));
+        errors.push(...this.validateTextOnlyButton(button, fieldPrefix));
         break;
     }
 
@@ -441,7 +440,7 @@ export class ButtonValidatorService {
     return errors;
   }
 
-  private validateCatalogButton(
+  private validateTextOnlyButton(
     button: TemplateButtonDto,
     fieldPrefix: string,
   ): ValidationError[] {
@@ -450,9 +449,9 @@ export class ButtonValidatorService {
     if (!button.text) {
       errors.push({
         field: `${fieldPrefix}.text`,
-        message: 'Catalog button text is required',
+        message: 'Button text is required',
         severity: 'error',
-        code: 'CATALOG_BUTTON_TEXT_REQUIRED',
+        code: 'BUTTON_TEXT_REQUIRED',
       });
     }
 

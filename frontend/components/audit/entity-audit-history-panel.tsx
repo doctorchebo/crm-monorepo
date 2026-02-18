@@ -2,7 +2,7 @@
  * Entity Audit History Panel
  *
  * A Sheet (slide-in panel) that shows the audit history for a specific entity
- * such as a contact, template, catalog item, etc.
+ * such as a contact, template, etc.
  *
  * Usage:
  * ```tsx

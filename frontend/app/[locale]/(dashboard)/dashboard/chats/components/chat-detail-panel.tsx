@@ -26,10 +26,6 @@ import React, {
 import type { Socket } from "socket.io-client";
 import useSWR from "swr";
 
-import {
-  CatalogSelectorModal,
-  type CatalogMessageItem,
-} from "@/components/catalog";
 import { AiRegenerateBanner } from "@/components/chat/AiRegenerateBanner";
 import { AiReplyPreviewPanel } from "@/components/chat/AiReplyPreviewPanel";
 import { LocationPickerModal } from "@/components/location";
@@ -122,7 +118,6 @@ export function ChatDetailPanel({
   onDeleteChat,
 }: ChatDetailPanelProps) {
   const t = useTranslations("chats");
-  const tCatalog = useTranslations("catalog");
   const { addNotification } = useNotification();
 
   // -------------------------------------------------------------------------
@@ -162,11 +157,8 @@ export function ChatDetailPanel({
     CHAT_SIDEBAR.DEFAULT_WIDTH,
   );
 
-  // Catalog / Location modals
-  const [catalogSelectorOpen, setCatalogSelectorOpen] = useState(false);
+  // Location modal
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
-  const [viewingCatalogItem, setViewingCatalogItem] =
-    useState<CatalogMessageItem | null>(null);
 
   // Pin modals
   const [pinDurationModalOpen, setPinDurationModalOpen] = useState(false);
@@ -480,11 +472,6 @@ export function ChatDetailPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedChatId, selectedChat?.participantPhone]);
 
-  // Clear catalog item on chat change
-  useEffect(() => {
-    setViewingCatalogItem(null);
-  }, [selectedChatId]);
-
   // -------------------------------------------------------------------------
   // Handlers — AI
   // -------------------------------------------------------------------------
@@ -684,10 +671,6 @@ export function ChatDetailPanel({
   // Handlers — catalog & location
   // -------------------------------------------------------------------------
 
-  const handleCatalogClick = useCallback(() => {
-    setCatalogSelectorOpen(true);
-  }, []);
-
   const handleLocationClick = useCallback(() => {
     setLocationPickerOpen(true);
   }, []);
@@ -732,76 +715,6 @@ export function ChatDetailPanel({
       addNotification,
       t,
     ],
-  );
-
-  const handleViewCatalogItem = useCallback((item: CatalogMessageItem) => {
-    setViewingCatalogItem(item);
-  }, []);
-
-  const handleViewAllCatalogItems = useCallback(
-    (items: CatalogMessageItem[]) => {
-      if (items.length > 0) {
-        setViewingCatalogItem(items[0]);
-      }
-    },
-    [],
-  );
-
-  const handleCloseCatalogView = useCallback(() => {
-    setViewingCatalogItem(null);
-  }, []);
-
-  const handleCatalogSendFromSidebar = useCallback(
-    async (item: CatalogMessageItem) => {
-      if (!selectedChatId) return;
-      try {
-        const result = await backendApi.catalog.sendToChat(selectedChatId, [
-          item.id,
-        ]);
-        if (result.success) {
-          addNotification(
-            t("catalog.send.sentSuccessfully") || "Product sent successfully",
-            "success",
-          );
-          setViewingCatalogItem(null);
-        }
-      } catch (error) {
-        console.error("Failed to send catalog item:", error);
-        addNotification(
-          tCatalog("send.sendFailed") || "Failed to send product",
-          "error",
-        );
-      }
-    },
-    [selectedChatId, addNotification, tCatalog],
-  );
-
-  const handleCatalogItemsSelected = useCallback(
-    async (items: Array<{ id: string; name: string }>) => {
-      if (!selectedChatId || items.length === 0) return;
-      try {
-        const result = await backendApi.catalog.sendToChat(
-          selectedChatId,
-          items.map((item) => item.id),
-        );
-        if (result.success) {
-          addNotification(
-            items.length === 1
-              ? tCatalog("send.sentSuccessfully") || "Product sent successfully"
-              : tCatalog("send.sentMultiple") ||
-                  `${items.length} products sent successfully`,
-            "success",
-          );
-        }
-      } catch (error) {
-        console.error("Failed to send catalog items:", error);
-        addNotification(
-          tCatalog("send.sendFailed") || "Failed to send products",
-          "error",
-        );
-      }
-    },
-    [selectedChatId, addNotification, tCatalog],
   );
 
   // -------------------------------------------------------------------------
@@ -953,8 +866,6 @@ export function ChatDetailPanel({
               selectedMessageIds={messageHandlers.selectedMessageIds}
               onToggleSelection={messageHandlers.handleToggleSelection}
               isAITyping={isAITyping}
-              handleViewCatalogItem={handleViewCatalogItem}
-              handleViewAllCatalogItems={handleViewAllCatalogItems}
             />
 
             {/* Scroll to Bottom Button */}
@@ -1054,7 +965,6 @@ export function ChatDetailPanel({
                 onFilesSelected={mediaHandlers.handleFilesSelected}
                 onContactsClick={contactHandlers.handleContactsClick}
                 onCameraClick={mediaHandlers.handleCameraClick}
-                onCatalogClick={handleCatalogClick}
                 onLocationClick={handleLocationClick}
                 conversationWindow={conversationWindow}
               />
@@ -1197,9 +1107,6 @@ export function ChatDetailPanel({
                   onContactCreated={handleContactResolved}
                   initialTab={persistedTab || "profile"}
                   onTabChange={handleSidebarTabChange}
-                  catalogItem={viewingCatalogItem}
-                  onCatalogClose={handleCloseCatalogView}
-                  onCatalogSendToChat={handleCatalogSendFromSidebar}
                 />
               )
             )}
@@ -1226,14 +1133,6 @@ export function ChatDetailPanel({
         }}
         onConfirm={handlePinReplace}
         oldestPinMessage={pins.pinnedMessages[0]?.message?.text || null}
-      />
-
-      {/* Catalog Selector Modal */}
-      <CatalogSelectorModal
-        open={catalogSelectorOpen}
-        onOpenChange={setCatalogSelectorOpen}
-        onSelect={handleCatalogItemsSelected}
-        maxSelection={10}
       />
 
       {/* Location Picker Modal */}

@@ -54,7 +54,6 @@ const ALL_CATEGORIES: AuditCategory[] = [
   "contacts",
   "templates",
   "team",
-  "catalog",
   "senders",
   "labels",
   "knowledge_base",

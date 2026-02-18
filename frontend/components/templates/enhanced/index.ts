@@ -25,7 +25,6 @@ export type {
   AuthenticationConfig,
   ButtonType,
   CarouselCard,
-  CatalogButton,
   CopyCodeButton,
   FlowButton,
   HeaderFormat,

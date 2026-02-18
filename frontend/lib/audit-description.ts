@@ -190,28 +190,6 @@ function buildDescription(
     case "custom_role_deleted":
       return t("custom_role_deleted", { name });
 
-    // -- Catalog ------------------------------------------------------------
-    case "catalog_item_created":
-      return t("catalog_item_created", { name });
-    case "catalog_item_updated":
-      return t("catalog_item_updated", { name });
-    case "catalog_item_deleted":
-      return t("catalog_item_deleted", { name });
-    case "catalog_linked":
-      return name ? t("catalog_linked_named", { name }) : t("catalog_linked");
-    case "catalog_unlinked":
-      return name
-        ? t("catalog_unlinked_named", { name })
-        : t("catalog_unlinked");
-    case "collection_created":
-      return t("collection_created", { name });
-    case "collection_deleted":
-      return t("collection_deleted", { name });
-    case "catalog_bulk_import":
-      return t("catalog_bulk_import", {
-        count: Number(meta.count ?? 0),
-      });
-
     // -- Senders ------------------------------------------------------------
     case "sender_created":
       return t("sender_created", { name });

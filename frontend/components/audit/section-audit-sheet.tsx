@@ -6,7 +6,6 @@
  * - Contacts page → category "contacts"
  * - Templates page → category "templates"
  * - Team page → category "team"
- * - Catalog page → category "catalog"
  * - Senders page → category "senders"
  * - Knowledge Base page → category "knowledge_base"
  *

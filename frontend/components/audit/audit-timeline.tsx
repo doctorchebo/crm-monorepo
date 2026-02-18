@@ -50,7 +50,6 @@ import {
   type LucideIcon,
   Mail,
   MessageSquare,
-  Package,
   Plus,
   RefreshCw,
   Send,
@@ -98,11 +97,6 @@ const CATEGORY_ICONS: Record<AuditCategory, IconConfig> = {
     icon: UserPlus,
     bg: "bg-teal-100 dark:bg-teal-950",
     text: "text-teal-600 dark:text-teal-400",
-  },
-  catalog: {
-    icon: Package,
-    bg: "bg-orange-100 dark:bg-orange-950",
-    text: "text-orange-600 dark:text-orange-400",
   },
   senders: {
     icon: Send,
@@ -166,11 +160,6 @@ const ACTION_ICON_OVERRIDES: Partial<Record<AuditAction, IconConfig>> = {
     bg: "bg-red-100 dark:bg-red-950",
     text: "text-red-600 dark:text-red-400",
   },
-  catalog_item_deleted: {
-    icon: Trash2,
-    bg: "bg-red-100 dark:bg-red-950",
-    text: "text-red-600 dark:text-red-400",
-  },
   label_deleted: {
     icon: Trash2,
     bg: "bg-red-100 dark:bg-red-950",
@@ -199,11 +188,6 @@ const ACTION_ICON_OVERRIDES: Partial<Record<AuditAction, IconConfig>> = {
     text: "text-green-600 dark:text-green-400",
   },
   template_created: {
-    icon: Plus,
-    bg: "bg-green-100 dark:bg-green-950",
-    text: "text-green-600 dark:text-green-400",
-  },
-  catalog_item_created: {
     icon: Plus,
     bg: "bg-green-100 dark:bg-green-950",
     text: "text-green-600 dark:text-green-400",

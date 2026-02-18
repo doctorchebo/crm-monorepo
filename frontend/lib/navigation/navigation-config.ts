@@ -9,8 +9,6 @@ import {
   LayoutDashboard,
   LayoutGrid,
   MessageSquare,
-  Package,
-  Phone,
   Search,
   Send,
   Settings,
@@ -67,12 +65,6 @@ export const navigationConfig: NavItem[] = [
     labelKey: "dashboard.templates",
     icon: FileText,
     href: "/dashboard/templates",
-  },
-  {
-    id: "catalog",
-    labelKey: "dashboard.catalog",
-    icon: Package,
-    href: "/dashboard/catalog",
   },
   {
     id: "senders",
@@ -195,12 +187,6 @@ export const navigationConfig: NavItem[] = [
         labelKey: "dashboard.settingsWorkflow",
         icon: GitBranch,
         href: "/dashboard/settings/workflow",
-      },
-      {
-        id: "settings-senders",
-        labelKey: "dashboard.settingsSenders",
-        icon: Phone,
-        href: "/dashboard/settings/senders",
       },
       {
         id: "settings-security",

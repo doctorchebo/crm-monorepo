@@ -1,4 +1,4 @@
-/**
+﻿/**
  * API Endpoints for backend communication
  */
 import type {
@@ -30,30 +30,6 @@ export interface Sender {
   registeredAt: string | null;
   createdAt: string;
   updatedAt: string;
-  // Commerce settings
-  isCatalogEnabled: boolean;
-  isCartEnabled: boolean;
-  linkedCatalogId: string | null;
-  commerceSettingsSyncedAt: string | null;
-}
-
-/**
- * Commerce settings for a sender
- */
-export interface CommerceSettings {
-  isCatalogEnabled: boolean;
-  isCartEnabled: boolean;
-  linkedCatalogId: string | null;
-  commerceSettingsSyncedAt: string | null;
-  isCommerceAvailable: boolean;
-}
-
-/**
- * Update commerce settings request
- */
-export interface UpdateCommerceSettingsRequest {
-  isCatalogVisible?: boolean;
-  isCartEnabled?: boolean;
 }
 
 /**
@@ -87,21 +63,21 @@ export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
 // Language display names for UI
 export const LANGUAGE_DISPLAY_NAMES: Record<SupportedLanguage, string> = {
   en: "English",
-  es: "Español",
-  pt: "Português",
-  fr: "Français",
+  es: "EspaÃ±ol",
+  pt: "PortuguÃªs",
+  fr: "FranÃ§ais",
   de: "Deutsch",
   it: "Italiano",
 };
 
 // Language flags for UI
 export const LANGUAGE_FLAGS: Record<SupportedLanguage, string> = {
-  en: "🇺🇸",
-  es: "🇪🇸",
-  pt: "🇧🇷",
-  fr: "🇫🇷",
-  de: "🇩🇪",
-  it: "🇮🇹",
+  en: "ðŸ‡ºðŸ‡¸",
+  es: "ðŸ‡ªðŸ‡¸",
+  pt: "ðŸ‡§ðŸ‡·",
+  fr: "ðŸ‡«ðŸ‡·",
+  de: "ðŸ‡©ðŸ‡ª",
+  it: "ðŸ‡®ðŸ‡¹",
 };
 
 // DTOs
@@ -161,249 +137,6 @@ export interface CustomerProfile {
     full_name: string;
   };
   custom: Record<string, string | null>;
-}
-
-// ==================== Catalog Types ====================
-
-/**
- * Catalog item status
- */
-export type CatalogItemStatus =
-  | "DRAFT"
-  | "PENDING_APPROVAL"
-  | "APPROVED"
-  | "REJECTED"
-  | "NEEDS_UPDATE"
-  | "ARCHIVED";
-
-/**
- * Item availability status
- */
-export type ItemAvailability =
-  | "in stock"
-  | "out of stock"
-  | "available for order";
-
-/**
- * Item condition
- */
-export type ItemCondition = "new" | "refurbished" | "used";
-
-/**
- * Catalog response
- */
-export interface CatalogResponse {
-  id: string;
-  teamId: number;
-  name: string;
-  description: string | null;
-  metaCatalogId: string | null;
-  currency: string;
-  isActive: boolean;
-  lastSyncedAt: string | null;
-  syncStatus: string | null;
-  itemCount: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/**
- * Catalog item image
- */
-export interface CatalogItemImageResponse {
-  id: string;
-  url: string;
-  thumbnailUrl: string | null;
-  originalFilename: string | null;
-  mimeType: string;
-  fileSize: number;
-  width: number | null;
-  height: number | null;
-  status: "uploading" | "processing" | "ready" | "error";
-  sortOrder: number;
-  isMain: boolean;
-}
-
-/**
- * Catalog item response
- * Fields align with Meta Commerce catalog requirements
- */
-export interface CatalogItemResponse {
-  id: string;
-  catalogId: string;
-  name: string;
-  description: string | null;
-  price: number;
-  salePrice: number | null;
-  currency: string;
-  link: string | null;
-  retailerId: string | null;
-  availability: ItemAvailability;
-  condition: ItemCondition;
-  brand: string | null;
-  status: CatalogItemStatus;
-  statusMessage: string | null;
-  metaProductId: string | null;
-  images: CatalogItemImageResponse[];
-  mainImageUrl: string | null;
-  mainThumbnailUrl: string | null;
-  whatsappProductLink: string | null;
-  createdBy: number | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/**
- * Paginated catalog items response
- */
-export interface PaginatedCatalogItemsResponse {
-  items: CatalogItemResponse[];
-  total: number;
-  page: number;
-  limit: number;
-  totalPages: number;
-}
-
-/**
- * Create catalog item DTO
- * Fields align with Meta Commerce catalog requirements
- */
-export interface CreateCatalogItemDto {
-  name: string;
-  description: string;
-  price: number;
-  salePrice?: number | null;
-  currency?: string;
-  link: string;
-  retailerId?: string;
-  availability?: ItemAvailability;
-  condition?: ItemCondition;
-  brand?: string;
-}
-
-/**
- * Update catalog item DTO
- */
-export interface UpdateCatalogItemDto extends Partial<CreateCatalogItemDto> {}
-
-/**
- * Update catalog DTO
- */
-export interface UpdateCatalogDto {
-  name?: string;
-  description?: string;
-  currency?: string;
-  isActive?: boolean;
-}
-
-/**
- * Image upload response (presigned URL)
- */
-export interface ImageUploadResponse {
-  imageId: string;
-  uploadUrl: string;
-  imageKey: string;
-  expiresAt: string;
-}
-
-/**
- * Direct image upload response (backend proxy)
- */
-export interface DirectImageUploadResponse {
-  imageId: string;
-  imageKey: string;
-  status: string;
-  originalFilename?: string;
-  fileSize?: number;
-  mimeType?: string;
-}
-
-/**
- * Catalog collection response
- */
-export interface CatalogCollectionResponse {
-  id: string;
-  catalogId: string;
-  name: string;
-  description: string | null;
-  coverImageUrl: string | null;
-  coverThumbnailUrl: string | null;
-  isActive: boolean;
-  itemCount: number;
-  sortOrder: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/**
- * Create catalog collection DTO
- */
-export interface CreateCatalogCollectionDto {
-  name: string;
-  description?: string;
-  itemIds?: string[];
-}
-
-// ==================== Meta Catalog Types ====================
-
-/**
- * Meta Catalog vertical type
- * Only 'commerce' is supported for WhatsApp product messages
- */
-export type MetaCatalogVertical = "commerce";
-
-/**
- * Meta Catalog from the Graph API
- */
-export interface MetaCatalog {
-  id: string;
-  name: string;
-  vertical: string;
-  productCount?: number;
-  feedCount?: number;
-  businessId?: string;
-  businessName?: string;
-}
-
-/**
- * Response for listing Meta catalogs
- */
-export interface MetaCatalogsResponse {
-  catalogs: MetaCatalog[];
-  total: number;
-  businessId?: string;
-}
-
-/**
- * Create Meta catalog DTO
- * Commerce vertical is used automatically for WhatsApp compatibility
- */
-export interface CreateMetaCatalogDto {
-  name: string;
-}
-
-/**
- * Link Meta catalog DTO
- */
-export interface LinkMetaCatalogDto {
-  metaCatalogId: string;
-}
-
-/**
- * Meta product set (collection)
- */
-export interface MetaProductSet {
-  id: string;
-  name: string;
-  productCount?: number;
-}
-
-/**
- * Create Meta product set DTO
- */
-export interface CreateMetaProductSetDto {
-  name: string;
-  filter?: Record<string, unknown>;
 }
 
 export interface VariableResolutionResult {
@@ -1659,360 +1392,6 @@ export const backendApi = {
     ) => apiClient.post(`/contacts/${contactId}/attributes/bulk`, data),
   },
 
-  // Catalog endpoints - Product catalog for WhatsApp Commerce
-  catalog: {
-    /**
-     * Get or create catalog for current team
-     */
-    get: (): Promise<CatalogResponse> => apiClient.get("/catalog"),
-
-    /**
-     * Update catalog settings
-     */
-    update: (data: UpdateCatalogDto): Promise<CatalogResponse> =>
-      apiClient.patch("/catalog", data),
-
-    /**
-     * List catalog items with pagination and filtering
-     */
-    listItems: (options?: {
-      page?: number;
-      limit?: number;
-      search?: string;
-      status?: string;
-      availableOnly?: boolean;
-    }): Promise<PaginatedCatalogItemsResponse> => {
-      const params = new URLSearchParams();
-      if (options?.page) params.append("page", options.page.toString());
-      if (options?.limit) params.append("limit", options.limit.toString());
-      if (options?.search) params.append("search", options.search);
-      if (options?.status) params.append("status", options.status);
-      if (options?.availableOnly) params.append("availableOnly", "true");
-      const queryString = params.toString();
-      return apiClient.get(
-        `/catalog/items${queryString ? `?${queryString}` : ""}`,
-      );
-    },
-
-    /**
-     * Get a single catalog item
-     */
-    getItem: (itemId: string): Promise<CatalogItemResponse> =>
-      apiClient.get(`/catalog/items/${itemId}`),
-
-    /**
-     * Create a new catalog item
-     */
-    createItem: (data: CreateCatalogItemDto): Promise<CatalogItemResponse> =>
-      apiClient.post("/catalog/items", data),
-
-    /**
-     * Update a catalog item
-     */
-    updateItem: (
-      itemId: string,
-      data: UpdateCatalogItemDto,
-    ): Promise<CatalogItemResponse> =>
-      apiClient.patch(`/catalog/items/${itemId}`, data),
-
-    /**
-     * Delete a catalog item
-     */
-    deleteItem: (itemId: string): Promise<void> =>
-      apiClient.delete(`/catalog/items/${itemId}`),
-
-    /**
-     * Submit items for Meta review
-     */
-    submitForReview: (
-      itemIds: string[],
-    ): Promise<{
-      submittedCount: number;
-      failedCount: number;
-      failures: Array<{
-        itemId: string;
-        itemName: string;
-        reason: string;
-      }>;
-      message: string;
-    }> => apiClient.post("/catalog/items/submit-for-review", { itemIds }),
-
-    /**
-     * Sync catalog item statuses with Meta Commerce
-     * If no itemIds provided, syncs all pending approval items
-     */
-    syncStatuses: (
-      itemIds?: string[],
-    ): Promise<{
-      totalChecked: number;
-      changedCount: number;
-      changes: Array<{
-        itemId: string;
-        itemName: string;
-        previousStatus: string;
-        newStatus: string;
-        message?: string;
-      }>;
-      message: string;
-    }> => apiClient.post("/catalog/items/sync-status", { itemIds }),
-
-    /**
-     * Sync status for a single catalog item with Meta Commerce
-     */
-    syncSingleStatus: (
-      itemId: string,
-    ): Promise<{
-      itemId: string;
-      itemName: string;
-      previousStatus: string;
-      currentStatus: string;
-      changed: boolean;
-      statusMessage?: string;
-    }> => apiClient.post(`/catalog/items/${itemId}/sync-status`, {}),
-
-    /**
-     * Upload image directly through backend (CORS-free)
-     * The backend proxies the upload to S3
-     */
-    uploadImage: (
-      file: File,
-      catalogItemId?: string,
-    ): Promise<DirectImageUploadResponse> => {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const endpoint = catalogItemId
-        ? `/catalog/images/upload?catalogItemId=${encodeURIComponent(catalogItemId)}`
-        : "/catalog/images/upload";
-
-      return apiClient.post(endpoint, formData);
-    },
-
-    /**
-     * Associate a previously uploaded image with a catalog item
-     * Used when images are uploaded before the item is created
-     */
-    associateImage: (
-      itemId: string,
-      data: {
-        imageKey: string;
-        originalFilename?: string;
-        fileSize?: number;
-        mimeType?: string;
-        isMain?: boolean;
-        sortOrder?: number;
-      },
-    ): Promise<{
-      id: string;
-      imageKey: string;
-      status: string;
-      isMain: boolean;
-      sortOrder: number;
-    }> => apiClient.post(`/catalog/items/${itemId}/images/associate`, data),
-
-    /**
-     * Initiate image upload (get presigned URL)
-     * @deprecated Use uploadImage instead for CORS-free uploads
-     */
-    initiateImageUpload: (data: {
-      filename: string;
-      mimeType: string;
-      fileSize: number;
-      catalogItemId?: string;
-    }): Promise<ImageUploadResponse> =>
-      apiClient.post("/catalog/images/initiate", data),
-
-    /**
-     * Complete image upload
-     * @deprecated Use uploadImage instead - it handles completion automatically
-     */
-    completeImageUpload: (data: {
-      imageId: string;
-      width?: number;
-      height?: number;
-    }): Promise<CatalogItemImageResponse> =>
-      apiClient.post("/catalog/images/complete", data),
-
-    /**
-     * Delete an image
-     */
-    deleteImage: (imageId: string): Promise<void> =>
-      apiClient.delete(`/catalog/images/${imageId}`),
-
-    /**
-     * Reorder images for an item
-     */
-    reorderImages: (
-      itemId: string,
-      imageIds: string[],
-    ): Promise<CatalogItemImageResponse[]> =>
-      apiClient.put(`/catalog/items/${itemId}/images/reorder`, { imageIds }),
-
-    /**
-     * List collections
-     */
-    listCollections: (): Promise<CatalogCollectionResponse[]> =>
-      apiClient.get("/catalog/collections"),
-
-    /**
-     * Create a collection
-     */
-    createCollection: (
-      data: CreateCatalogCollectionDto,
-    ): Promise<CatalogCollectionResponse> =>
-      apiClient.post("/catalog/collections", data),
-
-    /**
-     * Add items to a collection
-     */
-    addItemsToCollection: (
-      collectionId: string,
-      itemIds: string[],
-    ): Promise<void> =>
-      apiClient.post(`/catalog/collections/${collectionId}/items`, { itemIds }),
-
-    /**
-     * Remove items from a collection
-     */
-    removeItemsFromCollection: (
-      collectionId: string,
-      itemIds: string[],
-    ): Promise<void> =>
-      apiClient.delete(`/catalog/collections/${collectionId}/items`, {
-        data: { itemIds },
-      }),
-
-    /**
-     * Delete a collection
-     */
-    deleteCollection: (collectionId: string): Promise<void> =>
-      apiClient.delete(`/catalog/collections/${collectionId}`),
-
-    /**
-     * Send catalog item(s) to a chat
-     */
-    sendToChat: (
-      chatId: string,
-      catalogItemIds: string[],
-    ): Promise<{ success: boolean; messageId: string }> =>
-      apiClient.post("/catalog/items/send", { chatId, catalogItemIds }),
-
-    /**
-     * Send catalog item(s) to multiple chats
-     */
-    sendToMultipleChats: (
-      chatIds: string[],
-      catalogItemIds: string[],
-    ): Promise<{
-      success: boolean;
-      results: Array<{
-        chatId: string;
-        success: boolean;
-        messageId?: string;
-        error?: string;
-      }>;
-    }> =>
-      apiClient.post("/catalog/items/send-bulk", { chatIds, catalogItemIds }),
-
-    /**
-     * Bulk import catalog items
-     * @param items - Array of items to import (max 500)
-     */
-    bulkImport: (
-      items: Array<{
-        name: string;
-        description?: string;
-        price: number;
-        salePrice?: number;
-        currency?: string;
-        link: string;
-        retailerId?: string;
-        availability?: string;
-        condition?: string;
-        brand?: string;
-        imageUrl?: string;
-      }>,
-    ): Promise<{
-      successCount: number;
-      failedCount: number;
-      totalCount: number;
-      errors: Array<{ row: number; name: string; error: string }>;
-      createdItemIds: string[];
-    }> => apiClient.post("/catalog/items/bulk-import", { items }),
-
-    // ==================== Meta Catalog Management ====================
-
-    /**
-     * List all Meta catalogs for the business
-     */
-    listMetaCatalogs: (): Promise<MetaCatalogsResponse> =>
-      apiClient.get("/catalog/meta/catalogs"),
-
-    /**
-     * Create a new Meta catalog
-     * Creates on Meta platform and links to team catalog
-     */
-    createMetaCatalog: (data: CreateMetaCatalogDto): Promise<CatalogResponse> =>
-      apiClient.post("/catalog/meta/catalogs", data),
-
-    /**
-     * Get Meta catalog details
-     */
-    getMetaCatalogInfo: (metaCatalogId: string): Promise<MetaCatalog> =>
-      apiClient.get(`/catalog/meta/catalogs/${metaCatalogId}`),
-
-    /**
-     * Delete a Meta catalog
-     * This permanently deletes the catalog from Meta (if we own it),
-     * disconnects it from WABA, and unlinks it from the team catalog.
-     * For catalogs owned by other businesses, it will disconnect and clean up local references.
-     */
-    deleteMetaCatalog: (
-      metaCatalogId: string,
-    ): Promise<{
-      success: boolean;
-      catalogId: string;
-      disconnectedFromWaba?: boolean;
-      deletedFromMeta?: boolean;
-      localCatalogUnlinked?: boolean;
-      message?: string;
-    }> => apiClient.delete(`/catalog/meta/catalogs/${metaCatalogId}`),
-
-    /**
-     * Link an existing Meta catalog to team catalog
-     */
-    linkMetaCatalog: (data: LinkMetaCatalogDto): Promise<CatalogResponse> =>
-      apiClient.post("/catalog/meta/link", data),
-
-    /**
-     * Unlink Meta catalog from team catalog
-     */
-    unlinkMetaCatalog: (): Promise<CatalogResponse> =>
-      apiClient.delete("/catalog/meta/link"),
-
-    /**
-     * List product sets (collections) in Meta catalog
-     */
-    listMetaProductSets: (): Promise<MetaProductSet[]> =>
-      apiClient.get("/catalog/meta/product-sets"),
-
-    /**
-     * Create a product set in Meta catalog
-     */
-    createMetaProductSet: (
-      data: CreateMetaProductSetDto,
-    ): Promise<MetaProductSet> =>
-      apiClient.post("/catalog/meta/product-sets", data),
-
-    /**
-     * Delete a product set from Meta catalog
-     */
-    deleteMetaProductSet: (
-      productSetId: string,
-    ): Promise<{ success: boolean }> =>
-      apiClient.delete(`/catalog/meta/product-sets/${productSetId}`),
-  },
-
   // Import Jobs endpoints - Bulk contacts import
   importJobs: {
     /**
@@ -2188,46 +1567,6 @@ export const backendApi = {
      */
     refresh: (senderId: number): Promise<Sender> =>
       apiClient.patch(`/senders/${senderId}/refresh`, {}),
-
-    // Commerce Settings
-
-    /**
-     * Get commerce settings for a sender
-     */
-    getCommerceSettings: (senderId: number): Promise<CommerceSettings> =>
-      apiClient.get(`/senders/${senderId}/commerce-settings`),
-
-    /**
-     * Sync commerce settings from Meta
-     */
-    syncCommerceSettings: (senderId: number): Promise<CommerceSettings> =>
-      apiClient.post(`/senders/${senderId}/commerce-settings/sync`, {}),
-
-    /**
-     * Update commerce settings for a sender
-     */
-    updateCommerceSettings: (
-      senderId: number,
-      data: UpdateCommerceSettingsRequest,
-    ): Promise<CommerceSettings> =>
-      apiClient.patch(`/senders/${senderId}/commerce-settings`, data),
-
-    /**
-     * Link a Meta catalog to a sender
-     * Connects the catalog to the phone number's commerce settings
-     */
-    linkCatalog: (
-      senderId: number,
-      catalogId: string,
-    ): Promise<CommerceSettings> =>
-      apiClient.post(`/senders/${senderId}/catalog/link`, { catalogId }),
-
-    /**
-     * Unlink catalog from a sender
-     * Disconnects the catalog from the phone number's commerce settings
-     */
-    unlinkCatalog: (senderId: number): Promise<CommerceSettings> =>
-      apiClient.delete(`/senders/${senderId}/catalog/link`),
   },
 
   // Templates endpoints
@@ -3766,7 +3105,6 @@ export type AuditCategory =
   | "contacts"
   | "templates"
   | "team"
-  | "catalog"
   | "senders"
   | "labels"
   | "knowledge_base"
@@ -3825,15 +3163,6 @@ export type AuditAction =
   | "custom_role_created"
   | "custom_role_updated"
   | "custom_role_deleted"
-  // Catalog
-  | "catalog_item_created"
-  | "catalog_item_updated"
-  | "catalog_item_deleted"
-  | "catalog_linked"
-  | "catalog_unlinked"
-  | "collection_created"
-  | "collection_deleted"
-  | "catalog_bulk_import"
   // Senders
   | "sender_created"
   | "sender_updated"
@@ -3886,9 +3215,6 @@ export type AuditEntityType =
   | "custom_role"
   | "workflow_stage"
   | "ai_config"
-  | "catalog"
-  | "catalog_item"
-  | "catalog_collection"
   | "sender"
   | "label"
   | "kb_object"

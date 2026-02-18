@@ -11,7 +11,7 @@ import { ButtonType, OtpType, TEMPLATE_LIMITS } from '../types';
 
 /**
  * DTO for template button component
- * Supports all button types: quick reply, URL, phone, copy code, OTP, flow, catalog, MPM
+ * Supports all button types: quick reply, URL, phone, copy code, OTP, flow, MPM
  */
 export class TemplateButtonDto {
   @IsEnum(ButtonType, {
@@ -30,7 +30,6 @@ export class TemplateButtonDto {
       ButtonType.URL,
       ButtonType.PHONE_NUMBER,
       ButtonType.FLOW,
-      ButtonType.CATALOG,
       ButtonType.MPM,
       ButtonType.SPM,
     ].includes(o.type),

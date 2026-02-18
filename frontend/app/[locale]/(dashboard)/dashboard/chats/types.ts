@@ -183,23 +183,8 @@ export interface Message {
   aiModel?: string;
   aiProvider?: string;
   wasManuallyOverridden?: boolean;
-  /** Interactive message metadata (buttons, lists, catalogs) */
+  /** Interactive message metadata (buttons, lists) */
   metadata?: MessageMetadata | null;
-}
-
-/** Catalog item data embedded in messages */
-export interface CatalogMessageItem {
-  id: string;
-  name: string;
-  description?: string | null;
-  price: number;
-  salePrice?: number | null;
-  currency: string;
-  link?: string | null;
-  retailerId?: string | null;
-  status: string;
-  mainImageUrl?: string | null;
-  mainThumbnailUrl?: string | null;
 }
 
 /** Location data for location messages */
@@ -211,14 +196,12 @@ export interface LocationData {
   url?: string | null;
 }
 
-/** Metadata for interactive messages (buttons, lists, catalogs, locations) and template messages */
+/** Metadata for interactive messages (buttons, lists, locations) and template messages */
 export interface MessageMetadata {
   /** Type of interactive message */
   interactiveType?: "button" | "list";
   /** Interactive message data */
   interactiveData?: InteractiveMessageData;
-  /** Catalog items for product messages */
-  catalogItems?: CatalogMessageItem[];
   /** Location data for location messages */
   location?: LocationData;
   /** Template message fields (present when message.type === 'template') */

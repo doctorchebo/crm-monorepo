@@ -1,4 +1,4 @@
-import { db } from '@database/db.connection';
+﻿import { db } from '@database/db.connection';
 import {
   Chat,
   chats,
@@ -217,12 +217,12 @@ export class WhatsAppService implements OnModuleInit {
     console.log('Mode match:', hubMode === 'subscribe');
 
     if (hubMode === 'subscribe' && hubVerifyToken === this.metaVerifyToken) {
-      console.log('✅ Webhook challenge verified successfully');
+      console.log('âœ… Webhook challenge verified successfully');
       this.logger.log('Webhook challenge verified successfully');
       return hubChallenge;
     }
 
-    console.log('❌ Webhook challenge verification failed');
+    console.log('âŒ Webhook challenge verification failed');
     this.logger.warn('Webhook challenge verification failed');
     return null;
   }
@@ -263,10 +263,10 @@ export class WhatsAppService implements OnModuleInit {
         }
       } else {
         console.log(
-          '⚠️  META_APP_SECRET not configured - skipping signature verification',
+          'âš ï¸  META_APP_SECRET not configured - skipping signature verification',
         );
         this.logger.warn(
-          '⚠️  META_APP_SECRET not configured - skipping signature verification for webhook',
+          'âš ï¸  META_APP_SECRET not configured - skipping signature verification for webhook',
         );
       }
 
@@ -411,7 +411,7 @@ export class WhatsAppService implements OnModuleInit {
           // Log full status object to capture error details when status is 'failed'
           if (status.status === 'failed') {
             console.log(
-              `❌ FAILED STATUS DETAILS:`,
+              `âŒ FAILED STATUS DETAILS:`,
               JSON.stringify(status, null, 2),
             );
           }
@@ -751,9 +751,9 @@ export class WhatsAppService implements OnModuleInit {
     status: string;
   }> {
     try {
-      // ──────────────────────────────────────────────────────────────────
+      // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       // 1. Validate that template services are available
-      // ──────────────────────────────────────────────────────────────────
+      // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       if (!this.templatesService) {
         throw new BadRequestException(
           'Template services are not available. Cannot send template messages.',
@@ -767,9 +767,9 @@ export class WhatsAppService implements OnModuleInit {
 
       const recipientPhone = cleanPhoneNumber(dto.to);
 
-      // ──────────────────────────────────────────────────────────────────
+      // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       // 2. Resolve sender
-      // ──────────────────────────────────────────────────────────────────
+      // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const senderRecord = await db.query.senders.findFirst({
         where: eq(senders.id, dto.senderId),
       });
@@ -787,9 +787,9 @@ export class WhatsAppService implements OnModuleInit {
         );
       }
 
-      // ──────────────────────────────────────────────────────────────────
+      // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       // 3. Load template + locale
-      // ──────────────────────────────────────────────────────────────────
+      // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const template = await this.templatesService.getTemplate(dto.templateId);
       const localeData = template.locales?.find(
         (l: any) => l.locale === dto.locale,
@@ -801,11 +801,11 @@ export class WhatsAppService implements OnModuleInit {
         );
       }
 
-      // ──────────────────────────────────────────────────────────────────
+      // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       // 4. Validate approval status
       // CRITICAL: Never send non-approved templates to Meta's API. They will be
       // rejected and could flag the account. This is a safety guardrail.
-      // ──────────────────────────────────────────────────────────────────
+      // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const isApproved = localeData.approvalStatus === 'approved';
 
       if (!isApproved) {
@@ -827,9 +827,9 @@ export class WhatsAppService implements OnModuleInit {
         });
       }
 
-      // ──────────────────────────────────────────────────────────────────
+      // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       // 5. Conversation window validation
-      // ──────────────────────────────────────────────────────────────────
+      // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const chatId =
         dto.chatId ?? generateChatId(senderRecord.phoneNumber, recipientPhone);
 
@@ -862,9 +862,9 @@ export class WhatsAppService implements OnModuleInit {
         });
       }
 
-      // ──────────────────────────────────────────────────────────────────
+      // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       // 6. Determine variable format and build provider variables
-      // ──────────────────────────────────────────────────────────────────
+      // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const isPositional = localeData.parameterFormat === 'positional';
       let providerVariables: Record<string, string>;
 
@@ -874,13 +874,13 @@ export class WhatsAppService implements OnModuleInit {
         providerVariables = dto.variables;
       } else {
         // Custom templates: variables are keyed by name ("customer.first_name")
-        // The parser will convert named → positional in convertToProviderFormat
+        // The parser will convert named â†’ positional in convertToProviderFormat
         providerVariables = dto.variables;
       }
 
-      // ──────────────────────────────────────────────────────────────────
+      // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       // 6.5 Resolve media header URLs from original S3 files
-      // ──────────────────────────────────────────────────────────────────
+      // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       // The frontend passes thumbnail/preview URLs for media header variables.
       // Meta downloads the file from the URL we provide, so we must generate
       // a fresh presigned URL pointing to the ORIGINAL file (not the thumbnail).
@@ -896,9 +896,9 @@ export class WhatsAppService implements OnModuleInit {
         );
       }
 
-      // ──────────────────────────────────────────────────────────────────
+      // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       // 7. Send via Meta Cloud API provider
-      // ──────────────────────────────────────────────────────────────────
+      // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const provider = this.providerFactory.getDefaultProvider();
 
       this.logger.log(
@@ -931,9 +931,9 @@ export class WhatsAppService implements OnModuleInit {
 
       const waMessageId = sendResult.messageId || `tmpl-${Date.now()}`;
 
-      // ──────────────────────────────────────────────────────────────────
+      // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       // 8. Render the resolved body for storage/display
-      // ──────────────────────────────────────────────────────────────────
+      // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       let resolvedBody = localeData.body;
       if (this.templateParserService) {
         resolvedBody = this.templateParserService.renderTemplate(
@@ -995,9 +995,9 @@ export class WhatsAppService implements OnModuleInit {
         }
       }
 
-      // ──────────────────────────────────────────────────────────────────
+      // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       // 9. Store outbound message with template metadata in a single insert
-      // ──────────────────────────────────────────────────────────────────
+      // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       await this.storeOutboundMessage({
         waMessageId,
         chatId,
@@ -1011,9 +1011,9 @@ export class WhatsAppService implements OnModuleInit {
         metadata: templateMetadata,
       });
 
-      // ──────────────────────────────────────────────────────────────────
+      // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       // 10. Emit WebSocket event for real-time UI update
-      // ──────────────────────────────────────────────────────────────────
+      // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       if (whatsAppGatewayInstance) {
         whatsAppGatewayInstance.emitMessage({
           messageId: waMessageId,
@@ -1080,7 +1080,7 @@ export class WhatsAppService implements OnModuleInit {
    * Strategy (priority order):
    * 1. templateMedia.originalS3Key (set during upload for new templates)
    * 2. templateMedia.s3Key that is NOT a thumbnail (legacy originals)
-   * 3. templateLocales.components.header.link — extract S3 key from stored presigned URL
+   * 3. templateLocales.components.header.link â€” extract S3 key from stored presigned URL
    *
    * Each candidate is verified in S3 via HEAD before use.
    * On first success, backfills originalS3Key for future lookups.
@@ -1100,11 +1100,11 @@ export class WhatsAppService implements OnModuleInit {
     if (!varKey) return;
 
     try {
-      // ── Gather candidate S3 keys ──────────────────────────────────
+      // â”€â”€ Gather candidate S3 keys â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const candidateKeys: string[] = [];
       let needsBackfill = false;
 
-      // Source 1 & 2: templateMedia records (no status filter — record may
+      // Source 1 & 2: templateMedia records (no status filter â€” record may
       // still be 'pending' if Lambda hasn't finished thumbnailing yet)
       const mediaRecords = await db
         .select({
@@ -1147,11 +1147,11 @@ export class WhatsAppService implements OnModuleInit {
         const extracted = this.extractS3KeyFromPresignedUrl(headerLink);
         if (extracted) {
           if (!extracted.includes('_thumb')) {
-            // Non-thumbnail key — use directly
+            // Non-thumbnail key â€” use directly
             candidateKeys.push(extracted);
           } else {
-            // Thumbnail key — derive possible original file keys
-            // e.g. "path/file_thumb.jpg" → "path/file.mp4", "path/file.mp4.mp4"
+            // Thumbnail key â€” derive possible original file keys
+            // e.g. "path/file_thumb.jpg" â†’ "path/file.mp4", "path/file.mp4.mp4"
             const basePath = extracted.replace(/_thumb\.[^.]+$/, '');
             const extMap: Record<string, string[]> = {
               VIDEO: ['.mp4', '.mp4.mp4', '.mov', '.avi'],
@@ -1165,7 +1165,7 @@ export class WhatsAppService implements OnModuleInit {
         }
       }
 
-      // ── Try each candidate until one exists in S3 ─────────────────
+      // â”€â”€ Try each candidate until one exists in S3 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const seen = new Set<string>();
       let resolvedKey: string | null = null;
 
@@ -1187,7 +1187,7 @@ export class WhatsAppService implements OnModuleInit {
         return;
       }
 
-      // ── Generate fresh presigned URL (1 hour) ─────────────────────
+      // â”€â”€ Generate fresh presigned URL (1 hour) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const { url: freshUrl } =
         await this.s3Service.generatePresignedDownloadUrl(resolvedKey, {
           expiresIn: 3600,
@@ -1196,7 +1196,7 @@ export class WhatsAppService implements OnModuleInit {
       variables[varKey] = freshUrl;
 
       this.logger.log(
-        `[SEND-TEMPLATE] Resolved original media: ${resolvedKey} → fresh URL for ${varKey}`,
+        `[SEND-TEMPLATE] Resolved original media: ${resolvedKey} â†’ fresh URL for ${varKey}`,
       );
 
       // Best-effort backfill originalS3Key for future sends
@@ -1211,7 +1211,7 @@ export class WhatsAppService implements OnModuleInit {
       this.logger.error(
         `[SEND-TEMPLATE] Failed to resolve media URL for locale ${localeId}: ${error.message}`,
       );
-      // Don't throw — let the send proceed with whatever URL the frontend provided.
+      // Don't throw â€” let the send proceed with whatever URL the frontend provided.
     }
   }
 
@@ -1225,7 +1225,7 @@ export class WhatsAppService implements OnModuleInit {
       const parsed = new URL(url);
       let path = decodeURIComponent(parsed.pathname);
       if (path.startsWith('/')) path = path.slice(1);
-      // Path-style: hostname starts with s3. — first segment is the bucket
+      // Path-style: hostname starts with s3. â€” first segment is the bucket
       if (
         parsed.hostname.startsWith('s3.') ||
         parsed.hostname.startsWith('s3-')
@@ -1488,8 +1488,8 @@ export class WhatsAppService implements OnModuleInit {
 
       // Build location text preview for storage and display
       const locationPreview = name
-        ? `📍 ${name}${address ? ` - ${address}` : ''}`
-        : `📍 Location: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
+        ? `ðŸ“ ${name}${address ? ` - ${address}` : ''}`
+        : `ðŸ“ Location: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
 
       // Store location message with metadata
       const now = new Date();
@@ -2228,195 +2228,6 @@ export class WhatsAppService implements OnModuleInit {
   }
 
   /**
-   * Send a Single-Product Message via WhatsApp Cloud API
-   *
-   * Single-Product Messages (SPM) display a product from your Meta Commerce catalog.
-   * When a user taps the product, they see the Product Detail Page (PDP) within WhatsApp.
-   *
-   * CRITICAL: Product messages can ONLY be sent within the 24-hour conversation window.
-   * This method validates the window before sending and will throw an error if outside the window.
-   *
-   * Requirements:
-   * - META_CATALOG_ID must be configured and linked to WhatsApp Business Account
-   * - Product must exist in Meta Commerce catalog with matching retailer_id (SKU)
-   * - Product must be approved by Meta before it can be shared
-   *
-   * @see https://developers.facebook.com/docs/whatsapp/cloud-api/guides/sell-products-and-services/share-products
-   *
-   * @param senderId - The sender ID to determine which phoneNumberId to use
-   * @param recipientPhone - The recipient's phone number
-   * @param catalogId - Meta Commerce catalog ID
-   * @param productRetailerId - Product retailer ID (SKU) from catalog
-   * @param bodyText - Optional message body text (max 1024 chars)
-   * @param footerText - Optional footer text (max 60 chars)
-   * @returns Response with message ID
-   * @throws BadRequestException if outside conversation window or product not found
-   */
-  async sendProductMessage(
-    senderId: number,
-    recipientPhone: string,
-    catalogId: string,
-    productRetailerId: string,
-    bodyText?: string,
-    footerText?: string,
-  ): Promise<{
-    success: boolean;
-    messageId?: string;
-    waMessageId?: string;
-    error?: string;
-  }> {
-    try {
-      const cleanedPhone = cleanPhoneNumber(recipientPhone);
-
-      // Validate required parameters
-      if (!catalogId) {
-        throw new Error('Catalog ID is required for product messages');
-      }
-      if (!productRetailerId) {
-        throw new Error('Product retailer ID (SKU) is required');
-      }
-
-      // Look up sender's phoneNumberId
-      const senderRecord = await db.query.senders.findFirst({
-        where: eq(senders.id, senderId),
-      });
-
-      if (!senderRecord) {
-        throw new Error(`Sender with ID ${senderId} not found`);
-      }
-
-      if (!senderRecord.phoneNumberId) {
-        throw new Error(
-          `Sender ${senderId} does not have a phoneNumberId set.`,
-        );
-      }
-
-      // Validate conversation window - CRITICAL: Product messages can ONLY be sent within 24-hour window
-      const chatId = generateChatId(senderRecord.phoneNumber, cleanedPhone);
-      const windowValidation =
-        await this.conversationWindowService.validateFreeFormMessage(chatId);
-
-      if (!windowValidation.isValid) {
-        this.logger.error(
-          `Conversation window validation failed for product message to ${cleanedPhone}: ${windowValidation.errorMessage}`,
-        );
-        throw new BadRequestException({
-          statusCode: 400,
-          error: 'CONVERSATION_WINDOW_VIOLATION',
-          errorCode: windowValidation.errorCode,
-          message:
-            windowValidation.errorCode === 'NO_CUSTOMER_MESSAGES'
-              ? INTERACTIVE_MESSAGE_ERRORS.NO_CUSTOMER_MESSAGES
-              : INTERACTIVE_MESSAGE_ERRORS.OUTSIDE_CONVERSATION_WINDOW,
-          windowStatus: windowValidation.windowStatus,
-        });
-      }
-
-      // Build Single-Product Message payload
-      // @see https://developers.facebook.com/docs/whatsapp/cloud-api/guides/sell-products-and-services/share-products#single-product-messages
-      const message: any = {
-        messaging_product: 'whatsapp',
-        recipient_type: 'individual',
-        to: cleanedPhone,
-        type: 'interactive',
-        interactive: {
-          type: 'product',
-          action: {
-            catalog_id: catalogId,
-            product_retailer_id: productRetailerId,
-          },
-        },
-      };
-
-      // Add optional body text
-      if (bodyText) {
-        message.interactive.body = {
-          text: bodyText.substring(0, 1024), // Max 1024 characters
-        };
-      }
-
-      // Add optional footer (sanitized via centralized function)
-      if (footerText) {
-        message.interactive.footer = {
-          text: sanitizeFooterText(footerText),
-        };
-      }
-
-      // Send via Cloud API
-      const response = await this.sendCloudAPIMessage(
-        message,
-        senderRecord.phoneNumberId,
-      );
-
-      if (!response.messages || response.messages.length === 0) {
-        throw new Error('No message ID returned from Cloud API');
-      }
-
-      const waMessageId = response.messages[0].id;
-      this.logger.log(
-        `Product message sent successfully. ID: ${waMessageId}, Product: ${productRetailerId}`,
-      );
-
-      // Store message in database with product metadata
-      const storedMessageId = await this.storeOutboundMessage({
-        waMessageId,
-        chatId,
-        from: senderRecord.phoneNumber,
-        to: cleanedPhone,
-        body: bodyText || '',
-        attachments: undefined,
-        userId: senderRecord.userId,
-        senderId,
-        isInteractive: true,
-        interactiveType: 'product',
-        interactiveData: {
-          catalogId,
-          productRetailerId,
-          footerText,
-        },
-      });
-
-      // Emit WebSocket event for real-time UI update
-      // CRITICAL: Without this, messages won't appear in UI until page refresh
-      if (whatsAppGatewayInstance) {
-        whatsAppGatewayInstance.emitMessage({
-          messageId: waMessageId,
-          chatId,
-          sender: senderRecord.phoneNumber,
-          text: bodyText || '',
-          type: 'product',
-          timestamp: new Date(),
-          direction: 'outbound',
-          status: 'sent',
-          metadata: {
-            interactiveType: 'product',
-            interactiveData: {
-              catalogId,
-              productRetailerId,
-              footerText,
-            },
-          },
-        });
-      }
-
-      return {
-        success: true,
-        messageId: storedMessageId,
-        waMessageId,
-      };
-    } catch (error) {
-      this.logger.error(
-        `Error sending product message: ${error.message}`,
-        error,
-      );
-      return {
-        success: false,
-        error: error.message,
-      };
-    }
-  }
-
-  /**
    * Convert audio to WhatsApp-compatible format if needed
    * Downloads webm audio from S3, converts to ogg/opus, uploads back to S3
    * @returns New presigned URL for converted audio, or null if no conversion needed
@@ -2796,7 +2607,7 @@ export class WhatsAppService implements OnModuleInit {
           `[Inbound] Skipping unsupported message type. ID: ${message.id}, Errors: ${JSON.stringify(message.errors || [])}`,
         );
         console.log(
-          `⏭️ SKIPPED: Unsupported message type ${message.id} - this is a Cloud API error notification, not actual content`,
+          `â­ï¸ SKIPPED: Unsupported message type ${message.id} - this is a Cloud API error notification, not actual content`,
         );
         return; // Don't create a message bubble for unsupported types
       }
@@ -2817,11 +2628,11 @@ export class WhatsAppService implements OnModuleInit {
 
       if (existingMessage) {
         this.logger.warn(
-          `⚠️ Duplicate message detected: ${messageId} (already stored). ` +
+          `âš ï¸ Duplicate message detected: ${messageId} (already stored). ` +
             `This is likely a Meta webhook retry. Skipping.`,
         );
         console.log(
-          `🔄 DUPLICATE: Message ${messageId} already exists - this is a Meta webhook retry`,
+          `ðŸ”„ DUPLICATE: Message ${messageId} already exists - this is a Meta webhook retry`,
         );
         return; // Skip processing - already handled
       }
@@ -3097,15 +2908,15 @@ export class WhatsAppService implements OnModuleInit {
           const locationData = message.location;
           if (locationData) {
             textContent = locationData.name
-              ? `📍 ${locationData.name}${locationData.address ? ` - ${locationData.address}` : ''}`
-              : `📍 Location: ${locationData.latitude}, ${locationData.longitude}`;
+              ? `ðŸ“ ${locationData.name}${locationData.address ? ` - ${locationData.address}` : ''}`
+              : `ðŸ“ Location: ${locationData.latitude}, ${locationData.longitude}`;
           } else {
-            textContent = '📍 Location shared';
+            textContent = 'ðŸ“ Location shared';
           }
           break;
         case 'order':
           // Handle order messages (WhatsApp Business)
-          textContent = '🛒 Order received';
+          textContent = 'ðŸ›’ Order received';
           break;
         case 'system':
           // Handle system messages (group changes, etc.)
@@ -3229,7 +3040,7 @@ export class WhatsAppService implements OnModuleInit {
         `Inbound message stored. From: ${senderPhone}, Type: ${messageType}, ID: ${messageId}`,
       );
 
-      // 🔥 EMIT MESSAGE VIA WEBSOCKET
+      // ðŸ”¥ EMIT MESSAGE VIA WEBSOCKET
       // Notify all connected clients of the new message in real-time
       // Fetch the stored message to get the complete attachment data (including s3Key)
       if (whatsAppGatewayInstance) {
@@ -3810,7 +3621,7 @@ export class WhatsAppService implements OnModuleInit {
             // Log stage transition
             if (workflowResult.stageTransition) {
               this.logger.log(
-                `[Workflow] Stage transition: ${workflowResult.stageTransition.from?.name || 'unassigned'} → ${workflowResult.stageTransition.to.name}`,
+                `[Workflow] Stage transition: ${workflowResult.stageTransition.from?.name || 'unassigned'} â†’ ${workflowResult.stageTransition.to.name}`,
               );
             }
 
@@ -4453,7 +4264,7 @@ export class WhatsAppService implements OnModuleInit {
 
       if (targetMessage) {
         this.logger.log(
-          `[CustomerReaction] ✅ Found by exact messageId: ${targetMessage.messageId}`,
+          `[CustomerReaction] âœ… Found by exact messageId: ${targetMessage.messageId}`,
         );
       }
 
@@ -4469,7 +4280,7 @@ export class WhatsAppService implements OnModuleInit {
 
         if (targetMessage) {
           this.logger.log(
-            `[CustomerReaction] ✅ Found by exact mediaUrl: ${targetMessage.messageId}`,
+            `[CustomerReaction] âœ… Found by exact mediaUrl: ${targetMessage.messageId}`,
           );
         }
       }
@@ -4491,7 +4302,7 @@ export class WhatsAppService implements OnModuleInit {
           if (msgUniqueId === targetUniqueId) {
             targetMessage = { messageId: msg.messageId, chatId: msg.chatId };
             this.logger.log(
-              `[CustomerReaction] ✅ Found by unique ID match (messageId): ${msg.messageId}`,
+              `[CustomerReaction] âœ… Found by unique ID match (messageId): ${msg.messageId}`,
             );
             break;
           }
@@ -4503,7 +4314,7 @@ export class WhatsAppService implements OnModuleInit {
             if (mediaUniqueId === targetUniqueId) {
               targetMessage = { messageId: msg.messageId, chatId: msg.chatId };
               this.logger.log(
-                `[CustomerReaction] ✅ Found by unique ID match (mediaUrl): ${msg.messageId}`,
+                `[CustomerReaction] âœ… Found by unique ID match (mediaUrl): ${msg.messageId}`,
               );
               break;
             }
@@ -4530,7 +4341,7 @@ export class WhatsAppService implements OnModuleInit {
         }));
 
         this.logger.warn(
-          `[CustomerReaction] ❌ Message not found. Target unique ID: ${targetUniqueId}`,
+          `[CustomerReaction] âŒ Message not found. Target unique ID: ${targetUniqueId}`,
         );
         this.logger.warn(
           `[CustomerReaction] Recent messages: ${JSON.stringify(debugInfo)}`,
@@ -4571,7 +4382,7 @@ export class WhatsAppService implements OnModuleInit {
         );
 
         this.logger.log(
-          `[CustomerReaction] ✅ Removed reaction for message ${internalMessageId}`,
+          `[CustomerReaction] âœ… Removed reaction for message ${internalMessageId}`,
         );
       } else {
         // Customer added/updated their reaction
@@ -4622,7 +4433,7 @@ export class WhatsAppService implements OnModuleInit {
         );
 
         this.logger.log(
-          `[CustomerReaction] ✅ Saved reaction ${emoji} for message ${internalMessageId}`,
+          `[CustomerReaction] âœ… Saved reaction ${emoji} for message ${internalMessageId}`,
         );
       }
     } catch (error) {
@@ -4655,9 +4466,9 @@ export class WhatsAppService implements OnModuleInit {
    *
    * Implements the full message lifecycle:
    * - pending: Initial state when message is queued
-   * - sent: Message successfully sent to WhatsApp servers (✓)
-   * - delivered: Message reached recipient device (✓✓)
-   * - read: Message read by recipient (✓✓ in blue)
+   * - sent: Message successfully sent to WhatsApp servers (âœ“)
+   * - delivered: Message reached recipient device (âœ“âœ“)
+   * - read: Message read by recipient (âœ“âœ“ in blue)
    * - failed: Delivery failed with error
    *
    * @param messageId - Cloud API message ID (wamid)
@@ -4692,13 +4503,13 @@ export class WhatsAppService implements OnModuleInit {
           .join('; ');
         this.logger.error(`Message ${messageId} failed: ${errorInfo}`);
         console.log(
-          `❌ WhatsApp Error Details:`,
+          `âŒ WhatsApp Error Details:`,
           JSON.stringify(errors, null, 2),
         );
       }
 
       console.log(
-        `🔔 STATUS WEBHOOK RECEIVED: messageId=${messageId}, status=${status}`,
+        `ðŸ”” STATUS WEBHOOK RECEIVED: messageId=${messageId}, status=${status}`,
       );
 
       const normalizedStatus = mapCloudAPIStatus(status);
@@ -4709,7 +4520,7 @@ export class WhatsAppService implements OnModuleInit {
       // Find message to update - search by messageId or by WhatsApp ID stored in mediaUrl
       // Outbound attachment messages store WhatsApp ID in mediaUrl with 'wa:' prefix
       console.log(
-        `🔍 Searching for message by messageId="${messageId}" OR mediaUrl="wa:${messageId}"`,
+        `ðŸ” Searching for message by messageId="${messageId}" OR mediaUrl="wa:${messageId}"`,
       );
 
       const msg = await db.query.messages.findFirst({
@@ -4720,7 +4531,7 @@ export class WhatsAppService implements OnModuleInit {
       });
 
       console.log(
-        `🔍 Message found: ${msg ? `YES (id=${msg.id}, messageId=${msg.messageId}, mediaUrl=${msg.mediaUrl})` : 'NO'}`,
+        `ðŸ” Message found: ${msg ? `YES (id=${msg.id}, messageId=${msg.messageId}, mediaUrl=${msg.mediaUrl})` : 'NO'}`,
       );
 
       if (msg) {
@@ -4771,15 +4582,15 @@ export class WhatsAppService implements OnModuleInit {
         );
 
         // Log status progression for debugging
-        console.log(`📊 Message Status Update:
+        console.log(`ðŸ“Š Message Status Update:
           ID: ${msg.messageId} (WhatsApp: ${messageId})
-          Status: ${msg.status} → ${normalizedStatus}
-          Sent: ${msg.sentAt || 'pending'} → ${updateData.sentAt || msg.sentAt || 'pending'}
-          Delivered: ${msg.deliveredAt || 'pending'} → ${updateData.deliveredAt || msg.deliveredAt || 'pending'}
-          Read: ${msg.readAt || 'pending'} → ${updateData.readAt || msg.readAt || 'pending'}
+          Status: ${msg.status} â†’ ${normalizedStatus}
+          Sent: ${msg.sentAt || 'pending'} â†’ ${updateData.sentAt || msg.sentAt || 'pending'}
+          Delivered: ${msg.deliveredAt || 'pending'} â†’ ${updateData.deliveredAt || msg.deliveredAt || 'pending'}
+          Read: ${msg.readAt || 'pending'} â†’ ${updateData.readAt || msg.readAt || 'pending'}
         `);
 
-        // 🔥 EMIT STATUS UPDATE VIA WEBSOCKET
+        // ðŸ”¥ EMIT STATUS UPDATE VIA WEBSOCKET
         // This replaces polling - all connected clients get real-time updates
         // Use the message's actual messageId so frontend can match it
         if (whatsAppGatewayInstance) {
@@ -4794,7 +4605,7 @@ export class WhatsAppService implements OnModuleInit {
           `Message not found for status update: ${messageId}. Status: ${status}`,
         );
         console.warn(
-          `⚠️ Status update received for non-existent message: ${messageId}`,
+          `âš ï¸ Status update received for non-existent message: ${messageId}`,
         );
       }
     } catch (error) {
@@ -4879,7 +4690,7 @@ export class WhatsAppService implements OnModuleInit {
 
       this.logger.debug('Outbound message stored', messageData.waMessageId);
       console.log(
-        `💾 Outbound message stored with pending status: ${messageData.waMessageId}`,
+        `ðŸ’¾ Outbound message stored with pending status: ${messageData.waMessageId}`,
       );
 
       // Queue thumbnail generation for outbound media messages
@@ -4924,11 +4735,11 @@ export class WhatsAppService implements OnModuleInit {
                   thumbnailJobData,
                 );
                 this.logger.log(
-                  `[Outbound Media] ✅ Queued thumbnail generation for ${attachment.id || attachment.s3Key}`,
+                  `[Outbound Media] âœ… Queued thumbnail generation for ${attachment.id || attachment.s3Key}`,
                 );
               } catch (error) {
                 this.logger.warn(
-                  `[Outbound Media] ⚠️ Failed to queue thumbnail generation: ${error.message}`,
+                  `[Outbound Media] âš ï¸ Failed to queue thumbnail generation: ${error.message}`,
                 );
                 // Don't fail the message storage - thumbnail will remain pending
               }
@@ -5017,25 +4828,25 @@ export class WhatsAppService implements OnModuleInit {
 
           if (s3Key) {
             this.logger.log(
-              `[Inbound Media] ✅ Successfully cached media to S3: ${s3Key}`,
+              `[Inbound Media] âœ… Successfully cached media to S3: ${s3Key}`,
             );
           } else {
             this.logger.warn(
-              `[Inbound Media] ⚠️ Failed to cache media (will use cloud-api:// fallback): ${messageData.mediaMetadata.mediaId}`,
+              `[Inbound Media] âš ï¸ Failed to cache media (will use cloud-api:// fallback): ${messageData.mediaMetadata.mediaId}`,
             );
           }
 
           // If video was detected as GIF, update the media type
           if (detectedAsGif && messageData.mediaMetadata.type === 'video') {
             this.logger.log(
-              `[Inbound Media] 🎬→🖼️ Video detected as GIF based on media analysis (no audio, short duration)`,
+              `[Inbound Media] ðŸŽ¬â†’ðŸ–¼ï¸ Video detected as GIF based on media analysis (no audio, short duration)`,
             );
             messageData.mediaMetadata.type = 'gif';
             messageData.type = 'gif';
           }
         } catch (error) {
           this.logger.error(
-            `[Inbound Media] ❌ Exception while caching media: ${error.message}`,
+            `[Inbound Media] âŒ Exception while caching media: ${error.message}`,
             error,
           );
           // Continue without S3 cache - will fall back to cloud-api:// reference
@@ -5130,11 +4941,11 @@ export class WhatsAppService implements OnModuleInit {
             thumbnailJobData,
           );
           this.logger.log(
-            `[Inbound Media] ✅ Queued thumbnail generation for ${messageData.mediaMetadata.mediaId}`,
+            `[Inbound Media] âœ… Queued thumbnail generation for ${messageData.mediaMetadata.mediaId}`,
           );
         } catch (error) {
           this.logger.warn(
-            `[Inbound Media] ⚠️ Failed to queue thumbnail generation: ${error.message}`,
+            `[Inbound Media] âš ï¸ Failed to queue thumbnail generation: ${error.message}`,
           );
           // Don't fail the message storage - thumbnail will remain pending
         }
@@ -5421,7 +5232,7 @@ export class WhatsAppService implements OnModuleInit {
 
   /**
    * Update chat's last activity to show a customer reaction in the chat list
-   * Shows: "Reacted 👍 to: <message>"
+   * Shows: "Reacted ðŸ‘ to: <message>"
    * @private
    */
   private async updateChatLastActivityForReaction(
@@ -5450,20 +5261,20 @@ export class WhatsAppService implements OnModuleInit {
           // Type-based placeholder
           switch (message[0].type) {
             case 'image':
-              messagePreview = '📷 Photo';
+              messagePreview = 'ðŸ“· Photo';
               break;
             case 'video':
-              messagePreview = '🎥 Video';
+              messagePreview = 'ðŸŽ¥ Video';
               break;
             case 'audio':
             case 'voice':
-              messagePreview = '🎤 Voice message';
+              messagePreview = 'ðŸŽ¤ Voice message';
               break;
             case 'document':
-              messagePreview = '📄 Document';
+              messagePreview = 'ðŸ“„ Document';
               break;
             case 'sticker':
-              messagePreview = '🏷️ Sticker';
+              messagePreview = 'ðŸ·ï¸ Sticker';
               break;
             case 'gif':
               messagePreview = 'GIF';
@@ -5904,392 +5715,6 @@ export class WhatsAppService implements OnModuleInit {
     return this.wabaId;
   }
 
-  // ==================== COMMERCE SETTINGS ====================
-
-  /**
-   * Get commerce settings for a phone number
-   *
-   * API: GET /{phone-number-id}/whatsapp_commerce_settings
-   *
-   * @param phoneNumberId - Meta phone number ID
-   * @returns Commerce settings including catalog ID, cart and catalog visibility
-   */
-  async getCommerceSettings(phoneNumberId: string): Promise<{
-    catalogId: string | null;
-    isCartEnabled: boolean;
-    isCatalogVisible: boolean;
-  }> {
-    const url = this.metaCloudAPIConfig
-      .getEndpoints()
-      .getCommerceSettings(phoneNumberId);
-
-    this.logger.debug(`Fetching commerce settings for phone: ${phoneNumberId}`);
-
-    try {
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: this.metaCloudAPIConfig.getDefaultHeaders(),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        // 404 or empty data means commerce not configured
-        if (response.status === 404) {
-          this.logger.debug(
-            `Commerce settings not configured for phone ${phoneNumberId}`,
-          );
-          return {
-            catalogId: null,
-            isCartEnabled: false,
-            isCatalogVisible: false,
-          };
-        }
-        this.logger.error('Failed to fetch commerce settings:', errorData);
-        throw new BadRequestException(
-          `Failed to fetch commerce settings: ${errorData.error?.message || response.statusText}`,
-        );
-      }
-
-      const data = await response.json();
-
-      // Response format: { data: [{ id, is_cart_enabled, is_catalog_visible }] }
-      if (data.data && data.data.length > 0) {
-        const settings = data.data[0];
-
-        this.logger.log(
-          `Commerce settings for phone ${phoneNumberId}: ` +
-            `catalogId=${settings.id}, cartEnabled=${settings.is_cart_enabled}, catalogVisible=${settings.is_catalog_visible}`,
-        );
-
-        return {
-          catalogId: settings.id || null,
-          isCartEnabled: settings.is_cart_enabled || false,
-          isCatalogVisible: settings.is_catalog_visible || false,
-        };
-      }
-
-      return {
-        catalogId: null,
-        isCartEnabled: false,
-        isCatalogVisible: false,
-      };
-    } catch (error) {
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
-      this.logger.error(
-        `Error fetching commerce settings for ${phoneNumberId}:`,
-        error,
-      );
-      throw new BadRequestException(
-        `Failed to fetch commerce settings: ${error.message}`,
-      );
-    }
-  }
-
-  /**
-   * Update commerce settings for a phone number
-   *
-   * API: POST /{phone-number-id}/whatsapp_commerce_settings
-   *
-   * @param phoneNumberId - Meta phone number ID
-   * @param settings - Commerce settings to update
-   * @returns Success status
-   */
-  async updateCommerceSettings(
-    phoneNumberId: string,
-    settings: {
-      isCartEnabled?: boolean;
-      isCatalogVisible?: boolean;
-    },
-  ): Promise<boolean> {
-    // Build query parameters for the POST request
-    const params = new URLSearchParams();
-    if (settings.isCartEnabled !== undefined) {
-      params.set('is_cart_enabled', String(settings.isCartEnabled));
-    }
-    if (settings.isCatalogVisible !== undefined) {
-      params.set('is_catalog_visible', String(settings.isCatalogVisible));
-    }
-
-    const baseUrl = this.metaCloudAPIConfig
-      .getEndpoints()
-      .updateCommerceSettings(phoneNumberId);
-    const url = `${baseUrl}&${params.toString()}`;
-
-    this.logger.log(
-      `Updating commerce settings for phone ${phoneNumberId}: cart=${settings.isCartEnabled}, catalog=${settings.isCatalogVisible}`,
-    );
-
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: this.metaCloudAPIConfig.getDefaultHeaders(),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        this.logger.error('Failed to update commerce settings:', errorData);
-        throw new BadRequestException(
-          `Failed to update commerce settings: ${errorData.error?.message || response.statusText}`,
-        );
-      }
-
-      const data = await response.json();
-
-      if (data.success === true) {
-        this.logger.log(
-          `Successfully updated commerce settings for phone ${phoneNumberId}`,
-        );
-        return true;
-      }
-
-      return false;
-    } catch (error) {
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
-      this.logger.error(
-        `Error updating commerce settings for ${phoneNumberId}:`,
-        error,
-      );
-      throw new BadRequestException(
-        `Failed to update commerce settings: ${error.message}`,
-      );
-    }
-  }
-
-  /**
-   * Connect a catalog to the WABA (WhatsApp Business Account)
-   *
-   * API: POST /{waba_id}/product_catalogs?catalog_id=xxx
-   *
-   * This connects a Meta product catalog to the WhatsApp Business Account.
-   * The catalog must be connected to the WABA before it can be used with
-   * phone numbers in that WABA.
-   *
-   * @param catalogId - Meta catalog ID to connect
-   * @returns Success status
-   */
-  async connectCatalogToWaba(catalogId: string): Promise<boolean> {
-    if (!this.wabaId) {
-      this.logger.error('WABA ID not configured - cannot connect catalog');
-      throw new BadRequestException(
-        'WABA ID not configured. Set META_WABA_ID environment variable.',
-      );
-    }
-
-    const baseUrl = this.metaCloudAPIConfig
-      .getEndpoints()
-      .connectCatalogToWaba(this.wabaId);
-
-    // Add catalog_id parameter
-    const url = `${baseUrl}&catalog_id=${encodeURIComponent(catalogId)}`;
-
-    this.logger.log(`Connecting catalog ${catalogId} to WABA ${this.wabaId}`);
-    this.logger.debug(`API Request: POST ${url}`);
-
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: this.metaCloudAPIConfig.getDefaultHeaders(),
-      });
-
-      const responseText = await response.text();
-      let responseData: any;
-
-      try {
-        responseData = JSON.parse(responseText);
-      } catch {
-        responseData = { raw: responseText };
-      }
-
-      if (!response.ok) {
-        this.logger.error(
-          `Failed to connect catalog to WABA. Status: ${response.status}`,
-        );
-        this.logger.error('Response:', JSON.stringify(responseData, null, 2));
-
-        const errorMessage =
-          responseData?.error?.error_user_msg ||
-          responseData?.error?.message ||
-          response.statusText;
-        throw new BadRequestException(
-          `Failed to connect catalog to WABA: ${errorMessage}`,
-        );
-      }
-
-      this.logger.log(
-        `Successfully connected catalog ${catalogId} to WABA ${this.wabaId}`,
-      );
-      this.logger.debug('Response:', JSON.stringify(responseData, null, 2));
-
-      return responseData.success === true;
-    } catch (error) {
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
-      this.logger.error(
-        `Error connecting catalog ${catalogId} to WABA:`,
-        error,
-      );
-      throw new BadRequestException(
-        `Failed to connect catalog to WABA: ${error.message}`,
-      );
-    }
-  }
-
-  /**
-   * Get catalogs connected to the WABA
-   *
-   * API: GET /{waba_id}/product_catalogs
-   *
-   * @returns List of connected catalogs
-   */
-  async getWabaCatalogs(): Promise<{ id: string; name?: string }[]> {
-    if (!this.wabaId) {
-      this.logger.error('WABA ID not configured');
-      throw new BadRequestException(
-        'WABA ID not configured. Set META_WABA_ID environment variable.',
-      );
-    }
-
-    const url = this.metaCloudAPIConfig
-      .getEndpoints()
-      .getWabaCatalogs(this.wabaId);
-
-    this.logger.debug(`Fetching WABA catalogs: GET ${url}`);
-
-    try {
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: this.metaCloudAPIConfig.getDefaultHeaders(),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        this.logger.error('Failed to get WABA catalogs:', errorData);
-        throw new BadRequestException(
-          `Failed to get WABA catalogs: ${errorData.error?.message || response.statusText}`,
-        );
-      }
-
-      const data = await response.json();
-      return data.data || [];
-    } catch (error) {
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
-      this.logger.error('Error fetching WABA catalogs:', error);
-      throw new BadRequestException(
-        `Failed to get WABA catalogs: ${error.message}`,
-      );
-    }
-  }
-
-  /**
-   * Link a catalog to a phone number's commerce settings
-   *
-   * This is a two-step process:
-   * 1. Connect the catalog to the WABA (if not already connected)
-   * 2. Enable catalog visibility on the phone number
-   *
-   * API Flow:
-   * - POST /{waba_id}/product_catalogs?catalog_id=xxx (connect to WABA)
-   * - POST /{phone_number_id}/whatsapp_commerce_settings?is_catalog_visible=true (enable on phone)
-   *
-   * @param phoneNumberId - Meta phone number ID
-   * @param catalogId - Meta catalog ID to link
-   * @returns Success status
-   */
-  async linkCatalogToPhoneNumber(
-    phoneNumberId: string,
-    catalogId: string,
-  ): Promise<boolean> {
-    this.logger.log(
-      `Linking catalog ${catalogId} to phone number ${phoneNumberId}`,
-    );
-
-    try {
-      // Step 1: Connect catalog to WABA
-      this.logger.log('Step 1: Connecting catalog to WABA...');
-      await this.connectCatalogToWaba(catalogId);
-
-      // Step 2: Enable catalog visibility on the phone number
-      this.logger.log('Step 2: Enabling catalog visibility on phone number...');
-      const commerceSuccess = await this.updateCommerceSettings(phoneNumberId, {
-        isCatalogVisible: true,
-        isCartEnabled: true,
-      });
-
-      if (commerceSuccess) {
-        this.logger.log(
-          `Successfully linked catalog ${catalogId} to phone ${phoneNumberId}`,
-        );
-        return true;
-      }
-
-      this.logger.warn(
-        'Catalog connected to WABA but failed to enable on phone number',
-      );
-      return false;
-    } catch (error) {
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
-      this.logger.error(
-        `Error linking catalog ${catalogId} to ${phoneNumberId}:`,
-        error,
-      );
-      throw new BadRequestException(`Failed to link catalog: ${error.message}`);
-    }
-  }
-
-  /**
-   * Unlink catalog from a phone number's commerce settings
-   *
-   * This disables the catalog visibility on the phone number.
-   * Note: The catalog remains connected to the WABA.
-   *
-   * @param phoneNumberId - Meta phone number ID
-   * @returns Success status
-   */
-  async unlinkCatalogFromPhoneNumber(phoneNumberId: string): Promise<boolean> {
-    this.logger.log(`Unlinking catalog from phone number ${phoneNumberId}`);
-
-    try {
-      // Disable catalog visibility on the phone number
-      const success = await this.updateCommerceSettings(phoneNumberId, {
-        isCatalogVisible: false,
-        isCartEnabled: false,
-      });
-
-      if (success) {
-        this.logger.log(
-          `Successfully unlinked catalog from phone ${phoneNumberId}`,
-        );
-        return true;
-      }
-
-      return false;
-    } catch (error) {
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
-      this.logger.error(
-        `Error unlinking catalog from ${phoneNumberId}:`,
-        error,
-      );
-      throw new BadRequestException(
-        `Failed to unlink catalog: ${error.message}`,
-      );
-    }
-  }
-
-  /**
-   * Normalize phone number to E.164 format
-   * Handles various input formats from Meta API
-   */
   private normalizePhoneNumberFormat(phone: string): string {
     if (!phone) return '';
     // Remove all non-digit characters except leading +
