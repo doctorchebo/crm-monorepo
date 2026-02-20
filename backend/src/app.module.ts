@@ -1,3 +1,4 @@
+import { AiChatbotModule } from '@modules/ai-chatbot/ai-chatbot.module';
 import { AuditModule } from '@modules/audit/audit.module';
 import { CalendarModule } from '@modules/calendar/calendar.module';
 import { KnowledgeBaseModule } from '@modules/knowledge-base/knowledge-base.module';
@@ -8,7 +9,7 @@ import { PinsModule } from '@modules/pins/pins.module';
 import { ProfilePictureModule } from '@modules/profile-picture/profile-picture.module';
 import { ReactionsModule } from '@modules/reactions/reactions.module';
 import { ScheduledTasksModule } from '@modules/scheduled-tasks/scheduled-tasks.module';
-import { WorkflowModule } from '@modules/workflow/workflow.module';
+import { StagesModule } from '@modules/stages/stages.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
@@ -63,7 +64,8 @@ import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
     AiMemoryModule,
     AIReplyModule,
     KnowledgeBaseModule,
-    WorkflowModule,
+    StagesModule,
+    AiChatbotModule,
     MediaCompressionModule,
     ScheduledTasksModule,
     ImportJobsModule,

@@ -2370,6 +2370,26 @@ export const aiConfigurations = pgTable(
     // AI model preferences
     preferredModel: varchar('preferred_model', { length: 50 }), // 'gpt-4o', 'gpt-4o-mini', etc.
     temperature: integer('temperature').default(70), // 0-100, mapped to 0.0-1.0
+    // =========================================================================
+    // Goal-based AI Configuration
+    // Defines the AI's primary objective when responding to customers
+    // =========================================================================
+    /**
+     * The AI's primary goal type. Determines the base behavior/instructions.
+     * - 'answer_faq': Answer questions using knowledge base data
+     * - 'qualify_lead': Qualify leads via discovery questions
+     * - 'book_appointment': Help schedule appointments
+     * - 'handle_support': Provide customer support
+     * - 'custom': Use goalDescription for fully custom instructions
+     * Default: 'answer_faq'
+     */
+    goalType: varchar('goal_type', { length: 50 }).default('answer_faq'),
+    /**
+     * Free-text description of the AI's goal. Used to provide additional
+     * context beyond the goalType preset. For 'custom' goalType, this is
+     * the primary source of instructions.
+     */
+    goalDescription: text('goal_description'),
     // Metadata
     metadata: jsonb('metadata').default({}),
     // Timestamps
@@ -2918,9 +2938,6 @@ export * from './knowledge-base.schema';
 
 // Export AI context schema (lightweight replacement for AI memory)
 export * from './ai-context.schema';
-
-// Export workflow builder schema (visual canvas-based automation)
-export * from './workflow-builder.schema';
 
 // Export calendar schema (scheduling, booking, external sync)
 export * from './calendar.schema';

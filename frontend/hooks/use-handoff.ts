@@ -62,8 +62,8 @@ export function useHandoff(chatId: string | null) {
 
     try {
       const [handoff, ai] = await Promise.all([
-        backendApi.workflow.getHandoffStatus(chatId),
-        backendApi.workflow.getAIStatus(chatId),
+        backendApi.aiHandoff.getHandoffStatus(chatId),
+        backendApi.aiHandoff.getAIStatus(chatId),
       ]);
 
       setHandoffStatus(handoff);
@@ -80,7 +80,7 @@ export function useHandoff(chatId: string | null) {
     if (!chatId) return;
 
     try {
-      await backendApi.workflow.pauseAI(chatId);
+      await backendApi.aiHandoff.pauseAI(chatId);
       await fetchStatus();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to pause AI");
@@ -92,7 +92,7 @@ export function useHandoff(chatId: string | null) {
     if (!chatId) return;
 
     try {
-      await backendApi.workflow.resumeAI(chatId);
+      await backendApi.aiHandoff.resumeAI(chatId);
       await fetchStatus();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to resume AI");
@@ -105,7 +105,7 @@ export function useHandoff(chatId: string | null) {
       if (!chatId) return;
 
       try {
-        await backendApi.workflow.requestHandoff({ chatId, reason });
+        await backendApi.aiHandoff.requestHandoff({ chatId, reason });
         await fetchStatus();
       } catch (err) {
         setError(
@@ -122,7 +122,7 @@ export function useHandoff(chatId: string | null) {
       if (!chatId) return;
 
       try {
-        await backendApi.workflow.resolveHandoff({
+        await backendApi.aiHandoff.resolveHandoff({
           chatId,
           resumeAI,
           resolution,

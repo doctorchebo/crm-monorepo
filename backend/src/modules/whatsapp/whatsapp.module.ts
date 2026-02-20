@@ -4,13 +4,13 @@ import { ModuleRef } from '@nestjs/core';
 import { MetaCloudAPIConfigService } from '@shared/services/meta-cloud-api.config';
 import { ProfilePictureUrlService } from '@shared/services/profile-picture-url.service';
 import { S3Service } from '@shared/services/s3.service';
+import { AiChatbotModule } from '../ai-chatbot/ai-chatbot.module';
 import { AiMemoryModule } from '../ai-memory/ai-memory.module';
 import { ChatsModule } from '../chats/chats.module';
 import { TeamModule } from '../team/team.module';
 import { TemplatesModule } from '../templates/templates.module';
 import { ThumbnailQueueService } from '../thumbnail/thumbnail-queue.service';
 import { ThumbnailModule } from '../thumbnail/thumbnail.module';
-import { WorkflowModule } from '../workflow/workflow.module';
 import { MediaController } from './controllers/media.controller';
 import { AudioConverterService } from './services/audio-converter.service';
 import { ConversationWindowService } from './services/conversation-window.service';
@@ -50,7 +50,7 @@ import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
     ConfigModule,
     forwardRef(() => ThumbnailModule),
     AiMemoryModule,
-    forwardRef(() => WorkflowModule),
+    forwardRef(() => AiChatbotModule),
     TeamModule,
     forwardRef(() => ChatsModule),
     forwardRef(() => TemplatesModule),

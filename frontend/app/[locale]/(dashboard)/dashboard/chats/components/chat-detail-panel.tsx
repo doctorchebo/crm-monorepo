@@ -364,7 +364,7 @@ export function ChatDetailPanel({
 
     const fetchRateLimitStatus = async () => {
       try {
-        const status = await backendApi.aiWorkflow.getAIStatus(selectedChatId!);
+        const status = await backendApi.aiHandoff.getAIStatus(selectedChatId!);
         if (status.isRateLimited) {
           setFetchedRateLimitInfo({
             chatId: status.chatId,
@@ -804,10 +804,6 @@ export function ChatDetailPanel({
         }}
         isSidebarExpanded={isSidebarExpanded}
         onSidebarToggle={toggleSidebar}
-        onWorkflowResumed={() => {
-          refetchHandoff();
-          hideRegenerateBanner();
-        }}
       />
 
       {/* Messages + Notes/Search Container */}

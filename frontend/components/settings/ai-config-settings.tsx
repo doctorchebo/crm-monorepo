@@ -14,11 +14,18 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useAiConfig } from "@/hooks/use-ai-config";
+import { useTabState } from "@/hooks/use-tab-state";
 import type { UpdateAiConfigurationDto } from "@/lib/api/endpoints";
 import { cn } from "@/lib/utils";
-import { Bot, Languages, MessageSquare, Settings2, Zap } from "lucide-react";
+import {
+  Bot,
+  Crosshair,
+  Languages,
+  MessageSquare,
+  Settings2,
+  Zap,
+} from "lucide-react";
 import { useCallback, useState } from "react";
-import { useTabState } from "@/hooks/use-tab-state";
 
 // Simple toast replacement until sonner is installed
 const toast = {
@@ -33,7 +40,7 @@ interface AiConfigSettingsProps {
    * - "embedded": No card wrapper, for use inside SettingsCategory
    */
   variant?: "card" | "embedded";
-  
+
   /**
    * Query parameter name to store the selected tab.
    * Useful when multiple tabbed components exist on the same page.
@@ -46,13 +53,15 @@ interface AiConfigSettingsProps {
  * AI Configuration Settings Component
  * Allows users to configure AI behavior defaults
  *
- * These settings serve as defaults that can be overridden:
- * 1. Per workflow stage (via Kanban board stage settings)
- * 2. Per individual chat (via AI Settings modal in chat header)
+ * These settings serve as defaults that can be overridden
+ * per individual chat (via AI Settings modal in chat header).
  *
- * Priority order: Chat Override > Stage Settings > User Defaults > System Defaults
+ * Priority order: Chat Override > User Defaults > System Defaults
  */
-export function AiConfigSettings({ variant = "card", tabParamName = "tab" }: AiConfigSettingsProps) {
+export function AiConfigSettings({
+  variant = "card",
+  tabParamName = "tab",
+}: AiConfigSettingsProps) {
   const {
     options,
     loadingOptions,
@@ -62,7 +71,10 @@ export function AiConfigSettings({ variant = "card", tabParamName = "tab" }: AiC
   } = useAiConfig();
 
   const [saving, setSaving] = useState(false);
-  const [currentTab, setCurrentTab] = useTabState({ defaultValue: "style", paramName: tabParamName });
+  const [currentTab, setCurrentTab] = useTabState({
+    defaultValue: "goals",
+    paramName: tabParamName,
+  });
 
   const handleUpdate = useCallback(
     async (field: keyof UpdateAiConfigurationDto, value: unknown) => {
@@ -76,7 +88,7 @@ export function AiConfigSettings({ variant = "card", tabParamName = "tab" }: AiC
         setSaving(false);
       }
     },
-    [updateUserConfig]
+    [updateUserConfig],
   );
 
   // Loading state
@@ -132,7 +144,11 @@ export function AiConfigSettings({ variant = "card", tabParamName = "tab" }: AiC
   // Main content - the tabs with all the settings
   const settingsContent = (
     <Tabs value={currentTab} onValueChange={setCurrentTab} className="w-full">
-      <TabsList className="grid w-full grid-cols-4">
+      <TabsList className="grid w-full grid-cols-5">
+        <TabsTrigger value="goals" className="flex items-center gap-2">
+          <Crosshair className="h-4 w-4" />
+          Goals
+        </TabsTrigger>
         <TabsTrigger value="style" className="flex items-center gap-2">
           <MessageSquare className="h-4 w-4" />
           Style
@@ -150,6 +166,148 @@ export function AiConfigSettings({ variant = "card", tabParamName = "tab" }: AiC
           Advanced
         </TabsTrigger>
       </TabsList>
+
+      {/* Goals Tab */}
+      <TabsContent value="goals" className="space-y-6 mt-6">
+        {/* Goal Type */}
+        <div className="space-y-2">
+          <Label>AI Goal</Label>
+          <p className="text-xs text-muted-foreground mb-2">
+            Choose the primary objective for your AI assistant. This determines
+            how it responds to customers.
+          </p>
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+            {[
+              {
+                value: "answer_faq",
+                label: "Answer FAQs",
+                description: "Answer questions using your knowledge base data",
+                icon: "💬",
+              },
+              {
+                value: "qualify_lead",
+                label: "Qualify Leads",
+                description:
+                  "Ask discovery questions to qualify potential leads",
+                icon: "🎯",
+              },
+              {
+                value: "book_appointment",
+                label: "Book Appointments",
+                description: "Help customers schedule meetings or appointments",
+                icon: "📅",
+              },
+              {
+                value: "handle_support",
+                label: "Handle Support",
+                description: "Provide customer support and resolve issues",
+                icon: "🛠️",
+              },
+              {
+                value: "custom",
+                label: "Custom Goal",
+                description: "Define your own custom AI instructions below",
+                icon: "✨",
+              },
+            ].map((goal) => (
+              <button
+                key={goal.value}
+                type="button"
+                onClick={() => handleUpdate("goalType", goal.value)}
+                disabled={saving}
+                className={cn(
+                  "flex flex-col items-start gap-1 rounded-lg border p-4 text-left transition-all hover:bg-accent/50",
+                  userConfig.goalType === goal.value
+                    ? "border-primary bg-primary/5 ring-1 ring-primary"
+                    : "border-border",
+                )}
+              >
+                <span className="text-xl">{goal.icon}</span>
+                <span className="font-medium text-sm">{goal.label}</span>
+                <span className="text-xs text-muted-foreground">
+                  {goal.description}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Goal Description */}
+        <div className="space-y-2">
+          <Label>
+            {userConfig.goalType === "custom"
+              ? "Custom Instructions"
+              : "Additional Goal Context"}
+          </Label>
+          <Textarea
+            value={userConfig.goalDescription || ""}
+            onChange={(e) =>
+              handleUpdate("goalDescription", e.target.value || null)
+            }
+            placeholder={
+              userConfig.goalType === "custom"
+                ? "Describe exactly what you want your AI to do..."
+                : "Optional: Add specific context about how the AI should pursue this goal..."
+            }
+            disabled={saving}
+            rows={4}
+          />
+          <p className="text-xs text-muted-foreground">
+            {userConfig.goalType === "custom"
+              ? "This is the primary source of instructions for your AI. Be specific about what it should do."
+              : "Provide extra context to refine the AI's behavior beyond the selected goal preset."}
+          </p>
+        </div>
+
+        {/* Conversation Strategy */}
+        <div className="space-y-2">
+          <Label>Conversation Strategy</Label>
+          <Select
+            value={userConfig.conversationStrategy}
+            onValueChange={(v) =>
+              handleUpdate(
+                "conversationStrategy",
+                v as "direct" | "qualifying" | "guided",
+              )
+            }
+            disabled={saving}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="direct">
+                <div className="flex flex-col">
+                  <span>Direct</span>
+                  <span className="text-xs text-muted-foreground">
+                    Provide information immediately from the knowledge base
+                  </span>
+                </div>
+              </SelectItem>
+              <SelectItem value="qualifying">
+                <div className="flex flex-col">
+                  <span>Qualifying</span>
+                  <span className="text-xs text-muted-foreground">
+                    Ask clarifying questions before providing detailed info
+                  </span>
+                </div>
+              </SelectItem>
+              <SelectItem value="guided">
+                <div className="flex flex-col">
+                  <span>Guided</span>
+                  <span className="text-xs text-muted-foreground">
+                    Walk customers through a discovery process step by step
+                  </span>
+                </div>
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Controls how the AI handles initial or vague messages from
+            customers.
+          </p>
+        </div>
+      </TabsContent>
 
       {/* Style Tab */}
       <TabsContent value="style" className="space-y-6 mt-6">
@@ -252,7 +410,7 @@ export function AiConfigSettings({ variant = "card", tabParamName = "tab" }: AiC
               className={cn(
                 "w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700",
                 "[&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4",
-                "[&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-full"
+                "[&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-full",
               )}
             />
             <span className="text-sm w-12 text-right">
@@ -286,7 +444,7 @@ export function AiConfigSettings({ variant = "card", tabParamName = "tab" }: AiC
               className={cn(
                 "w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700",
                 "[&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4",
-                "[&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-full"
+                "[&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-full",
               )}
             />
             <span className="text-sm w-16 text-right">
@@ -350,7 +508,7 @@ export function AiConfigSettings({ variant = "card", tabParamName = "tab" }: AiC
               onChange={(e) =>
                 handleUpdate(
                   "minDelayBetweenMessagesMs",
-                  parseInt(e.target.value)
+                  parseInt(e.target.value),
                 )
               }
               min={0}
@@ -360,7 +518,7 @@ export function AiConfigSettings({ variant = "card", tabParamName = "tab" }: AiC
               className={cn(
                 "w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700",
                 "[&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4",
-                "[&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-full"
+                "[&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-full",
               )}
             />
             <span className="text-sm w-20 text-right">
@@ -499,7 +657,7 @@ export function AiConfigSettings({ variant = "card", tabParamName = "tab" }: AiC
                 e.target.value
                   .split(",")
                   .map((t) => t.trim())
-                  .filter(Boolean)
+                  .filter(Boolean),
               )
             }
             placeholder="e.g., politics, religion, competitors"
@@ -529,7 +687,7 @@ export function AiConfigSettings({ variant = "card", tabParamName = "tab" }: AiC
         </CardTitle>
         <p className="text-sm text-muted-foreground">
           Configure how AI responds to your customers. These are default
-          settings that can be overridden per chat or workflow stage.
+          settings that can be overridden per chat.
         </p>
       </CardHeader>
       <CardContent>{settingsContent}</CardContent>

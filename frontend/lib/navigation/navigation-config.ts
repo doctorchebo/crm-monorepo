@@ -3,7 +3,6 @@ import {
   Bot,
   CalendarDays,
   FileText,
-  GitBranch,
   History,
   Layers,
   LayoutDashboard,
@@ -117,12 +116,6 @@ export const navigationConfig: NavItem[] = [
     ],
   },
   {
-    id: "workflows",
-    labelKey: "dashboard.workflows",
-    icon: GitBranch,
-    href: "/dashboard/workflows",
-  },
-  {
     id: "knowledge-base",
     labelKey: "dashboard.knowledgeBase",
     icon: BookOpen,
@@ -181,12 +174,6 @@ export const navigationConfig: NavItem[] = [
         labelKey: "dashboard.settingsChats",
         icon: MessageSquare,
         href: "/dashboard/settings/chats",
-      },
-      {
-        id: "settings-workflow",
-        labelKey: "dashboard.settingsWorkflow",
-        icon: GitBranch,
-        href: "/dashboard/settings/workflow",
       },
       {
         id: "settings-security",

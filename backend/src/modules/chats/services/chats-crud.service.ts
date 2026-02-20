@@ -1,13 +1,10 @@
 import { db } from '@database/db.connection';
 import { Chat, chats, contacts, senders, teamMembers } from '@database/schema';
-import { WorkflowAssignmentService } from '@modules/workflow/services';
 import {
   BadRequestException,
-  Inject,
   Injectable,
   Logger,
   NotFoundException,
-  forwardRef,
 } from '@nestjs/common';
 import { and, desc, eq, or, sql } from 'drizzle-orm';
 import { AuditWriteService } from '../../audit/audit-write.service';
@@ -27,8 +24,6 @@ export class ChatsCrudService {
   constructor(
     private readonly chatVisibilityService: ChatVisibilityService,
     private readonly auditWriteService: AuditWriteService,
-    @Inject(forwardRef(() => WorkflowAssignmentService))
-    private readonly workflowAssignmentService: WorkflowAssignmentService,
   ) {}
 
   /**

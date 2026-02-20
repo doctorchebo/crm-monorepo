@@ -10,9 +10,7 @@ import {
   type ChatAiOverride,
   type ResolvedAiConfig,
   type SetChatOverrideDto,
-  type SetStageAiSettingsDto,
   type UpdateAiConfigurationDto,
-  type WorkflowStageAiSetting,
 } from "@/lib/api/endpoints";
 import { useCallback, useEffect, useState } from "react";
 
@@ -41,14 +39,6 @@ interface UseAiConfigReturn {
   setChatOverride: (data: SetChatOverrideDto) => Promise<ChatAiOverride>;
   deleteChatOverride: (chatId: string) => Promise<void>;
 
-  // Stage settings
-  stageSettings: WorkflowStageAiSetting[];
-  loadingStageSettings: boolean;
-  setStageSetting: (
-    data: SetStageAiSettingsDto
-  ) => Promise<WorkflowStageAiSetting>;
-  deleteStageSetting: (stageId: string) => Promise<void>;
-
   // General
   error: string | null;
   refresh: () => Promise<void>;
@@ -69,19 +59,13 @@ export function useAiConfig(): UseAiConfigReturn {
 
   // Resolved config state
   const [resolvedConfig, setResolvedConfig] = useState<ResolvedAiConfig | null>(
-    null
+    null,
   );
   const [loadingResolvedConfig, setLoadingResolvedConfig] = useState(false);
 
   // Chat overrides state
   const [chatOverrides, setChatOverrides] = useState<ChatAiOverride[]>([]);
   const [loadingChatOverrides, setLoadingChatOverrides] = useState(true);
-
-  // Stage settings state
-  const [stageSettings, setStageSettings] = useState<WorkflowStageAiSetting[]>(
-    []
-  );
-  const [loadingStageSettings, setLoadingStageSettings] = useState(true);
 
   // General state
   const [error, setError] = useState<string | null>(null);
@@ -127,19 +111,6 @@ export function useAiConfig(): UseAiConfigReturn {
     }
   }, []);
 
-  // Fetch stage settings
-  const fetchStageSettings = useCallback(async () => {
-    try {
-      setLoadingStageSettings(true);
-      const data = await api.aiConfig.getStageSettings();
-      setStageSettings(data);
-    } catch (err) {
-      console.error("Failed to fetch stage settings:", err);
-    } finally {
-      setLoadingStageSettings(false);
-    }
-  }, []);
-
   // Update user config
   const updateUserConfig = useCallback(
     async (data: UpdateAiConfigurationDto) => {
@@ -151,7 +122,7 @@ export function useAiConfig(): UseAiConfigReturn {
         throw new Error("Failed to update AI configuration");
       }
     },
-    []
+    [],
   );
 
   // Fetch resolved config for a chat
@@ -169,7 +140,7 @@ export function useAiConfig(): UseAiConfigReturn {
         setLoadingResolvedConfig(false);
       }
     },
-    []
+    [],
   );
 
   // Set chat override
@@ -195,7 +166,7 @@ export function useAiConfig(): UseAiConfigReturn {
         throw new Error("Failed to set chat AI override");
       }
     },
-    []
+    [],
   );
 
   // Delete chat override
@@ -211,45 +182,6 @@ export function useAiConfig(): UseAiConfigReturn {
     }
   }, []);
 
-  // Set stage setting
-  const setStageSettingHandler = useCallback(
-    async (data: SetStageAiSettingsDto): Promise<WorkflowStageAiSetting> => {
-      try {
-        const result = await api.aiConfig.setStageSetting(data);
-
-        // Update local state
-        setStageSettings((prev) => {
-          const index = prev.findIndex((s) => s.stageId === data.stageId);
-          if (index >= 0) {
-            const updated = [...prev];
-            updated[index] = result;
-            return updated;
-          }
-          return [...prev, result];
-        });
-
-        return result;
-      } catch (err) {
-        console.error("Failed to set stage setting:", err);
-        throw new Error("Failed to set stage AI settings");
-      }
-    },
-    []
-  );
-
-  // Delete stage setting
-  const deleteStageSettingHandler = useCallback(async (stageId: string) => {
-    try {
-      await api.aiConfig.deleteStageSetting(stageId);
-
-      // Update local state
-      setStageSettings((prev) => prev.filter((s) => s.stageId !== stageId));
-    } catch (err) {
-      console.error("Failed to delete stage setting:", err);
-      throw new Error("Failed to delete stage AI settings");
-    }
-  }, []);
-
   // Refresh all data
   const refresh = useCallback(async () => {
     setError(null);
@@ -257,9 +189,8 @@ export function useAiConfig(): UseAiConfigReturn {
       fetchOptions(),
       fetchUserConfig(),
       fetchChatOverrides(),
-      fetchStageSettings(),
     ]);
-  }, [fetchOptions, fetchUserConfig, fetchChatOverrides, fetchStageSettings]);
+  }, [fetchOptions, fetchUserConfig, fetchChatOverrides]);
 
   // Initial load
   useEffect(() => {
@@ -279,10 +210,6 @@ export function useAiConfig(): UseAiConfigReturn {
     loadingChatOverrides,
     setChatOverride: setChatOverrideHandler,
     deleteChatOverride: deleteChatOverrideHandler,
-    stageSettings,
-    loadingStageSettings,
-    setStageSetting: setStageSettingHandler,
-    deleteStageSetting: deleteStageSettingHandler,
     error,
     refresh,
   };
@@ -356,7 +283,7 @@ export function useChatAiConfig(chatId: string | null): UseChatAiConfigReturn {
         throw new Error("Failed to update chat AI settings");
       }
     },
-    [chatId]
+    [chatId],
   );
 
   const clearOverride = useCallback(async () => {

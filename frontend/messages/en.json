@@ -1,4 +1,4 @@
-﻿{
+{
   "common": {
     "create": "Create",
     "edit": "Edit",
@@ -60,7 +60,6 @@
     "connectWhatsapp": "Connect WhatsApp",
     "kanban": "Kanban",
     "calendar": "Calendar",
-    "workflows": "Workflows",
     "knowledgeBase": "Knowledge Base",
     "overview": "Overview",
     "objects": "Objects",
@@ -73,7 +72,6 @@
     "settings": "Settings",
     "settingsAi": "AI",
     "settingsChats": "Chats",
-    "settingsWorkflow": "Workflow",
     "calendarOverview": "Overview",
     "bookingLinks": "Booking Links",
     "availability": "Availability",
@@ -593,7 +591,7 @@
     "closed": "Closed",
     "editModeInstructions": "Edit Mode: Rename stages, drag to reorder, delete, create new stages with + buttons, or click badges to set default. Minimum {minStages} stages required.",
     "createStage": "Create Stage",
-    "createStageDescription": "Add a new stage to your pipeline workflow.",
+    "createStageDescription": "Add a new stage to your pipeline.",
     "stageName": "Stage Name",
     "stageNamePlaceholder": "e.g., Qualified Lead",
     "stageDescription": "Description",
@@ -636,10 +634,10 @@
     "statTotalChats": "Total Chats",
     "statHandoffsPending": "Handoffs Pending",
     "statAiPaused": "AI Paused",
-    "noStagesTitle": "No Workflow Stages Found",
-    "noStagesDescription": "Get started by creating default workflow stages for your pipeline.",
+    "noStagesTitle": "No Pipeline Stages Found",
+    "noStagesDescription": "Get started by creating default pipeline stages.",
     "initializeDefaults": "Initialize Default Stages",
-    "loadFailed": "Failed to load workflow stages. Please try again.",
+    "loadFailed": "Failed to load pipeline stages. Please try again.",
     "chatMoved": "Successfully moved chat to {stageName}",
     "chatMoveFailed": "Failed to move chat. Please try again.",
     "chatMovedReason": "Moved to {stageName} via kanban board",
@@ -654,7 +652,7 @@
     "stageDeleteFailed": "Failed to delete stage. Please try again.",
     "stageOrderUpdated": "Stage order updated",
     "stageOrderFailed": "Failed to save stage order. Please refresh.",
-    "defaultStagesCreated": "Default workflow stages created",
+    "defaultStagesCreated": "Default pipeline stages created",
     "initializeFailed": "Failed to initialize stages",
     "cannotDeleteMinStages": "Cannot delete: minimum {minStages} stages required",
     "noChatsYet": "No chats yet",
@@ -669,7 +667,7 @@
     "hoursInStage": "{count}h in stage",
     "justEntered": "Just entered",
     "activityHistory": "Activity History",
-    "activityHistoryDescription": "View stage transitions and workflow changes",
+    "activityHistoryDescription": "View stage transitions and pipeline changes",
     "history": "History"
   },
   "pipeline": {
@@ -1897,7 +1895,7 @@
   },
   "settingsAi": {
     "title": "AI Settings",
-    "description": "Configure default AI behavior. These settings can be overridden per chat or workflow stage.",
+    "description": "Configure default AI behavior. These settings can be overridden per chat.",
     "defaultsTitle": "Default AI Behavior",
     "defaultsDescription": "Configure how AI behaves for new chats by default.",
     "defaultsCategory": "AI for New Chats",
@@ -1984,219 +1982,6 @@
     "qualityHigh": "High Quality",
     "qualityMedium": "Medium Quality",
     "qualityLow": "Low Quality"
-  },
-  "workflows": {
-    "title": "Workflows",
-    "description": "Build automated workflows with visual canvas",
-    "totalWorkflows": "{count, plural, =0 {No workflows} one {# workflow} other {# workflows}}",
-    "newWorkflowName": "New Workflow",
-    "noDescription": "No description",
-    "searchPlaceholder": "Search workflows...",
-    "updatedAt": "Updated {date}",
-    "selectedCount": "{count} selected",
-    "selectAll": "Select all",
-    "bulkDeleteTitle": "Delete Workflows",
-    "bulkDeleteDescription": "Are you sure you want to delete {count} workflows? This action cannot be undone.",
-    "bulkDeleteSuccess": "{count} workflows deleted successfully",
-    "pagination": {
-      "page": "Page {current} of {total}",
-      "previous": "Previous",
-      "next": "Next",
-      "first": "First",
-      "last": "Last",
-      "rowsPerPage": "Per page"
-    },
-    "status": {
-      "draft": "Draft",
-      "published": "Published",
-      "active": "Active",
-      "archived": "Archived",
-      "disabled": "Disabled"
-    },
-    "filters": {
-      "all": "All",
-      "draft": "Drafts",
-      "published": "Published",
-      "archived": "Archived"
-    },
-    "actions": {
-      "create": "Create Workflow",
-      "edit": "Edit",
-      "duplicate": "Duplicate",
-      "archive": "Archive",
-      "unarchive": "Unarchive",
-      "delete": "Delete",
-      "import": "Import"
-    },
-    "emptyState": {
-      "title": "No workflows yet",
-      "description": "Create your first workflow to automate customer interactions"
-    },
-    "notifications": {
-      "duplicated": "Workflow duplicated",
-      "duplicatedMessage": "Created copy: {name}",
-      "deleted": "Workflow deleted",
-      "deletedMessage": "The workflow has been permanently deleted",
-      "archived": "Workflow archived",
-      "unarchived": "Workflow unarchived"
-    },
-    "errors": {
-      "loadFailed": "Failed to load workflows",
-      "createFailed": "Failed to create workflow",
-      "duplicateFailed": "Failed to duplicate workflow",
-      "deleteFailed": "Failed to delete workflow",
-      "archiveFailed": "Failed to archive workflow"
-    },
-    "editor": {
-      "unsavedChanges": "Unsaved changes",
-      "status": {
-        "draft": "Draft",
-        "published": "Published",
-        "active": "Active",
-        "paused": "Paused",
-        "archived": "Archived",
-        "disabled": "Disabled"
-      },
-      "actions": {
-        "save": "Save",
-        "publish": "Publish",
-        "published": "Published",
-        "versionHistory": "Version History",
-        "export": "Export",
-        "import": "Import",
-        "settings": "Settings"
-      },
-      "notifications": {
-        "saved": "Workflow saved",
-        "published": "Workflow published",
-        "publishedMessage": "Version {version} is now live"
-      },
-      "errors": {
-        "loadFailed": "Failed to load workflow",
-        "saveFailed": "Failed to save workflow",
-        "publishFailed": "Failed to publish workflow"
-      },
-      "dialogs": {
-        "unsavedChanges": {
-          "title": "Unsaved Changes",
-          "description": "You have unsaved changes that will be lost if you leave this page. Are you sure you want to continue?",
-          "leave": "Leave Without Saving",
-          "stay": "Stay on Page"
-        }
-      },
-      "sidebar": {
-        "searchNodes": "Search nodes...",
-        "variables": "Variables",
-        "noVariables": "No variables defined",
-        "workflowSettings": "Workflow Settings"
-      }
-    },
-    "versionHistory": {
-      "title": "Version History",
-      "description": "View and restore previous versions of this workflow",
-      "versionLabel": "Version {version}",
-      "current": "Current",
-      "publishedBy": "User #{userId}",
-      "nodesCount": "{count, plural, =0 {No nodes} =1 {1 node} other {# nodes}}",
-      "connectionsCount": "{count, plural, =0 {No connections} =1 {1 connection} other {# connections}}",
-      "restore": "Restore",
-      "restoring": "Restoring...",
-      "retry": "Try Again",
-      "empty": {
-        "title": "No version history",
-        "description": "Publish your workflow to start tracking versions"
-      },
-      "errors": {
-        "loadFailed": "Failed to load version history",
-        "restoreFailed": "Failed to restore version"
-      },
-      "notifications": {
-        "restored": "Workflow restored",
-        "restoredMessage": "Restored to version {version}"
-      }
-    },
-    "templates": {
-      "title": "Workflow Templates",
-      "description": "Start with a pre-built template to save time",
-      "searchPlaceholder": "Search templates...",
-      "useTemplate": "Use Template",
-      "preview": "Preview",
-      "featured": "Featured",
-      "allCategories": "All Categories",
-      "noResults": "No templates found",
-      "noResultsDescription": "Try adjusting your search or filter",
-      "empty": {
-        "title": "No templates available",
-        "description": "Check back later for new templates"
-      },
-      "errors": {
-        "loadFailed": "Failed to load templates",
-        "useFailed": "Failed to create workflow from template"
-      },
-      "notifications": {
-        "created": "Workflow created",
-        "createdMessage": "Created from template: {name}"
-      }
-    }
-  },
-  "workflow": {
-    "common": {
-      "loading": "Loading...",
-      "select_workflow": "Select workflow",
-      "search_workflows": "Search workflows...",
-      "no_workflows_found": "No workflows found",
-      "none": "None",
-      "active": "Active",
-      "inactive": "Inactive",
-      "draft": "Draft"
-    },
-    "settings": {
-      "title": "Default Workflow",
-      "description": "Configure the default workflow that will be automatically assigned to new chats.",
-      "default_workflow_title": "Default Team Workflow",
-      "default_workflow_description": "Select the workflow that will be assigned to all new chats.",
-      "default_workflow_label": "Workflow",
-      "default_workflow_help": "This workflow will be applied when a new chat starts.",
-      "select_default_workflow": "Select a workflow",
-      "save_changes": "Save Changes",
-      "settings_saved": "Settings saved successfully",
-      "settings_save_error": "Failed to save settings"
-    },
-    "assignment": {
-      "title": "Assign Workflow",
-      "description": "Select a workflow to assign to this chat.",
-      "select_label": "Workflow",
-      "select_placeholder": "Select a workflow",
-      "warning_stop_workflow": "Warning: Assigning a new workflow will stop the current one.",
-      "confirm_title": "Confirm Assignment",
-      "confirm_reassign_message": "Are you sure you want to reassign the workflow? The current workflow will be stopped.",
-      "confirm_stop_message": "Are you sure you want to stop the current workflow?",
-      "confirm": "Confirm",
-      "cancel": "Cancel",
-      "save": "Save",
-      "success_assigned": "Workflow assigned successfully",
-      "error_assigning": "Failed to assign workflow",
-      "success_unassigned": "Workflow unassigned successfully",
-      "error_unassigning": "Failed to unassign workflow"
-    },
-    "visualization": {
-      "title": "Workflow Progress",
-      "viewProgress": "View Progress",
-      "changeWorkflow": "Change Workflow",
-      "assignWorkflow": "Assign Workflow",
-      "noActiveWorkflow": "No Active Workflow",
-      "noActiveWorkflowDescription": "This conversation doesn't have an active workflow assigned. Assign a workflow to see the execution path here.",
-      "loadingWorkflow": "Loading workflow...",
-      "executionPath": "Execution Path",
-      "steps": "{count} steps",
-      "status": {
-        "running": "Running",
-        "waiting": "Waiting",
-        "completed": "Completed",
-        "failed": "Failed",
-        "noWorkflow": "No Workflow"
-      }
-    }
   },
   "labels": {
     "selectLabels": "Select Labels",
@@ -2405,7 +2190,6 @@
       "stage_deleted": "Deleted stage \"{name}\"",
       "stage_reordered": "Reordered pipeline stages",
       "stage_default_changed": "Set \"{name}\" as default stage",
-
       "chat_transition_kanban": "Moved to {stageName} from kanban board",
       "chat_transition_pipeline": "Manual transition from chat pipeline view",
       "chat_transition_modal": "Stage assignment from modal",
@@ -2416,7 +2200,6 @@
       "chat_transition_workflow_init": "Workflow initialized",
       "chat_transition_bulk": "Bulk transition",
       "chat_transition_manual": "Manual transition",
-
       "handoff_requested": "Handoff to human requested",
       "handoff_resolved": "Handoff resolved",
       "ai_paused": "AI paused",
@@ -2439,20 +2222,17 @@
       "lock_acquired": "Chat lock acquired",
       "lock_released": "Chat lock released",
       "lock_force_released": "Chat lock force released",
-
       "contact_created": "Created contact \"{name}\"",
       "contact_updated": "Updated contact \"{name}\"",
       "contact_deleted": "Deleted contact \"{name}\"",
       "contacts_bulk_deleted": "Bulk deleted {count} contacts",
       "contacts_bulk_deleted_named": "Deleted {count} contacts: {names}",
       "contacts_bulk_deleted_named_more": "Deleted contacts: {names} and {remaining} more",
-
       "template_created": "Created template \"{name}\"",
       "template_updated": "Updated template \"{name}\"",
       "template_deleted": "Deleted template \"{name}\"",
       "template_submitted": "Submitted template \"{name}\" for approval",
       "template_version_created": "Created new version for template \"{name}\"",
-
       "member_added": "Added \"{name}\" to the team",
       "member_removed": "Removed \"{name}\" from the team",
       "role_changed": "Changed role for \"{name}\"",
@@ -2464,18 +2244,15 @@
       "custom_role_created": "Created custom role \"{name}\"",
       "custom_role_updated": "Updated custom role \"{name}\"",
       "custom_role_deleted": "Deleted custom role \"{name}\"",
-
       "sender_created": "Created sender \"{name}\"",
       "sender_updated": "Updated sender \"{name}\"",
       "sender_removed": "Removed sender \"{name}\"",
       "sender_synced": "Synced senders from WhatsApp Business Account",
-
       "label_created": "Created label \"{name}\"",
       "label_updated": "Updated label \"{name}\"",
       "label_deleted": "Deleted label \"{name}\"",
       "labels_applied": "Applied labels [{labels}] to {count} chat(s)",
       "labels_removed": "Removed labels [{labels}] from {count} chat(s)",
-
       "kb_object_created": "Created knowledge base entry \"{name}\"",
       "kb_object_updated": "Updated knowledge base entry \"{name}\"",
       "kb_object_deleted": "Deleted knowledge base entry \"{name}\"",
@@ -2483,7 +2260,6 @@
       "kb_template_created": "Created knowledge base template \"{name}\"",
       "kb_template_updated": "Updated knowledge base template \"{name}\"",
       "kb_template_deleted": "Deleted knowledge base template \"{name}\"",
-
       "import_started": "Started contact import",
       "import_started_named": "Started import \"{name}\"",
       "import_completed": "Completed contact import",
@@ -2491,9 +2267,7 @@
       "import_rolled_back": "Rolled back contact import",
       "import_deleted": "Deleted import job",
       "import_deleted_named": "Deleted import job \"{name}\"",
-
       "setting_changed": "Changed setting \"{name}\"",
-
       "sign_in": "Sign in",
       "sign_up": "Sign up",
       "sign_out": "Sign out",
@@ -2505,7 +2279,7 @@
   },
   "calendar": {
     "title": "Calendar",
-    "description": "Manage your events, bookings, and availability",
+    "description": "Description",
     "today": "Today",
     "newEvent": "New Event",
     "selectCalendar": "Select Calendar",
@@ -2528,7 +2302,6 @@
     "videoConference": "Video Conference",
     "selectProvider": "Select provider",
     "meetingLink": "Meeting link",
-    "description": "Description",
     "descriptionPlaceholder": "Add description",
     "attendees": "Attendees",
     "attendeeEmailPlaceholder": "Add attendee email",

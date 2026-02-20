@@ -11,9 +11,9 @@ import {
   templateLocales,
   templateMedia,
 } from '@database/schema';
+import { AiChatbotService } from '@modules/ai-chatbot/services/ai-chatbot.service';
+import { RateLimiterService } from '@modules/ai-chatbot/services/rate-limiter.service';
 import { MessageMemoryIntegration } from '@modules/ai-memory/services/message-memory-integration.service';
-import { RateLimiterService } from '@modules/workflow/services/rate-limiter.service';
-import { WorkflowEngineService } from '@modules/workflow/services/workflow-engine/workflow-engine.service';
 import {
   BadRequestException,
   ForbiddenException,
@@ -94,7 +94,7 @@ export class WhatsAppService implements OnModuleInit {
   private readonly metaAppSecret: string | undefined;
   private readonly wabaId: string | undefined;
 
-  private workflowEngine: WorkflowEngineService;
+  private aiChatbot: AiChatbotService;
   private templatesService: TemplatesService;
   private providerFactory: MessagingProviderFactory;
   private variableResolutionService: VariableResolutionService;
@@ -135,12 +135,12 @@ export class WhatsAppService implements OnModuleInit {
 
   async onModuleInit() {
     try {
-      this.workflowEngine = await this.moduleRef.get(WorkflowEngineService, {
+      this.aiChatbot = await this.moduleRef.get(AiChatbotService, {
         strict: false,
       });
     } catch (error) {
       this.logger.warn(
-        'Failed to resolve WorkflowEngineService lazily - this is expected in some test environments',
+        'Failed to resolve AiChatbotService lazily - this is expected in some test environments',
       );
     }
 
@@ -2816,8 +2816,7 @@ export class WhatsAppService implements OnModuleInit {
             this.logger.log(
               `[Interactive] Button reply: id=${buttonReply?.id}, title=${buttonReply?.title}`,
             );
-            // Store button context in metadata for workflow processing
-            // The workflow engine will use this to trigger appropriate actions
+            // Store button context in metadata for AI processing
             mediaMetadata = {
               type: 'interactive_response',
               mimeType: 'application/json',
@@ -2836,7 +2835,7 @@ export class WhatsAppService implements OnModuleInit {
             this.logger.log(
               `[Interactive] List reply: id=${listReply?.id}, title=${listReply?.title}, description=${listReply?.description}`,
             );
-            // Store list context in metadata for workflow processing
+            // Store list context in metadata for AI processing
             mediaMetadata = {
               type: 'interactive_response',
               mimeType: 'application/json',
@@ -3090,13 +3089,11 @@ export class WhatsAppService implements OnModuleInit {
         });
       }
 
-      // === WORKFLOW ENGINE INTEGRATION ===
-      // Trigger AI agent / automation rules for inbound customer messages
+      // === AI CHATBOT INTEGRATION ===
+      // Trigger AI agent for inbound customer messages
       if (chat.userId && senderId) {
         try {
-          this.logger.log(
-            `[Workflow] Processing inbound message for chat ${chatId}`,
-          );
+          this.logger.log(`[AI] Processing inbound message for chat ${chatId}`);
 
           // Extract interactive response data if this was a button/list click
           let interactiveResponse:
@@ -3133,16 +3130,16 @@ export class WhatsAppService implements OnModuleInit {
                 };
               }
               this.logger.log(
-                `[Workflow] Interactive response detected: ${JSON.stringify(interactiveResponse)}`,
+                `[AI] Interactive response detected: ${JSON.stringify(interactiveResponse)}`,
               );
             } catch (e) {
               this.logger.warn(
-                `[Workflow] Failed to parse interactive response data: ${e}`,
+                `[AI] Failed to parse interactive response data: ${e}`,
               );
             }
           }
 
-          const workflowResult = await this.workflowEngine.processMessage({
+          const aiResult = await this.aiChatbot.processMessage({
             chatId,
             messageId,
             messageContent: textContent,
@@ -3152,484 +3149,54 @@ export class WhatsAppService implements OnModuleInit {
             interactiveResponse,
           });
 
-          if (workflowResult.success) {
-            this.logger.debug(
-              `[Workflow] Message processed. Classification: ${JSON.stringify(workflowResult.classification)}`,
-            );
+          if (aiResult.success) {
+            this.logger.debug(`[AI] Message processed for chat ${chatId}`);
 
             // Check if AI generated a response that should be sent
             if (
-              workflowResult.aiResponse?.shouldSend &&
-              workflowResult.aiResponse.content
+              aiResult.aiResponse?.shouldSend &&
+              aiResult.aiResponse.content
             ) {
               this.logger.log(
-                `[Workflow] AI response to send: "${workflowResult.aiResponse.content.substring(0, 50)}..."`,
+                `[AI] Response to send: "${aiResult.aiResponse.content.substring(0, 50)}..."`,
               );
 
-              // Send the AI response via WhatsApp
               try {
-                // Use the sender's phoneNumberId for the Cloud API call
                 if (!sender?.phoneNumberId) {
                   throw new Error(
                     `Sender ${senderId} does not have a phoneNumberId configured`,
                   );
                 }
 
-                // **RATE LIMIT TRACKING: Record AI message BEFORE sending**
-                // This ensures the rate_limit_tracking table is populated
-                if (chat.userId) {
-                  await this.rateLimiter.recordMessage(chat.userId, chatId, {
-                    isAiMessage: true,
-                    senderId,
-                  });
-                  this.logger.debug(
-                    `[RateLimit] Recorded AI message for chat ${chatId}`,
-                  );
-                }
-
-                // Check if we have a media attachment to send
-                const mediaAttachment =
-                  workflowResult.aiResponse.mediaAttachment;
-
-                if (mediaAttachment) {
-                  // Send media with the text as caption or as a separate message
-                  this.logger.log(
-                    `[Workflow] Sending media attachment: ${mediaAttachment.fileName} (${mediaAttachment.mediaType})`,
-                  );
-
-                  // Upload media to WhatsApp servers first to get a media_id
-                  // This is more reliable than using presigned URLs
-                  const whatsappMediaId = await this.uploadMediaToWhatsApp(
-                    mediaAttachment.s3Key,
-                    mediaAttachment.mimeType,
-                    sender.phoneNumberId,
-                  );
-
-                  // Prepare text response (sent first if media doesn't support caption)
-                  const aiResponseText = workflowResult.aiResponse.content;
-
-                  // For documents/videos/images, we can include caption with the media
-                  const mediaSupportsCaption = [
-                    'image',
-                    'video',
-                    'document',
-                  ].includes(mediaAttachment.mediaType);
-
-                  // WhatsApp caption limits:
-                  // - Images: 1024 characters
-                  // - Videos: 1024 characters
-                  // - Documents: 1024 characters (filename is separate)
-                  const MAX_CAPTION_LENGTH = 1024;
-
-                  // Determine caption: use AI response text or media's built-in caption
-                  // Truncate if needed to stay within WhatsApp's limits
-                  let caption: string | undefined;
-                  let textToSendSeparately: string | undefined;
-
-                  if (mediaSupportsCaption && aiResponseText) {
-                    if (aiResponseText.length <= MAX_CAPTION_LENGTH) {
-                      caption = aiResponseText;
-                    } else {
-                      // Caption too long - send text separately, media without caption
-                      this.logger.warn(
-                        `[Workflow] AI response (${aiResponseText.length} chars) exceeds caption limit (${MAX_CAPTION_LENGTH}). Sending text separately.`,
-                      );
-                      textToSendSeparately = aiResponseText;
-                      caption = undefined; // Don't include caption with media
-                    }
-                  }
-
-                  // Send text first if media doesn't support caption OR if caption was too long
-                  if (
-                    textToSendSeparately ||
-                    (!mediaSupportsCaption && aiResponseText)
-                  ) {
-                    const textToSend = textToSendSeparately || aiResponseText;
-                    const textMessage = {
-                      messaging_product: 'whatsapp' as const,
-                      to: senderPhone,
-                      type: 'text' as const,
-                      text: {
-                        preview_url: true,
-                        body: textToSend,
-                      },
-                    };
-
-                    const textResponse = await this.sendCloudAPIMessage(
-                      textMessage,
-                      sender.phoneNumberId,
-                    );
-
-                    const textMessageId = textResponse.messages?.[0]?.id;
-                    if (textMessageId) {
-                      // Store text message
-                      await this.storeOutboundMessage({
-                        waMessageId: textMessageId,
-                        chatId,
-                        from: businessPhone,
-                        to: senderPhone,
-                        body: textToSend,
-                        userId: chat.userId ?? undefined,
-                        senderId,
-                        isAiGenerated: true,
-                      });
-                    }
-                  }
-
-                  // Construct media message using WhatsApp media_id (not URL)
-                  const mediaPayload: any = {
-                    id: whatsappMediaId, // Use uploaded media ID instead of link
-                  };
-
-                  if (caption) {
-                    mediaPayload.caption = caption;
-                  }
-
-                  if (mediaAttachment.mediaType === 'document') {
-                    mediaPayload.filename = mediaAttachment.fileName;
-                  }
-
-                  const mediaMessage = {
-                    messaging_product: 'whatsapp' as const,
-                    to: senderPhone,
-                    type: mediaAttachment.mediaType,
-                    [mediaAttachment.mediaType]: mediaPayload,
-                  };
-
-                  // Debug: Log the exact message being sent
-                  this.logger.debug(
-                    `[Media Message] Sending to WhatsApp: ${JSON.stringify(mediaMessage, null, 2)}`,
-                  );
-
-                  const mediaResponse = await this.sendCloudAPIMessage(
-                    mediaMessage,
-                    sender.phoneNumberId,
-                  );
-
-                  const mediaMessageId = mediaResponse.messages?.[0]?.id;
-                  if (!mediaMessageId) {
-                    throw new Error(
-                      'No message ID returned from Cloud API for media',
-                    );
-                  }
-
-                  this.logger.log(
-                    `[Workflow] AI media response sent successfully to ${senderPhone} with ID: ${mediaMessageId}`,
-                  );
-
-                  // Build a proper AttachmentMetadata object that includes all required fields
-                  // This ensures the frontend can display and stream the media correctly
-                  const attachmentData = {
-                    id: mediaAttachment.mediaId,
-                    type: mediaAttachment.mediaType,
-                    fileName: mediaAttachment.fileName,
-                    mimeType: mediaAttachment.mimeType,
-                    s3Key: mediaAttachment.s3Key, // Required for media streaming
-                    size: 0, // KB media doesn't track size, but field is required
-                    uploadedAt: new Date().toISOString(),
-                    status: 'success' as const,
-                  };
-
-                  // Store the media message in the database
-                  await this.storeOutboundMessage({
-                    waMessageId: mediaMessageId,
-                    chatId,
-                    from: businessPhone,
-                    to: senderPhone,
-                    body: caption || '',
-                    attachments: [attachmentData],
-                    userId: chat.userId ?? undefined,
-                    senderId,
-                    isAiGenerated: true,
-                  });
-
-                  // Update chat with last message preview
-                  await this.updateChatLastMessage(
-                    chatId,
-                    caption || `[${mediaAttachment.mediaType}]`,
-                    mediaAttachment.mediaType,
-                  );
-
-                  // Emit message via WebSocket for real-time UI update
-                  if (whatsAppGatewayInstance) {
-                    whatsAppGatewayInstance.emitMessage({
-                      messageId: mediaMessageId,
-                      chatId,
-                      sender: businessPhone,
-                      text: caption || '',
-                      type: mediaAttachment.mediaType,
-                      timestamp: new Date(),
-                      direction: 'outbound',
-                      status: 'sent',
-                      attachments: [attachmentData],
-                    });
-                  }
-
-                  // STEP: Send interactive CTA buttons AFTER media message
-                  // WhatsApp allows sending interactive buttons after a media message
-                  // This provides the user with follow-up actions
-                  const interactiveData =
-                    workflowResult.aiResponse.interactiveData;
-
-                  if (
-                    interactiveData?.enabled &&
-                    interactiveData.buttons &&
-                    interactiveData.buttons.length > 0
-                  ) {
-                    this.logger.log(
-                      `[Workflow] Sending CTA buttons after media: ${interactiveData.buttons.map((b) => b.title).join(', ')}`,
-                    );
-
-                    try {
-                      const interactiveResult =
-                        await this.sendInteractiveButtons(
-                          senderId,
-                          senderPhone,
-                          'What would you like to do next?', // Simple followup text
-                          interactiveData.buttons,
-                          interactiveData.footerText,
-                          undefined, // headerText
-                          { isAiGenerated: true },
-                        );
-
-                      if (!interactiveResult.success) {
-                        this.logger.warn(
-                          `[Workflow] CTA buttons after media failed (${interactiveResult.error}). This is non-critical.`,
-                        );
-                        // Don't throw - CTA failure shouldn't block the media from being sent
-                      } else {
-                        this.logger.log(
-                          `[Workflow] CTA buttons sent successfully after media`,
-                        );
-                      }
-                    } catch (ctaError) {
-                      this.logger.warn(
-                        `[Workflow] Error sending CTA buttons after media: ${ctaError.message}. Continuing.`,
-                      );
-                      // Non-critical error - media was already sent successfully
-                    }
-                  }
-                } else {
-                  // No media - check if we should send interactive buttons or plain text
-                  const interactiveData =
-                    workflowResult.aiResponse.interactiveData;
-
-                  if (
-                    interactiveData?.enabled &&
-                    interactiveData.buttons &&
-                    interactiveData.buttons.length > 0
-                  ) {
-                    // Send interactive button message with CTAs
-                    this.logger.log(
-                      `[Workflow] Sending AI response WITH interactive CTAs: ${interactiveData.buttons.map((b) => b.title).join(', ')}`,
-                    );
-
-                    const interactiveResult = await this.sendInteractiveButtons(
-                      senderId,
-                      senderPhone,
-                      workflowResult.aiResponse.content,
-                      interactiveData.buttons,
-                      interactiveData.footerText,
-                      undefined, // headerText
-                      { isAiGenerated: true },
-                    );
-
-                    if (!interactiveResult.success) {
-                      // If interactive message fails (e.g., outside window), fall back to plain text
-                      this.logger.warn(
-                        `[Workflow] Interactive message failed (${interactiveResult.error}), falling back to plain text`,
-                      );
-
-                      // Send as plain text
-                      const aiMessage = {
-                        messaging_product: 'whatsapp' as const,
-                        to: senderPhone,
-                        type: 'text' as const,
-                        text: {
-                          preview_url: true,
-                          body: workflowResult.aiResponse.content,
-                        },
-                      };
-
-                      const response = await this.sendCloudAPIMessage(
-                        aiMessage,
-                        sender.phoneNumberId,
-                      );
-
-                      const aiMessageId = response.messages?.[0]?.id;
-                      if (!aiMessageId) {
-                        throw new Error(
-                          'No message ID returned from Cloud API',
-                        );
-                      }
-
-                      this.logger.log(
-                        `[Workflow] AI response sent (plain text fallback) to ${senderPhone} with ID: ${aiMessageId}`,
-                      );
-
-                      await this.storeOutboundMessage({
-                        waMessageId: aiMessageId,
-                        chatId,
-                        from: businessPhone,
-                        to: senderPhone,
-                        body: workflowResult.aiResponse.content,
-                        userId: chat.userId ?? undefined,
-                        senderId,
-                        isAiGenerated: true,
-                      });
-
-                      await this.updateChatLastMessage(
-                        chatId,
-                        workflowResult.aiResponse.content,
-                        'text',
-                      );
-
-                      if (whatsAppGatewayInstance) {
-                        whatsAppGatewayInstance.emitMessage({
-                          messageId: aiMessageId,
-                          chatId,
-                          sender: businessPhone,
-                          text: workflowResult.aiResponse.content,
-                          type: 'text',
-                          timestamp: new Date(),
-                          direction: 'outbound',
-                          status: 'sent',
-                          isAiGenerated: true,
-                        });
-                      }
-                    } else {
-                      // Interactive message sent successfully
-                      this.logger.log(
-                        `[Workflow] AI response with CTAs sent successfully to ${senderPhone} with ID: ${interactiveResult.waMessageId}`,
-                      );
-
-                      // Update chat with last message preview
-                      await this.updateChatLastMessage(
-                        chatId,
-                        workflowResult.aiResponse.content,
-                        'interactive',
-                      );
-
-                      // Emit message via WebSocket for real-time UI update
-                      if (
-                        whatsAppGatewayInstance &&
-                        interactiveResult.waMessageId
-                      ) {
-                        whatsAppGatewayInstance.emitMessage({
-                          messageId: interactiveResult.waMessageId,
-                          chatId,
-                          sender: businessPhone,
-                          text: workflowResult.aiResponse.content,
-                          type: 'interactive',
-                          timestamp: new Date(),
-                          direction: 'outbound',
-                          status: 'sent',
-                          isAiGenerated: true,
-                          metadata: {
-                            interactiveType: 'button',
-                            interactiveData: {
-                              buttons: interactiveData.buttons,
-                              footerText: interactiveData.footerText,
-                            },
-                          },
-                        });
-                      }
-                    }
-                  } else {
-                    // Send plain text response (no interactive CTAs)
-                    const aiMessage = {
-                      messaging_product: 'whatsapp' as const,
-                      to: senderPhone,
-                      type: 'text' as const,
-                      text: {
-                        preview_url: true,
-                        body: workflowResult.aiResponse.content,
-                      },
-                    };
-
-                    // Send message and capture response with WhatsApp message ID
-                    const response = await this.sendCloudAPIMessage(
-                      aiMessage,
-                      sender.phoneNumberId,
-                    );
-
-                    // Extract the WhatsApp message ID from response
-                    const aiMessageId = response.messages?.[0]?.id;
-                    if (!aiMessageId) {
-                      throw new Error('No message ID returned from Cloud API');
-                    }
-
-                    this.logger.log(
-                      `[Workflow] AI response sent successfully to ${senderPhone} with ID: ${aiMessageId}`,
-                    );
-
-                    // Store the AI message in the database
-                    await this.storeOutboundMessage({
-                      waMessageId: aiMessageId,
-                      chatId,
-                      from: businessPhone,
-                      to: senderPhone,
-                      body: workflowResult.aiResponse.content,
-                      userId: chat.userId ?? undefined,
-                      senderId,
-                      isAiGenerated: true,
-                    });
-
-                    // Update chat with last message preview
-                    await this.updateChatLastMessage(
-                      chatId,
-                      workflowResult.aiResponse.content,
-                      'text',
-                    );
-
-                    // Emit message via WebSocket for real-time UI update
-                    if (whatsAppGatewayInstance) {
-                      whatsAppGatewayInstance.emitMessage({
-                        messageId: aiMessageId,
-                        chatId,
-                        sender: businessPhone,
-                        text: workflowResult.aiResponse.content,
-                        type: 'text',
-                        timestamp: new Date(),
-                        direction: 'outbound',
-                        status: 'sent',
-                        isAiGenerated: true,
-                      });
-                    }
-                  }
-                }
+                await this.dispatchAiResponse(
+                  chatId,
+                  senderPhone,
+                  businessPhone,
+                  sender.phoneNumberId,
+                  aiResult.aiResponse,
+                  chat.userId ?? undefined,
+                  senderId,
+                  sender,
+                );
               } catch (sendError) {
                 this.logger.error(
-                  `[Workflow] Failed to send AI response: ${sendError}`,
+                  `[AI] Failed to send AI response: ${sendError}`,
                 );
               } finally {
-                // Always emit typing stop after AI response processing completes
-                // This ensures the typing indicator is cleared regardless of success/failure
                 if (whatsAppGatewayInstance) {
                   whatsAppGatewayInstance.emitAITypingStop(chatId);
                 }
               }
             }
 
-            // Log if handoff was requested
-            if (workflowResult.handoffRequested) {
-              this.logger.log(
-                `[Workflow] Handoff requested for chat ${chatId}`,
-              );
+            if (aiResult.handoffRequested) {
+              this.logger.log(`[AI] Handoff requested for chat ${chatId}`);
             }
 
-            // Log stage transition
-            if (workflowResult.stageTransition) {
-              this.logger.log(
-                `[Workflow] Stage transition: ${workflowResult.stageTransition.from?.name || 'unassigned'} â†’ ${workflowResult.stageTransition.to.name}`,
-              );
-            }
-
-            // Emit typing stop if AI didn't send a response (handled in finally block above when sending)
-            // This covers cases where AI decided not to respond (low confidence, handoff, disabled, etc.)
+            // Emit typing stop if AI didn't send a response
             if (
-              !workflowResult.aiResponse?.shouldSend ||
-              !workflowResult.aiResponse?.content
+              !aiResult.aiResponse?.shouldSend ||
+              !aiResult.aiResponse?.content
             ) {
               if (whatsAppGatewayInstance) {
                 whatsAppGatewayInstance.emitAITypingStop(chatId);
@@ -3637,26 +3204,21 @@ export class WhatsAppService implements OnModuleInit {
             }
           } else {
             this.logger.warn(
-              `[Workflow] Message processing failed: ${workflowResult.error}`,
+              `[AI] Message processing failed: ${aiResult.error}`,
             );
-            // Emit typing stop on workflow failure
             if (whatsAppGatewayInstance) {
               whatsAppGatewayInstance.emitAITypingStop(chatId);
             }
           }
-        } catch (workflowError) {
-          // Don't fail the entire message processing if workflow fails
-          this.logger.error(
-            `[Workflow] Error processing message through workflow: ${workflowError}`,
-          );
-          // Emit typing stop on workflow error
+        } catch (aiError) {
+          this.logger.error(`[AI] Error processing message: ${aiError}`);
           if (whatsAppGatewayInstance) {
             whatsAppGatewayInstance.emitAITypingStop(chatId);
           }
         }
       } else {
         this.logger.debug(
-          `[Workflow] Skipping workflow processing - no userId (${chat.userId}) or senderId (${senderId})`,
+          `[AI] Skipping AI processing - no userId (${chat.userId}) or senderId (${senderId})`,
         );
       }
     } catch (error) {
@@ -3674,18 +3236,13 @@ export class WhatsAppService implements OnModuleInit {
    *
    * @param chatId - The chat ID to generate response for
    * @param userId - The user ID (owner of the chat)
-   * @param skipWorkflowExecution - If true, skip visual workflow execution step.
-   *   Use this when workflow has already been executed (e.g., via resumeWorkflowFromNode).
    */
   async triggerAiResponseForResume(
     chatId: string,
     userId: number,
-    skipWorkflowExecution = false,
   ): Promise<void> {
     try {
-      this.logger.log(
-        `[Resume AI] Triggering AI response for chat ${chatId} (skipWorkflow: ${skipWorkflowExecution})`,
-      );
+      this.logger.log(`[Resume AI] Triggering AI response for chat ${chatId}`);
 
       // 1. Get Chat details
       const chat = await db.query.chats.findFirst({
@@ -3722,26 +3279,25 @@ export class WhatsAppService implements OnModuleInit {
         return;
       }
 
-      // 4. Call Workflow Engine
+      // 4. Call AI Chatbot
       this.logger.log(
         `[Resume AI] Processing message ${lastMessage.messageId} for AI response...`,
       );
 
-      const workflowResult = await this.workflowEngine.processMessage({
+      const aiResult = await this.aiChatbot.processMessage({
         chatId,
         messageId: lastMessage.messageId,
-        messageContent: lastMessage.text || '', // Handle text-less messages?
+        messageContent: lastMessage.text || '',
         senderId: chat.senderId,
         userId,
         isFromCustomer: true,
-        skipWorkflowExecution, // Skip if workflow already executed via resume modal
       });
 
       // 5. Dispatch Response
       if (
-        workflowResult.success &&
-        workflowResult.aiResponse?.shouldSend &&
-        workflowResult.aiResponse.content
+        aiResult.success &&
+        aiResult.aiResponse?.shouldSend &&
+        aiResult.aiResponse.content
       ) {
         this.logger.log(`[Resume AI] Response generated. Dispatching...`);
         await this.dispatchAiResponse(
@@ -3749,7 +3305,7 @@ export class WhatsAppService implements OnModuleInit {
           lastMessage.sender, // recipient phone (customer)
           chat.businessPhone,
           sender.phoneNumberId,
-          workflowResult.aiResponse,
+          aiResult.aiResponse,
           userId,
           chat.senderId,
           sender,
@@ -3801,7 +3357,7 @@ export class WhatsAppService implements OnModuleInit {
     if (mediaAttachment) {
       // Send media with the text as caption or as a separate message
       this.logger.log(
-        `[Workflow] Sending media attachment: ${mediaAttachment.fileName} (${mediaAttachment.mediaType})`,
+        `[AI] Sending media attachment: ${mediaAttachment.fileName} (${mediaAttachment.mediaType})`,
       );
 
       // Upload media to WhatsApp servers first to get a media_id
@@ -3837,7 +3393,7 @@ export class WhatsAppService implements OnModuleInit {
         } else {
           // Caption too long - send text separately, media without caption
           this.logger.warn(
-            `[Workflow] AI response (${aiResponseText.length} chars) exceeds caption limit (${MAX_CAPTION_LENGTH}). Sending text separately.`,
+            `[AI] AI response (${aiResponseText.length} chars) exceeds caption limit (${MAX_CAPTION_LENGTH}). Sending text separately.`,
           );
           textToSendSeparately = aiResponseText;
           caption = undefined; // Don't include caption with media
@@ -3914,7 +3470,7 @@ export class WhatsAppService implements OnModuleInit {
       }
 
       this.logger.log(
-        `[Workflow] AI media response sent successfully to ${recipientPhone} with ID: ${mediaMessageId}`,
+        `[AI] AI media response sent successfully to ${recipientPhone} with ID: ${mediaMessageId}`,
       );
 
       // Build a proper AttachmentMetadata object that includes all required fields
@@ -3974,7 +3530,7 @@ export class WhatsAppService implements OnModuleInit {
         interactiveData.buttons.length > 0
       ) {
         this.logger.log(
-          `[Workflow] Sending CTA buttons after media: ${interactiveData.buttons.map((b: any) => b.title).join(', ')}`,
+          `[AI] Sending CTA buttons after media: ${interactiveData.buttons.map((b: any) => b.title).join(', ')}`,
         );
 
         try {
@@ -3990,16 +3546,14 @@ export class WhatsAppService implements OnModuleInit {
 
           if (!interactiveResult.success) {
             this.logger.warn(
-              `[Workflow] CTA buttons after media failed (${interactiveResult.error}). This is non-critical.`,
+              `[AI] CTA buttons after media failed (${interactiveResult.error}). This is non-critical.`,
             );
           } else {
-            this.logger.log(
-              `[Workflow] CTA buttons sent successfully after media`,
-            );
+            this.logger.log(`[AI] CTA buttons sent successfully after media`);
           }
         } catch (ctaError) {
           this.logger.warn(
-            `[Workflow] Error sending CTA buttons after media: ${ctaError.message}. Continuing.`,
+            `[AI] Error sending CTA buttons after media: ${ctaError.message}. Continuing.`,
           );
         }
       }
@@ -4014,7 +3568,7 @@ export class WhatsAppService implements OnModuleInit {
       ) {
         // Send interactive button message with CTAs
         this.logger.log(
-          `[Workflow] Sending AI response WITH interactive CTAs: ${interactiveData.buttons.map((b: any) => b.title).join(', ')}`,
+          `[AI] Sending AI response WITH interactive CTAs: ${interactiveData.buttons.map((b: any) => b.title).join(', ')}`,
         );
 
         const interactiveResult = await this.sendInteractiveButtons(
@@ -4030,7 +3584,7 @@ export class WhatsAppService implements OnModuleInit {
         if (!interactiveResult.success) {
           // If interactive message fails (e.g., outside window), fall back to plain text
           this.logger.warn(
-            `[Workflow] Interactive message failed (${interactiveResult.error}), falling back to plain text`,
+            `[AI] Interactive message failed (${interactiveResult.error}), falling back to plain text`,
           );
 
           // Send as plain text
@@ -4055,7 +3609,7 @@ export class WhatsAppService implements OnModuleInit {
           }
 
           this.logger.log(
-            `[Workflow] AI response sent (plain text fallback) to ${recipientPhone} with ID: ${aiMessageId}`,
+            `[AI] AI response sent (plain text fallback) to ${recipientPhone} with ID: ${aiMessageId}`,
           );
 
           await this.storeOutboundMessage({
@@ -4086,7 +3640,7 @@ export class WhatsAppService implements OnModuleInit {
         } else {
           // Interactive message sent successfully
           this.logger.log(
-            `[Workflow] AI response with CTAs sent successfully to ${recipientPhone} with ID: ${interactiveResult.waMessageId}`,
+            `[AI] AI response with CTAs sent successfully to ${recipientPhone} with ID: ${interactiveResult.waMessageId}`,
           );
 
           // Update chat with last message preview
@@ -4135,7 +3689,7 @@ export class WhatsAppService implements OnModuleInit {
         }
 
         this.logger.log(
-          `[Workflow] AI response sent successfully to ${recipientPhone} with ID: ${aiMessageId}`,
+          `[AI] AI response sent successfully to ${recipientPhone} with ID: ${aiMessageId}`,
         );
 
         await this.storeOutboundMessage({
@@ -5140,22 +4694,7 @@ export class WhatsAppService implements OnModuleInit {
           `Chat created: ${chatId} for sender ${senderId} with participant name: ${participantName}, teamId: ${teamId}`,
         );
 
-        // Initialize workflow for the new chat - assigns to first/default stage
-        // This ensures the chat appears in the Kanban board
-        if (this.workflowEngine && sender?.userId) {
-          try {
-            await this.workflowEngine.initializeChatWorkflow(
-              chatId,
-              sender.userId,
-            );
-            this.logger.log(`Workflow initialized for new chat: ${chatId}`);
-          } catch (workflowError) {
-            // Log but don't fail - workflow initialization is not critical for message delivery
-            this.logger.warn(
-              `Failed to initialize workflow for chat ${chatId}: ${(workflowError as Error).message}`,
-            );
-          }
-        }
+        // Stage assignment happens via StageService if needed
 
         return { chat: newChat, isNewChat: true };
       }

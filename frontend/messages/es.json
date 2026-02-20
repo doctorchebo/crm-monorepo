@@ -47,7 +47,6 @@
     "senders": "Remitentes",
     "connectWhatsapp": "Conectar WhatsApp",
     "kanban": "Kanban",
-    "workflows": "Flujos de Trabajo",
     "knowledgeBase": "Base de Conocimiento",
     "overview": "Resumen",
     "objects": "Objetos",
@@ -60,7 +59,6 @@
     "settings": "Configuración",
     "settingsAi": "IA",
     "settingsChats": "Chats",
-    "settingsWorkflow": "Flujo de Trabajo",
     "calendar": "Calendario",
     "calendarOverview": "Vista General",
     "bookingLinks": "Enlaces de Reserva",
@@ -581,7 +579,7 @@
     "closed": "Cerrado",
     "editModeInstructions": "Modo Edición: Renombra etapas, arrastra para reordenar, elimina, crea nuevas etapas con botones +, o haz clic en insignias para establecer la predeterminada. Mínimo {minStages} etapas requeridas.",
     "createStage": "Crear Etapa",
-    "createStageDescription": "Agrega una nueva etapa a tu flujo de trabajo.",
+    "createStageDescription": "Agrega una nueva etapa a tu pipeline.",
     "stageName": "Nombre de la Etapa",
     "stageNamePlaceholder": "ej., Cliente Calificado",
     "stageDescription": "Descripción",
@@ -625,7 +623,7 @@
     "statHandoffsPending": "Transferencias Pendientes",
     "statAiPaused": "IA Pausada",
     "noStagesTitle": "No se Encontraron Etapas",
-    "noStagesDescription": "Comienza creando las etapas predeterminadas para tu flujo de trabajo.",
+    "noStagesDescription": "Comienza creando las etapas predeterminadas para tu pipeline.",
     "initializeDefaults": "Inicializar Etapas Predeterminadas",
     "loadFailed": "Error al cargar las etapas. Por favor, intenta de nuevo.",
     "chatMoved": "Chat movido exitosamente a {stageName}",
@@ -1812,7 +1810,7 @@
   },
   "settingsAi": {
     "title": "Configuración de IA",
-    "description": "Configura el comportamiento predeterminado de la IA. Estos ajustes pueden ser sobrescritos por chat o etapa del flujo de trabajo.",
+    "description": "Configura el comportamiento predeterminado de la IA. Estos ajustes pueden ser sobrescritos por chat.",
     "defaultsTitle": "Comportamiento de IA Predeterminado",
     "defaultsDescription": "Configura cómo se comporta la IA para nuevos chats por defecto.",
     "defaultsCategory": "IA para Nuevos Chats",
@@ -1899,219 +1897,6 @@
     "qualityHigh": "Alta Calidad",
     "qualityMedium": "Calidad Media",
     "qualityLow": "Baja Calidad"
-  },
-  "workflows": {
-    "title": "Flujos de Trabajo",
-    "description": "Construye flujos de trabajo automatizados con un lienzo visual",
-    "totalWorkflows": "{count, plural, =0 {Sin flujos de trabajo} one {# flujo de trabajo} other {# flujos de trabajo}}",
-    "newWorkflowName": "Nuevo Flujo de Trabajo",
-    "noDescription": "Sin descripción",
-    "searchPlaceholder": "Buscar flujos de trabajo...",
-    "updatedAt": "Actualizado {date}",
-    "selectedCount": "{count} seleccionados",
-    "selectAll": "Seleccionar todos",
-    "bulkDeleteTitle": "Eliminar Flujos de Trabajo",
-    "bulkDeleteDescription": "¿Estás seguro de que deseas eliminar {count} flujos de trabajo? Esta acción no se puede deshacer.",
-    "bulkDeleteSuccess": "{count} flujos de trabajo eliminados exitosamente",
-    "pagination": {
-      "page": "Página {current} de {total}",
-      "previous": "Anterior",
-      "next": "Siguiente",
-      "first": "Primera",
-      "last": "Última",
-      "rowsPerPage": "Por página"
-    },
-    "status": {
-      "draft": "Borrador",
-      "published": "Publicado",
-      "active": "Activo",
-      "archived": "Archivado",
-      "disabled": "Deshabilitado"
-    },
-    "filters": {
-      "all": "Todos",
-      "draft": "Borradores",
-      "published": "Publicados",
-      "archived": "Archivados"
-    },
-    "actions": {
-      "create": "Crear Flujo",
-      "edit": "Editar",
-      "duplicate": "Duplicar",
-      "archive": "Archivar",
-      "unarchive": "Desarchivar",
-      "delete": "Eliminar",
-      "import": "Importar"
-    },
-    "emptyState": {
-      "title": "Aún no hay flujos de trabajo",
-      "description": "Crea tu primer flujo de trabajo para automatizar las interacciones con clientes"
-    },
-    "notifications": {
-      "duplicated": "Flujo duplicado",
-      "duplicatedMessage": "Copia creada: {name}",
-      "deleted": "Flujo eliminado",
-      "deletedMessage": "El flujo de trabajo ha sido eliminado permanentemente",
-      "archived": "Flujo archivado",
-      "unarchived": "Flujo desarchivado"
-    },
-    "errors": {
-      "loadFailed": "Error al cargar flujos de trabajo",
-      "createFailed": "Error al crear flujo de trabajo",
-      "duplicateFailed": "Error al duplicar flujo de trabajo",
-      "deleteFailed": "Error al eliminar flujo de trabajo",
-      "archiveFailed": "Error al archivar flujo de trabajo"
-    },
-    "editor": {
-      "unsavedChanges": "Cambios sin guardar",
-      "status": {
-        "draft": "Borrador",
-        "published": "Publicado",
-        "active": "Activo",
-        "paused": "Pausado",
-        "archived": "Archivado",
-        "disabled": "Deshabilitado"
-      },
-      "actions": {
-        "save": "Guardar",
-        "publish": "Publicar",
-        "published": "Publicado",
-        "versionHistory": "Historial de Versiones",
-        "export": "Exportar",
-        "import": "Importar",
-        "settings": "Configuración"
-      },
-      "notifications": {
-        "saved": "Flujo guardado",
-        "published": "Flujo publicado",
-        "publishedMessage": "La versión {version} está activa"
-      },
-      "errors": {
-        "loadFailed": "Error al cargar flujo de trabajo",
-        "saveFailed": "Error al guardar flujo de trabajo",
-        "publishFailed": "Error al publicar flujo de trabajo"
-      },
-      "dialogs": {
-        "unsavedChanges": {
-          "title": "Cambios Sin Guardar",
-          "description": "Tienes cambios sin guardar que se perderán si sales de esta página. ¿Estás seguro de que deseas continuar?",
-          "leave": "Salir Sin Guardar",
-          "stay": "Permanecer en la Página"
-        }
-      },
-      "sidebar": {
-        "searchNodes": "Buscar nodos...",
-        "variables": "Variables",
-        "noVariables": "Sin variables definidas",
-        "workflowSettings": "Configuración del Flujo"
-      }
-    },
-    "versionHistory": {
-      "title": "Historial de Versiones",
-      "description": "Ver y restaurar versiones anteriores de este flujo de trabajo",
-      "versionLabel": "Versión {version}",
-      "current": "Actual",
-      "publishedBy": "Usuario #{userId}",
-      "nodesCount": "{count, plural, =0 {Sin nodos} =1 {1 nodo} other {# nodos}}",
-      "connectionsCount": "{count, plural, =0 {Sin conexiones} =1 {1 conexión} other {# conexiones}}",
-      "restore": "Restaurar",
-      "restoring": "Restaurando...",
-      "retry": "Reintentar",
-      "empty": {
-        "title": "Sin historial de versiones",
-        "description": "Publica tu flujo de trabajo para comenzar a rastrear versiones"
-      },
-      "errors": {
-        "loadFailed": "Error al cargar el historial de versiones",
-        "restoreFailed": "Error al restaurar la versión"
-      },
-      "notifications": {
-        "restored": "Flujo de trabajo restaurado",
-        "restoredMessage": "Restaurado a la versión {version}"
-      }
-    },
-    "templates": {
-      "title": "Plantillas de Flujos de Trabajo",
-      "description": "Comienza con una plantilla prediseñada para ahorrar tiempo",
-      "searchPlaceholder": "Buscar plantillas...",
-      "useTemplate": "Usar Plantilla",
-      "preview": "Vista Previa",
-      "featured": "Destacados",
-      "allCategories": "Todas las Categorías",
-      "noResults": "No se encontraron plantillas",
-      "noResultsDescription": "Intenta ajustar tu búsqueda o filtro",
-      "empty": {
-        "title": "No hay plantillas disponibles",
-        "description": "Vuelve más tarde para nuevas plantillas"
-      },
-      "errors": {
-        "loadFailed": "Error al cargar las plantillas",
-        "useFailed": "Error al crear flujo de trabajo desde la plantilla"
-      },
-      "notifications": {
-        "created": "Flujo de trabajo creado",
-        "createdMessage": "Creado desde la plantilla: {name}"
-      }
-    }
-  },
-  "workflow": {
-    "common": {
-      "loading": "Cargando...",
-      "select_workflow": "Seleccionar flujo de trabajo",
-      "search_workflows": "Buscar flujos de trabajo...",
-      "no_workflows_found": "No se encontraron flujos de trabajo",
-      "none": "Ninguno",
-      "active": "Activo",
-      "inactive": "Inactivo",
-      "draft": "Borrador"
-    },
-    "settings": {
-      "title": "Flujo de Trabajo Predeterminado",
-      "description": "Configura el flujo de trabajo predeterminado que se asignará automáticamente a los chats nuevos.",
-      "default_workflow_title": "Flujo de Trabajo Predeterminado del Equipo",
-      "default_workflow_description": "Selecciona el flujo de trabajo que se asignará a todos los chats nuevos.",
-      "default_workflow_label": "Flujo de trabajo",
-      "default_workflow_help": "Este flujo de trabajo se aplicará cuando se inicie un nuevo chat.",
-      "select_default_workflow": "Seleccionar un flujo de trabajo",
-      "save_changes": "Guardar Cambios",
-      "settings_saved": "Configuración guardada correctamente",
-      "settings_save_error": "Error al guardar la configuración"
-    },
-    "assignment": {
-      "title": "Asignar Flujo de Trabajo",
-      "description": "Selecciona un flujo de trabajo para asignar a este chat.",
-      "select_label": "Flujo de trabajo",
-      "select_placeholder": "Seleccionar un flujo de trabajo",
-      "warning_stop_workflow": "Advertencia: Asignar un nuevo flujo de trabajo detendrá el actual.",
-      "confirm_title": "Confirmar Asignación",
-      "confirm_reassign_message": "¿Estás seguro de que deseas reasignar el flujo de trabajo? El flujo de trabajo actual se detendrá.",
-      "confirm_stop_message": "¿Estás seguro de que deseas detener el flujo de trabajo actual?",
-      "confirm": "Confirmar",
-      "cancel": "Cancelar",
-      "save": "Guardar",
-      "success_assigned": "Flujo de trabajo asignado correctamente",
-      "error_assigning": "Error al asignar el flujo de trabajo",
-      "success_unassigned": "Flujo de trabajo desasignado correctamente",
-      "error_unassigning": "Error al desasignar el flujo de trabajo"
-    },
-    "visualization": {
-      "title": "Progreso del Flujo de Trabajo",
-      "viewProgress": "Ver Progreso",
-      "changeWorkflow": "Cambiar Flujo de Trabajo",
-      "assignWorkflow": "Asignar Flujo de Trabajo",
-      "noActiveWorkflow": "Sin Flujo de Trabajo Activo",
-      "noActiveWorkflowDescription": "Esta conversación no tiene un flujo de trabajo activo asignado. Asigna un flujo de trabajo para ver la ruta de ejecución aquí.",
-      "loadingWorkflow": "Cargando flujo de trabajo...",
-      "executionPath": "Ruta de Ejecución",
-      "steps": "{count} pasos",
-      "status": {
-        "running": "En Ejecución",
-        "waiting": "Esperando",
-        "completed": "Completado",
-        "failed": "Fallido",
-        "noWorkflow": "Sin Flujo de Trabajo"
-      }
-    }
   },
   "labels": {
     "selectLabels": "Seleccionar Etiquetas",
@@ -2318,7 +2103,6 @@
       "stage_deleted": "Etapa \"{name}\" eliminada",
       "stage_reordered": "Etapas del pipeline reordenadas",
       "stage_default_changed": "Etapa \"{name}\" establecida como predeterminada",
-
       "chat_transition_kanban": "Movido a {stageName} desde el tablero kanban",
       "chat_transition_pipeline": "Transición manual desde la vista del pipeline",
       "chat_transition_modal": "Asignación de etapa desde el modal",
@@ -2329,7 +2113,6 @@
       "chat_transition_workflow_init": "Flujo de trabajo inicializado",
       "chat_transition_bulk": "Transición masiva",
       "chat_transition_manual": "Transición manual",
-
       "handoff_requested": "Transferencia a humano solicitada",
       "handoff_resolved": "Transferencia resuelta",
       "ai_paused": "IA pausada",
@@ -2352,20 +2135,17 @@
       "lock_acquired": "Bloqueo de chat adquirido",
       "lock_released": "Bloqueo de chat liberado",
       "lock_force_released": "Bloqueo de chat forzado",
-
       "contact_created": "Contacto \"{name}\" creado",
       "contact_updated": "Contacto \"{name}\" actualizado",
       "contact_deleted": "Contacto \"{name}\" eliminado",
       "contacts_bulk_deleted": "{count} contactos eliminados en masa",
       "contacts_bulk_deleted_named": "{count} contactos eliminados: {names}",
       "contacts_bulk_deleted_named_more": "Contactos eliminados: {names} y {remaining} más",
-
       "template_created": "Plantilla \"{name}\" creada",
       "template_updated": "Plantilla \"{name}\" actualizada",
       "template_deleted": "Plantilla \"{name}\" eliminada",
       "template_submitted": "Plantilla \"{name}\" enviada para aprobación",
       "template_version_created": "Nueva versión creada para la plantilla \"{name}\"",
-
       "member_added": "\"{name}\" añadido al equipo",
       "member_removed": "\"{name}\" eliminado del equipo",
       "role_changed": "Rol cambiado para \"{name}\"",
@@ -2377,18 +2157,15 @@
       "custom_role_created": "Rol personalizado \"{name}\" creado",
       "custom_role_updated": "Rol personalizado \"{name}\" actualizado",
       "custom_role_deleted": "Rol personalizado \"{name}\" eliminado",
-
       "sender_created": "Remitente \"{name}\" creado",
       "sender_updated": "Remitente \"{name}\" actualizado",
       "sender_removed": "Remitente \"{name}\" eliminado",
       "sender_synced": "Remitentes sincronizados desde WhatsApp Business Account",
-
       "label_created": "Etiqueta \"{name}\" creada",
       "label_updated": "Etiqueta \"{name}\" actualizada",
       "label_deleted": "Etiqueta \"{name}\" eliminada",
       "labels_applied": "Etiquetas [{labels}] aplicadas a {count} chat(s)",
       "labels_removed": "Etiquetas [{labels}] eliminadas de {count} chat(s)",
-
       "kb_object_created": "Entrada de base de conocimiento \"{name}\" creada",
       "kb_object_updated": "Entrada de base de conocimiento \"{name}\" actualizada",
       "kb_object_deleted": "Entrada de base de conocimiento \"{name}\" eliminada",
@@ -2396,7 +2173,6 @@
       "kb_template_created": "Plantilla de base de conocimiento \"{name}\" creada",
       "kb_template_updated": "Plantilla de base de conocimiento \"{name}\" actualizada",
       "kb_template_deleted": "Plantilla de base de conocimiento \"{name}\" eliminada",
-
       "import_started": "Importación de contactos iniciada",
       "import_started_named": "Importación \"{name}\" iniciada",
       "import_completed": "Importación de contactos completada",
@@ -2404,9 +2180,7 @@
       "import_rolled_back": "Importación de contactos revertida",
       "import_deleted": "Importación eliminada",
       "import_deleted_named": "Importación \"{name}\" eliminada",
-
       "setting_changed": "Configuración \"{name}\" cambiada",
-
       "sign_in": "Inicio de sesión",
       "sign_up": "Registro",
       "sign_out": "Cierre de sesión",

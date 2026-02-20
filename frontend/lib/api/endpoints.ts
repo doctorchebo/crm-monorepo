@@ -2162,9 +2162,9 @@ export const backendApi = {
   },
 
   // ==========================================================================
-  // Workflow & AI Handoff
+  // AI Handoff & Status
   // ==========================================================================
-  workflow: {
+  aiHandoff: {
     // Handoff status
     getHandoffStatus: (
       chatId: string,
@@ -2178,7 +2178,7 @@ export const backendApi = {
       aiPausedBy?: number;
       currentStageId: string;
       currentStageName: string;
-    } | null> => apiClient.get(`/workflow/handoff/chat/${chatId}/status`),
+    } | null> => apiClient.get(`/ai/handoff/chat/${chatId}/status`),
 
     // AI status for a chat
     getAIStatus: (
@@ -2186,25 +2186,30 @@ export const backendApi = {
     ): Promise<{
       chatId: string;
       aiEnabled: boolean;
+      aiConfigEnabled: boolean;
       reason?: string;
-    }> => apiClient.get(`/workflow/ai/status/${chatId}`),
+      isRateLimited: boolean;
+      rateLimitReset?: string;
+      rateLimitCurrentCount?: number;
+      rateLimitMaxCount?: number;
+    }> => apiClient.get(`/ai/status/${chatId}`),
 
     // Pause AI for a chat
     pauseAI: (chatId: string): Promise<{ success: boolean; message: string }> =>
-      apiClient.post("/workflow/ai/pause", { chatId }),
+      apiClient.post("/ai/pause", { chatId }),
 
     // Resume AI for a chat
     resumeAI: (
       chatId: string,
     ): Promise<{ success: boolean; message: string }> =>
-      apiClient.post(`/workflow/ai/resume/${chatId}`),
+      apiClient.post(`/ai/resume/${chatId}`),
 
     // Request human handoff
     requestHandoff: (data: {
       chatId: string;
       reason: string;
     }): Promise<{ success: boolean; message: string }> =>
-      apiClient.post("/workflow/handoffs/request", data),
+      apiClient.post("/ai/handoffs/request", data),
 
     // Resolve handoff
     resolveHandoff: (data: {
@@ -2212,7 +2217,7 @@ export const backendApi = {
       resumeAI: boolean;
       resolution?: string;
     }): Promise<{ success: boolean; message: string }> =>
-      apiClient.post("/workflow/handoffs/resolve", data),
+      apiClient.post("/ai/handoffs/resolve", data),
 
     // Get pending handoffs
     getPendingHandoffs: (): Promise<
@@ -2223,7 +2228,7 @@ export const backendApi = {
         handoffRequestedAt: string | null;
         handoffReason: string | null;
       }>
-    > => apiClient.get("/workflow/handoffs/pending"),
+    > => apiClient.get("/ai/handoffs/pending"),
 
     // Handoff notifications
     getNotifications: (): Promise<
@@ -2239,23 +2244,22 @@ export const backendApi = {
         status: string;
         createdAt: string;
       }>
-    > => apiClient.get("/workflow/handoff/notifications"),
+    > => apiClient.get("/ai/handoff/notifications"),
 
     acknowledgeNotification: (
       notificationId: string,
     ): Promise<{ success: boolean }> =>
       apiClient.patch(
-        `/workflow/handoff/notifications/${notificationId}/acknowledge`,
+        `/ai/handoff/notifications/${notificationId}/acknowledge`,
       ),
 
     resolveNotification: (
       notificationId: string,
       resolution: string,
     ): Promise<{ success: boolean }> =>
-      apiClient.patch(
-        `/workflow/handoff/notifications/${notificationId}/resolve`,
-        { resolution },
-      ),
+      apiClient.patch(`/ai/handoff/notifications/${notificationId}/resolve`, {
+        resolution,
+      }),
   },
 
   // ==========================================================================
@@ -2286,7 +2290,7 @@ export const backendApi = {
       if (options?.period) params.append("period", options.period);
       if (options?.startDate) params.append("startDate", options.startDate);
       if (options?.endDate) params.append("endDate", options.endDate);
-      return apiClient.get(`/workflow/usage/summary?${params.toString()}`);
+      return apiClient.get(`/ai/usage/summary?${params.toString()}`);
     },
 
     // Get usage status against limits
@@ -2302,7 +2306,7 @@ export const backendApi = {
         limitPeriod: string;
         periodEnd?: string;
       }>
-    > => apiClient.get("/workflow/usage/status"),
+    > => apiClient.get("/ai/usage/status"),
 
     // Get chat-specific usage
     getChatUsage: (
@@ -2319,7 +2323,7 @@ export const backendApi = {
       }>
     > =>
       apiClient.get(
-        `/workflow/usage/chat/${chatId}${limit ? `?limit=${limit}` : ""}`,
+        `/ai/usage/chat/${chatId}${limit ? `?limit=${limit}` : ""}`,
       ),
 
     // Set usage limit
@@ -2330,11 +2334,11 @@ export const backendApi = {
       warningThreshold?: number;
       actionOnLimit?: "pause" | "notify" | "block";
     }): Promise<{ success: boolean; limitId: string }> =>
-      apiClient.post("/workflow/usage/limits", data),
+      apiClient.post("/ai/usage/limits", data),
 
     // Remove usage limit
     removeLimit: (limitType: string, limitPeriod: string): Promise<void> =>
-      apiClient.delete(`/workflow/usage/limits/${limitType}/${limitPeriod}`),
+      apiClient.delete(`/ai/usage/limits/${limitType}/${limitPeriod}`),
 
     // Get throttle dashboard status
     getThrottleStatus: (): Promise<{
@@ -2352,7 +2356,7 @@ export const backendApi = {
       }>;
       warnings: string[];
       recommendations: string[];
-    }> => apiClient.get("/workflow/throttle/status"),
+    }> => apiClient.get("/ai/throttle/status"),
 
     // Check if AI operation is allowed
     checkBeforeAiOperation: (): Promise<{
@@ -2367,26 +2371,26 @@ export const backendApi = {
         percentUsed: number;
       }>;
       warnings?: string[];
-    }> => apiClient.post("/workflow/throttle/check"),
+    }> => apiClient.post("/ai/throttle/check"),
 
     // Pause AI for a chat
     pauseChat: (
       chatId: string,
       reason?: string,
     ): Promise<{ success: boolean; message: string }> =>
-      apiClient.post("/workflow/throttle/pause-chat", { chatId, reason }),
+      apiClient.post("/ai/throttle/pause-chat", { chatId, reason }),
 
     // Resume AI for a chat
     resumeChat: (
       chatId: string,
     ): Promise<{ success: boolean; message: string }> =>
-      apiClient.post("/workflow/throttle/resume-chat", { chatId }),
+      apiClient.post("/ai/throttle/resume-chat", { chatId }),
 
     // Pause all AI
     pauseAll: (
       reason?: string,
     ): Promise<{ success: boolean; pausedCount: number }> =>
-      apiClient.post("/workflow/throttle/pause-all", { reason }),
+      apiClient.post("/ai/throttle/pause-all", { reason }),
   },
 
   // Workflow Stages
@@ -2446,7 +2450,7 @@ export const backendApi = {
       apiClient.post("/workflow/chat/transition", data),
 
     // Get chat's current stage
-    getChatStatus: (chatId: string): Promise<ChatWorkflowStatus> =>
+    getChatStatus: (chatId: string): Promise<ChatPipelineStatus> =>
       apiClient.get(`/workflow/chat/${chatId}/status`),
 
     // Get stage history for chat (raw)
@@ -2500,7 +2504,7 @@ export const backendApi = {
     },
 
     // Get workflow summary
-    getWorkflowSummary: (senderId?: number): Promise<WorkflowSummary> => {
+    getPipelineSummary: (senderId?: number): Promise<PipelineSummary> => {
       const params = senderId ? `?senderId=${senderId}` : "";
       return apiClient.get(`/workflow/summary${params}`);
     },
@@ -2510,50 +2514,32 @@ export const backendApi = {
   aiConfig: {
     // Get available options (tones, styles, formalities)
     getOptions: (): Promise<AiConfigOptions> =>
-      apiClient.get("/workflow/ai-config/options"),
+      apiClient.get("/ai/config/options"),
 
     // Get user's AI configuration
-    getUserConfig: (): Promise<AiConfiguration> =>
-      apiClient.get("/workflow/ai-config"),
+    getUserConfig: (): Promise<AiConfiguration> => apiClient.get("/ai/config"),
 
     // Update user's AI configuration
     updateUserConfig: (
       data: UpdateAiConfigurationDto,
-    ): Promise<AiConfiguration> => apiClient.patch("/workflow/ai-config", data),
+    ): Promise<AiConfiguration> => apiClient.patch("/ai/config", data),
 
-    // Get resolved configuration for a chat (merged user + stage + chat)
+    // Get resolved configuration for a chat (merged user + chat)
     getResolvedConfig: (chatId: string): Promise<ResolvedAiConfig> =>
-      apiClient.get(`/workflow/ai-config/resolved/${chatId}`),
+      apiClient.get(`/ai/config/resolved/${chatId}`),
 
     // Chat overrides
     getChatOverrides: (): Promise<ChatAiOverride[]> =>
-      apiClient.get("/workflow/ai-config/chat-overrides"),
+      apiClient.get("/ai/config/chat-overrides"),
 
     getChatOverride: (chatId: string): Promise<ChatAiOverride | null> =>
-      apiClient.get(`/workflow/ai-config/chat-overrides/${chatId}`),
+      apiClient.get(`/ai/config/chat-overrides/${chatId}`),
 
     setChatOverride: (data: SetChatOverrideDto): Promise<ChatAiOverride> =>
-      apiClient.post("/workflow/ai-config/chat-overrides", data),
+      apiClient.post("/ai/config/chat-overrides", data),
 
     deleteChatOverride: (chatId: string): Promise<void> =>
-      apiClient.delete(`/workflow/ai-config/chat-overrides/${chatId}`),
-
-    // Stage settings
-    getStageSettings: (): Promise<WorkflowStageAiSetting[]> =>
-      apiClient.get("/workflow/ai-config/stage-settings"),
-
-    getStageSetting: (
-      stageId: string,
-    ): Promise<WorkflowStageAiSetting | null> =>
-      apiClient.get(`/workflow/ai-config/stage-settings/${stageId}`),
-
-    setStageSetting: (
-      data: SetStageAiSettingsDto,
-    ): Promise<WorkflowStageAiSetting> =>
-      apiClient.post("/workflow/ai-config/stage-settings", data),
-
-    deleteStageSetting: (stageId: string): Promise<void> =>
-      apiClient.delete(`/workflow/ai-config/stage-settings/${stageId}`),
+      apiClient.delete(`/ai/config/chat-overrides/${chatId}`),
   },
 
   // AI Review
@@ -2563,29 +2549,14 @@ export const backendApi = {
       content: string;
       mediaAttachment?: unknown;
       interactiveData?: unknown;
-    }) => apiClient.post("/workflow/ai/send-reviewed", data),
+    }) => apiClient.post("/ai/send-reviewed", data),
 
     discardPending: (chatId: string) =>
-      apiClient.post("/workflow/ai/discard-pending", { chatId }),
+      apiClient.post("/ai/discard-pending", { chatId }),
 
     regenerate: async (chatId: string) => {
-      return apiClient.post("/workflow/ai/regenerate", { chatId });
+      return apiClient.post("/ai/regenerate", { chatId });
     },
-  },
-
-  aiWorkflow: {
-    getAIStatus: (
-      chatId: string,
-    ): Promise<{
-      chatId: string;
-      aiEnabled: boolean;
-      aiConfigEnabled: boolean;
-      reason?: string;
-      isRateLimited: boolean;
-      rateLimitReset?: Date;
-      rateLimitCurrentCount?: number;
-      rateLimitMaxCount?: number;
-    }> => apiClient.get(`/workflow/ai/status/${chatId}`),
   },
 
   // ==================== Labels API ====================
@@ -2804,6 +2775,9 @@ export interface AiConfiguration {
   requiredSignature: string | null;
   preferredModel: string | null;
   temperature: number;
+  // Goal-based AI configuration
+  goalType: string;
+  goalDescription: string | null;
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -2832,10 +2806,13 @@ export interface UpdateAiConfigurationDto {
   requiredSignature?: string | null;
   preferredModel?: string | null;
   temperature?: number;
+  // Goal-based AI configuration
+  goalType?: string;
+  goalDescription?: string | null;
   metadata?: Record<string, unknown>;
 }
 
-// ==================== Workflow Stages Types ====================
+// ==================== Workflow Stages Types ==
 
 export interface WorkflowStage {
   id: string;
@@ -2907,7 +2884,7 @@ export interface ChatStageAssignment {
   assignedToProfilePictureUrl: string | null;
 }
 
-export interface ChatWorkflowStatus {
+export interface ChatPipelineStatus {
   chatId: string;
   currentStage: WorkflowStage | null;
   awaitingHandoff: boolean;
@@ -2972,7 +2949,7 @@ export interface GlobalStageHistoryEntry {
   createdAt: string;
 }
 
-export interface WorkflowSummary {
+export interface PipelineSummary {
   totalChats: number;
   stageDistribution: Array<{
     stageId: string;
@@ -3056,42 +3033,6 @@ export interface SetChatOverrideDto {
   avoidTopics?: string[] | null;
   aiEnabled?: boolean;
   overrideReason?: string | null;
-}
-
-export interface WorkflowStageAiSetting {
-  id: string;
-  stageId: string;
-  userId: number;
-  tone: string | null;
-  style: string | null;
-  formalityLevel: string | null;
-  maxMessagesPerHour: number | null;
-  languagePreference: string | null;
-  allowFreeTextReplies: boolean | null;
-  useTemplatesOnly: boolean;
-  suggestedTemplateIds: string[];
-  maxResponseLength: number | null;
-  systemPromptAddition: string | null;
-  goalDescription: string | null;
-  escalationTriggers: unknown[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface SetStageAiSettingsDto {
-  stageId: string;
-  tone?: string | null;
-  style?: string | null;
-  formalityLevel?: string | null;
-  maxMessagesPerHour?: number | null;
-  languagePreference?: string | null;
-  allowFreeTextReplies?: boolean | null;
-  useTemplatesOnly?: boolean;
-  suggestedTemplateIds?: string[];
-  maxResponseLength?: number | null;
-  systemPromptAddition?: string | null;
-  goalDescription?: string | null;
-  escalationTriggers?: unknown[];
 }
 
 // ==================== Audit Types ====================

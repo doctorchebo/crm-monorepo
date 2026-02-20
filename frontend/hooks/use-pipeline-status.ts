@@ -1,4 +1,4 @@
-import { backendApi, type ChatWorkflowStatus } from "@/lib/api/endpoints";
+import { backendApi, type ChatPipelineStatus } from "@/lib/api/endpoints";
 import { useCallback, useEffect, useState } from "react";
 
 interface UsePipelineStatusOptions {
@@ -9,8 +9,8 @@ interface UsePipelineStatusOptions {
 }
 
 interface UsePipelineStatusReturn {
-  /** Current workflow status for the chat */
-  status: ChatWorkflowStatus | null;
+  /** Current pipeline status for the chat */
+  status: ChatPipelineStatus | null;
   /** Whether the status is currently loading */
   loading: boolean;
   /** Any error that occurred during fetch */
@@ -45,7 +45,7 @@ export function usePipelineStatus({
   chatId,
   autoFetch = true,
 }: UsePipelineStatusOptions): UsePipelineStatusReturn {
-  const [status, setStatus] = useState<ChatWorkflowStatus | null>(null);
+  const [status, setStatus] = useState<ChatPipelineStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

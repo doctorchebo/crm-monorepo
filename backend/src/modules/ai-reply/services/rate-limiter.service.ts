@@ -1,10 +1,10 @@
 /**
  * AI Reply Rate Limiter Adapter
- * 
+ *
  * This is an ADAPTER that delegates to the workflow module's RateLimiterService
  * for actual rate limiting and tracking. It provides a compatibility layer for
  * the ai-reply module's legacy interface.
- * 
+ *
  * Key changes:
  * - Rate checks now use chatAiOverrides.maxMessagesPerHour
  * - Messages are tracked in rate_limit_tracking table
@@ -13,7 +13,7 @@
 
 import { db } from '@database/db.connection';
 import { chatAiOverrides, messages } from '@database/schema';
-import { RateLimiterService as WorkflowRateLimiterService } from '@modules/workflow/services/rate-limiter.service';
+import { RateLimiterService as WorkflowRateLimiterService } from '@modules/ai-chatbot/services/rate-limiter.service';
 import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { and, desc, eq, gte, sql } from 'drizzle-orm';
 import {
@@ -57,7 +57,9 @@ export class RateLimiterService {
     @Inject(forwardRef(() => WorkflowRateLimiterService))
     private readonly workflowRateLimiter: WorkflowRateLimiterService,
   ) {
-    this.logger.log('AI Reply Rate Limiter initialized (using workflow rate limiter)');
+    this.logger.log(
+      'AI Reply Rate Limiter initialized (using workflow rate limiter)',
+    );
   }
 
   /**
@@ -126,8 +128,10 @@ export class RateLimiterService {
     if (!workflowCheck.allowed) {
       return {
         canSend: false,
-        messagesLastHour: workflowCheck.limits.find(l => l.type === 'hour')?.current ?? 0,
-        messagesToday: workflowCheck.limits.find(l => l.type === 'day')?.current ?? 0,
+        messagesLastHour:
+          workflowCheck.limits.find((l) => l.type === 'hour')?.current ?? 0,
+        messagesToday:
+          workflowCheck.limits.find((l) => l.type === 'day')?.current ?? 0,
         cooldownRemaining: 0,
         blockReason: 'hourly_limit_reached',
         hourlyResetAt: workflowCheck.resetTime ?? this.getHourlyResetTime(now),
@@ -200,7 +204,11 @@ export class RateLimiterService {
    * Record that a message was sent
    * Now delegates to workflow rate limiter to populate rate_limit_tracking
    */
-  async recordMessageSent(chatId: string, content: string, userId?: number): Promise<void> {
+  async recordMessageSent(
+    chatId: string,
+    content: string,
+    userId?: number,
+  ): Promise<void> {
     const now = new Date();
     const contentHash = this.hashContent(content);
 
@@ -232,9 +240,13 @@ export class RateLimiterService {
         await this.workflowRateLimiter.recordMessage(userId, chatId, {
           isAiMessage: true,
         });
-        this.logger.debug(`[RateLimit] Recorded AI message for chat ${chatId} in tracking table`);
+        this.logger.debug(
+          `[RateLimit] Recorded AI message for chat ${chatId} in tracking table`,
+        );
       } catch (error) {
-        this.logger.error(`[RateLimit] Failed to record message: ${error.message}`);
+        this.logger.error(
+          `[RateLimit] Failed to record message: ${error.message}`,
+        );
       }
     }
   }
@@ -432,4 +444,3 @@ export class RateLimiterService {
     };
   }
 }
-

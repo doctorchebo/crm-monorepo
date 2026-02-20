@@ -19,6 +19,6 @@ import { AuditController } from './audit.controller';
 @Module({
   controllers: [AuditController],
   providers: [AuditWriteService, AuditQueryService, PermissionService],
-  exports: [AuditWriteService],
+  exports: [AuditWriteService, AuditQueryService],
 })
 export class AuditModule {}
