@@ -479,8 +479,11 @@ export function ChatDetailPanel({
   const handleAIToggle = useCallback(
     async (shouldEnable: boolean) => {
       if (shouldEnable) {
-        await resumeAI();
+        // Note: When enabling, chat-header shows goal modal and calls resumeAI with goal
+        // This callback is only for side effects after resumeAI completes
         hideRegenerateBanner();
+        // Refetch handoff status to update UI (template section, input area visibility)
+        refetchHandoff();
       } else {
         await pauseAI();
         const lastMessage = chatState.messages[chatState.messages.length - 1];
@@ -490,11 +493,11 @@ export function ChatDetailPanel({
       }
     },
     [
-      resumeAI,
       pauseAI,
       chatState.messages,
       enableRegenerateBanner,
       hideRegenerateBanner,
+      refetchHandoff,
     ],
   );
 

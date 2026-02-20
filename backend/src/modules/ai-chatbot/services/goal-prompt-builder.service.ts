@@ -5,22 +5,85 @@
  * goal type (answer_faq, qualify_lead, book_appointment, handle_support, custom).
  *
  * Replaces the old stage-based prompt building with a simpler goal-based approach.
+ *
+ * Features:
+ * - Goal-based conversation guidance (from database or fallback defaults)
+ * - Automatic customer profile data collection awareness
+ * - Knowledge base integration
+ * - Media attachment support
  */
 
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type {
   GoalPromptParams,
   GoalType,
   MediaContext,
 } from '../types/ai-chatbot.types';
 import { getMediaTypeLabel } from '../utils/ai-chatbot.utils';
+import { SystemAiPromptsService } from './system-ai-prompts.service';
+
+/**
+ * Profile data collection instructions for the AI
+ * These instructions tell the AI how to naturally collect and acknowledge customer information
+ */
+const PROFILE_DATA_COLLECTION_INSTRUCTIONS = `
+==========================================================================
+CUSTOMER DATA COLLECTION - IMPORTANT
+==========================================================================
+
+When customers share personal information, acknowledge it naturally and continue the conversation.
+The system will automatically save this information to their profile.
+
+TYPES OF DATA TO LOOK FOR:
+1. Name: When customers introduce themselves (e.g., "I'm Carlos", "My name is María García")
+   - Acknowledge: "Nice to meet you, Carlos!" or naturally use their name
+2. Email: When shared for confirmation or follow-up (e.g., "my email is john@example.com")
+   - Acknowledge: "I've noted your email. You'll receive confirmation there."
+3. Phone: When customers provide an ADDITIONAL contact number
+   - Acknowledge: "I have that number noted for follow-up."
+4. Preferences: Dates, times, budget, requirements, locations
+   - Acknowledge: "I've noted your preference for [what they mentioned]."
+
+DATA HANDLING RULES:
+- Always confirm you've "noted" or "saved" important information
+- Use the customer's name naturally after they provide it
+- Don't ask for information they've already given
+- If they correct information (e.g., "Actually, it's María, not Maria"), acknowledge the correction
+- Never read back sensitive data like full email or phone out loud
+
+EXAMPLE INTERACTIONS:
+Customer: "Hi, I'm Carlos Mendoza and I'm interested in the Flow House"
+AI: "Hello Carlos! It's great to hear from you. I'd be happy to help you with information about Flow House..."
+
+Customer: "You can reach me at carlos@email.com for the booking confirmation"
+AI: "I've noted your email address. You'll receive the booking confirmation there. Now, regarding the visit..."
+
+Customer: "My wife's number is +59178901234 in case I'm unavailable"
+AI: "Thank you for providing an alternative contact number. I've saved it for our records..."
+`;
+
+/**
+ * Compact version of profile collection instructions (for when context window is limited)
+ */
+const PROFILE_DATA_COLLECTION_COMPACT = `
+DATA COLLECTION: When customers share personal info (name, email, phone, preferences):
+- Acknowledge naturally: "Thanks, Carlos!" / "I've noted your email"
+- Use their name after they share it
+- Don't re-ask for info they've given
+`;
 
 @Injectable()
 export class GoalPromptBuilderService {
+  private readonly logger = new Logger(GoalPromptBuilderService.name);
+
+  constructor(
+    private readonly systemAiPromptsService: SystemAiPromptsService,
+  ) {}
+
   /**
    * Build the complete system prompt for an AI response
    */
-  buildPrompt(params: GoalPromptParams): string {
+  async buildPrompt(params: GoalPromptParams): Promise<string> {
     const {
       goalType,
       goalDescription,
@@ -35,19 +98,25 @@ export class GoalPromptBuilderService {
       hasKnowledgeBase,
       mediaContext,
       customerName,
+      conversationContext,
     } = params;
 
     const parts: string[] = [];
 
-    // 1. Base role + goal instructions
-    parts.push(this.buildGoalBlock(goalType, goalDescription));
+    // 1. Base role + goal instructions (fetch from DB)
+    parts.push(await this.buildGoalBlock(goalType, goalDescription));
 
     // 2. Customer info
     if (customerName) {
       parts.push(this.buildCustomerBlock(customerName));
     }
 
-    // 3. Style directives
+    // 3. Conversation context (if available from resumption)
+    if (conversationContext) {
+      parts.push(this.buildConversationContextBlock(conversationContext));
+    }
+
+    // 4. Style directives
     parts.push(
       this.buildStyleBlock(
         tone,
@@ -58,26 +127,34 @@ export class GoalPromptBuilderService {
       ),
     );
 
-    // 4. Custom instructions from admin
+    // 5. Custom instructions from admin
     if (customInstructions) {
       parts.push(
         `\nADDITIONAL INSTRUCTIONS FROM ADMIN:\n${customInstructions}`,
       );
     }
 
-    // 5. Topics to avoid
+    // 6. Topics to avoid
     if (avoidTopics && avoidTopics.length > 0) {
       parts.push(
         `\nTOPICS TO AVOID (never discuss these):\n- ${avoidTopics.join('\n- ')}`,
       );
     }
 
-    // 6. Media context
+    // 7. Profile data collection instructions
+    // Use compact version when KB context is present to save tokens
+    parts.push(
+      hasKnowledgeBase
+        ? PROFILE_DATA_COLLECTION_COMPACT
+        : PROFILE_DATA_COLLECTION_INSTRUCTIONS,
+    );
+
+    // 8. Media context
     if (mediaContext?.willHaveMedia && mediaContext.mediaType) {
       parts.push(this.buildMediaBlock(mediaContext));
     }
 
-    // 7. Knowledge base context
+    // 9. Knowledge base context
     if (hasKnowledgeBase && knowledgeContext) {
       parts.push(this.buildKnowledgeBaseBlock(knowledgeContext));
     } else {
@@ -90,11 +167,11 @@ export class GoalPromptBuilderService {
   /**
    * Build the goal-specific instruction block
    */
-  private buildGoalBlock(
+  private async buildGoalBlock(
     goalType: GoalType,
     goalDescription?: string | null,
-  ): string {
-    const goalInstructions = this.getGoalInstructions(goalType);
+  ): Promise<string> {
+    const goalInstructions = await this.getGoalInstructions(goalType);
 
     let block = `You are a friendly and professional AI assistant.\n\nYOUR GOAL: ${goalInstructions}`;
 
@@ -107,20 +184,45 @@ export class GoalPromptBuilderService {
 
   /**
    * Get base instructions for each goal type
+   * Fetches from database if available, otherwise falls back to hardcoded defaults
    */
-  private getGoalInstructions(goalType: GoalType): string {
+  private async getGoalInstructions(goalType: GoalType): Promise<string> {
+    try {
+      // Try to get the prompt from the database
+      const dbPrompt =
+        await this.systemAiPromptsService.getPromptTemplate(goalType);
+      if (dbPrompt) {
+        return dbPrompt;
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed to fetch goal prompt from database for ${goalType}, using default: ${(error as Error).message}`,
+      );
+    }
+
+    // Fallback to hardcoded defaults
+    return this.getDefaultGoalInstructions(goalType);
+  }
+
+  /**
+   * Get default hardcoded instructions for each goal type (fallback)
+   */
+  private getDefaultGoalInstructions(goalType: GoalType): string {
     switch (goalType) {
       case 'answer_faq':
         return (
           'Answer customer questions accurately using the available knowledge base. ' +
           'Provide specific details (prices, features, availability) when available. ' +
-          "If you don't have the information, let the customer know an agent will follow up."
+          "If you don't have the information, let them know an agent will follow up. " +
+          'When customers share their name or details, acknowledge naturally and use their name in future responses.'
         );
 
       case 'qualify_lead':
         return (
           'Qualify incoming leads by understanding their needs and budget. ' +
           'Ask relevant discovery questions (timeline, budget, requirements, decision makers). ' +
+          'When customers share their name, contact info, or preferences, acknowledge this information naturally ' +
+          '(e.g., "Thanks for sharing that, [Name]" or "I\'ve noted your budget of X"). ' +
           'Share relevant information from the knowledge base to keep them engaged. ' +
           'When a lead is qualified, suggest connecting with an agent for next steps.'
         );
@@ -129,6 +231,8 @@ export class GoalPromptBuilderService {
         return (
           'Help customers schedule appointments or meetings. ' +
           'Collect necessary information: preferred date/time, type of service, contact details. ' +
+          "When customers provide their name, email, or preferences, confirm you've noted the information " +
+          '(e.g., "I have you down as [Name] for [date/time]" or "I\'ll send confirmation to [email]"). ' +
           'Provide available options from the knowledge base when possible. ' +
           'Confirm all details before finalizing.'
         );
@@ -136,7 +240,9 @@ export class GoalPromptBuilderService {
       case 'handle_support':
         return (
           'Provide customer support by troubleshooting issues and answering questions. ' +
-          'Be empathetic and patient. Search the knowledge base for solutions. ' +
+          'Be empathetic and patient. When customers introduce themselves, use their name to personalize the interaction. ' +
+          'If they share contact details for follow-up, acknowledge receipt. ' +
+          'Search the knowledge base for solutions. ' +
           'If the issue requires human intervention, offer to connect with a support agent. ' +
           "Always acknowledge the customer's frustration and provide clear next steps."
         );
@@ -144,11 +250,15 @@ export class GoalPromptBuilderService {
       case 'custom':
         return (
           'Assist the customer based on the additional context provided below. ' +
-          'Be helpful, accurate, and professional in all interactions.'
+          'Be helpful, accurate, and professional in all interactions. ' +
+          'When customers share personal information, acknowledge it naturally.'
         );
 
       default:
-        return 'Assist the customer with their inquiry using available information.';
+        return (
+          'Assist the customer with their inquiry using available information. ' +
+          'When customers share their name or contact details, acknowledge naturally.'
+        );
     }
   }
 
@@ -164,6 +274,20 @@ CUSTOMER INFORMATION
 Customer Name: ${customerName}
 
 IMPORTANT: Use the customer's actual name when addressing them. Never use placeholders like "[Customer's Name]".`;
+  }
+
+  /**
+   * Build conversation context block
+   * This provides the AI with a summary of previous conversation state
+   */
+  private buildConversationContextBlock(conversationContext: string): string {
+    return `
+==========================================================================
+CONVERSATION CONTEXT (Previous Discussion Summary)
+==========================================================================
+${conversationContext}
+
+IMPORTANT: Use this context to maintain conversation continuity. Address any pending items or follow up on previous topics naturally.`;
   }
 
   /**

@@ -3,6 +3,7 @@
 import { SettingsCategory, SettingsPage } from "@/components/settings";
 import { AiConfigSettings } from "@/components/settings/ai-config-settings";
 import { AiDefaultsSettings } from "@/components/settings/ai-defaults-settings";
+import { SystemAiPromptsSettings } from "@/components/settings/system-ai-prompts-settings";
 import { useTranslations } from "next-intl";
 
 /**
@@ -14,6 +15,7 @@ import { useTranslations } from "next-intl";
  * - Rate limiting and response limits
  * - Language preferences
  * - Template behavior settings
+ * - System AI Prompts (for system admins only)
  *
  * These settings serve as defaults that can be overridden:
  * 1. Per workflow stage (via Kanban board stage settings)
@@ -43,6 +45,16 @@ export default function AiSettingsPage() {
       >
         <div className="-mx-6 -my-4">
           <AiConfigSettings variant="embedded" />
+        </div>
+      </SettingsCategory>
+
+      {/* System AI Prompts (Only visible to system admins) */}
+      <SettingsCategory
+        title={t("systemPromptsCategory")}
+        description={t("systemPromptsCategoryDescription")}
+      >
+        <div className="-mx-6 -my-4">
+          <SystemAiPromptsSettings variant="embedded" />
         </div>
       </SettingsCategory>
     </SettingsPage>

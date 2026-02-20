@@ -1843,7 +1843,9 @@
     "statusSummaryActiveDetail": "Los nuevos chats tendrán la IA activa y respondiendo automáticamente a los mensajes de los clientes.",
     "settingsSaved": "Configuración de IA actualizada",
     "settingsError": "Error al actualizar la configuración de IA",
-    "loadError": "No se pudo cargar la configuración de IA. Por favor intenta de nuevo."
+    "loadError": "No se pudo cargar la configuración de IA. Por favor intenta de nuevo.",
+    "systemPromptsCategory": "Prompts de IA del Sistema",
+    "systemPromptsCategoryDescription": "Prompts de objetivos de IA globales que aplican a todos los usuarios y equipos. Solo visible para administradores del sistema."
   },
   "settingsChats": {
     "title": "Configuración de Chats",

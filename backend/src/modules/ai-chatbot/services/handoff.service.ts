@@ -21,7 +21,13 @@ import {
   workflowStages,
 } from '@database/schema';
 import { AuditWriteService } from '@modules/audit/audit-write.service';
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  forwardRef,
+  Inject,
+  Injectable,
+  Logger,
+  Optional,
+} from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   AI_DEFAULTS,
@@ -30,6 +36,7 @@ import {
 } from '@shared/constants/ai-defaults';
 import { eq } from 'drizzle-orm';
 import { AiConfigurationService } from './ai-configuration.service';
+import { AiResumptionContextService } from './ai-resumption-context.service';
 import {
   HandoffRequest,
   HandoffStatus,
@@ -46,6 +53,9 @@ export class HandoffService {
     private readonly eventEmitter: EventEmitter2,
     private readonly aiConfigService: AiConfigurationService,
     private readonly auditWriteService: AuditWriteService,
+    @Optional()
+    @Inject(forwardRef(() => AiResumptionContextService))
+    private readonly aiContextService?: AiResumptionContextService,
   ) {}
 
   /**
@@ -438,8 +448,20 @@ export class HandoffService {
 
   /**
    * Pause AI for a chat
+   * Also captures conversation context for future AI resumption
    */
   async pauseAI(chatId: string, userId: number): Promise<boolean> {
+    // Capture context in the background (don't block pause operation)
+    if (this.aiContextService) {
+      this.aiContextService
+        .captureContextOnPause(chatId, userId)
+        .catch((err) => {
+          this.logger.warn(
+            `[Context] Failed to capture context on pause: ${err.message}`,
+          );
+        });
+    }
+
     // Try stage assignments first
     try {
       const result = await db
@@ -512,10 +534,13 @@ export class HandoffService {
    * Resume AI for a chat
    * Sets BOTH assignment.aiPaused=false AND override.aiEnabled=true
    * (canAISend requires both configEnabled AND !aiPaused)
+   * Also stores the selected goal type for context-aware responses
    */
   async resumeAI(
     chatId: string,
     userId: number,
+    goalType?: string,
+    goalDescription?: string,
   ): Promise<{ success: boolean }> {
     // 1. First, ensure override has aiEnabled=true (sets configEnabled in canAISend)
     const [existingOverride] = await db
@@ -529,6 +554,8 @@ export class HandoffService {
         .update(chatAiOverrides)
         .set({
           aiEnabled: true,
+          goalType: goalType || existingOverride.goalType,
+          goalDescription: goalDescription || existingOverride.goalDescription,
           updatedAt: new Date(),
         })
         .where(eq(chatAiOverrides.chatId, chatId));
@@ -537,6 +564,8 @@ export class HandoffService {
         chatId,
         userId,
         aiEnabled: true,
+        goalType: goalType || null,
+        goalDescription: goalDescription || null,
       });
     }
 

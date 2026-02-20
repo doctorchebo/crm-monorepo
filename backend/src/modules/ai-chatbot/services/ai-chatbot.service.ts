@@ -8,16 +8,16 @@
  * 2. Check handoff keywords → auto-handoff
  * 3. Check canAISend → rate limit auto-pause
  * 4. Acquire chat lock
- * 5. Resolve AI config (goalType, tone, style, etc.)
- * 6. Retrieve KB context
- * 7. Pre-check media
- * 8. Build goal prompt
- * 9. Call LLM
- * 10. Select media
- * 11. Generate interactive CTAs
- * 12. Check review-before-send
- * 13. Release lock
- * 14. Return result
+ * 5. Generate AI response (KB retrieval, prompt building, LLM call)
+ * 6. Extract & update customer profile (async, non-blocking)
+ * 7. Release lock
+ * 8. Return result
+ *
+ * Profile extraction:
+ * - Automatically extracts customer info (name, email, phone, preferences)
+ * - Updates contact profile with extracted data
+ * - Saves additional phone numbers as attributes (never replaces existing)
+ * - Updates chat participant name when customer introduces themselves
  */
 
 import { db } from '@database/db.connection';
@@ -43,6 +43,9 @@ import type { WhatsAppService } from '@modules/whatsapp/whatsapp.service';
 
 // AI infrastructure services (now local to this module)
 import { AiConfigurationService } from './ai-configuration.service';
+import { AiProfileUpdateService } from './ai-profile-update.service';
+import { AiResumptionContextService } from './ai-resumption-context.service';
+import { CustomerProfileExtractionService } from './customer-profile-extraction.service';
 import { HandoffService } from './handoff.service';
 import { LLMService } from './llm.service';
 import { RateLimiterService } from './rate-limiter.service';
@@ -75,9 +78,12 @@ export class AiChatbotService implements OnModuleInit {
     private readonly handoffService: HandoffService,
     private readonly rateLimiter: RateLimiterService,
     private readonly aiConfigService: AiConfigurationService,
+    private readonly aiContextService: AiResumptionContextService,
     private readonly llmService: LLMService,
     private readonly retrievalService: RetrievalService,
     private readonly goalPromptBuilder: GoalPromptBuilderService,
+    private readonly profileExtractionService: CustomerProfileExtractionService,
+    private readonly profileUpdateService: AiProfileUpdateService,
     private readonly moduleRef: ModuleRef,
     @Optional() private readonly chatLockService?: ChatLockService,
     @Optional() private readonly whatsappGateway?: WhatsAppGateway,
@@ -195,12 +201,20 @@ export class AiChatbotService implements OnModuleInit {
         // Step 4: Generate the AI response
         const aiResponse = await this.generateResponse(input);
 
+        // Step 5: Extract and update customer profile (async, non-blocking)
+        // This happens in the background after the response is generated
+        this.extractAndUpdateProfile(input).catch((error) => {
+          this.logger.warn(
+            `[Profile Extraction] Non-critical error for chat ${chatId}: ${error.message}`,
+          );
+        });
+
         return {
           success: true,
           aiResponse,
         };
       } finally {
-        // Step 5: Always release the lock
+        // Step 6: Always release the lock
         if (lockAcquired && this.chatLockService) {
           await this.chatLockService.releaseLock(chatId, userId);
         }
@@ -244,8 +258,11 @@ export class AiChatbotService implements OnModuleInit {
     const userConfig = await this.aiConfigService.getUserConfiguration(userId);
     const chatOverride = await this.aiConfigService.getChatOverride(chatId);
 
-    const goalType = userConfig.goalType || 'answer_faq';
-    const goalDescription = userConfig.goalDescription || null;
+    // Goal type priority: chat override > user config > default
+    const goalType =
+      chatOverride?.goalType || userConfig.goalType || 'answer_faq';
+    const goalDescription =
+      chatOverride?.goalDescription || userConfig.goalDescription || null;
     const tone = chatOverride?.tone || userConfig.defaultTone || 'friendly';
     const style = chatOverride?.style || userConfig.defaultStyle || 'concise';
     const formalityLevel =
@@ -260,6 +277,24 @@ export class AiChatbotService implements OnModuleInit {
       this.parseJsonArray(userConfig.avoidTopics) ||
       [];
     const temperature = (userConfig.temperature || 70) / 100; // Convert 0-100 to 0.0-1.0
+
+    // 3.5 Load conversation context (for efficient context-aware responses)
+    let conversationContextPrompt = '';
+    try {
+      const conversationContext =
+        await this.aiContextService.getContext(chatId);
+      if (conversationContext) {
+        conversationContextPrompt =
+          this.aiContextService.formatContextForPrompt(conversationContext);
+        this.logger.log(
+          `[Context] Loaded conversation context for chat ${chatId} (${conversationContext.keyFacts.length} facts, sentiment: ${conversationContext.customerSentiment})`,
+        );
+      }
+    } catch (error) {
+      this.logger.warn(
+        `[Context] Failed to load conversation context: ${(error as Error).message}`,
+      );
+    }
 
     // 4. Build conversation context for KB retrieval
     const conversationContext =
@@ -359,7 +394,7 @@ END OF KNOWLEDGE BASE DATA
     }
 
     // 7. Build system prompt using goal-based builder
-    const systemPrompt = this.goalPromptBuilder.buildPrompt({
+    const systemPrompt = await this.goalPromptBuilder.buildPrompt({
       goalType: goalType as GoalType,
       goalDescription,
       tone,
@@ -373,6 +408,7 @@ END OF KNOWLEDGE BASE DATA
       hasKnowledgeBase,
       mediaContext: mediaPreCheck,
       customerName,
+      conversationContext: conversationContextPrompt || undefined,
     });
 
     // 8. Build message array and call LLM
@@ -690,6 +726,137 @@ END OF KNOWLEDGE BASE DATA
     // If a response was generated, the caller (WhatsApp service) handles dispatch
     if (!result.aiResponse?.shouldSend) {
       this.whatsappGateway?.emitAITypingStop(chatId);
+    }
+  }
+
+  // ============================================================================
+  // Customer Profile Extraction & Update
+  // ============================================================================
+
+  /**
+   * Extract customer profile data from their message and update their profile.
+   * This runs asynchronously and doesn't block the AI response.
+   *
+   * Extracts:
+   * - Name (first, last)
+   * - Email
+   * - Additional phone numbers (saved as attributes, never replaces existing)
+   * - Preferences and custom fields
+   */
+  private async extractAndUpdateProfile(
+    input: ChatMessageInput,
+  ): Promise<void> {
+    const { chatId, messageContent, userId } = input;
+
+    try {
+      // Get the chat to find participant phone (existing contact number)
+      const chat = await db.query.chats.findFirst({
+        where: eq(chats.chatId, chatId),
+      });
+
+      if (!chat) {
+        return;
+      }
+
+      // Build recent conversation context for better extraction
+      const recentMessages = await db
+        .select()
+        .from(messages)
+        .where(eq(messages.chatId, chatId))
+        .orderBy(desc(messages.timestamp))
+        .limit(5);
+
+      const recentContext = recentMessages
+        .reverse()
+        .filter((m) => m.text)
+        .map((m) => ({
+          role: (m.direction === 'inbound' ? 'customer' : 'agent') as
+            | 'customer'
+            | 'agent',
+          content: m.text || '',
+        }));
+
+      // Extract profile data from the customer message
+      const extractedData =
+        await this.profileExtractionService.extractProfileData(messageContent, {
+          existingPhoneNumber: chat.participantPhone,
+          existingName: chat.participantName || undefined,
+          recentMessages: recentContext,
+        });
+
+      // If no data was extracted, skip the update
+      if (!extractedData.hasData) {
+        return;
+      }
+
+      this.logger.log(
+        `[Profile Extraction] Extracted data for chat ${chatId}: ${JSON.stringify(
+          {
+            firstName: extractedData.firstName,
+            lastName: extractedData.lastName,
+            email: extractedData.email ? '[email]' : undefined,
+            alternatePhone: extractedData.alternatePhone
+              ? '[phone]'
+              : undefined,
+            customFieldsCount: extractedData.customFields
+              ? Object.keys(extractedData.customFields).length
+              : 0,
+          },
+        )}`,
+      );
+
+      // Update the customer profile with extracted data
+      const updateResult = await this.profileUpdateService.updateProfile(
+        extractedData,
+        {
+          chatId,
+          userId,
+          updateMode: 'fill_empty', // Only fill empty fields, don't overwrite existing
+        },
+      );
+
+      if (updateResult.success) {
+        const updates = [
+          ...updateResult.updatedFields,
+          ...updateResult.createdAttributes,
+        ];
+        if (updates.length > 0) {
+          this.logger.log(
+            `[Profile Update] Chat ${chatId}: Updated [${updates.join(', ')}]`,
+          );
+
+          // Update the chat's participant name if we extracted a name
+          if (
+            extractedData.firstName &&
+            (!chat.participantName || chat.participantName === 'Unknown')
+          ) {
+            const newName = extractedData.lastName
+              ? `${extractedData.firstName} ${extractedData.lastName}`
+              : extractedData.firstName;
+
+            await db
+              .update(chats)
+              .set({
+                participantName: newName,
+                updatedAt: new Date(),
+              })
+              .where(eq(chats.chatId, chatId));
+
+            this.logger.log(
+              `[Profile Update] Updated chat participant name to: ${newName}`,
+            );
+          }
+        }
+      } else if (updateResult.errors.length > 0) {
+        this.logger.warn(
+          `[Profile Update] Errors for chat ${chatId}: ${updateResult.errors.join(', ')}`,
+        );
+      }
+    } catch (error) {
+      // Non-critical error - log and continue
+      this.logger.warn(
+        `[Profile Extraction] Error for chat ${chatId}: ${(error as Error).message}`,
+      );
     }
   }
 

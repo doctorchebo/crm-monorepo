@@ -22,7 +22,17 @@
  * │    ├── GuardrailAlertService, GuardrailAlertGateway            │
  * │    ├── UsageTrackingService, UsageThrottleService              │
  * │    └── HandoffNotificationGateway                              │
+ * ├────────────────────────────────────────────────────────────────┤
+ * │  Customer Profile Services:                                    │
+ * │    ├── CustomerProfileExtractionService (LLM-based extraction) │
+ * │    └── AiProfileUpdateService (contact & attribute updates)    │
  * └────────────────────────────────────────────────────────────────┘
+ *
+ * Profile Extraction Feature:
+ * - Automatically extracts customer info from messages (name, email, phone)
+ * - Updates contact profile with validated data
+ * - Saves additional phone numbers as attributes (never replaces existing)
+ * - Saves preferences and custom fields as contact attributes
  */
 
 import { AiMemoryModule } from '@modules/ai-memory/ai-memory.module';
@@ -44,13 +54,17 @@ import { GoalPromptBuilderService } from './services/goal-prompt-builder.service
 // AI infrastructure services
 import { AiActionLoggerService } from './services/ai-action-logger.service';
 import { AiConfigurationService } from './services/ai-configuration.service';
+import { AiProfileUpdateService } from './services/ai-profile-update.service';
+import { AiResumptionContextService } from './services/ai-resumption-context.service';
 import { AntiBanSafeguardService } from './services/anti-ban-safeguard.service';
+import { CustomerProfileExtractionService } from './services/customer-profile-extraction.service';
 import { GuardrailAlertGateway } from './services/guardrail-alert.gateway';
 import { GuardrailAlertService } from './services/guardrail-alert.service';
 import { HandoffNotificationGateway } from './services/handoff-notification.gateway';
 import { HandoffService } from './services/handoff.service';
 import { LLMService } from './services/llm.service';
 import { RateLimiterService } from './services/rate-limiter.service';
+import { SystemAiPromptsService } from './services/system-ai-prompts.service';
 import { UsageThrottleService } from './services/usage-throttle.service';
 import { UsageTrackingService } from './services/usage-tracking.service';
 
@@ -74,6 +88,7 @@ import { UsageTrackingService } from './services/usage-tracking.service';
 
     // AI infrastructure services
     AiConfigurationService,
+    AiResumptionContextService,
     LLMService,
     HandoffService,
     RateLimiterService,
@@ -85,6 +100,13 @@ import { UsageTrackingService } from './services/usage-tracking.service';
     UsageThrottleService,
     HandoffNotificationGateway,
 
+    // System admin services
+    SystemAiPromptsService,
+
+    // Customer profile services
+    CustomerProfileExtractionService,
+    AiProfileUpdateService,
+
     // Shared dependencies needed by moved services
     ProfilePictureUrlService,
   ],
@@ -95,6 +117,7 @@ import { UsageTrackingService } from './services/usage-tracking.service';
 
     // AI infrastructure (needed by WhatsAppModule, AIReplyModule)
     AiConfigurationService,
+    AiResumptionContextService,
     LLMService,
     HandoffService,
     RateLimiterService,
@@ -103,6 +126,10 @@ import { UsageTrackingService } from './services/usage-tracking.service';
     GuardrailAlertService,
     UsageTrackingService,
     UsageThrottleService,
+
+    // Customer profile services
+    CustomerProfileExtractionService,
+    AiProfileUpdateService,
   ],
 })
 export class AiChatbotModule {}

@@ -87,17 +87,20 @@ export function useHandoff(chatId: string | null) {
     }
   }, [chatId, fetchStatus]);
 
-  // Resume AI for this chat
-  const resumeAI = useCallback(async () => {
-    if (!chatId) return;
+  // Resume AI for this chat with optional goal
+  const resumeAI = useCallback(
+    async (goalType?: string, goalDescription?: string) => {
+      if (!chatId) return;
 
-    try {
-      await backendApi.aiHandoff.resumeAI(chatId);
-      await fetchStatus();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to resume AI");
-    }
-  }, [chatId, fetchStatus]);
+      try {
+        await backendApi.aiHandoff.resumeAI(chatId, goalType, goalDescription);
+        await fetchStatus();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to resume AI");
+      }
+    },
+    [chatId, fetchStatus],
+  );
 
   // Request human handoff
   const requestHandoff = useCallback(

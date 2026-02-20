@@ -2,6 +2,10 @@
 
 import { ChatAIControls } from "@/components/chat-ai-controls";
 import { AssigneeSelector } from "@/components/chat/assignee-selector";
+import {
+  GoalSelectionModal,
+  type GoalType,
+} from "@/components/goal-selection-modal";
 import { HandoffBanner } from "@/components/handoff-banner";
 import { Button } from "@/components/ui/button";
 import {
@@ -54,33 +58,52 @@ export function ChatHeader({
   } = useHandoff(chat.chatId);
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
 
   /**
    * Handle AI toggle.
-   * When enabling AI, resume it. When disabling, pause it.
+   * When enabling AI (resuming), show goal selection modal first.
+   * When disabling, pause AI directly.
    */
   const handleToggleAI = useCallback(
     async (shouldEnable: boolean) => {
       try {
         if (shouldEnable) {
-          if (onAIToggle) {
-            await onAIToggle(true);
-          } else {
-            await resumeAI();
-          }
+          // Show goal selection modal instead of directly resuming
+          setIsGoalModalOpen(true);
         } else {
           if (onAIToggle) {
             await onAIToggle(false);
           } else {
             await pauseAI();
           }
+          refetch();
         }
-        refetch();
       } catch (error) {
         console.error("Failed to toggle AI:", error);
       }
     },
-    [onAIToggle, pauseAI, resumeAI, refetch],
+    [onAIToggle, pauseAI, refetch],
+  );
+
+  /**
+   * Handle goal selection and resume AI with the selected goal
+   * Always use resumeAI with goal - onAIToggle is only for side effects
+   */
+  const handleResumeWithGoal = useCallback(
+    async (goalType: GoalType, goalDescription?: string) => {
+      try {
+        // Always call resumeAI with goal (this saves the goal and triggers AI response)
+        await resumeAI(goalType, goalDescription);
+        // Call onAIToggle for any extra side effects (e.g., hide banners)
+        onAIToggle?.(true);
+        refetch();
+      } catch (error) {
+        console.error("Failed to resume AI with goal:", error);
+        throw error; // Re-throw to let the modal handle the error
+      }
+    },
+    [onAIToggle, resumeAI, refetch],
   );
 
   const handleRequestHandoff = async () => {
@@ -213,6 +236,14 @@ export function ChatHeader({
           className="mx-4 mt-2"
         />
       )}
+
+      {/* Goal Selection Modal - shown when resuming AI */}
+      <GoalSelectionModal
+        open={isGoalModalOpen}
+        onOpenChange={setIsGoalModalOpen}
+        onConfirm={handleResumeWithGoal}
+        chatName={chat.participantName || chat.participantPhone}
+      />
     </div>
   );
 }

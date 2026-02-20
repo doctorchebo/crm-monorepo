@@ -142,4 +142,6 @@ export interface GoalPromptParams {
   hasKnowledgeBase: boolean;
   mediaContext?: MediaContext;
   customerName?: string | null;
+  /** Additional conversation context (summary, key facts, etc.) for context-aware responses */
+  conversationContext?: string;
 }

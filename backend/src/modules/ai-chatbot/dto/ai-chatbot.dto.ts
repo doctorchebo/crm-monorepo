@@ -59,6 +59,20 @@ export class PauseAIDto {
   reason?: string;
 }
 
+export class ResumeAIDto {
+  @IsString()
+  @IsNotEmpty()
+  chatId: string;
+
+  @IsString()
+  @IsOptional()
+  goalType?: GoalType;
+
+  @IsString()
+  @IsOptional()
+  goalDescription?: string;
+}
+
 // ============================================================================
 // AI Operation DTOs
 // ============================================================================
@@ -280,4 +294,39 @@ export class SetChatAiOverrideDto {
   @IsString()
   @IsOptional()
   overrideReason?: string | null;
+}
+
+// ============================================================================
+// System AI Prompts DTOs (System Admin Only)
+// ============================================================================
+
+export class UpdateGoalPromptDto {
+  @IsString()
+  @IsOptional()
+  displayName?: string;
+
+  @IsString()
+  @IsOptional()
+  description?: string;
+
+  @IsString()
+  @IsOptional()
+  promptTemplate?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  isActive?: boolean;
+}
+
+export class UpdateSystemSettingDto {
+  @IsString()
+  @IsNotEmpty()
+  settingKey: string;
+
+  @IsNotEmpty()
+  settingValue: unknown;
+
+  @IsString()
+  @IsOptional()
+  description?: string;
 }

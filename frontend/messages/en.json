@@ -1928,7 +1928,9 @@
     "statusSummaryActiveDetail": "New chats will have AI active and responding automatically to customer messages.",
     "settingsSaved": "AI settings updated",
     "settingsError": "Failed to update AI settings",
-    "loadError": "Unable to load AI configuration. Please try again."
+    "loadError": "Unable to load AI configuration. Please try again.",
+    "systemPromptsCategory": "System AI Prompts",
+    "systemPromptsCategoryDescription": "Global AI goal prompts that apply to all users and teams. Only visible to system administrators."
   },
   "settingsChats": {
     "title": "Chats Settings",

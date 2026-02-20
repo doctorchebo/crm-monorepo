@@ -1,6 +1,8 @@
 "use client";
 
-import LocationPicker, { type LocationData } from "@/components/location/location-picker";
+import LocationPicker, {
+  type LocationData,
+} from "@/components/location/location-picker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,6 +30,7 @@ import {
 } from "@/components/ui/popover";
 import {
   backendApi,
+  ContactAttribute,
   VariableDefinition,
   VariableDefinitionsResponse,
   VariableResolutionResult,
@@ -45,6 +48,7 @@ import {
   Pen,
   Phone,
   Send,
+  Sparkles,
   Video,
   XCircle,
 } from "lucide-react";
@@ -290,6 +294,28 @@ function VariableRow({
               <CommandInput placeholder="Search variables..." />
               <CommandList>
                 <CommandEmpty>No variable found.</CommandEmpty>
+
+                {/* Auto option - resolve automatically from contact data */}
+                <CommandGroup heading="Automatic">
+                  <CommandItem
+                    value="__auto__"
+                    onSelect={() => {
+                      onChange(vs.name, {
+                        sourceMode: "auto",
+                        freeformValue: "",
+                        popoverOpen: false,
+                      });
+                    }}
+                  >
+                    <Sparkles className="mr-2 h-3.5 w-3.5" />
+                    Auto-fill from contact
+                    {vs.sourceMode === "auto" && (
+                      <Check className="ml-auto h-3.5 w-3.5" />
+                    )}
+                  </CommandItem>
+                </CommandGroup>
+
+                <CommandSeparator />
 
                 {/* Freeform text option */}
                 <CommandGroup heading="Input">
@@ -660,50 +686,95 @@ export function TemplateSendModal({
         setLoading(true);
         setError(null);
 
-        // Parallel: fetch auto-fill suggestions AND variable definitions.
+        // Parallel: fetch auto-fill suggestions, variable definitions, AND contact attributes.
         // Auto-fill requires contactId; if absent, we extract variables
         // client-side from the template body and header format instead.
-        const [autoFillResult, defsResult] = await Promise.all([
-          contactId
-            ? backendApi.templates
-                .getAutoFill(template!.id, {
-                  locale: selectedLocale!.locale,
-                  contactId,
-                  senderId,
-                  chatId,
-                })
-                .catch((err: unknown) => {
-                  console.warn(
-                    "[TemplateSendModal] Auto-fill request failed:",
-                    err,
-                  );
-                  return {
-                    variables: [] as Array<{
-                      name: string;
-                      value: string | null;
-                    }>,
-                    suggestions: {} as Record<string, string>,
-                    missing: [] as string[],
-                  };
-                })
-            : Promise.resolve({
-                variables: [] as Array<{
-                  name: string;
-                  value: string | null;
-                }>,
-                suggestions: {} as Record<string, string>,
-                missing: [] as string[],
-              }),
-          backendApi.templates.getVariableDefinitions().catch(() => ({
-            definitions: [],
-            grouped: {},
-            categories: [],
-          })),
-        ]);
+        // Contact attributes provide custom variables specific to this chat.
+        const [autoFillResult, defsResult, contactAttributesResult] =
+          await Promise.all([
+            contactId
+              ? backendApi.templates
+                  .getAutoFill(template!.id, {
+                    locale: selectedLocale!.locale,
+                    contactId,
+                    senderId,
+                    chatId,
+                  })
+                  .catch((err: unknown) => {
+                    console.warn(
+                      "[TemplateSendModal] Auto-fill request failed:",
+                      err,
+                    );
+                    return {
+                      variables: [] as Array<{
+                        name: string;
+                        value: string | null;
+                      }>,
+                      suggestions: {} as Record<string, string>,
+                      missing: [] as string[],
+                    };
+                  })
+              : Promise.resolve({
+                  variables: [] as Array<{
+                    name: string;
+                    value: string | null;
+                  }>,
+                  suggestions: {} as Record<string, string>,
+                  missing: [] as string[],
+                }),
+            backendApi.templates.getVariableDefinitions().catch(() => ({
+              definitions: [],
+              grouped: {},
+              categories: [],
+            })),
+            // Fetch contact attributes (custom variables) for this chat
+            contactId && chatId
+              ? backendApi.contacts
+                  .getAttributes(contactId, chatId)
+                  .catch((err: unknown) => {
+                    console.warn(
+                      "[TemplateSendModal] Contact attributes request failed:",
+                      err,
+                    );
+                    return [] as ContactAttribute[];
+                  })
+              : Promise.resolve([] as ContactAttribute[]),
+          ]);
 
         if (cancelled) return;
 
-        setDefinitions(defsResult as VariableDefinitionsResponse);
+        // Convert contact attributes to VariableDefinition format and merge them
+        const contactAttributes = contactAttributesResult as ContactAttribute[];
+        const attributeDefinitions: VariableDefinition[] =
+          contactAttributes.map((attr, index) => ({
+            id: `attr_${attr.id}`,
+            category: "custom",
+            property: attr.key,
+            displayName: attr.key
+              .split("_")
+              .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+              .join(" "),
+            description: attr.value ? `Current value: ${attr.value}` : null,
+            dataType: attr.valueType || "string",
+            sourceTable: "contact_attributes",
+            sourceColumn: "value",
+            fallbackValue: null,
+            isRequired: false,
+            isSystem: false,
+            isActive: true,
+            sortOrder: 100 + index,
+          }));
+
+        // Merge attribute definitions with system definitions
+        const mergedDefinitions: VariableDefinitionsResponse = {
+          ...(defsResult as VariableDefinitionsResponse),
+          definitions: [
+            ...(defsResult as VariableDefinitionsResponse).definitions,
+            ...attributeDefinitions,
+          ],
+        };
+
+        setDefinitions(mergedDefinitions);
 
         // Build variable states from the backend's auto-fill response.
         // The backend extracts variables directly from the template body,

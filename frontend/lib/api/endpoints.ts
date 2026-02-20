@@ -2198,11 +2198,17 @@ export const backendApi = {
     pauseAI: (chatId: string): Promise<{ success: boolean; message: string }> =>
       apiClient.post("/ai/pause", { chatId }),
 
-    // Resume AI for a chat
+    // Resume AI for a chat with optional goal
     resumeAI: (
       chatId: string,
+      goalType?: string,
+      goalDescription?: string,
     ): Promise<{ success: boolean; message: string }> =>
-      apiClient.post(`/ai/resume/${chatId}`),
+      apiClient.post(`/ai/resume/${chatId}`, {
+        chatId,
+        goalType,
+        goalDescription,
+      }),
 
     // Request human handoff
     requestHandoff: (data: {
@@ -2559,6 +2565,36 @@ export const backendApi = {
     },
   },
 
+  // System AI Prompts (System Admin Only)
+  systemAiPrompts: {
+    // Check if current user is a system admin
+    checkAdmin: (): Promise<{ isSystemAdmin: boolean }> =>
+      apiClient.get("/ai/system/admin-check"),
+
+    // Get all goal prompts
+    getAllPrompts: (): Promise<SystemAiGoalPrompt[]> =>
+      apiClient.get("/ai/system/prompts"),
+
+    // Update a goal prompt
+    updatePrompt: (
+      goalType: string,
+      data: UpdateGoalPromptDto,
+    ): Promise<SystemAiGoalPrompt> =>
+      apiClient.patch(`/ai/system/prompts?goalType=${goalType}`, data),
+
+    // Reset a goal prompt to default
+    resetPrompt: (goalType: string): Promise<SystemAiGoalPrompt> =>
+      apiClient.post(`/ai/system/prompts/${goalType}/reset`),
+
+    // Get all system settings
+    getAllSettings: (): Promise<SystemAiSetting[]> =>
+      apiClient.get("/ai/system/settings"),
+
+    // Update a system setting
+    updateSetting: (data: UpdateSystemSettingDto): Promise<SystemAiSetting> =>
+      apiClient.patch("/ai/system/settings", data),
+  },
+
   // ==================== Labels API ====================
   labels: {
     /**
@@ -2810,6 +2846,44 @@ export interface UpdateAiConfigurationDto {
   goalType?: string;
   goalDescription?: string | null;
   metadata?: Record<string, unknown>;
+}
+
+// ==================== System AI Prompts Types (System Admin) ====================
+
+export interface SystemAiGoalPrompt {
+  id: number;
+  goalType: string;
+  displayName: string;
+  description: string | null;
+  promptTemplate: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  createdById: number | null;
+  updatedById: number | null;
+}
+
+export interface SystemAiSetting {
+  id: number;
+  settingKey: string;
+  settingValue: unknown;
+  description: string | null;
+  createdAt: string;
+  updatedAt: string;
+  updatedById: number | null;
+}
+
+export interface UpdateGoalPromptDto {
+  displayName?: string;
+  description?: string;
+  promptTemplate?: string;
+  isActive?: boolean;
+}
+
+export interface UpdateSystemSettingDto {
+  settingKey: string;
+  settingValue: unknown;
+  description?: string;
 }
 
 // ==================== Workflow Stages Types ==

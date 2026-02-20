@@ -12,6 +12,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Logger,
   Param,
   Patch,
   Post,
@@ -19,6 +20,8 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
+import { SystemAdminGuard } from '@shared/guards/system-admin.guard';
 
 // AI infrastructure services (now local to this module)
 import { AiActionLoggerService } from './services/ai-action-logger.service';
@@ -28,6 +31,7 @@ import { GuardrailAlertService } from './services/guardrail-alert.service';
 import { HandoffService } from './services/handoff.service';
 import { LLMService } from './services/llm.service';
 import { RateLimiterService } from './services/rate-limiter.service';
+import { SystemAiPromptsService } from './services/system-ai-prompts.service';
 import { UsageThrottleService } from './services/usage-throttle.service';
 import { UsageTrackingService } from './services/usage-tracking.service';
 
@@ -39,19 +43,23 @@ import {
   PauseAIDto,
   RequestHandoffDto,
   ResolveHandoffDto,
+  ResumeAIDto,
   SendReviewedAiResponseDto,
   SetChatAiOverrideDto,
   UpdateAiConfigurationDto,
+  UpdateGoalPromptDto,
+  UpdateSystemSettingDto,
 } from './dto/ai-chatbot.dto';
 import { AiChatbotService } from './services/ai-chatbot.service';
 
-// WhatsApp service (lazy resolution pattern)
-import type { WhatsAppService } from '@modules/whatsapp/whatsapp.service';
+// WhatsApp service (lazy resolution to avoid circular dependency at startup)
+import { WhatsAppService } from '@modules/whatsapp/whatsapp.service';
 
 @Controller('ai')
 @UseGuards(JwtAuthGuard)
 export class AiChatbotController {
-  private whatsAppService: WhatsAppService | undefined;
+  private readonly logger = new Logger(AiChatbotController.name);
+  private whatsAppServiceInstance: WhatsAppService | null = null;
 
   constructor(
     private readonly aiChatbotService: AiChatbotService,
@@ -64,7 +72,26 @@ export class AiChatbotController {
     private readonly usageTracking: UsageTrackingService,
     private readonly usageThrottle: UsageThrottleService,
     private readonly aiConfigService: AiConfigurationService,
+    private readonly systemAiPromptsService: SystemAiPromptsService,
+    private readonly moduleRef: ModuleRef,
   ) {}
+
+  /**
+   * Lazily resolve WhatsAppService to avoid circular dependency at startup.
+   * Uses ModuleRef.get with strict:false to resolve across modules.
+   */
+  private getWhatsAppService(): WhatsAppService | null {
+    if (!this.whatsAppServiceInstance) {
+      try {
+        this.whatsAppServiceInstance = this.moduleRef.get(WhatsAppService, {
+          strict: false,
+        });
+      } catch (error) {
+        this.logger.warn(`Failed to resolve WhatsAppService: ${error}`);
+      }
+    }
+    return this.whatsAppServiceInstance;
+  }
 
   // ==========================================================================
   // Handoff Management
@@ -110,21 +137,46 @@ export class AiChatbotController {
 
   @Post('resume/:chatId')
   @HttpCode(HttpStatus.OK)
-  async resumeAI(@Req() req: any, @Param('chatId') chatId: string) {
+  async resumeAI(
+    @Req() req: any,
+    @Param('chatId') chatId: string,
+    @Body() dto?: ResumeAIDto,
+  ) {
     const userId = req.user.userId;
-    await this.handoffService.resumeAI(chatId, userId);
 
-    // Always trigger AI response for pending customer messages
+    this.logger.log(
+      `[Resume AI] Resuming AI for chat ${chatId} with goal: ${dto?.goalType || 'none'}`,
+    );
+
+    await this.handoffService.resumeAI(
+      chatId,
+      userId,
+      dto?.goalType,
+      dto?.goalDescription,
+    );
+
+    // Trigger AI response for pending customer messages
     try {
-      // Lazy-resolve WhatsAppService if needed
-      if (!this.whatsAppService) {
-        const { ModuleRef } = await import('@nestjs/core');
-        // Use the service's own module ref — but we don't have one here.
-        // Instead, triggerAiResponseForResume is called from the WhatsApp service side.
-        // For now, we return success and the frontend handles the trigger.
+      const whatsAppService = this.getWhatsAppService();
+      if (whatsAppService) {
+        this.logger.log(
+          `[Resume AI] Triggering AI response for pending messages in chat ${chatId}`,
+        );
+        // Fire and forget - don't block the response
+        whatsAppService
+          .triggerAiResponseForResume(chatId, userId)
+          .catch((err) => {
+            this.logger.warn(
+              `[Resume AI] Failed to trigger AI response: ${err.message}`,
+            );
+          });
+      } else {
+        this.logger.warn(
+          '[Resume AI] WhatsAppService not available to trigger AI response',
+        );
       }
-    } catch {
-      // Non-critical
+    } catch (error) {
+      this.logger.warn(`[Resume AI] Error triggering AI response: ${error}`);
     }
 
     return { success: true, message: 'AI resumed' };
@@ -641,5 +693,81 @@ export class AiChatbotController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteChatOverride(@Param('chatId') chatId: string, @Req() req: any) {
     await this.aiConfigService.deleteChatOverride(chatId, req.user.userId);
+  }
+
+  // ==========================================================================
+  // System AI Goal Prompts (System Admin Only)
+  // ==========================================================================
+
+  @Get('system/prompts')
+  async getAllGoalPrompts() {
+    return this.systemAiPromptsService.getAllGoalPrompts();
+  }
+
+  @Get('system/prompts/:goalType')
+  async getGoalPrompt(@Param('goalType') goalType: string) {
+    return this.systemAiPromptsService.getGoalPrompt(goalType);
+  }
+
+  @Patch('system/prompts/:goalType')
+  @UseGuards(SystemAdminGuard)
+  async updateGoalPrompt(
+    @Req() req: any,
+    @Param('goalType') goalType: string,
+    @Body() dto: UpdateGoalPromptDto,
+  ) {
+    return this.systemAiPromptsService.updateGoalPrompt(
+      req.user.userId,
+      goalType,
+      dto,
+    );
+  }
+
+  @Post('system/prompts/:goalType/reset')
+  @UseGuards(SystemAdminGuard)
+  async resetGoalPromptToDefault(
+    @Req() req: any,
+    @Param('goalType') goalType: string,
+  ) {
+    return this.systemAiPromptsService.resetGoalPromptToDefault(
+      req.user.userId,
+      goalType,
+    );
+  }
+
+  @Get('system/admin-check')
+  async checkSystemAdmin(@Req() req: any) {
+    const isAdmin = await this.systemAiPromptsService.isSystemAdmin(
+      req.user.userId,
+    );
+    return { isSystemAdmin: isAdmin };
+  }
+
+  // ==========================================================================
+  // System AI Settings (System Admin Only)
+  // ==========================================================================
+
+  @Get('system/settings')
+  async getAllSystemSettings() {
+    return this.systemAiPromptsService.getAllSettings();
+  }
+
+  @Get('system/settings/:settingKey')
+  async getSystemSetting(@Param('settingKey') settingKey: string) {
+    return this.systemAiPromptsService.getSetting(settingKey);
+  }
+
+  @Patch('system/settings/:settingKey')
+  @UseGuards(SystemAdminGuard)
+  async updateSystemSetting(
+    @Req() req: any,
+    @Param('settingKey') settingKey: string,
+    @Body() dto: UpdateSystemSettingDto,
+  ) {
+    return this.systemAiPromptsService.updateSetting(req.user.userId, {
+      settingKey,
+      settingValue: dto.settingValue,
+      description: dto.description,
+    });
   }
 }

@@ -17,6 +17,7 @@ export const users = pgTable("users", {
   email: varchar("email", { length: 255 }).notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   role: varchar("role", { length: 20 }).notNull().default("member"),
+  isSystemAdmin: boolean("is_system_admin").default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   deletedAt: timestamp("deleted_at"),
@@ -249,3 +250,36 @@ export type TeamDataWithMembers = Team & {
     user: Pick<User, "id" | "name" | "email">;
   })[];
 };
+
+// ============================================================================
+// System-wide AI Configuration Tables
+// ============================================================================
+
+export const systemAiGoalPrompts = pgTable("system_ai_goal_prompts", {
+  id: serial("id").primaryKey(),
+  goalType: varchar("goal_type", { length: 50 }).notNull().unique(),
+  displayName: varchar("display_name", { length: 100 }).notNull(),
+  description: text("description"),
+  promptTemplate: text("prompt_template").notNull(),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+});
+
+export type SystemAiGoalPrompt = typeof systemAiGoalPrompts.$inferSelect;
+export type NewSystemAiGoalPrompt = typeof systemAiGoalPrompts.$inferInsert;
+
+export const systemAiSettings = pgTable("system_ai_settings", {
+  id: serial("id").primaryKey(),
+  settingKey: varchar("setting_key", { length: 100 }).notNull().unique(),
+  settingValue: jsonb("setting_value").notNull().default({}),
+  description: text("description"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  updatedBy: integer("updated_by").references(() => users.id),
+});
+
+export type SystemAiSetting = typeof systemAiSettings.$inferSelect;
+export type NewSystemAiSetting = typeof systemAiSettings.$inferInsert;
