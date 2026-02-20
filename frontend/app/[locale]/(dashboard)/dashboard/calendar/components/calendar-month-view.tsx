@@ -72,11 +72,11 @@ export function CalendarMonthView({
       </div>
 
       {/* Calendar Grid */}
-      <div className="flex-1 grid grid-rows-[repeat(auto-fill,minmax(0,1fr))]">
+      <div className="flex-1 flex flex-col">
         {weeks.map((week, weekIndex) => (
           <div
             key={weekIndex}
-            className="grid grid-cols-7 border-b last:border-b-0"
+            className="flex-1 grid grid-cols-7 border-b last:border-b-0 min-h-0"
           >
             {week.map((day) => {
               const dayEvents = getEventsForDate(day);

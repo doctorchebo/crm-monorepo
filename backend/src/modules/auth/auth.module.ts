@@ -20,13 +20,6 @@ import { RefreshJwtStrategy } from './strategies/refresh.strategy';
         const jwtExpirationEnv = configService.get<string>('JWT_EXPIRATION');
         const jwtExpirationParsed = parseInt(jwtExpirationEnv || '3600', 10);
 
-        console.log('[Auth Module] JWT Configuration:', {
-          jwtSecret: jwtSecret ? '***set***' : 'MISSING',
-          jwtExpirationEnv,
-          jwtExpirationParsed,
-          jwtExpirationType: typeof jwtExpirationParsed,
-        });
-
         return {
           secret: jwtSecret,
           signOptions: {

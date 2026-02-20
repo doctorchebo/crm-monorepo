@@ -232,10 +232,6 @@ export class LambdaThumbnailService implements OnModuleInit {
   async onModuleInit() {
     // Check if Lambda thumbnail is configured (uses same queue as compression)
     if (!this.queueUrl) {
-      this.logger.error(
-        'Lambda thumbnails are DISABLED - MEDIA_COMPRESSION_QUEUE_URL not configured. ' +
-          'Thumbnail generation will NOT work without AWS Lambda.',
-      );
       this.isEnabled = false;
       return;
     }
@@ -246,20 +242,13 @@ export class LambdaThumbnailService implements OnModuleInit {
       !this.queueUrl.includes('.amazonaws.com/')
     ) {
       this.logger.error(
-        `Lambda thumbnails are DISABLED - Invalid queue URL format: ${this.queueUrl}`,
+        `Lambda thumbnails are DISABLED - Invalid queue URL format`,
       );
       this.isEnabled = false;
       return;
     }
 
     this.isEnabled = true;
-    this.logger.log(
-      `Lambda thumbnails are ENABLED:\n` +
-        `  • Queue URL: ${this.queueUrl}\n` +
-        `  • Webhook URL: ${this.webhookBaseUrl}/api/v1/media/thumbnail/callback\n` +
-        `  • S3 Bucket: ${this.bucketName}\n` +
-        `  • Safety: max ${SAFETY_LIMITS.maxAttempts} attempts, ${SAFETY_LIMITS.maxAgeMs / 60000}min max age`,
-    );
   }
 
   /**

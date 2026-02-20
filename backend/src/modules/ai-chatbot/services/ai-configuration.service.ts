@@ -137,6 +137,12 @@ export interface ChatAiOverrideDto {
   useTemplatesOnly?: boolean;
   reviewBeforeSend?: boolean;
   overrideReason?: string | null;
+  // Calendar AI overrides
+  calendarAiEnabled?: boolean | null;
+  calendarCanCreateEvents?: boolean | null;
+  calendarCanModifyEvents?: boolean | null;
+  calendarCanDeleteEvents?: boolean | null;
+  calendarAiInstructions?: string | null;
 }
 
 /**
@@ -348,6 +354,11 @@ export class AiConfigurationService {
           useTemplatesOnly: dto.useTemplatesOnly,
           reviewBeforeSend: dto.reviewBeforeSend,
           overrideReason: dto.overrideReason,
+          calendarAiEnabled: dto.calendarAiEnabled,
+          calendarCanCreateEvents: dto.calendarCanCreateEvents,
+          calendarCanModifyEvents: dto.calendarCanModifyEvents,
+          calendarCanDeleteEvents: dto.calendarCanDeleteEvents,
+          calendarAiInstructions: dto.calendarAiInstructions,
           updatedAt: new Date(),
         })
         .where(eq(chatAiOverrides.chatId, chatId))
@@ -390,6 +401,11 @@ export class AiConfigurationService {
         useTemplatesOnly: dto.useTemplatesOnly ?? false,
         reviewBeforeSend: dto.reviewBeforeSend ?? false,
         overrideReason: dto.overrideReason,
+        calendarAiEnabled: dto.calendarAiEnabled,
+        calendarCanCreateEvents: dto.calendarCanCreateEvents,
+        calendarCanModifyEvents: dto.calendarCanModifyEvents,
+        calendarCanDeleteEvents: dto.calendarCanDeleteEvents,
+        calendarAiInstructions: dto.calendarAiInstructions,
       })
       .returning();
 

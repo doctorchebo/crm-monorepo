@@ -37,7 +37,7 @@ export class PermissionsGuard implements CanActivate {
 
     // Attempt to resolve Team ID
     let teamId =
-      request.params.teamId || request.query.teamId || request.body.teamId;
+      request.params?.teamId || request.query?.teamId || request.body?.teamId;
 
     // Special case: If route is /teams/:id, the :id is teamId
     // Or if this is TeamController and param is :id

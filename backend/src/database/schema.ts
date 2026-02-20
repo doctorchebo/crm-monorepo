@@ -2437,6 +2437,12 @@ export const chatAiOverrides = pgTable(
     // Goal override for this chat (selected when resuming AI)
     goalType: varchar('goal_type', { length: 50 }), // Per-chat goal override
     goalDescription: text('goal_description'), // Custom goal description
+    // Calendar AI overrides (null = inherit from global calendar AI settings)
+    calendarAiEnabled: boolean('calendar_ai_enabled'), // Override whether AI can access calendar in this chat
+    calendarCanCreateEvents: boolean('calendar_can_create_events'),
+    calendarCanModifyEvents: boolean('calendar_can_modify_events'),
+    calendarCanDeleteEvents: boolean('calendar_can_delete_events'),
+    calendarAiInstructions: text('calendar_ai_instructions'), // Calendar-specific AI instructions for this chat
     // Reason for override
     overrideReason: text('override_reason'),
     // Timestamps

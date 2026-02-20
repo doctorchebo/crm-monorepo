@@ -294,6 +294,27 @@ export class SetChatAiOverrideDto {
   @IsString()
   @IsOptional()
   overrideReason?: string | null;
+
+  // Calendar AI overrides (null = inherit from global calendar AI settings)
+  @IsBoolean()
+  @IsOptional()
+  calendarAiEnabled?: boolean | null;
+
+  @IsBoolean()
+  @IsOptional()
+  calendarCanCreateEvents?: boolean | null;
+
+  @IsBoolean()
+  @IsOptional()
+  calendarCanModifyEvents?: boolean | null;
+
+  @IsBoolean()
+  @IsOptional()
+  calendarCanDeleteEvents?: boolean | null;
+
+  @IsString()
+  @IsOptional()
+  calendarAiInstructions?: string | null;
 }
 
 // ============================================================================

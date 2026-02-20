@@ -94,9 +94,6 @@ export class WhatsAppModule implements OnModuleInit {
   async onModuleInit() {
     // Inject MediaAnalyzerService into MediaService for GIF detection
     this.mediaService.setMediaAnalyzerService(this.mediaAnalyzerService);
-    console.log(
-      '✅ MediaAnalyzerService injected into MediaService for GIF detection',
-    );
 
     // Inject ThumbnailQueueService into MediaService and MediaStagingService
     // This avoids circular dependency issues
@@ -109,18 +106,9 @@ export class WhatsAppModule implements OnModuleInit {
         this.mediaStagingService.setThumbnailQueueService(
           thumbnailQueueService,
         );
-        console.log(
-          '✅ ThumbnailQueueService injected into MediaService and MediaStagingService',
-        );
-      } else {
-        console.warn(
-          '⚠️ ThumbnailQueueService not available - thumbnails will not be generated',
-        );
       }
     } catch (error) {
-      console.warn(
-        `⚠️ Could not inject ThumbnailQueueService: ${error.message}`,
-      );
+      // ThumbnailQueueService not available - thumbnails won't be generated
     }
   }
 }

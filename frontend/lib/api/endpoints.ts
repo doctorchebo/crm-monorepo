@@ -3088,6 +3088,12 @@ export interface ChatAiOverride {
   avoidTopics: string[] | null;
   aiEnabled: boolean;
   overrideReason: string | null;
+  // Calendar AI overrides (null = inherit from global calendar AI settings)
+  calendarAiEnabled: boolean | null;
+  calendarCanCreateEvents: boolean | null;
+  calendarCanModifyEvents: boolean | null;
+  calendarCanDeleteEvents: boolean | null;
+  calendarAiInstructions: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -3107,6 +3113,12 @@ export interface SetChatOverrideDto {
   avoidTopics?: string[] | null;
   aiEnabled?: boolean;
   overrideReason?: string | null;
+  // Calendar AI overrides (null = inherit from global calendar AI settings)
+  calendarAiEnabled?: boolean | null;
+  calendarCanCreateEvents?: boolean | null;
+  calendarCanModifyEvents?: boolean | null;
+  calendarCanDeleteEvents?: boolean | null;
+  calendarAiInstructions?: string | null;
 }
 
 // ==================== Audit Types ====================

@@ -9,6 +9,8 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     // Disable built-in body parser to use custom configuration
     bodyParser: false,
+    // Disable verbose route logging at startup for cleaner output
+    logger: ['error', 'warn'],
   });
 
   // Parse incoming cookies so they're available in req.cookies
@@ -43,22 +45,17 @@ async function bootstrap() {
   // MUST be applied BEFORE the default body parser to capture the raw stream
   // Meta Cloud API sends JSON webhooks and signs the raw body
   app.use('/webhook/whatsapp', (req, res, next) => {
-    console.log('🔌 Raw body middleware triggered');
     let data = '';
     req.on('data', (chunk) => {
-      console.log('📥 Receiving chunk:', chunk.length, 'bytes');
       data += chunk.toString();
     });
     req.on('end', () => {
-      console.log('✅ Body received completely:', data.length, 'bytes');
       // Store raw body for signature verification
       (req as any).rawBody = data;
       try {
         // Parse JSON body
         req.body = JSON.parse(data);
-        console.log('✅ JSON parsed successfully');
       } catch (e) {
-        console.log('⚠️ JSON parse failed, trying URLSearchParams');
         // If not JSON, try form data parsing (for potential backward compatibility)
         const params = new URLSearchParams(data);
         req.body = Object.fromEntries(params);
@@ -78,27 +75,7 @@ async function bootstrap() {
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   });
 
-  // Global logging middleware to debug all requests
-  app.use((req, res, next) => {
-    // Skip logging for frequent status checks (they're too noisy)
-    const isStatusCheck = req.url.includes('/whatsapp/status/');
-
-    if (
-      !isStatusCheck &&
-      (req.url.includes('webhook') || req.url.includes('whatsapp'))
-    ) {
-      console.log(
-        `\n📨 [${new Date().toISOString()}] ${req.method} ${req.url}`,
-      );
-      console.log('IP:', req.ip);
-      console.log('Headers:', {
-        'content-type': req.headers['content-type'],
-        'content-length': req.headers['content-length'],
-        'x-hub-signature-256': req.headers['x-hub-signature-256'],
-      });
-    }
-    next();
-  });
+  // Request logging middleware removed - use structured logging in production instead
 
   await app.listen(process.env.PORT ?? 3001);
   console.log(`✅ Backend running on port ${process.env.PORT ?? 3001}`);

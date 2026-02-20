@@ -40,6 +40,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   Bot,
+  Calendar,
   FileText,
   Loader2,
   MessageSquare,
@@ -72,6 +73,12 @@ interface ConfigFormData {
   useTemplatesOnly: boolean;
   reviewBeforeSend: boolean;
   overrideReason: string | null;
+  // Calendar AI overrides
+  calendarAiEnabled: boolean | null;
+  calendarCanCreateEvents: boolean | null;
+  calendarCanModifyEvents: boolean | null;
+  calendarCanDeleteEvents: boolean | null;
+  calendarAiInstructions: string | null;
 }
 
 // ============================================================================
@@ -159,6 +166,11 @@ export function ChatAiConfigModal({
     useTemplatesOnly: false,
     reviewBeforeSend: false,
     overrideReason: null,
+    calendarAiEnabled: null,
+    calendarCanCreateEvents: null,
+    calendarCanModifyEvents: null,
+    calendarCanDeleteEvents: null,
+    calendarAiInstructions: null,
   });
 
   // Fetch existing override
@@ -184,6 +196,11 @@ export function ChatAiConfigModal({
           useTemplatesOnly: override.useTemplatesOnly ?? false,
           reviewBeforeSend: override.reviewBeforeSend ?? false,
           overrideReason: override.overrideReason,
+          calendarAiEnabled: override.calendarAiEnabled ?? null,
+          calendarCanCreateEvents: override.calendarCanCreateEvents ?? null,
+          calendarCanModifyEvents: override.calendarCanModifyEvents ?? null,
+          calendarCanDeleteEvents: override.calendarCanDeleteEvents ?? null,
+          calendarAiInstructions: override.calendarAiInstructions ?? null,
         });
       } else {
         // Reset to defaults for new chat (AI disabled by default)
@@ -198,6 +215,11 @@ export function ChatAiConfigModal({
           useTemplatesOnly: false,
           reviewBeforeSend: false,
           overrideReason: null,
+          calendarAiEnabled: null,
+          calendarCanCreateEvents: null,
+          calendarCanModifyEvents: null,
+          calendarCanDeleteEvents: null,
+          calendarAiInstructions: null,
         });
       }
     } catch (err) {
@@ -230,6 +252,11 @@ export function ChatAiConfigModal({
         useTemplatesOnly: formData.useTemplatesOnly,
         reviewBeforeSend: formData.reviewBeforeSend,
         overrideReason: formData.overrideReason || "User configuration",
+        calendarAiEnabled: formData.calendarAiEnabled,
+        calendarCanCreateEvents: formData.calendarCanCreateEvents,
+        calendarCanModifyEvents: formData.calendarCanModifyEvents,
+        calendarCanDeleteEvents: formData.calendarCanDeleteEvents,
+        calendarAiInstructions: formData.calendarAiInstructions,
       };
 
       await backendApi.aiConfig.setChatOverride(dto);
@@ -264,6 +291,11 @@ export function ChatAiConfigModal({
         useTemplatesOnly: false,
         reviewBeforeSend: false,
         overrideReason: null,
+        calendarAiEnabled: null,
+        calendarCanCreateEvents: null,
+        calendarCanModifyEvents: null,
+        calendarCanDeleteEvents: null,
+        calendarAiInstructions: null,
       });
       onSaved?.();
     } catch (err) {
@@ -276,7 +308,7 @@ export function ChatAiConfigModal({
 
   const updateField = <K extends keyof ConfigFormData>(
     field: K,
-    value: ConfigFormData[K]
+    value: ConfigFormData[K],
   ) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
@@ -314,7 +346,7 @@ export function ChatAiConfigModal({
                     "p-2 rounded-full",
                     formData.aiEnabled
                       ? "bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400"
-                      : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
+                      : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
                   )}
                 >
                   {formData.aiEnabled ? (
@@ -405,7 +437,7 @@ export function ChatAiConfigModal({
                         onValueChange={(v) =>
                           updateField(
                             "formalityLevel",
-                            v === "default" ? null : v
+                            v === "default" ? null : v,
                           )
                         }
                       >
@@ -442,7 +474,7 @@ export function ChatAiConfigModal({
                         onChange={(e) =>
                           updateField(
                             "maxMessagesPerHour",
-                            e.target.value ? parseInt(e.target.value) : null
+                            e.target.value ? parseInt(e.target.value) : null,
                           )
                         }
                         min={1}
@@ -462,7 +494,7 @@ export function ChatAiConfigModal({
                         onChange={(e) =>
                           updateField(
                             "maxResponseLength",
-                            e.target.value ? parseInt(e.target.value) : null
+                            e.target.value ? parseInt(e.target.value) : null,
                           )
                         }
                         min={50}
@@ -496,7 +528,9 @@ export function ChatAiConfigModal({
 
                   <div className="flex items-center justify-between p-3 rounded-lg border border-violet-200 dark:border-violet-800 bg-violet-50/50 dark:bg-violet-950/20">
                     <div>
-                      <Label className="text-violet-700 dark:text-violet-300">Review Before Send</Label>
+                      <Label className="text-violet-700 dark:text-violet-300">
+                        Review Before Send
+                      </Label>
                       <p className="text-sm text-muted-foreground">
                         Preview and edit AI responses before they are sent
                       </p>
@@ -525,7 +559,7 @@ export function ChatAiConfigModal({
                       onChange={(e) =>
                         updateField(
                           "customInstructions",
-                          e.target.value || null
+                          e.target.value || null,
                         )
                       }
                       rows={3}
@@ -534,6 +568,176 @@ export function ChatAiConfigModal({
                       Provide specific context or instructions for AI when
                       responding to this chat
                     </p>
+                  </div>
+                </div>
+
+                {/* Calendar AI Settings */}
+                <div className="space-y-4">
+                  <h4 className="flex items-center gap-2 text-sm font-medium">
+                    <Calendar className="h-4 w-4" />
+                    Calendar AI (Override)
+                  </h4>
+                  <p className="text-xs text-muted-foreground -mt-2">
+                    Override the global calendar AI settings for this chat.
+                    Leave toggles in the middle position to inherit global
+                    defaults.
+                  </p>
+
+                  <div className="space-y-3">
+                    {/* Calendar AI Enabled */}
+                    <div className="flex items-center justify-between p-3 rounded-lg border">
+                      <div>
+                        <Label>Calendar AI Access</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Allow AI to read/write calendar for this chat
+                        </p>
+                      </div>
+                      <Select
+                        value={
+                          formData.calendarAiEnabled === null
+                            ? "inherit"
+                            : formData.calendarAiEnabled
+                              ? "enabled"
+                              : "disabled"
+                        }
+                        onValueChange={(v) =>
+                          updateField(
+                            "calendarAiEnabled",
+                            v === "inherit" ? null : v === "enabled",
+                          )
+                        }
+                      >
+                        <SelectTrigger className="w-32">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="inherit">Inherit</SelectItem>
+                          <SelectItem value="enabled">Enabled</SelectItem>
+                          <SelectItem value="disabled">Disabled</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Calendar Create Events */}
+                    <div className="flex items-center justify-between p-3 rounded-lg border">
+                      <div>
+                        <Label>Can Create Events</Label>
+                        <p className="text-xs text-muted-foreground">
+                          AI can schedule new calendar events
+                        </p>
+                      </div>
+                      <Select
+                        value={
+                          formData.calendarCanCreateEvents === null
+                            ? "inherit"
+                            : formData.calendarCanCreateEvents
+                              ? "enabled"
+                              : "disabled"
+                        }
+                        onValueChange={(v) =>
+                          updateField(
+                            "calendarCanCreateEvents",
+                            v === "inherit" ? null : v === "enabled",
+                          )
+                        }
+                      >
+                        <SelectTrigger className="w-32">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="inherit">Inherit</SelectItem>
+                          <SelectItem value="enabled">Enabled</SelectItem>
+                          <SelectItem value="disabled">Disabled</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Calendar Modify Events */}
+                    <div className="flex items-center justify-between p-3 rounded-lg border">
+                      <div>
+                        <Label>Can Modify Events</Label>
+                        <p className="text-xs text-muted-foreground">
+                          AI can reschedule or update calendar events
+                        </p>
+                      </div>
+                      <Select
+                        value={
+                          formData.calendarCanModifyEvents === null
+                            ? "inherit"
+                            : formData.calendarCanModifyEvents
+                              ? "enabled"
+                              : "disabled"
+                        }
+                        onValueChange={(v) =>
+                          updateField(
+                            "calendarCanModifyEvents",
+                            v === "inherit" ? null : v === "enabled",
+                          )
+                        }
+                      >
+                        <SelectTrigger className="w-32">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="inherit">Inherit</SelectItem>
+                          <SelectItem value="enabled">Enabled</SelectItem>
+                          <SelectItem value="disabled">Disabled</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Calendar Delete Events */}
+                    <div className="flex items-center justify-between p-3 rounded-lg border">
+                      <div>
+                        <Label>Can Delete Events</Label>
+                        <p className="text-xs text-muted-foreground">
+                          AI can cancel or delete calendar events
+                        </p>
+                      </div>
+                      <Select
+                        value={
+                          formData.calendarCanDeleteEvents === null
+                            ? "inherit"
+                            : formData.calendarCanDeleteEvents
+                              ? "enabled"
+                              : "disabled"
+                        }
+                        onValueChange={(v) =>
+                          updateField(
+                            "calendarCanDeleteEvents",
+                            v === "inherit" ? null : v === "enabled",
+                          )
+                        }
+                      >
+                        <SelectTrigger className="w-32">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="inherit">Inherit</SelectItem>
+                          <SelectItem value="enabled">Enabled</SelectItem>
+                          <SelectItem value="disabled">Disabled</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Calendar AI Instructions */}
+                    <div className="space-y-2">
+                      <Label>Calendar AI Instructions</Label>
+                      <Textarea
+                        placeholder="e.g., Only schedule meetings between 9am–5pm. Prefer afternoons."
+                        value={formData.calendarAiInstructions || ""}
+                        onChange={(e) =>
+                          updateField(
+                            "calendarAiInstructions",
+                            e.target.value || null,
+                          )
+                        }
+                        rows={2}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Specific calendar scheduling instructions for this chat
+                      </p>
+                    </div>
                   </div>
                 </div>
               </>

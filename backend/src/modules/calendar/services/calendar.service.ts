@@ -136,7 +136,19 @@ export class CalendarService {
     teamId: number,
     dto: CreateEventDto,
   ): Promise<CalendarEvent> {
-    return this.eventsService.create(dto.calendarId, userId, dto);
+    let calendarId = dto.calendarId;
+    if (!calendarId) {
+      const defaultCalendar =
+        await this.calendarCrudService.getOrCreateDefaultCalendar(
+          userId,
+          teamId,
+        );
+      calendarId = defaultCalendar.id;
+    }
+    return this.eventsService.create(calendarId, userId, {
+      ...dto,
+      calendarId,
+    });
   }
 
   async getEvents(

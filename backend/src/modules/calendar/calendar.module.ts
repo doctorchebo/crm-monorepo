@@ -10,6 +10,7 @@ import { ContactsModule } from '../contacts/contacts.module';
 import { TeamModule } from '../team/team.module';
 
 // Controllers
+import { AiSettingsController } from './controllers/ai-settings.controller';
 import { AvailabilityController } from './controllers/availability.controller';
 import { BookingController } from './controllers/booking.controller';
 import { CalendarSyncController } from './controllers/calendar-sync.controller';
@@ -79,6 +80,7 @@ import { CalendarReminderTask, CalendarSyncTask } from './tasks';
     ),
   ],
   controllers: [
+    AiSettingsController,
     CalendarController,
     EventsController,
     BookingController,

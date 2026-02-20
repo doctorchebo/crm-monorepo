@@ -120,10 +120,6 @@ export class LambdaCompressionService implements OnModuleInit {
   async onModuleInit() {
     // Check if Lambda compression is configured
     if (!this.queueUrl) {
-      this.logger.warn(
-        'Lambda compression is DISABLED - MEDIA_COMPRESSION_QUEUE_URL not configured. ' +
-          'Falling back to local compression.',
-      );
       this.isEnabled = false;
       return;
     }
@@ -134,21 +130,13 @@ export class LambdaCompressionService implements OnModuleInit {
       !this.queueUrl.includes('.amazonaws.com/')
     ) {
       this.logger.error(
-        `Lambda compression is DISABLED - Invalid queue URL format: ${this.queueUrl}`,
+        `Lambda compression is DISABLED - Invalid queue URL format`,
       );
       this.isEnabled = false;
       return;
     }
 
     this.isEnabled = true;
-    const queueType = this.queueUrl.endsWith('.fifo') ? 'FIFO' : 'Standard';
-    this.logger.log(
-      `Lambda compression is ENABLED:\n` +
-        `  • Queue URL: ${this.queueUrl}\n` +
-        `  • Queue Type: ${queueType}\n` +
-        `  • Webhook URL: ${this.webhookBaseUrl}/api/v1/media/compression/callback\n` +
-        `  • S3 Bucket: ${this.bucketName}`,
-    );
   }
 
   /**

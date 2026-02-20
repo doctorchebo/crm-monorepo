@@ -28,9 +28,6 @@ import { Server, Socket } from 'socket.io';
       origin: string,
       callback: (err: Error | null, allow?: boolean) => void,
     ) => {
-      console.log(
-        `[WhatsAppGateway] Connection attempt from origin: ${origin}`,
-      );
       callback(null, true);
     },
     credentials: true,
@@ -51,10 +48,6 @@ export class WhatsAppGateway
    */
   handleConnection(socket: Socket): void {
     this.connectedClients.add(socket.id);
-    this.logger.log(
-      `Client connected: ${socket.id}. Total: ${this.connectedClients.size}`,
-    );
-    console.log(`✅ WebSocket client connected: ${socket.id}`);
   }
 
   /**
@@ -62,10 +55,6 @@ export class WhatsAppGateway
    */
   handleDisconnect(socket: Socket): void {
     this.connectedClients.delete(socket.id);
-    this.logger.log(
-      `Client disconnected: ${socket.id}. Total: ${this.connectedClients.size}`,
-    );
-    console.log(`❌ WebSocket client disconnected: ${socket.id}`);
   }
 
   /**
@@ -86,10 +75,6 @@ export class WhatsAppGateway
       status,
       timestamp: timestamp || new Date(),
     };
-
-    console.log(
-      `📡 Emitting status update: ${messageId} → ${status} to ${this.connectedClients.size} clients`,
-    );
 
     // Emit to all connected clients
     this.server.emit('message:status', statusUpdate);
@@ -116,10 +101,6 @@ export class WhatsAppGateway
       ...update,
       timestamp: update.timestamp || new Date(),
     }));
-
-    console.log(
-      `📡 Emitting ${updates.length} status updates to ${this.connectedClients.size} clients`,
-    );
 
     // Emit batch to all connected clients
     this.server.emit('message:statuses', statusUpdates);
@@ -151,10 +132,6 @@ export class WhatsAppGateway
     if (this.connectedClients.size === 0) {
       return; // No clients connected
     }
-
-    console.log(
-      `📡 Emitting new message: ${message.messageId} in chat ${message.chatId} to ${this.connectedClients.size} clients`,
-    );
 
     // Emit to all connected clients
     this.server.emit('message:new', {
@@ -193,10 +170,6 @@ export class WhatsAppGateway
         : msg.timestamp,
     }));
 
-    console.log(
-      `📡 Emitting ${messages.length} new messages to ${this.connectedClients.size} clients`,
-    );
-
     // Emit batch to all connected clients
     this.server.emit('message:batch', messageData);
   }
@@ -220,10 +193,6 @@ export class WhatsAppGateway
     if (this.connectedClients.size === 0) {
       return; // No clients connected
     }
-
-    console.log(
-      `📡 Emitting thumbnail:ready for ${event.messageId}/${event.attachmentId} to ${this.connectedClients.size} clients`,
-    );
 
     // Emit to all connected clients
     this.server.emit('thumbnail:ready', event);
@@ -249,10 +218,6 @@ export class WhatsAppGateway
       return;
     }
 
-    console.log(
-      `📡 Emitting ${events.length} thumbnail:ready events to ${this.connectedClients.size} clients`,
-    );
-
     // Emit batch to all connected clients
     this.server.emit('thumbnails:batch', events);
   }
@@ -273,10 +238,6 @@ export class WhatsAppGateway
     if (this.connectedClients.size === 0) {
       return; // No clients connected
     }
-
-    console.log(
-      `📡 Emitting attachment:status for ${event.messageId}/${event.attachmentId} → ${event.status} to ${this.connectedClients.size} clients`,
-    );
 
     // Emit to all connected clients
     this.server.emit('attachment:status', {
@@ -306,10 +267,6 @@ export class WhatsAppGateway
     if (this.connectedClients.size === 0) {
       return; // No clients connected
     }
-
-    console.log(
-      `📡 Emitting chat:update for ${chatUpdate.chatId} (unread: ${chatUpdate.unreadCount}, type: ${chatUpdate.lastMessageType || chatUpdate.lastActivityType || 'text'}) to ${this.connectedClients.size} clients`,
-    );
 
     // Emit to all connected clients
     this.server.emit('chat:update', {
@@ -342,10 +299,6 @@ export class WhatsAppGateway
       return; // No clients connected
     }
 
-    console.log(
-      `📡 Emitting chat:new for ${chat.chatId} (participant: ${chat.participantPhone}) to ${this.connectedClients.size} clients`,
-    );
-
     // Emit to all connected clients
     this.server.emit('chat:new', {
       ...chat,
@@ -366,10 +319,6 @@ export class WhatsAppGateway
       return; // No clients connected
     }
 
-    console.log(
-      `📡 Emitting chat:archived for ${chatId} (isArchived: ${isArchived}) to ${this.connectedClients.size} clients`,
-    );
-
     // Emit to all connected clients
     this.server.emit('chat:archived', {
       chatId,
@@ -388,10 +337,6 @@ export class WhatsAppGateway
     if (this.connectedClients.size === 0) {
       return; // No clients connected
     }
-
-    console.log(
-      `📡 Emitting chat:deleted for ${chatId} to ${this.connectedClients.size} clients`,
-    );
 
     // Emit to all connected clients
     this.server.emit('chat:deleted', {
@@ -417,10 +362,6 @@ export class WhatsAppGateway
       return; // No clients connected
     }
 
-    console.log(
-      `📡 Emitting attachment:updated for message ${data.messageId}, attachment ${data.attachmentId} to ${this.connectedClients.size} clients`,
-    );
-
     // Emit to all connected clients
     this.server.emit('attachment:updated', {
       ...data,
@@ -444,10 +385,6 @@ export class WhatsAppGateway
     if (this.connectedClients.size === 0) {
       return; // No clients connected
     }
-
-    console.log(
-      `📡 Emitting customer-reaction for message ${data.messageId} (${data.action}: ${data.emoji || 'removed'}) to ${this.connectedClients.size} clients`,
-    );
 
     // Emit to all connected clients
     this.server.emit('customer-reaction', {
@@ -476,10 +413,6 @@ export class WhatsAppGateway
       return; // No clients connected
     }
 
-    console.log(
-      `📡 Emitting ai:rate_limit_exceeded for ${data.chatId} (${data.currentCount}/${data.maxCount}) to ${this.connectedClients.size} clients`,
-    );
-
     this.server.emit('ai:rate_limit_exceeded', {
       ...data,
       resetTime: data.resetTime?.toISOString(),
@@ -498,10 +431,6 @@ export class WhatsAppGateway
       return; // No clients connected
     }
 
-    console.log(
-      `📡 Emitting ai:typing_start for ${chatId} to ${this.connectedClients.size} clients`,
-    );
-
     this.server.emit('ai:typing_start', {
       chatId,
       timestamp: new Date().toISOString(),
@@ -518,10 +447,6 @@ export class WhatsAppGateway
     if (this.connectedClients.size === 0) {
       return; // No clients connected
     }
-
-    console.log(
-      `📡 Emitting ai:typing_stop for ${chatId} to ${this.connectedClients.size} clients`,
-    );
 
     this.server.emit('ai:typing_stop', {
       chatId,
@@ -557,10 +482,6 @@ export class WhatsAppGateway
       return; // No clients connected
     }
 
-    console.log(
-      `📡 Emitting ai:pending_review for ${data.chatId} to ${this.connectedClients.size} clients`,
-    );
-
     this.server.emit('ai:pending_review', {
       ...data,
       generatedAt: new Date().toISOString(),
@@ -591,10 +512,6 @@ export class WhatsAppGateway
     if (this.connectedClients.size === 0) {
       return; // No clients connected
     }
-
-    console.log(
-      `📡 Emitting template-media:thumbnail-ready for tempId ${event.tempId} to ${this.connectedClients.size} clients`,
-    );
 
     this.server.emit('template-media:thumbnail-ready', event);
   }

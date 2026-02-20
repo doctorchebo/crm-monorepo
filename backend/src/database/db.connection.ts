@@ -32,25 +32,9 @@ function createPool(): Pool {
     allowExitOnIdle: false, // Keep pool alive
   });
 
-  // Log pool events for debugging
-  pool.on('connect', () => {
-    console.log(
-      `[DB Pool] Connection established. Total: ${pool.totalCount}, Idle: ${pool.idleCount}`,
-    );
-  });
-
+  // Only log errors - connection events are too verbose for normal operation
   pool.on('error', (err) => {
     console.error('[DB Pool] Pool error:', err.message);
-    // Don't crash on idle client errors
-    if (err.message.includes('Connection terminated unexpectedly')) {
-      console.warn('[DB Pool] Connection lost, pool will reconnect...');
-    }
-  });
-
-  pool.on('remove', () => {
-    console.log(
-      `[DB Pool] Connection removed. Total: ${pool.totalCount}, Idle: ${pool.idleCount}`,
-    );
   });
 
   return pool;
@@ -83,16 +67,6 @@ function initializeDb(): NodePgDatabase<typeof schema> {
   global.__db_pool__ = pool;
   global.__db_instance__ = instance;
 
-  // Periodic pool status logging (only one interval)
-  global.__db_pool_interval__ = setInterval(() => {
-    if (global.__db_pool__) {
-      console.log(
-        `[DB Pool] Status - Total: ${global.__db_pool__.totalCount}, Idle: ${global.__db_pool__.idleCount}, Waiting: ${global.__db_pool__.waitingCount}`,
-      );
-    }
-  }, 60000); // Log every 60 seconds (reduced frequency)
-
-  console.log('[DB Pool] Database connection initialized');
   return instance;
 }
 
@@ -118,11 +92,9 @@ export async function closeDbPool(): Promise<void> {
   }
 
   if (global.__db_pool__) {
-    console.log('[DB Pool] Closing database pool...');
     await global.__db_pool__.end();
     global.__db_pool__ = undefined;
     global.__db_instance__ = undefined;
-    console.log('[DB Pool] Database pool closed');
   }
 }
 

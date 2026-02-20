@@ -13,3 +13,5 @@ For any new feature you work on, make sure to add tests. For any bug fix, make s
 When implementing a feature, start by breaking it down into smaller, manageable tasks. This will help you stay organized and ensure that you don't miss any important details.
 
 When working on a bug fix, make sure to thoroughly investigate the issue and understand the root cause before implementing a solution. This will help you avoid introducing new bugs or issues.
+
+Don't generate additional documentation files for the features or fixes you implement.
