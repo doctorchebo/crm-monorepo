@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseIntPipe,
   Patch,
   Post,
   Query,
@@ -165,6 +166,58 @@ export class AvailabilityController {
     const userId = req.user.userId;
     await this.availabilityService.deleteOverride(id, userId);
     return { success: true };
+  }
+
+  // ============================================================
+  // Slot Availability (public-facing for booking)
+  // ============================================================
+
+  /**
+   * Get available time slots for a booking link on a specific date
+   * GET /calendar/availability/slots?bookingLinkId=...&date=YYYY-MM-DD&duration=30
+   */
+  @Get('slots')
+  @RequirePermission('calendar.view')
+  async getSlots(
+    @Query('bookingLinkId') bookingLinkId: string,
+    @Query('date') date: string,
+    @Query('duration') duration?: string,
+  ) {
+    const targetDate = new Date(date);
+    const durationMinutes = duration ? parseInt(duration, 10) : 30;
+    const slots = await this.availabilityService.getAvailableSlots(
+      bookingLinkId,
+      targetDate,
+      durationMinutes,
+    );
+    return {
+      slots: slots.map((s) => ({
+        start: s.start.toISOString(),
+        end: s.end.toISOString(),
+      })),
+    };
+  }
+
+  /**
+   * Get dates that have at least one available slot within a month
+   * GET /calendar/availability/available-dates?bookingLinkId=...&year=2026&month=2&duration=30
+   */
+  @Get('available-dates')
+  @RequirePermission('calendar.view')
+  async getAvailableDates(
+    @Query('bookingLinkId') bookingLinkId: string,
+    @Query('year', ParseIntPipe) year: number,
+    @Query('month', ParseIntPipe) month: number,
+    @Query('duration') duration?: string,
+  ) {
+    const durationMinutes = duration ? parseInt(duration, 10) : 30;
+    const dates = await this.availabilityService.getAvailableDatesInMonth(
+      bookingLinkId,
+      year,
+      month,
+      durationMinutes,
+    );
+    return { dates };
   }
 
   // ============================================================

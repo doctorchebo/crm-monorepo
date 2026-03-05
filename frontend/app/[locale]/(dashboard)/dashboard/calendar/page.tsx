@@ -62,6 +62,9 @@ export default function CalendarPage() {
     calendars,
     defaultCalendar,
     isLoading: calendarsLoading,
+    createCalendar,
+    updateCalendar,
+    deleteCalendar,
   } = useCalendars();
   const [selectedCalendarId, setSelectedCalendarId] = useState<
     string | undefined
@@ -197,6 +200,9 @@ export default function CalendarPage() {
             onSelectCalendar={setSelectedCalendarId}
             currentDate={currentDate}
             onDateSelect={setCurrentDate}
+            onCreateCalendar={createCalendar}
+            onUpdateCalendar={updateCalendar}
+            onDeleteCalendar={deleteCalendar}
           />
         )}
 

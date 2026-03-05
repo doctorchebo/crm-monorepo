@@ -47,8 +47,8 @@ export type BookingStatus =
 // ==================== Calendar Interfaces ====================
 
 export interface Calendar {
-  id: number;
-  calendarId: string;
+  id: string; // UUID
+  calendarId: string; // alias for id, mapped in API client
   teamId: number;
   name: string;
   description: string | null;
@@ -62,8 +62,8 @@ export interface Calendar {
 }
 
 export interface CalendarEvent {
-  id: number;
-  eventId: string;
+  id: string; // UUID
+  eventId: string; // alias for id, mapped in API client
   calendarId: number;
   title: string;
   description: string | null;
@@ -134,8 +134,8 @@ export interface CalendarShare {
 }
 
 export interface BookingLink {
-  id: number;
-  bookingLinkId: string;
+  id: string; // UUID
+  bookingLinkId: string; // alias for id, mapped in API client
   teamId: number;
   calendarId: number;
   slug: string;
@@ -180,16 +180,29 @@ export interface BookingLinkMember {
   user?: { id: number; name: string; email: string };
 }
 
-export interface AvailabilityRule {
-  id: number;
-  ruleId: string;
-  teamId: number;
+/** Raw shape returned directly by the backend DB (what the API actually sends) */
+interface RawAvailabilityRule {
+  id: string;
   userId: number | null;
-  bookingLinkId: number | null;
+  bookingLinkId: string | null;
+  ruleType: string;
+  daysOfWeek: number[];
+  startMinutes: number;
+  endMinutes: number;
+  timezone: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Frontend-friendly availability rule (one entry per day) */
+export interface AvailabilityRule {
+  id: string;
   dayOfWeek: DayOfWeek;
   startTime: string;
   endTime: string;
   isAvailable: boolean;
+  timezone: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -312,15 +325,12 @@ export interface CreateEventDto {
   videoConferenceProvider?: string;
   relatedContactId?: number;
   relatedChatId?: string;
-  attendees?: Array<{
-    email: string;
-    name?: string;
-    isOrganizer?: boolean;
-  }>;
+  attendeeEmails?: string[];
   reminders?: Array<{
     type: ReminderType;
     minutesBefore: number;
   }>;
+  skipAvailabilityCheck?: boolean;
 }
 
 export interface UpdateEventDto extends Partial<CreateEventDto> {}
@@ -386,7 +396,7 @@ export interface AvailabilityQueryParams {
 
 export interface SetAvailabilityDto {
   userId?: number;
-  bookingLinkId?: number;
+  bookingLinkId?: string;
   rules: Array<{
     dayOfWeek: DayOfWeek;
     startTime: string;
@@ -411,6 +421,20 @@ export interface CreateSyncConnectionDto {
   authCode: string;
   syncDirection?: SyncDirection;
   syncFrequency?: SyncFrequency;
+}
+
+export interface InitiateOAuthDto {
+  provider: CalendarProvider;
+  calendarId?: string;
+  syncDirection?: SyncDirection;
+  syncFrequency?: SyncFrequency;
+  redirectUri?: string;
+}
+
+export interface CompleteOAuthDto {
+  code: string;
+  state: string;
+  provider: CalendarProvider;
 }
 
 export interface UpdateAiSettingsDto {
@@ -458,26 +482,101 @@ export interface AvailabilityResponse {
   };
 }
 
-export interface SyncOAuthUrlResponse {
-  url: string;
-  state: string;
+// ==================== Response Mappers ====================
+
+// The backend returns Drizzle objects where the primary key is `id` (UUID string).
+// The frontend interfaces expect `calendarId` / `eventId` as the public identifier.
+// These mappers bridge the gap without changing the existing frontend code.
+
+function mapCalendar(raw: Record<string, unknown>): Calendar {
+  return { ...(raw as Calendar), calendarId: raw.id as string };
+}
+
+function mapCalendarEvent(raw: Record<string, unknown>): CalendarEvent {
+  return { ...(raw as CalendarEvent), eventId: raw.id as string };
+}
+
+function mapBookingLink(raw: Record<string, unknown>): BookingLink {
+  return { ...(raw as BookingLink), bookingLinkId: raw.id as string };
 }
 
 // ==================== Calendar API Client ====================
 
+// ==================== Availability helpers ====================
+// Backend stores days as numbers (0 = Sunday) and times as minutes-from-midnight.
+// These helpers translate between that representation and the frontend DayOfWeek strings.
+const DAY_NUM_TO_NAME: Record<number, DayOfWeek> = {
+  0: "sunday",
+  1: "monday",
+  2: "tuesday",
+  3: "wednesday",
+  4: "thursday",
+  5: "friday",
+  6: "saturday",
+};
+const DAY_NAME_TO_NUM: Record<DayOfWeek, number> = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+};
+const minutesToTime = (mins: number): string => {
+  const h = Math.floor(mins / 60)
+    .toString()
+    .padStart(2, "0");
+  const m = (mins % 60).toString().padStart(2, "0");
+  return `${h}:${m}`;
+};
+const mapRawAvailabilityRule = (
+  raw: RawAvailabilityRule,
+): AvailabilityRule[] => {
+  // daysOfWeek is JSONB — pg driver normally returns a parsed array, but can
+  // return a JSON string in some configurations. Handle both defensively.
+  const days: number[] = Array.isArray(raw.daysOfWeek)
+    ? (raw.daysOfWeek as number[])
+    : typeof raw.daysOfWeek === "string"
+      ? (JSON.parse(raw.daysOfWeek) as number[])
+      : [];
+  return days.map((dayNum) => ({
+    id: raw.id,
+    dayOfWeek: DAY_NUM_TO_NAME[dayNum],
+    startTime: minutesToTime(raw.startMinutes),
+    endTime: minutesToTime(raw.endMinutes),
+    // Use isActive to determine availability (handles both legacy ruleType and new isActive flag)
+    isAvailable: raw.isActive !== false && raw.ruleType !== "unavailable",
+    timezone: raw.timezone,
+    createdAt: raw.createdAt,
+    updatedAt: raw.updatedAt,
+  }));
+};
+
 export const calendarApi = {
   // Calendar CRUD
   calendars: {
-    list: (): Promise<Calendar[]> => apiClient.get("/calendar/calendars"),
+    list: (): Promise<Calendar[]> =>
+      apiClient
+        .get<Record<string, unknown>[]>("/calendar/calendars")
+        .then((items) => items.map(mapCalendar)),
 
     get: (calendarId: string): Promise<Calendar> =>
-      apiClient.get(`/calendar/calendars/${calendarId}`),
+      apiClient
+        .get<Record<string, unknown>>(`/calendar/calendars/${calendarId}`)
+        .then(mapCalendar),
 
     create: (data: CreateCalendarDto): Promise<Calendar> =>
-      apiClient.post("/calendar/calendars", data),
+      apiClient
+        .post<Record<string, unknown>>("/calendar/calendars", data)
+        .then(mapCalendar),
 
     update: (calendarId: string, data: UpdateCalendarDto): Promise<Calendar> =>
-      apiClient.patch(`/calendar/calendars/${calendarId}`, data),
+      apiClient
+        .patch<
+          Record<string, unknown>
+        >(`/calendar/calendars/${calendarId}`, data)
+        .then(mapCalendar),
 
     delete: (calendarId: string): Promise<{ success: boolean }> =>
       apiClient.delete(`/calendar/calendars/${calendarId}`),
@@ -506,17 +605,33 @@ export const calendarApi = {
           }
         });
       }
-      return apiClient.get(`/calendar/events?${searchParams.toString()}`);
+      return apiClient
+        .get<
+          Record<string, unknown>[]
+        >(`/calendar/events?${searchParams.toString()}`)
+        .then((items) => ({
+          items: items.map(mapCalendarEvent),
+          total: items.length,
+          page: 1,
+          pageSize: items.length,
+          totalPages: 1,
+        }));
     },
 
     get: (eventId: string): Promise<CalendarEvent> =>
-      apiClient.get(`/calendar/events/${eventId}`),
+      apiClient
+        .get<Record<string, unknown>>(`/calendar/events/${eventId}`)
+        .then(mapCalendarEvent),
 
     create: (data: CreateEventDto): Promise<CalendarEvent> =>
-      apiClient.post("/calendar/events", data),
+      apiClient
+        .post<Record<string, unknown>>("/calendar/events", data)
+        .then(mapCalendarEvent),
 
     update: (eventId: string, data: UpdateEventDto): Promise<CalendarEvent> =>
-      apiClient.patch(`/calendar/events/${eventId}`, data),
+      apiClient
+        .patch<Record<string, unknown>>(`/calendar/events/${eventId}`, data)
+        .then(mapCalendarEvent),
 
     delete: (eventId: string): Promise<{ success: boolean }> =>
       apiClient.delete(`/calendar/events/${eventId}`),
@@ -547,25 +662,39 @@ export const calendarApi = {
   // Booking Links
   bookingLinks: {
     list: (): Promise<BookingLink[]> =>
-      apiClient.get("/calendar/booking-links"),
+      apiClient
+        .get<Record<string, unknown>[]>("/calendar/booking/links")
+        .then((items) => items.map(mapBookingLink)),
 
     get: (bookingLinkId: string): Promise<BookingLink> =>
-      apiClient.get(`/calendar/booking-links/${bookingLinkId}`),
+      apiClient
+        .get<
+          Record<string, unknown>
+        >(`/calendar/booking/links/${bookingLinkId}`)
+        .then(mapBookingLink),
 
     getBySlug: (slug: string): Promise<BookingLink> =>
-      apiClient.get(`/calendar/booking-links/slug/${slug}`),
+      apiClient
+        .get<Record<string, unknown>>(`/calendar/booking/links/slug/${slug}`)
+        .then(mapBookingLink),
 
     create: (data: CreateBookingLinkDto): Promise<BookingLink> =>
-      apiClient.post("/calendar/booking-links", data),
+      apiClient
+        .post<Record<string, unknown>>("/calendar/booking/links", data)
+        .then(mapBookingLink),
 
     update: (
       bookingLinkId: string,
       data: UpdateBookingLinkDto,
     ): Promise<BookingLink> =>
-      apiClient.patch(`/calendar/booking-links/${bookingLinkId}`, data),
+      apiClient
+        .patch<
+          Record<string, unknown>
+        >(`/calendar/booking/links/${bookingLinkId}`, data)
+        .then(mapBookingLink),
 
     delete: (bookingLinkId: string): Promise<{ success: boolean }> =>
-      apiClient.delete(`/calendar/booking-links/${bookingLinkId}`),
+      apiClient.delete(`/calendar/booking/links/${bookingLinkId}`),
 
     // Members (round-robin)
     addMember: (
@@ -573,7 +702,7 @@ export const calendarApi = {
       userId: number,
       priority?: number,
     ): Promise<BookingLinkMember> =>
-      apiClient.post(`/calendar/booking-links/${bookingLinkId}/members`, {
+      apiClient.post(`/calendar/booking/links/${bookingLinkId}/members`, {
         userId,
         priority,
       }),
@@ -583,7 +712,7 @@ export const calendarApi = {
       memberId: number,
     ): Promise<{ success: boolean }> =>
       apiClient.delete(
-        `/calendar/booking-links/${bookingLinkId}/members/${memberId}`,
+        `/calendar/booking/links/${bookingLinkId}/members/${memberId}`,
       ),
 
     updateMemberPriority: (
@@ -592,7 +721,7 @@ export const calendarApi = {
       priority: number,
     ): Promise<BookingLinkMember> =>
       apiClient.patch(
-        `/calendar/booking-links/${bookingLinkId}/members/${memberId}`,
+        `/calendar/booking/links/${bookingLinkId}/members/${memberId}`,
         { priority },
       ),
   },
@@ -615,32 +744,36 @@ export const calendarApi = {
           }
         });
       }
-      return apiClient.get(`/calendar/bookings?${searchParams.toString()}`);
+      return apiClient.get(
+        `/calendar/booking/bookings?${searchParams.toString()}`,
+      );
     },
 
     get: (bookingId: string): Promise<Booking> =>
-      apiClient.get(`/calendar/bookings/${bookingId}`),
+      apiClient.get(`/calendar/booking/bookings/${bookingId}`),
 
     // Public endpoint for guests to create bookings
     create: (data: CreateBookingDto): Promise<Booking> =>
-      apiClient.post("/calendar/bookings", data),
+      apiClient.post("/calendar/booking/bookings", data),
 
     confirm: (bookingId: string): Promise<Booking> =>
-      apiClient.post(`/calendar/bookings/${bookingId}/confirm`),
+      apiClient.post(`/calendar/booking/bookings/${bookingId}/confirm`),
 
     cancel: (bookingId: string, reason?: string): Promise<Booking> =>
-      apiClient.post(`/calendar/bookings/${bookingId}/cancel`, { reason }),
+      apiClient.post(`/calendar/booking/bookings/${bookingId}/cancel`, {
+        reason,
+      }),
 
     reschedule: (bookingId: string, newStartTime: string): Promise<Booking> =>
-      apiClient.post(`/calendar/bookings/${bookingId}/reschedule`, {
+      apiClient.post(`/calendar/booking/bookings/${bookingId}/reschedule`, {
         scheduledStartTime: newStartTime,
       }),
 
     markNoShow: (bookingId: string): Promise<Booking> =>
-      apiClient.post(`/calendar/bookings/${bookingId}/no-show`),
+      apiClient.post(`/calendar/booking/bookings/${bookingId}/no-show`),
 
     markCompleted: (bookingId: string): Promise<Booking> =>
-      apiClient.post(`/calendar/bookings/${bookingId}/complete`),
+      apiClient.post(`/calendar/booking/bookings/${bookingId}/complete`),
   },
 
   // Availability
@@ -671,13 +804,29 @@ export const calendarApi = {
           }
         });
       }
-      return apiClient.get(
-        `/calendar/availability/rules?${searchParams.toString()}`,
-      );
+      return apiClient
+        .get<
+          RawAvailabilityRule[]
+        >(`/calendar/availability/rules?${searchParams.toString()}`)
+        .then((raw) => raw.flatMap(mapRawAvailabilityRule));
     },
 
-    setRules: (data: SetAvailabilityDto): Promise<AvailabilityRule[]> =>
-      apiClient.post("/calendar/availability/rules", data),
+    setRules: (data: SetAvailabilityDto): Promise<AvailabilityRule[]> => {
+      // Convert frontend rule format to the backend's BulkAvailabilityDto.
+      // - Include ALL days with their isAvailable status (so "all unavailable" is distinguishable from "first-time user").
+      // - Convert string day names to numeric (0=Sunday).
+      const weeklySchedule = data.rules.map((r) => ({
+        dayOfWeek: DAY_NAME_TO_NUM[r.dayOfWeek],
+        slots: [{ startTime: r.startTime, endTime: r.endTime }],
+        isAvailable: r.isAvailable,
+      }));
+      return apiClient
+        .post<RawAvailabilityRule[]>("/calendar/availability/weekly", {
+          weeklySchedule,
+          bookingLinkId: data.bookingLinkId,
+        })
+        .then((raw) => raw.flatMap(mapRawAvailabilityRule));
+    },
 
     getOverrides: (params?: {
       userId?: number;
@@ -712,11 +861,11 @@ export const calendarApi = {
     getConnections: (): Promise<CalendarSyncConnection[]> =>
       apiClient.get("/calendar/sync/connections"),
 
-    getOAuthUrl: (provider: CalendarProvider): Promise<SyncOAuthUrlResponse> =>
-      apiClient.get(`/calendar/sync/oauth/${provider}`),
+    initiateOAuth: (data: InitiateOAuthDto): Promise<{ url: string }> =>
+      apiClient.post("/calendar/sync/oauth/initiate", data),
 
-    connect: (data: CreateSyncConnectionDto): Promise<CalendarSyncConnection> =>
-      apiClient.post("/calendar/sync/connect", data),
+    completeOAuth: (data: CompleteOAuthDto): Promise<CalendarSyncConnection> =>
+      apiClient.post("/calendar/sync/oauth/callback", data),
 
     disconnect: (connectionId: string): Promise<{ success: boolean }> =>
       apiClient.delete(`/calendar/sync/connections/${connectionId}`),

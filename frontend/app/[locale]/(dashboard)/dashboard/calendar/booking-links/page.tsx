@@ -50,6 +50,7 @@ import type {
   RoundRobinMode,
 } from "@/lib/api/calendar";
 import {
+  AlertTriangle,
   Clock,
   Copy,
   ExternalLink,
@@ -82,6 +83,8 @@ export default function BookingLinksPage() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingLink, setEditingLink] = useState<BookingLink | null>(null);
+  const [confirmDeleteLink, setConfirmDeleteLink] =
+    useState<BookingLink | null>(null);
 
   const handleCreateNew = () => {
     setEditingLink(null);
@@ -105,10 +108,14 @@ export default function BookingLinksPage() {
     await updateBookingLink(link.bookingLinkId, { status: newStatus });
   };
 
-  const handleDelete = async (link: BookingLink) => {
-    if (confirm("Are you sure you want to delete this booking link?")) {
-      await deleteBookingLink(link.bookingLinkId);
-    }
+  const handleDelete = (link: BookingLink) => {
+    setConfirmDeleteLink(link);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!confirmDeleteLink) return;
+    await deleteBookingLink(confirmDeleteLink.bookingLinkId);
+    setConfirmDeleteLink(null);
   };
 
   return (
@@ -156,6 +163,12 @@ export default function BookingLinksPage() {
           ))}
         </div>
       )}
+
+      <DeleteBookingLinkDialog
+        link={confirmDeleteLink}
+        onClose={() => setConfirmDeleteLink(null)}
+        onConfirm={handleConfirmDelete}
+      />
 
       <BookingLinkDialog
         open={dialogOpen}
@@ -228,7 +241,10 @@ function BookingLinkCard({
                 </>
               )}
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={onDelete} className="text-destructive">
+            <DropdownMenuItem
+              onClick={onDelete}
+              className="text-red-600 dark:text-red-400 focus:bg-red-50 dark:focus:bg-red-950/50 focus:text-red-600 dark:focus:text-red-400"
+            >
               <Trash2 className="h-4 w-4 mr-2" />
               Delete
             </DropdownMenuItem>
@@ -632,6 +648,63 @@ function BookingLinkDialog({
             </Button>
           </DialogFooter>
         </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+interface DeleteBookingLinkDialogProps {
+  link: BookingLink | null;
+  onClose: () => void;
+  onConfirm: () => Promise<void>;
+}
+
+function DeleteBookingLinkDialog({
+  link,
+  onClose,
+  onConfirm,
+}: DeleteBookingLinkDialogProps) {
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleConfirm = async () => {
+    setIsDeleting(true);
+    try {
+      await onConfirm();
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  return (
+    <Dialog open={!!link} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <div className="flex items-center gap-3 mb-1">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
+              <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
+            </div>
+            <DialogTitle>Delete Booking Link</DialogTitle>
+          </div>
+          <DialogDescription className="text-left">
+            You are about to permanently delete{" "}
+            <strong className="text-foreground">{link?.name}</strong>. This
+            action cannot be undone. New bookings through this link will no
+            longer be possible.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="mt-2">
+          <Button variant="outline" onClick={onClose} disabled={isDeleting}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={handleConfirm}
+            disabled={isDeleting}
+          >
+            {isDeleting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+            Delete
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

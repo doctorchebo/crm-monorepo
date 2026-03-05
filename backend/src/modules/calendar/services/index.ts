@@ -20,4 +20,7 @@ export { BookingsService } from './bookings.service';
 export { CalendarAiService } from './calendar-ai.service';
 export type { AiActionResult } from './calendar-ai.service';
 export { CalendarSyncService } from './calendar-sync.service';
-export type { OAuthConfig } from './calendar-sync.service';
+export type {
+  OAuthConfig,
+  SyncConnectionResponse,
+} from './calendar-sync.service';

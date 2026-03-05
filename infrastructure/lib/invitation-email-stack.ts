@@ -95,6 +95,16 @@ export interface InvitationEmailStackProps extends StackProps {
    * @default 'rate(1 hour)'
    */
   readonly cleanupSchedule?: string;
+
+  /**
+   * Enable SQS event source mapping for Lambda.
+   *
+   * When disabled, Lambda will NOT automatically poll the SQS queue.
+   * This is useful for development to avoid excessive SQS free tier consumption.
+   *
+   * @default true
+   */
+  readonly enableEventSourceMapping?: boolean;
 }
 
 export class InvitationEmailStack extends Stack {
@@ -134,6 +144,7 @@ export class InvitationEmailStack extends Stack {
       resourcePrefix: resourcePrefix,
       enableCleanup: props.enableCleanup ?? true,
       cleanupSchedule: props.cleanupSchedule,
+      enableEventSourceMapping: props.enableEventSourceMapping ?? true,
     });
 
     // =========================================================================

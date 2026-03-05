@@ -40,7 +40,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useAuthProtection } from "@/hooks/use-auth";
 import { useCalendars, useSyncConnections } from "@/hooks/use-calendar";
 import { useNotification } from "@/hooks/use-notification";
-import { calendarApi, type CalendarProvider } from "@/lib/api/calendar";
+import {
+  calendarApi,
+  type CalendarProvider,
+  type SyncDirection,
+  type SyncFrequency,
+} from "@/lib/api/calendar";
 import { format } from "date-fns";
 import {
   AlertCircle,
@@ -364,8 +369,9 @@ function ConnectCalendarDialog({
   const { addNotification } = useNotification();
   const [isConnecting, setIsConnecting] = useState(false);
   const [selectedCalendarId, setSelectedCalendarId] = useState("");
-  const [syncDirection, setSyncDirection] = useState("two_way");
-  const [syncFrequency, setSyncFrequency] = useState("every_15_minutes");
+  const [syncDirection, setSyncDirection] = useState<SyncDirection>("two_way");
+  const [syncFrequency, setSyncFrequency] =
+    useState<SyncFrequency>("every_15_minutes");
 
   const providerInfo = PROVIDERS.find((p) => p.id === provider);
 
@@ -374,21 +380,17 @@ function ConnectCalendarDialog({
 
     setIsConnecting(true);
     try {
-      // Get OAuth URL
-      const { url } = await calendarApi.sync.getOAuthUrl(provider);
+      const redirectUri = `${window.location.origin}/dashboard/calendar/sync/callback`;
 
-      // Store state for callback
-      sessionStorage.setItem(
-        "calendar_connect_state",
-        JSON.stringify({
-          calendarId: selectedCalendarId,
-          syncDirection,
-          syncFrequency,
-          provider,
-        }),
-      );
+      const { url } = await calendarApi.sync.initiateOAuth({
+        provider,
+        calendarId: selectedCalendarId,
+        syncDirection,
+        syncFrequency,
+        redirectUri,
+      });
 
-      // Redirect to OAuth
+      // Redirect to provider's OAuth consent screen
       window.location.href = url;
     } catch (err) {
       addNotification("Failed to initiate connection", "error");
@@ -435,7 +437,10 @@ function ConnectCalendarDialog({
           {/* Sync Direction */}
           <div className="space-y-2">
             <Label>Sync direction</Label>
-            <Select value={syncDirection} onValueChange={setSyncDirection}>
+            <Select
+              value={syncDirection}
+              onValueChange={(v) => setSyncDirection(v as SyncDirection)}
+            >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -454,7 +459,10 @@ function ConnectCalendarDialog({
           {/* Sync Frequency */}
           <div className="space-y-2">
             <Label>Sync frequency</Label>
-            <Select value={syncFrequency} onValueChange={setSyncFrequency}>
+            <Select
+              value={syncFrequency}
+              onValueChange={(v) => setSyncFrequency(v as SyncFrequency)}
+            >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>

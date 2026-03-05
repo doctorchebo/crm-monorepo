@@ -113,7 +113,7 @@ export class MediaProcessingQueue extends Construct {
   constructor(
     scope: Construct,
     id: string,
-    props: MediaProcessingQueueProps = {}
+    props: MediaProcessingQueueProps = {},
   ) {
     super(scope, id);
 
@@ -157,6 +157,10 @@ export class MediaProcessingQueue extends Construct {
       // Standard retention - messages should be processed quickly
       // 4 days gives enough buffer for temporary outages
       retentionPeriod: Duration.days(4),
+
+      // Long polling - wait up to 20 seconds for messages before returning empty
+      // This reduces the number of empty receives and lowers SQS API costs
+      receiveMessageWaitTime: Duration.seconds(20),
 
       // SSE encryption for data at rest
       encryption: sqs.QueueEncryption.SQS_MANAGED,

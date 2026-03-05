@@ -174,6 +174,22 @@ export interface MediaCompressionStackProps extends StackProps {
    * @default 'media-compression'
    */
   readonly resourcePrefix?: string;
+
+  /**
+   * Enable SQS event source mapping for Lambda.
+   *
+   * When disabled, Lambda will NOT automatically poll the SQS queue.
+   * This is useful for development to avoid excessive SQS free tier consumption.
+   *
+   * In development, Lambda event source mappings continuously poll SQS queues
+   * even when empty, consuming ~86,400 requests/day per queue (which exceeds
+   * the 1M/month free tier in ~12 days with 4 queues).
+   *
+   * Set to false in development, true in production.
+   *
+   * @default true
+   */
+  readonly enableEventSourceMapping?: boolean;
 }
 
 /**
@@ -224,14 +240,14 @@ export class MediaCompressionStack extends Stack {
     if (!props.inputBucketArn) {
       throw new Error(
         "inputBucketArn is required. The input bucket must already exist. " +
-          "This stack does not create input buckets to prevent accidental data overwrites."
+          "This stack does not create input buckets to prevent accidental data overwrites.",
       );
     }
 
     this.inputBucket = s3.Bucket.fromBucketArn(
       this,
       "InputBucket",
-      props.inputBucketArn
+      props.inputBucketArn,
     );
 
     // Output bucket configuration
@@ -244,11 +260,11 @@ export class MediaCompressionStack extends Stack {
       this.outputBucket = s3.Bucket.fromBucketArn(
         this,
         "OutputBucket",
-        props.outputBucketArn
+        props.outputBucketArn,
       );
     } else {
       throw new Error(
-        "Either useSameBucket must be true or outputBucketArn must be provided"
+        "Either useSameBucket must be true or outputBucketArn must be provided",
       );
     }
 
@@ -280,6 +296,7 @@ export class MediaCompressionStack extends Stack {
       logRetentionDays: logRetentionDays,
       resourcePrefix: resourcePrefix,
       environment: props.lambda?.environment,
+      enableEventSourceMapping: props.enableEventSourceMapping ?? true,
     });
 
     // =========================================================================

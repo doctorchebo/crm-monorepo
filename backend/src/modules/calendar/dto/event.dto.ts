@@ -196,6 +196,11 @@ export class CreateEventDto {
   @IsOptional()
   @IsString({ each: true })
   attendeeEmails?: string[];
+
+  // Availability enforcement
+  @IsBoolean()
+  @IsOptional()
+  skipAvailabilityCheck?: boolean;
 }
 
 export class UpdateEventDto {

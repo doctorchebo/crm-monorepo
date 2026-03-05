@@ -15,115 +15,135 @@ import { Construct } from "constructs";
 import * as path from "path";
 
 export interface ContactsImportLambdaProps {
-    /**
-     * SQS queue for import jobs
-     */
-    readonly queue: sqs.IQueue;
+  /**
+   * SQS queue for import jobs
+   */
+  readonly queue: sqs.IQueue;
 
-    /**
-     * S3 bucket for import files
-     */
-    readonly importBucket: s3.IBucket;
+  /**
+   * S3 bucket for import files
+   */
+  readonly importBucket: s3.IBucket;
 
-    /**
-     * Database connection string (from Secrets Manager or SSM)
-     */
-    readonly databaseUrl: string;
+  /**
+   * Database connection string (from Secrets Manager or SSM)
+   */
+  readonly databaseUrl: string;
 
-    /**
-     * Lambda memory in MB
-     * @default 1024
-     */
-    readonly memoryMb?: number;
+  /**
+   * Lambda memory in MB
+   * @default 1024
+   */
+  readonly memoryMb?: number;
 
-    /**
-     * Lambda timeout in seconds
-     * @default 300
-     */
-    readonly timeoutSeconds?: number;
+  /**
+   * Lambda timeout in seconds
+   * @default 300
+   */
+  readonly timeoutSeconds?: number;
 
-    /**
-     * Log retention in days
-     * @default 14
-     */
-    readonly logRetentionDays?: number;
+  /**
+   * Log retention in days
+   * @default 14
+   */
+  readonly logRetentionDays?: number;
 
-    /**
-     * Resource prefix
-     * @default 'contacts-import'
-     */
-    readonly resourcePrefix?: string;
+  /**
+   * Resource prefix
+   * @default 'contacts-import'
+   */
+  readonly resourcePrefix?: string;
 
-    /**
-     * SQS batch size for Lambda
-     * @default 1
-     */
-    readonly batchSize?: number;
+  /**
+   * SQS batch size for Lambda
+   * @default 1
+   */
+  readonly batchSize?: number;
+
+  /**
+   * Enable SQS event source mapping.
+   *
+   * When disabled, Lambda will NOT poll the SQS queue automatically.
+   * This is useful for development to avoid SQS free tier consumption.
+   *
+   * @default true
+   */
+  readonly enableEventSourceMapping?: boolean;
 }
 
 export class ContactsImportLambda extends Construct {
-    public readonly processingFunction: lambda.Function;
+  public readonly processingFunction: lambda.Function;
 
-    constructor(scope: Construct, id: string, props: ContactsImportLambdaProps) {
-        super(scope, id);
+  constructor(scope: Construct, id: string, props: ContactsImportLambdaProps) {
+    super(scope, id);
 
-        const memoryMb = props.memoryMb ?? 1024;
-        const timeoutSeconds = props.timeoutSeconds ?? 300;
-        const logRetentionDays = props.logRetentionDays ?? 14;
-        const resourcePrefix = props.resourcePrefix ?? "contacts-import";
-        const batchSize = props.batchSize ?? 1;
+    const memoryMb = props.memoryMb ?? 1024;
+    const timeoutSeconds = props.timeoutSeconds ?? 300;
+    const logRetentionDays = props.logRetentionDays ?? 14;
+    const resourcePrefix = props.resourcePrefix ?? "contacts-import";
+    const batchSize = props.batchSize ?? 1;
 
-        // Lambda code path
-        const lambdaCodePath = path.join(__dirname, "../../lambda/contacts-import/dist");
+    // Lambda code path
+    const lambdaCodePath = path.join(
+      __dirname,
+      "../../lambda/contacts-import/dist",
+    );
 
-        // Common Lambda configuration
-        const commonProps = {
-            runtime: lambda.Runtime.NODEJS_20_X,
-            architecture: lambda.Architecture.ARM_64,
-            memorySize: memoryMb,
-            timeout: Duration.seconds(timeoutSeconds),
-            environment: {
-                NODE_OPTIONS: "--enable-source-maps",
-                DATABASE_URL: props.databaseUrl,
-                IMPORT_BUCKET: props.importBucket.bucketName,
-                QUEUE_URL: props.queue.queueUrl,
-            },
-        };
+    // Common Lambda configuration
+    const commonProps = {
+      runtime: lambda.Runtime.NODEJS_20_X,
+      architecture: lambda.Architecture.ARM_64,
+      memorySize: memoryMb,
+      timeout: Duration.seconds(timeoutSeconds),
+      environment: {
+        NODE_OPTIONS: "--enable-source-maps",
+        DATABASE_URL: props.databaseUrl,
+        IMPORT_BUCKET: props.importBucket.bucketName,
+        QUEUE_URL: props.queue.queueUrl,
+      },
+    };
 
-        // Processing Lambda - triggered via SQS for all actions (PARSE, VALIDATE, EXECUTE)
-        this.processingFunction = new lambda.Function(this, "ProcessingFunction", {
-            ...commonProps,
-            functionName: `${resourcePrefix}-processor`,
-            handler: "index.handler",
-            code: lambda.Code.fromAsset(lambdaCodePath),
-            description: "Unified processor for contact imports (Parse/Validate/Execute)",
-        });
+    // Processing Lambda - triggered via SQS for all actions (PARSE, VALIDATE, EXECUTE)
+    this.processingFunction = new lambda.Function(this, "ProcessingFunction", {
+      ...commonProps,
+      functionName: `${resourcePrefix}-processor`,
+      handler: "index.handler",
+      code: lambda.Code.fromAsset(lambdaCodePath),
+      description:
+        "Unified processor for contact imports (Parse/Validate/Execute)",
+    });
 
-        // Grant S3 read permissions
-        props.importBucket.grantRead(this.processingFunction);
+    // Grant S3 read permissions
+    props.importBucket.grantRead(this.processingFunction);
 
-        // Grant SQS send permissions (for chaining)
-        props.queue.grantSendMessages(this.processingFunction);
+    // Grant SQS send permissions (for chaining)
+    props.queue.grantSendMessages(this.processingFunction);
 
-        // Add SQS event source
-        // No filters needed because this one function handles all message types on the queue
-        this.processingFunction.addEventSource(
-            new SqsEventSource(props.queue, {
-                batchSize: batchSize,
-                maxBatchingWindow: Duration.seconds(5),
-                reportBatchItemFailures: true,
-            })
-        );
+    // Add SQS event source (can be disabled for development)
+    const enableEventSource = props.enableEventSourceMapping ?? true;
 
-        // Log group with retention
-        new logs.LogGroup(this, "ProcessorLogGroup", {
-            logGroupName: `/aws/lambda/${this.processingFunction.functionName}`,
-            retention: logRetentionDays as logs.RetentionDays,
-            removalPolicy: RemovalPolicy.DESTROY,
-        });
+    if (enableEventSource) {
+      this.processingFunction.addEventSource(
+        new SqsEventSource(props.queue, {
+          batchSize: batchSize,
+          maxBatchingWindow: Duration.seconds(5),
+          reportBatchItemFailures: true,
+        }),
+      );
+    } else {
+      // Grant SQS permissions manually since event source won't do it
+      props.queue.grantConsumeMessages(this.processingFunction);
     }
 
-    get functionName(): string {
-        return this.processingFunction.functionName;
-    }
+    // Log group with retention
+    new logs.LogGroup(this, "ProcessorLogGroup", {
+      logGroupName: `/aws/lambda/${this.processingFunction.functionName}`,
+      retention: logRetentionDays as logs.RetentionDays,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+  }
+
+  get functionName(): string {
+    return this.processingFunction.functionName;
+  }
 }

@@ -26,9 +26,9 @@ dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
 import * as cdk from "aws-cdk-lib";
 import "source-map-support/register";
-import { MediaCompressionStack } from "../lib/media-compression-stack";
 import { ContactsImportStack } from "../lib/contacts-import-stack";
 import { InvitationEmailStack } from "../lib/invitation-email-stack";
+import { MediaCompressionStack } from "../lib/media-compression-stack";
 import { PasswordResetEmailStack } from "../lib/password-reset-email-stack";
 
 // Initialize CDK app
@@ -102,6 +102,36 @@ if (!chromiumLayerArn) {
 }
 
 // ============================================================================
+// SQS Event Source Mapping Configuration
+// ============================================================================
+// In development, Lambda event source mappings continuously poll SQS queues
+// even when empty, consuming ~86,400 requests/day per queue (4 queues = ~345,600/day).
+// This exceeds the 1M/month free tier in ~3 days!
+//
+// Set ENABLE_SQS_POLLING=true to enable automatic SQS polling (for production).
+// Default is false to prevent unexpected AWS bills in development.
+//
+// When disabled:
+// - Lambda functions still exist and can be invoked manually
+// - Messages can be sent to queues (they'll accumulate until polling is enabled)
+// - To re-enable: aws lambda update-event-source-mapping --uuid <UUID> --enabled
+//
+const enableSqsPolling = process.env.ENABLE_SQS_POLLING === "true";
+
+if (!enableSqsPolling) {
+  console.log(
+    "\n⚠️  SQS Event Source Mappings DISABLED to save free tier.\n" +
+      "   Lambda functions will NOT automatically process queue messages.\n" +
+      "   Set ENABLE_SQS_POLLING=true to enable (for production).\n",
+  );
+} else {
+  console.log(
+    "\n✅ SQS Event Source Mappings ENABLED.\n" +
+      "   Lambda functions will automatically poll SQS queues.\n",
+  );
+}
+
+// ============================================================================
 // Stack Instantiation
 // ============================================================================
 
@@ -139,6 +169,9 @@ new MediaCompressionStack(app, "MediaCompressionStack", {
 
   // Resource naming
   resourcePrefix: "media-compression",
+
+  // SQS polling - disabled by default for development to save free tier
+  enableEventSourceMapping: enableSqsPolling,
 });
 
 // ============================================================================
@@ -172,6 +205,9 @@ new ContactsImportStack(app, "ContactsImportStack", {
 
   // Resource naming
   resourcePrefix: "contacts-import",
+
+  // SQS polling - disabled by default for development to save free tier
+  enableEventSourceMapping: enableSqsPolling,
 });
 
 // ============================================================================
@@ -215,6 +251,9 @@ new InvitationEmailStack(app, "InvitationEmailStack", {
 
   // Resource naming
   resourcePrefix: "invitation-email",
+
+  // SQS polling - disabled by default for development to save free tier
+  enableEventSourceMapping: enableSqsPolling,
 });
 
 // ============================================================================
@@ -257,6 +296,9 @@ new PasswordResetEmailStack(app, "PasswordResetEmailStack", {
 
   // Resource naming
   resourcePrefix: "password-reset-email",
+
+  // SQS polling - disabled by default for development to save free tier
+  enableEventSourceMapping: enableSqsPolling,
 });
 
 // Add tags to all resources

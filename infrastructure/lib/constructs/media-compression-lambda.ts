@@ -157,6 +157,22 @@ export interface MediaCompressionLambdaProps {
    * Useful for passing configuration like API endpoints.
    */
   readonly environment?: Record<string, string>;
+
+  /**
+   * Enable SQS event source mapping.
+   *
+   * When disabled, Lambda will NOT poll the SQS queue automatically.
+   * This is useful for development to avoid SQS free tier consumption.
+   *
+   * IMPORTANT: When disabled, the Lambda function still exists but won't
+   * process messages. You can manually invoke it or re-enable the mapping
+   * via AWS CLI when needed.
+   *
+   * To re-enable: aws lambda update-event-source-mapping --uuid <UUID> --enabled
+   *
+   * @default true
+   */
+  readonly enableEventSourceMapping?: boolean;
 }
 
 /**
@@ -192,7 +208,7 @@ export class MediaCompressionLambda extends Construct {
   constructor(
     scope: Construct,
     id: string,
-    props: MediaCompressionLambdaProps
+    props: MediaCompressionLambdaProps,
   ) {
     super(scope, id);
 
@@ -224,7 +240,7 @@ export class MediaCompressionLambda extends Construct {
       ffmpegLayer = lambda.LayerVersion.fromLayerVersionArn(
         this,
         "FfmpegLayer",
-        props.ffmpegLayerArn
+        props.ffmpegLayerArn,
       );
     } else {
       // Create layer from local ffmpeg binaries
@@ -236,7 +252,7 @@ export class MediaCompressionLambda extends Construct {
         description:
           "FFmpeg and FFprobe static binaries for ARM64 Lambda (media compression)",
         code: lambda.Code.fromAsset(
-          path.join(__dirname, "../../layers/ffmpeg")
+          path.join(__dirname, "../../layers/ffmpeg"),
         ),
         compatibleRuntimes: [
           lambda.Runtime.NODEJS_18_X,
@@ -259,7 +275,7 @@ export class MediaCompressionLambda extends Construct {
       chromiumLayer = lambda.LayerVersion.fromLayerVersionArn(
         this,
         "ChromiumLayer",
-        props.chromiumLayerArn
+        props.chromiumLayerArn,
       );
       layers.push(chromiumLayer);
     }
@@ -279,7 +295,7 @@ export class MediaCompressionLambda extends Construct {
 
       // Code location - bundled separately
       code: lambda.Code.fromAsset(
-        path.join(__dirname, "../../lambda/media-compression/dist")
+        path.join(__dirname, "../../lambda/media-compression/dist"),
       ),
 
       // Resource allocation
@@ -344,23 +360,31 @@ export class MediaCompressionLambda extends Construct {
     // =========================================================================
     // SQS Event Source
     // =========================================================================
-    // Configure Lambda to be triggered by SQS messages
-    this.function.addEventSource(
-      new lambdaEventSources.SqsEventSource(props.queue, {
-        // Process one message at a time
-        // WHY: ffmpeg compression is CPU-intensive and benefits from full resources
-        batchSize: 1,
+    // Configure Lambda to be triggered by SQS messages.
+    // Can be disabled for development to avoid SQS free tier consumption.
+    const enableEventSource = props.enableEventSourceMapping ?? true;
 
-        // Maximum time to wait for messages before invoking Lambda
-        // Lower value = more responsive, higher costs
-        // Higher value = batching opportunity, but we use batchSize=1
-        maxBatchingWindow: Duration.seconds(0),
+    if (enableEventSource) {
+      this.function.addEventSource(
+        new lambdaEventSources.SqsEventSource(props.queue, {
+          // Process one message at a time
+          // WHY: ffmpeg compression is CPU-intensive and benefits from full resources
+          batchSize: 1,
 
-        // Report partial batch failures
-        // If processing fails, only the failed message is retried
-        reportBatchItemFailures: true,
-      })
-    );
+          // Maximum time to wait for messages before invoking Lambda
+          // Lower value = more responsive, higher costs
+          // Higher value = batching opportunity, but we use batchSize=1
+          maxBatchingWindow: Duration.seconds(0),
+
+          // Report partial batch failures
+          // If processing fails, only the failed message is retried
+          reportBatchItemFailures: true,
+        }),
+      );
+    } else {
+      // Grant SQS permissions manually since event source won't do it
+      props.queue.grantConsumeMessages(this.function);
+    }
 
     // Export function properties
     this.functionArn = this.function.functionArn;

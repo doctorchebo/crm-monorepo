@@ -8,6 +8,8 @@ import {
 import { and, eq, gte, isNull, lte, or } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import {
+  availabilityOverrides,
+  availabilityRules,
   type CalendarEvent,
   calendarEvents,
   eventAttendees,
@@ -27,6 +29,112 @@ export class EventsService {
     private db: NodePgDatabase<typeof schema>,
     private calendarShareService: CalendarShareService,
   ) {}
+
+  /**
+   * Convert HH:MM time string to minutes from midnight
+   */
+  private timeToMinutes(time: string): number {
+    const [hours, minutes] = time.split(':').map(Number);
+    return hours * 60 + minutes;
+  }
+
+  /**
+   * Check if an event falls within the user's availability window
+   * Returns true if available, false if outside availability hours
+   */
+  private async checkUserAvailability(
+    userId: number,
+    startTime: Date,
+    endTime: Date,
+  ): Promise<{ isAvailable: boolean; reason?: string }> {
+    const dayOfWeek = startTime.getUTCDay();
+    const dateStart = new Date(startTime);
+    dateStart.setUTCHours(0, 0, 0, 0);
+    const dateEnd = new Date(startTime);
+    dateEnd.setUTCHours(23, 59, 59, 999);
+
+    // Check for date-specific overrides first
+    const [override] = await this.db
+      .select()
+      .from(availabilityOverrides)
+      .where(
+        and(
+          eq(availabilityOverrides.userId, userId),
+          gte(availabilityOverrides.date, dateStart),
+          lte(availabilityOverrides.date, dateEnd),
+          isNull(availabilityOverrides.bookingLinkId),
+        ),
+      );
+
+    if (override && override.overrideType === 'unavailable') {
+      return {
+        isAvailable: false,
+        reason: override.reason || 'This date is marked as unavailable',
+      };
+    }
+
+    // Get availability rules for the user (general rules, not booking-link specific)
+    const rules = await this.db
+      .select()
+      .from(availabilityRules)
+      .where(
+        and(
+          eq(availabilityRules.userId, userId),
+          isNull(availabilityRules.bookingLinkId),
+        ),
+      );
+
+    // If no rules exist, user hasn't configured availability - allow by default
+    if (rules.length === 0) {
+      return { isAvailable: true };
+    }
+
+    // Find rules for the day of week
+    const applicableRules = rules.filter((rule) => {
+      const days = rule.daysOfWeek as number[];
+      return days.includes(dayOfWeek) && rule.isActive;
+    });
+
+    // If no active rules for this day, check if there are any rules for this day at all
+    if (applicableRules.length === 0) {
+      const dayRules = rules.filter((rule) => {
+        const days = rule.daysOfWeek as number[];
+        return days.includes(dayOfWeek);
+      });
+
+      if (dayRules.length > 0) {
+        // There are rules for this day but none are active - day is unavailable
+        return {
+          isAvailable: false,
+          reason: 'This day is marked as unavailable in your schedule',
+        };
+      }
+      // No rules defined for this day at all - allow by default
+      return { isAvailable: true };
+    }
+
+    // Check if the event falls within any available time window (using UTC)
+    const eventStartMinutes =
+      startTime.getUTCHours() * 60 + startTime.getUTCMinutes();
+    const eventEndMinutes =
+      endTime.getUTCHours() * 60 + endTime.getUTCMinutes();
+
+    const isWithinWindow = applicableRules.some((rule) => {
+      return (
+        eventStartMinutes >= rule.startMinutes &&
+        eventEndMinutes <= rule.endMinutes
+      );
+    });
+
+    if (!isWithinWindow) {
+      return {
+        isAvailable: false,
+        reason: 'Event time falls outside your available hours',
+      };
+    }
+
+    return { isAvailable: true };
+  }
 
   /**
    * Create a new event
@@ -55,6 +163,23 @@ export class EventsService {
 
     if (endTime <= startTime) {
       throw new BadRequestException('End time must be after start time');
+    }
+
+    // Check availability unless explicitly skipped (and not an all-day event)
+    const skipAvailabilityCheck =
+      'skipAvailabilityCheck' in dto ? dto.skipAvailabilityCheck : false;
+    if (!skipAvailabilityCheck && !dto.isAllDay) {
+      const availabilityResult = await this.checkUserAvailability(
+        userId,
+        startTime,
+        endTime,
+      );
+      if (!availabilityResult.isAvailable) {
+        throw new BadRequestException(
+          availabilityResult.reason ||
+            'Event time falls outside your available hours',
+        );
+      }
     }
 
     const eventData: NewCalendarEvent = {

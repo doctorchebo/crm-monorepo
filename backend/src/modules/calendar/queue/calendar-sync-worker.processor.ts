@@ -185,18 +185,92 @@ export class CalendarSyncWorkerProcessor extends WorkerHost {
     data: CalendarSyncJobData,
     syncToken?: string,
   ): Promise<{ events: ExternalCalendarEvent[]; newSyncToken?: string }> {
-    // TODO: Implement Google Calendar API integration
-    // 1. Get access token from connection
-    // 2. Call Google Calendar API with sync token
-    // 3. Transform response to ExternalCalendarEvent[]
-    // 4. Return new sync token
+    // Retrieve the access token from DB
+    const [connection] = await db
+      .select({
+        accessToken: calendarSyncConnections.accessToken,
+        expiresAt: calendarSyncConnections.expiresAt,
+      })
+      .from(calendarSyncConnections)
+      .where(eq(calendarSyncConnections.id, data.connectionId));
 
-    this.logger.debug('[Sync Worker] Google Calendar fetch (placeholder)');
+    if (!connection?.accessToken) {
+      throw new Error(`No access token for connection ${data.connectionId}`);
+    }
 
-    // Placeholder implementation
+    const params = new URLSearchParams({
+      maxResults: '250',
+      singleEvents: 'true',
+      orderBy: 'startTime',
+    });
+
+    if (syncToken) {
+      params.set('syncToken', syncToken);
+    } else {
+      params.set('timeMin', new Date().toISOString());
+      params.set(
+        'timeMax',
+        new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+      );
+    }
+
+    const response = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params}`,
+      { headers: { Authorization: `Bearer ${connection.accessToken}` } },
+    );
+
+    if (response.status === 410) {
+      // Sync token expired – retry without it (full sync)
+      return this.fetchGoogleEvents(data, undefined);
+    }
+
+    if (!response.ok) {
+      throw new Error(`Google Calendar API error: ${response.status}`);
+    }
+
+    const googleResponse = (await response.json()) as {
+      items: Array<{
+        id: string;
+        summary?: string;
+        description?: string;
+        location?: string;
+        start: { dateTime?: string; date?: string };
+        end: { dateTime?: string; date?: string };
+        status?: string;
+        updated?: string;
+        attendees?: Array<{ email: string }>;
+      }>;
+      nextSyncToken?: string;
+    };
+
+    const events: ExternalCalendarEvent[] = (googleResponse.items || [])
+      .filter((item) => item.start && item.end)
+      .map((item) => {
+        const isAllDay = Boolean(item.start.date && !item.start.dateTime);
+        const startTime = new Date(
+          item.start.dateTime || item.start.date || '',
+        );
+        const endTime = new Date(item.end.dateTime || item.end.date || '');
+
+        return {
+          externalId: item.id,
+          title: item.summary || '(No title)',
+          description: item.description,
+          location: item.location,
+          startTime,
+          endTime,
+          isAllDay,
+          status:
+            (item.status as 'confirmed' | 'tentative' | 'cancelled') ||
+            'confirmed',
+          attendees: item.attendees?.map((a) => a.email),
+          lastModified: item.updated ? new Date(item.updated) : new Date(),
+        };
+      });
+
     return {
-      events: [],
-      newSyncToken: `google_sync_${Date.now()}`,
+      events,
+      newSyncToken: googleResponse.nextSyncToken,
     };
   }
 

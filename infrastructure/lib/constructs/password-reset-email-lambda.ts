@@ -91,6 +91,16 @@ export interface PasswordResetEmailLambdaProps {
    * @default 'rate(1 hour)'
    */
   readonly cleanupSchedule?: string;
+
+  /**
+   * Enable SQS event source mapping.
+   *
+   * When disabled, Lambda will NOT poll the SQS queue automatically.
+   * This is useful for development to avoid SQS free tier consumption.
+   *
+   * @default true
+   */
+  readonly enableEventSourceMapping?: boolean;
 }
 
 export class PasswordResetEmailLambda extends Construct {
@@ -145,14 +155,21 @@ export class PasswordResetEmailLambda extends Construct {
       description: "Sends password reset emails via Mailgun",
     });
 
-    // Add SQS event source
-    this.sendFunction.addEventSource(
-      new SqsEventSource(props.queue, {
-        batchSize: batchSize,
-        maxBatchingWindow: Duration.seconds(5),
-        reportBatchItemFailures: true,
-      }),
-    );
+    // Add SQS event source (can be disabled for development)
+    const enableEventSource = props.enableEventSourceMapping ?? true;
+
+    if (enableEventSource) {
+      this.sendFunction.addEventSource(
+        new SqsEventSource(props.queue, {
+          batchSize: batchSize,
+          maxBatchingWindow: Duration.seconds(5),
+          reportBatchItemFailures: true,
+        }),
+      );
+    } else {
+      // Grant SQS permissions manually since event source won't do it
+      props.queue.grantConsumeMessages(this.sendFunction);
+    }
 
     // Log group with retention
     new logs.LogGroup(this, "SendLogGroup", {

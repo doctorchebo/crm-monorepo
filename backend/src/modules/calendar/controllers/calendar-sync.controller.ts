@@ -123,12 +123,12 @@ export class CalendarSyncController {
   @RequirePermission('calendar.sync.manage')
   async initiateOAuth(@Req() req: any, @Body() dto: InitiateOAuthDto) {
     const userId = req.user.userId;
-    const authUrl = this.calendarSyncService.generateAuthUrl(dto, userId);
-    return { authUrl };
+    const url = this.calendarSyncService.generateAuthUrl(dto, userId);
+    return { url };
   }
 
   /**
-   * Handle OAuth callback
+   * Handle OAuth callback – exchanges code for tokens and creates connection
    * POST /calendar/sync/oauth/callback
    */
   @Post('oauth/callback')
@@ -143,7 +143,18 @@ export class CalendarSyncController {
   // ============================================================
 
   /**
-   * Trigger manual sync
+   * Trigger sync for a specific connection
+   * POST /calendar/sync/connections/:id/sync
+   */
+  @Post('connections/:id/sync')
+  @RequirePermission('calendar.sync.manage')
+  async triggerConnectionSync(@Req() req: any, @Param('id') id: string) {
+    const userId = req.user.userId;
+    return this.calendarSyncService.triggerConnectionSync(id, userId);
+  }
+
+  /**
+   * Trigger manual sync (bulk)
    * POST /calendar/sync/trigger
    */
   @Post('trigger')

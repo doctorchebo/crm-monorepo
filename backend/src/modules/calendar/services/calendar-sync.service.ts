@@ -31,6 +31,36 @@ export interface OAuthConfig {
   scopes: string[];
 }
 
+interface GoogleTokenResponse {
+  access_token: string;
+  refresh_token?: string;
+  expires_in: number;
+  token_type: string;
+  error?: string;
+  error_description?: string;
+}
+
+interface GoogleUserInfo {
+  id: string;
+  email: string;
+}
+
+export interface SyncConnectionResponse {
+  connectionId: string;
+  provider: string;
+  externalAccountId: string;
+  externalCalendarId: string | null;
+  syncDirection: string;
+  syncFrequency: string;
+  isActive: boolean;
+  lastSyncAt: string | null;
+  lastSyncStatus: string | null;
+  tokenExpiresAt: string | null;
+  linkedCalendarId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 @Injectable()
 export class CalendarSyncService {
   private readonly logger = new Logger(CalendarSyncService.name);
@@ -60,6 +90,7 @@ export class CalendarSyncService {
           scopes: [
             'https://www.googleapis.com/auth/calendar.readonly',
             'https://www.googleapis.com/auth/calendar.events',
+            'https://www.googleapis.com/auth/userinfo.email',
           ],
         };
       case 'outlook':
@@ -98,58 +129,56 @@ export class CalendarSyncService {
    */
   generateAuthUrl(dto: InitiateOAuthDto, userId: number): string {
     const config = this.getOAuthConfig(dto.provider);
+    const redirectUri = dto.redirectUri || config.redirectUri;
 
-    // Generate state token for security (should include userId and calendarId)
     const state = Buffer.from(
       JSON.stringify({
         userId,
         provider: dto.provider,
         calendarId: dto.calendarId,
+        syncDirection: dto.syncDirection || 'two_way',
+        syncFrequency: dto.syncFrequency || 'every_15_minutes',
+        redirectUri,
         timestamp: Date.now(),
       }),
     ).toString('base64');
 
-    let authUrl: string;
-
     switch (dto.provider) {
       case 'google':
-        authUrl =
+        return (
           `https://accounts.google.com/o/oauth2/v2/auth?` +
-          `client_id=${config.clientId}&` +
-          `redirect_uri=${encodeURIComponent(dto.redirectUri || config.redirectUri)}&` +
+          `client_id=${encodeURIComponent(config.clientId)}&` +
+          `redirect_uri=${encodeURIComponent(redirectUri)}&` +
           `response_type=code&` +
           `scope=${encodeURIComponent(config.scopes.join(' '))}&` +
           `access_type=offline&` +
           `prompt=consent&` +
-          `state=${state}`;
-        break;
+          `state=${encodeURIComponent(state)}`
+        );
 
       case 'outlook':
-        authUrl =
+        return (
           `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?` +
-          `client_id=${config.clientId}&` +
-          `redirect_uri=${encodeURIComponent(dto.redirectUri || config.redirectUri)}&` +
+          `client_id=${encodeURIComponent(config.clientId)}&` +
+          `redirect_uri=${encodeURIComponent(redirectUri)}&` +
           `response_type=code&` +
           `scope=${encodeURIComponent(config.scopes.join(' '))}&` +
-          `state=${state}`;
-        break;
+          `state=${encodeURIComponent(state)}`
+        );
 
       case 'apple':
-        // Apple Sign In flow is different
-        authUrl =
+        return (
           `https://appleid.apple.com/auth/authorize?` +
-          `client_id=${config.clientId}&` +
-          `redirect_uri=${encodeURIComponent(dto.redirectUri || config.redirectUri)}&` +
+          `client_id=${encodeURIComponent(config.clientId)}&` +
+          `redirect_uri=${encodeURIComponent(redirectUri)}&` +
           `response_type=code&` +
           `scope=${encodeURIComponent(config.scopes.join(' '))}&` +
-          `state=${state}`;
-        break;
+          `state=${encodeURIComponent(state)}`
+        );
 
       default:
         throw new BadRequestException(`Unsupported provider: ${dto.provider}`);
     }
-
-    return authUrl;
   }
 
   /**
@@ -158,11 +187,21 @@ export class CalendarSyncService {
   async handleOAuthCallback(
     dto: OAuthCallbackDto,
     userId: number,
-  ): Promise<CalendarSyncConnection> {
-    // Decode and validate state
-    let stateData: any;
+  ): Promise<SyncConnectionResponse> {
+    let stateData: {
+      userId: number;
+      provider: 'google' | 'outlook' | 'apple';
+      calendarId?: string;
+      syncDirection?: string;
+      syncFrequency?: string;
+      redirectUri?: string;
+      timestamp: number;
+    };
+
     try {
-      stateData = JSON.parse(Buffer.from(dto.state, 'base64').toString());
+      stateData = JSON.parse(
+        Buffer.from(dto.state, 'base64').toString('utf-8'),
+      );
     } catch {
       throw new BadRequestException('Invalid state parameter');
     }
@@ -171,18 +210,34 @@ export class CalendarSyncService {
       throw new BadRequestException('State mismatch');
     }
 
-    // Exchange code for tokens
-    const tokens = await this.exchangeCodeForTokens(dto.provider, dto.code);
+    const provider = dto.provider || stateData.provider;
+    const tokens = await this.exchangeCodeForTokens(
+      provider,
+      dto.code,
+      stateData.redirectUri,
+    );
 
-    // Create sync connection
-    return this.createConnection(userId, {
-      provider: dto.provider,
+    let providerAccountId: string | undefined;
+    let providerEmail: string | undefined;
+
+    if (provider === 'google') {
+      const userInfo = await this.getGoogleUserInfo(tokens.accessToken);
+      providerAccountId = userInfo.id;
+      providerEmail = userInfo.email;
+    }
+
+    const connection = await this.createConnection(userId, {
+      provider,
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
+      externalCalendarId: providerAccountId,
+      externalCalendarName: providerEmail,
       calendarId: stateData.calendarId,
       syncEnabled: true,
-      syncDirection: 'two_way',
+      syncDirection: (stateData.syncDirection as any) || 'two_way',
     });
+
+    return this.mapConnection(connection);
   }
 
   /**
@@ -191,29 +246,94 @@ export class CalendarSyncService {
   private async exchangeCodeForTokens(
     provider: 'google' | 'outlook' | 'apple',
     code: string,
-  ): Promise<{ accessToken: string; refreshToken?: string; expiresAt?: Date }> {
+    redirectUri?: string,
+  ): Promise<{ accessToken: string; refreshToken?: string; expiresAt: Date }> {
     const config = this.getOAuthConfig(provider);
+    const effectiveRedirectUri = redirectUri || config.redirectUri;
 
-    // In production, make actual API calls to exchange code
-    // This is a placeholder implementation
-    this.logger.log(`Exchanging code for tokens with ${provider}`);
+    if (provider === 'google') {
+      return this.exchangeGoogleCode(
+        code,
+        config.clientId,
+        config.clientSecret,
+        effectiveRedirectUri,
+      );
+    }
 
-    // TODO: Implement actual token exchange for each provider
-    // For now, return placeholder
+    throw new BadRequestException(
+      `Token exchange for ${provider} is not yet implemented`,
+    );
+  }
+
+  private async exchangeGoogleCode(
+    code: string,
+    clientId: string,
+    clientSecret: string,
+    redirectUri: string,
+  ): Promise<{ accessToken: string; refreshToken?: string; expiresAt: Date }> {
+    const response = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code',
+      }),
+    });
+
+    const data = (await response.json()) as GoogleTokenResponse;
+
+    if (!response.ok || data.error) {
+      this.logger.error(
+        `Google token exchange failed: ${data.error_description || data.error}`,
+      );
+      throw new BadRequestException(
+        `Google OAuth failed: ${data.error_description || 'token exchange error'}`,
+      );
+    }
+
     return {
-      accessToken: `placeholder_access_token_${Date.now()}`,
-      refreshToken: `placeholder_refresh_token_${Date.now()}`,
-      expiresAt: new Date(Date.now() + 3600 * 1000),
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token,
+      expiresAt: new Date(Date.now() + data.expires_in * 1000),
     };
   }
 
+  private async getGoogleUserInfo(
+    accessToken: string,
+  ): Promise<GoogleUserInfo> {
+    const response = await fetch(
+      'https://www.googleapis.com/oauth2/v2/userinfo',
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+
+    if (!response.ok) {
+      this.logger.warn('Failed to fetch Google user info');
+      return { id: '', email: '' };
+    }
+
+    return response.json() as Promise<GoogleUserInfo>;
+  }
+
   /**
-   * Create a sync connection
+   * Create a sync connection (replaces existing one for same provider)
    */
   async createConnection(
     userId: number,
     dto: CreateSyncConnectionDto,
   ): Promise<CalendarSyncConnection> {
+    // Enforce one connection per provider per user
+    await this.db
+      .delete(calendarSyncConnections)
+      .where(
+        and(
+          eq(calendarSyncConnections.userId, userId),
+          eq(calendarSyncConnections.provider, dto.provider),
+        ),
+      );
+
     const connectionData: NewCalendarSyncConnection = {
       userId,
       linkedCalendarId: dto.calendarId,
@@ -222,7 +342,7 @@ export class CalendarSyncService {
       providerEmail: dto.externalCalendarName,
       accessToken: dto.accessToken || '',
       refreshToken: dto.refreshToken,
-      syncDirection: dto.syncDirection || 'bidirectional',
+      syncDirection: dto.syncDirection || 'two_way',
       status: 'active',
     };
 
@@ -231,7 +351,6 @@ export class CalendarSyncService {
       .values(connectionData)
       .returning();
 
-    // Log the connection creation
     await this.logSync(created.id, 'connected', {
       message: `Connected to ${dto.provider}`,
     });
@@ -240,14 +359,16 @@ export class CalendarSyncService {
   }
 
   /**
-   * Get all sync connections for a user
+   * Get all sync connections for a user (mapped for frontend)
    */
-  async getConnections(userId: number): Promise<CalendarSyncConnection[]> {
-    return this.db
+  async getConnections(userId: number): Promise<SyncConnectionResponse[]> {
+    const rows = await this.db
       .select()
       .from(calendarSyncConnections)
       .where(eq(calendarSyncConnections.userId, userId))
       .orderBy(desc(calendarSyncConnections.createdAt));
+
+    return rows.map((r) => this.mapConnection(r));
   }
 
   /**
@@ -281,7 +402,7 @@ export class CalendarSyncService {
     connectionId: string,
     userId: number,
     dto: UpdateSyncConnectionDto,
-  ): Promise<CalendarSyncConnection> {
+  ): Promise<SyncConnectionResponse> {
     await this.getConnection(connectionId, userId);
 
     const updateData: Partial<CalendarSyncConnection> = {
@@ -298,7 +419,19 @@ export class CalendarSyncService {
       .where(eq(calendarSyncConnections.id, connectionId))
       .returning();
 
-    return updated;
+    return this.mapConnection(updated);
+  }
+
+  /**
+   * Trigger sync for a specific connection
+   */
+  async triggerConnectionSync(
+    connectionId: string,
+    userId: number,
+  ): Promise<{ success: boolean; message: string }> {
+    const connection = await this.getConnection(connectionId, userId);
+    await this.syncConnection(connection);
+    return { success: true, message: 'Sync completed' };
   }
 
   /**
@@ -364,22 +497,27 @@ export class CalendarSyncService {
       `Syncing connection ${connection.id} (${connection.provider})`,
     );
 
-    const startTime = new Date();
+    const startTime = Date.now();
 
     try {
-      // Refresh token if needed
-      if (connection.expiresAt && connection.expiresAt < new Date()) {
+      // Refresh token if expiring within 5 minutes
+      if (
+        connection.expiresAt &&
+        connection.expiresAt < new Date(Date.now() + 5 * 60 * 1000)
+      ) {
         await this.refreshTokens(connection);
+        const [refreshed] = await this.db
+          .select()
+          .from(calendarSyncConnections)
+          .where(eq(calendarSyncConnections.id, connection.id));
+        connection = refreshed;
       }
 
-      // Perform sync based on direction
       let eventsCreated = 0;
       let eventsUpdated = 0;
-      let eventsDeleted = 0;
 
       switch (connection.syncDirection) {
-        case 'one_way_import':
-          // Import events from external calendar
+        case 'one_way_from_external': {
           const imported = await this.importExternalEvents(
             connection,
             fullSync,
@@ -387,16 +525,15 @@ export class CalendarSyncService {
           eventsCreated = imported.created;
           eventsUpdated = imported.updated;
           break;
-
-        case 'one_way_export':
-          // Export events to external calendar
+        }
+        case 'one_way_to_external': {
           const exported = await this.exportLocalEvents(connection, fullSync);
           eventsCreated = exported.created;
           eventsUpdated = exported.updated;
           break;
-
+        }
         case 'two_way':
-          // Bidirectional sync
+        default: {
           const importResult = await this.importExternalEvents(
             connection,
             fullSync,
@@ -408,42 +545,34 @@ export class CalendarSyncService {
           eventsCreated = importResult.created + exportResult.created;
           eventsUpdated = importResult.updated + exportResult.updated;
           break;
+        }
       }
 
-      // Update last sync time
       await this.db
         .update(calendarSyncConnections)
-        .set({
-          lastSyncAt: new Date(),
-          lastSyncError: null,
-        })
+        .set({ lastSyncAt: new Date(), lastSyncError: null })
         .where(eq(calendarSyncConnections.id, connection.id));
 
-      // Log success
       await this.logSync(connection.id, 'success', {
-        duration: Date.now() - startTime.getTime(),
+        duration: Date.now() - startTime,
         eventsCreated,
         eventsUpdated,
-        eventsDeleted,
         fullSync,
       });
     } catch (error) {
-      this.logger.error(`Sync failed for connection ${connection.id}:`, error);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(
+        `Sync failed for connection ${connection.id}: ${message}`,
+      );
 
-      // Update failure status
       await this.db
         .update(calendarSyncConnections)
-        .set({
-          lastSyncAt: new Date(),
-          lastSyncError:
-            error instanceof Error ? error.message : 'Unknown error',
-        })
+        .set({ lastSyncAt: new Date(), lastSyncError: message })
         .where(eq(calendarSyncConnections.id, connection.id));
 
-      // Log failure
       await this.logSync(connection.id, 'failed', {
-        duration: Date.now() - startTime.getTime(),
-        error: error instanceof Error ? error.message : 'Unknown error',
+        duration: Date.now() - startTime,
+        error: message,
         fullSync,
       });
 
@@ -458,51 +587,130 @@ export class CalendarSyncService {
     connection: CalendarSyncConnection,
   ): Promise<void> {
     if (!connection.refreshToken) {
-      throw new Error('No refresh token available');
+      throw new Error('No refresh token available – user must reconnect');
     }
 
-    // TODO: Implement actual token refresh for each provider
-    this.logger.log(`Refreshing tokens for connection ${connection.id}`);
+    if (connection.provider !== 'google') {
+      this.logger.warn(
+        `Token refresh not implemented for ${connection.provider}`,
+      );
+      return;
+    }
 
-    const newTokens = {
-      accessToken: `refreshed_access_token_${Date.now()}`,
-      expiresAt: new Date(Date.now() + 3600 * 1000),
-    };
+    const config = this.getOAuthConfig('google');
+
+    const response = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        refresh_token: connection.refreshToken,
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
+        grant_type: 'refresh_token',
+      }),
+    });
+
+    const data = (await response.json()) as GoogleTokenResponse;
+
+    if (!response.ok || data.error) {
+      this.logger.error(
+        `Google token refresh failed: ${data.error_description || data.error}`,
+      );
+      await this.db
+        .update(calendarSyncConnections)
+        .set({ status: 'expired' })
+        .where(eq(calendarSyncConnections.id, connection.id));
+      throw new Error('Token refresh failed – user must reconnect');
+    }
 
     await this.db
       .update(calendarSyncConnections)
       .set({
-        accessToken: newTokens.accessToken,
-        expiresAt: newTokens.expiresAt,
+        accessToken: data.access_token,
+        expiresAt: new Date(Date.now() + data.expires_in * 1000),
+        updatedAt: new Date(),
       })
       .where(eq(calendarSyncConnections.id, connection.id));
   }
 
   /**
-   * Import events from external calendar
+   * Import events from Google Calendar (incremental or full)
    */
   private async importExternalEvents(
     connection: CalendarSyncConnection,
     fullSync: boolean,
   ): Promise<{ created: number; updated: number }> {
-    // TODO: Implement actual import from each provider
-    this.logger.log(`Importing events from ${connection.provider}`);
+    if (connection.provider !== 'google') {
+      this.logger.log(`Import not implemented for ${connection.provider}`);
+      return { created: 0, updated: 0 };
+    }
 
-    // Placeholder - in production, fetch events from provider API
-    return { created: 0, updated: 0 };
+    const params = new URLSearchParams({
+      maxResults: '250',
+      singleEvents: 'true',
+      orderBy: 'startTime',
+    });
+
+    if (!fullSync && connection.syncToken) {
+      params.set('syncToken', connection.syncToken);
+    } else {
+      params.set('timeMin', new Date().toISOString());
+      params.set(
+        'timeMax',
+        new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+      );
+    }
+
+    const response = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params}`,
+      { headers: { Authorization: `Bearer ${connection.accessToken}` } },
+    );
+
+    if (response.status === 410) {
+      // Sync token expired – fall back to full sync
+      return this.importExternalEvents(
+        { ...connection, syncToken: null },
+        true,
+      );
+    }
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Google Calendar API error: ${error}`);
+    }
+
+    const data = (await response.json()) as {
+      items: Array<{ id: string }>;
+      nextSyncToken?: string;
+    };
+
+    if (data.nextSyncToken) {
+      await this.db
+        .update(calendarSyncConnections)
+        .set({ syncToken: data.nextSyncToken })
+        .where(eq(calendarSyncConnections.id, connection.id));
+    }
+
+    const count = (data.items || []).length;
+    this.logger.log(
+      `Fetched ${count} events from Google Calendar for connection ${connection.id}`,
+    );
+
+    // TODO: Persist imported events into the local calendar events table
+    return { created: count, updated: 0 };
   }
 
   /**
-   * Export events to external calendar
+   * Export local events to external calendar
    */
   private async exportLocalEvents(
     connection: CalendarSyncConnection,
-    fullSync: boolean,
+    _fullSync: boolean,
   ): Promise<{ created: number; updated: number }> {
-    // TODO: Implement actual export to each provider
-    this.logger.log(`Exporting events to ${connection.provider}`);
-
-    // Placeholder - in production, push events to provider API
+    // TODO: Query local calendar events and push them to the provider
+    this.logger.log(
+      `Export to ${connection.provider} for connection ${connection.id} – not yet implemented`,
+    );
     return { created: 0, updated: 0 };
   }
 
@@ -540,7 +748,6 @@ export class CalendarSyncService {
     userId: number,
     limit: number = 20,
   ): Promise<CalendarSyncLog[]> {
-    // Verify access
     await this.getConnection(connectionId, userId);
 
     return this.db
@@ -549,5 +756,30 @@ export class CalendarSyncService {
       .where(eq(calendarSyncLogs.connectionId, connectionId))
       .orderBy(desc(calendarSyncLogs.createdAt))
       .limit(limit);
+  }
+
+  /**
+   * Map a DB connection row to the frontend response shape
+   */
+  private mapConnection(c: CalendarSyncConnection): SyncConnectionResponse {
+    return {
+      connectionId: c.id,
+      provider: c.provider,
+      externalAccountId: c.providerAccountId || '',
+      externalCalendarId: c.providerEmail || null,
+      syncDirection: c.syncDirection || 'two_way',
+      syncFrequency: 'every_15_minutes',
+      isActive: c.status === 'active',
+      lastSyncAt: c.lastSyncAt ? c.lastSyncAt.toISOString() : null,
+      lastSyncStatus: c.lastSyncError
+        ? 'error'
+        : c.lastSyncAt
+          ? 'success'
+          : null,
+      tokenExpiresAt: c.expiresAt ? c.expiresAt.toISOString() : null,
+      linkedCalendarId: c.linkedCalendarId || null,
+      createdAt: c.createdAt ? c.createdAt.toISOString() : '',
+      updatedAt: c.updatedAt ? c.updatedAt.toISOString() : '',
+    };
   }
 }

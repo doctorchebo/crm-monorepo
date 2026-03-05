@@ -160,10 +160,7 @@ export class AvailabilityService {
     userId: number,
     bookingLinkId?: string,
   ): Promise<AvailabilityRule[]> {
-    const conditions = [
-      eq(availabilityRules.userId, userId),
-      eq(availabilityRules.isActive, true),
-    ];
+    const conditions = [eq(availabilityRules.userId, userId)];
 
     if (bookingLinkId) {
       conditions.push(
@@ -172,13 +169,23 @@ export class AvailabilityService {
           isNull(availabilityRules.bookingLinkId),
         ) as ReturnType<typeof eq>,
       );
+    } else {
+      // General schedule: only rules not tied to a specific booking link
+      conditions.push(
+        isNull(availabilityRules.bookingLinkId) as ReturnType<typeof eq>,
+      );
     }
 
-    return this.db
+    const results = await this.db
       .select()
       .from(availabilityRules)
       .where(and(...conditions))
       .orderBy(availabilityRules.startMinutes);
+
+    console.log(
+      `[AvailabilityService] getRules userId=${userId} bookingLinkId=${bookingLinkId ?? 'null'} → ${results.length} rules`,
+    );
+    return results;
   }
 
   /**
@@ -188,7 +195,13 @@ export class AvailabilityService {
     userId: number,
     dto: BulkAvailabilityDto,
   ): Promise<AvailabilityRule[]> {
-    // Remove existing rules
+    console.log(
+      `[AvailabilityService] setBulkAvailability userId=${userId} days=${dto.weeklySchedule?.length ?? 0} bookingLinkId=${dto.bookingLinkId ?? 'null'}`,
+    );
+
+    // Delete existing rules for this scope (general or booking-link-specific).
+    // Note: db is a Proxy - do NOT use db.transaction() as it loses `this` binding.
+    // Sequential delete + insert is safe here since failures are recoverable.
     const deleteConditions = [eq(availabilityRules.userId, userId)];
     if (dto.bookingLinkId) {
       deleteConditions.push(
@@ -200,30 +213,54 @@ export class AvailabilityService {
       );
     }
 
-    await this.db.delete(availabilityRules).where(and(...deleteConditions));
+    const deleted = await this.db
+      .delete(availabilityRules)
+      .where(and(...deleteConditions))
+      .returning();
+    console.log(
+      `[AvailabilityService] setBulkAvailability deleted ${deleted.length} existing rules`,
+    );
 
-    // Create new rules from weekly schedule
+    // Build new rules from weekly schedule (all days are saved - unavailable days have isActive=false)
     const newRules: NewAvailabilityRule[] = [];
-    for (const day of dto.weeklySchedule) {
-      for (const slot of day.slots) {
+    for (const day of dto.weeklySchedule ?? []) {
+      // Determine if day is available: explicit isAvailable flag, or inferred from non-empty slots
+      const isAvailable =
+        day.isAvailable ?? (day.slots && day.slots.length > 0);
+      const slots =
+        day.slots && day.slots.length > 0
+          ? day.slots
+          : [{ startTime: '09:00', endTime: '17:00' }]; // Default time window for unavailable days
+
+      for (const slot of slots) {
         newRules.push({
           userId,
-          bookingLinkId: dto.bookingLinkId,
-          ruleType: 'available',
-          daysOfWeek: [day.dayOfWeek], // Single day per rule
+          bookingLinkId: dto.bookingLinkId ?? null,
+          ruleType: isAvailable ? 'available' : 'unavailable',
+          daysOfWeek: [day.dayOfWeek],
           startMinutes: this.timeToMinutes(slot.startTime),
           endMinutes: this.timeToMinutes(slot.endTime),
           timezone: dto.timezone || 'UTC',
-          isActive: true,
+          isActive: isAvailable,
         });
       }
     }
 
     if (newRules.length === 0) {
+      console.log(
+        `[AvailabilityService] setBulkAvailability no days provided in weeklySchedule`,
+      );
       return [];
     }
 
-    return this.db.insert(availabilityRules).values(newRules).returning();
+    const inserted = await this.db
+      .insert(availabilityRules)
+      .values(newRules)
+      .returning();
+    console.log(
+      `[AvailabilityService] setBulkAvailability inserted ${inserted.length} rules`,
+    );
+    return inserted;
   }
 
   /**

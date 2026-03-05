@@ -23,7 +23,7 @@ import { useAvailability } from "@/hooks/use-calendar";
 import type { DayOfWeek } from "@/lib/api/calendar";
 import { Clock, Loader2, Save } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const DAYS_OF_WEEK: { value: DayOfWeek; label: string }[] = [
   { value: "monday", label: "Monday" },
@@ -61,23 +61,40 @@ export default function AvailabilityPage() {
   const [schedule, setSchedule] = useState<WeekSchedule>(DEFAULT_SCHEDULE);
   const [isSaving, setIsSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
+  // Track whether we've applied the initial DB load so we don't overwrite user edits
+  // on subsequent SWR re-validations.
+  const initializedRef = useRef(false);
 
-  // Initialize schedule from rules
+  // Initialize schedule once from DB rules (first successful data load).
+  // Start from an all-unavailable base so days without a rule stay disabled.
+  // If no rules exist at all (first-time user), keep DEFAULT_SCHEDULE.
   useEffect(() => {
-    if (rules.length > 0) {
-      const newSchedule = { ...DEFAULT_SCHEDULE };
-      rules.forEach((rule) => {
-        if (rule.dayOfWeek && newSchedule[rule.dayOfWeek]) {
-          newSchedule[rule.dayOfWeek] = {
-            isAvailable: rule.isAvailable,
-            startTime: rule.startTime,
-            endTime: rule.endTime,
-          };
-        }
-      });
-      setSchedule(newSchedule);
-    }
-  }, [rules]);
+    if (isLoading) return; // wait until fetch completes
+    if (initializedRef.current) return; // already initialized, don't clobber user edits
+    initializedRef.current = true;
+
+    if (rules.length === 0) return; // no saved data → keep DEFAULT_SCHEDULE
+
+    const allUnavailable: WeekSchedule = {
+      monday: { isAvailable: false, startTime: "09:00", endTime: "17:00" },
+      tuesday: { isAvailable: false, startTime: "09:00", endTime: "17:00" },
+      wednesday: { isAvailable: false, startTime: "09:00", endTime: "17:00" },
+      thursday: { isAvailable: false, startTime: "09:00", endTime: "17:00" },
+      friday: { isAvailable: false, startTime: "09:00", endTime: "17:00" },
+      saturday: { isAvailable: false, startTime: "09:00", endTime: "17:00" },
+      sunday: { isAvailable: false, startTime: "09:00", endTime: "17:00" },
+    };
+    rules.forEach((rule) => {
+      if (rule.dayOfWeek && rule.dayOfWeek in allUnavailable) {
+        allUnavailable[rule.dayOfWeek] = {
+          isAvailable: rule.isAvailable,
+          startTime: rule.startTime,
+          endTime: rule.endTime,
+        };
+      }
+    });
+    setSchedule(allUnavailable);
+  }, [isLoading, rules]);
 
   const updateDay = useCallback(
     (day: DayOfWeek, updates: Partial<DaySchedule>) => {
@@ -134,10 +151,53 @@ export default function AvailabilityPage() {
       }
     >
       {isLoading ? (
-        <div className="space-y-4">
-          {[1, 2, 3, 4, 5, 6, 7].map((i) => (
-            <Skeleton key={i} className="h-16" />
-          ))}
+        <div className="space-y-6">
+          {/* Quick Actions card skeleton */}
+          <Card>
+            <CardHeader>
+              <Skeleton className="h-5 w-32" />
+              <Skeleton className="h-4 w-56 mt-1" />
+            </CardHeader>
+            <CardContent className="flex flex-wrap gap-2">
+              <Skeleton className="h-8 w-24" />
+              <Skeleton className="h-8 w-24" />
+              <Skeleton className="h-8 w-24" />
+            </CardContent>
+          </Card>
+
+          {/* Weekly Schedule card skeleton */}
+          <Card>
+            <CardHeader>
+              <Skeleton className="h-5 w-40" />
+              <Skeleton className="h-4 w-64 mt-1" />
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {DAYS_OF_WEEK.map((day) => (
+                <div
+                  key={day.value}
+                  className="flex items-center gap-4 py-2 border-b last:border-0"
+                >
+                  <Skeleton className="h-4 w-28" />
+                  <Skeleton className="h-6 w-10 rounded-full" />
+                  <Skeleton className="h-9 w-32" />
+                  <Skeleton className="h-4 w-4" />
+                  <Skeleton className="h-9 w-32" />
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+
+          {/* Tips card skeleton */}
+          <Card>
+            <CardHeader>
+              <Skeleton className="h-5 w-16" />
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-5/6" />
+              <Skeleton className="h-4 w-4/6" />
+            </CardContent>
+          </Card>
         </div>
       ) : (
         <div className="space-y-6">
@@ -196,7 +256,7 @@ export default function AvailabilityPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
-                <Clock className="h-4 w-4" />
+                <Clock className="h-4 w-4 text-muted-foreground" />
                 Weekly Schedule
               </CardTitle>
               <CardDescription>
@@ -264,14 +324,14 @@ function DayRow({ day, schedule, onUpdate }: DayRowProps) {
             type="time"
             value={schedule.startTime}
             onChange={(e) => onUpdate({ startTime: e.target.value })}
-            className="w-32"
+            className="w-32 [color-scheme:light] dark:[color-scheme:dark]"
           />
           <span className="text-muted-foreground">to</span>
           <Input
             type="time"
             value={schedule.endTime}
             onChange={(e) => onUpdate({ endTime: e.target.value })}
-            className="w-32"
+            className="w-32 [color-scheme:light] dark:[color-scheme:dark]"
           />
         </div>
       ) : (

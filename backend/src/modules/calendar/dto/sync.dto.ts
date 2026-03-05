@@ -35,9 +35,9 @@ export class CreateSyncConnectionDto {
   @IsOptional()
   syncEnabled?: boolean;
 
-  @IsEnum(['one_way_import', 'one_way_export', 'two_way'])
+  @IsEnum(['one_way_to_external', 'one_way_from_external', 'two_way'])
   @IsOptional()
-  syncDirection?: 'one_way_import' | 'one_way_export' | 'two_way';
+  syncDirection?: 'one_way_to_external' | 'one_way_from_external' | 'two_way';
 }
 
 export class UpdateSyncConnectionDto {
@@ -53,9 +53,9 @@ export class UpdateSyncConnectionDto {
   @IsOptional()
   syncEnabled?: boolean;
 
-  @IsEnum(['one_way_import', 'one_way_export', 'two_way'])
+  @IsEnum(['one_way_to_external', 'one_way_from_external', 'two_way'])
   @IsOptional()
-  syncDirection?: 'one_way_import' | 'one_way_export' | 'two_way';
+  syncDirection?: 'one_way_to_external' | 'one_way_from_external' | 'two_way';
 
   @IsString()
   @IsOptional()
@@ -88,6 +88,14 @@ export class InitiateOAuthDto {
   @IsString()
   @IsOptional()
   calendarId?: string;
+
+  @IsEnum(['one_way_to_external', 'one_way_from_external', 'two_way'])
+  @IsOptional()
+  syncDirection?: 'one_way_to_external' | 'one_way_from_external' | 'two_way';
+
+  @IsString()
+  @IsOptional()
+  syncFrequency?: string;
 }
 
 export class OAuthCallbackDto {

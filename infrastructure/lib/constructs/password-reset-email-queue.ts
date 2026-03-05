@@ -76,6 +76,9 @@ export class PasswordResetEmailQueue extends Construct {
       queueName: `${resourcePrefix}-queue`,
       visibilityTimeout: Duration.seconds(visibilityTimeoutSeconds),
       retentionPeriod: Duration.days(4),
+      // Long polling - wait up to 20 seconds for messages before returning empty
+      // This reduces the number of empty receives and lowers SQS API costs
+      receiveMessageWaitTime: Duration.seconds(20),
       encryption: sqs.QueueEncryption.SQS_MANAGED,
       deadLetterQueue: {
         queue: this.deadLetterQueue,

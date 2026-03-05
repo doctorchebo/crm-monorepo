@@ -292,7 +292,10 @@ export function useCalendarEvents(options: UseCalendarEventsOptions = {}) {
         addNotification("Event created successfully", "success");
         return result;
       } catch (err) {
-        addNotification("Failed to create event", "error");
+        // Show specific error message from API if available
+        const errorMessage =
+          err instanceof Error ? err.message : "Failed to create event";
+        addNotification(errorMessage, "error");
         throw err;
       }
     },
@@ -307,7 +310,9 @@ export function useCalendarEvents(options: UseCalendarEventsOptions = {}) {
         addNotification("Event updated successfully", "success");
         return result;
       } catch (err) {
-        addNotification("Failed to update event", "error");
+        const errorMessage =
+          err instanceof Error ? err.message : "Failed to update event";
+        addNotification(errorMessage, "error");
         throw err;
       }
     },

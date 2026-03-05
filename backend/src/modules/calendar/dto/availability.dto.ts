@@ -39,6 +39,10 @@ export class DayAvailabilityDto {
   @ValidateNested({ each: true })
   @Type(() => TimeSlotDto)
   slots: TimeSlotDto[];
+
+  @IsBoolean()
+  @IsOptional()
+  isAvailable?: boolean; // Indicates if this day is available (default: true if slots present)
 }
 
 export class CreateAvailabilityRuleDto {
